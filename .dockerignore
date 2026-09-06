@@ -1,0 +1,13 @@
+**/node_modules
+**/.next
+**/__pycache__
+**/*.pyc
+**/.venv
+**/dist
+**/build
+**/.git
+**/.pytest_cache
+**/.ruff_cache
+
+# El frontend lee la API desde el servidor; en Docker se inyecta por compose.
+**/.env.local

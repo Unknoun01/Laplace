@@ -1,0 +1,84 @@
+name: laplace
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8-alpine
+    container_name: laplace-clickhouse
+    environment:
+      CLICKHOUSE_DB: laplace
+      CLICKHOUSE_USER: laplace
+      CLICKHOUSE_PASSWORD: laplace
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ports:
+      - "8123:8123"   # HTTP
+      - "9000:9000"   # protocolo nativo
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    healthcheck:
+      # 127.0.0.1 y no `localhost`: dentro del contenedor resuelve primero a ::1 y
+      # ClickHouse sólo escucha en IPv4, así que el healthcheck no pasaría nunca.
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8123/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: laplace-postgres
+    environment:
+      POSTGRES_DB: laplace
+      POSTGRES_USER: laplace
+      POSTGRES_PASSWORD: laplace
+    ports:
+      # 5433 en el host: 5432 suele estar ocupado por un Postgres nativo, y
+      # colisionar con la base de datos del desarrollador es la peor primera impresion.
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U laplace -d laplace"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    container_name: laplace-backend
+    environment:
+      LAPLACE_CLICKHOUSE_HOST: clickhouse
+      LAPLACE_CLICKHOUSE_PORT: 8123
+      LAPLACE_CLICKHOUSE_USER: laplace
+      LAPLACE_CLICKHOUSE_PASSWORD: laplace
+      LAPLACE_CLICKHOUSE_DATABASE: laplace
+      LAPLACE_POSTGRES_DSN: postgresql://laplace:laplace@postgres:5432/laplace
+      LAPLACE_CORS_ORIGINS: http://localhost:3000
+    ports:
+      - "8000:8000"
+      # Alias en el puerto OTLP/HTTP estándar: cualquier exportador OpenTelemetry
+      # puede apuntar aquí sin saber nada de Laplace.
+      - "4318:8000"
+    depends_on:
+      clickhouse: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: laplace-web
+    environment:
+      # El frontend lee desde el servidor (Server Components), por eso apunta al
+      # nombre del servicio y no a localhost.
+      LAPLACE_API_URL: http://backend:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  clickhouse-data:
+  postgres-data:

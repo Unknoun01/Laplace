@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "laplace-backend"
+version = "0.1.0"
+description = "Ingesta OTLP y API de lectura de Laplace."
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.2",
+    "clickhouse-connect>=0.7",
+    "psycopg[binary]>=3.1",
+    "opentelemetry-proto>=1.24",
+    "protobuf>=4.25",
+    # Contrato de traza compartido (D-001). En desarrollo se instala con
+    #   pip install -e ../../packages/sdk-python
+    "laplace-trace>=0.1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "httpx>=0.27", "ruff>=0.5"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["laplace_backend"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
