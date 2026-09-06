@@ -370,7 +370,24 @@ class ClickHouseStore:
             where += " AND project_id = %(project_id)s"
             params["project_id"] = project_id
 
-        sql = f"SELECT {', '.join(COLUMNS)} FROM spans FINAL WHERE {where} ORDER BY start_time"
+        # Deliberadamente SIN `FINAL`. Ésta es la consulta que se ejecuta cada vez que
+        # alguien abre una traza, y `FINAL` obliga a ClickHouse a leer la partición
+        # entera en lugar de los gránulos que el índice de `trace_id` selecciona:
+        # medido sobre 800.000 spans, 300.349 filas leídas con FINAL frente a 16.384
+        # sin él. `LIMIT 1 BY span_id` sobre `ingested_at DESC` da exactamente la misma
+        # garantía que necesitamos —quedarnos con la última versión de cada span si el
+        # exportador reintentó— conservando la poda.
+        columns = ", ".join(COLUMNS)
+        sql = f"""
+            SELECT {columns} FROM (
+                SELECT {columns}
+                FROM spans
+                WHERE {where}
+                ORDER BY span_id, ingested_at DESC
+                LIMIT 1 BY span_id
+            )
+            ORDER BY start_time
+        """
         rows = self._client.query(sql, parameters=params).result_rows
         return [self._to_span(row) for row in rows]
 
@@ -471,6 +488,18 @@ class ClickHouseStore:
             )
             for row in self._client.query(sql).result_rows
         ]
+
+    def delete_project(self, project_id: str) -> None:
+        """Borra todos los spans de un proyecto.
+
+        Hoy sólo lo usan las pruebas, para no dejar proyectos sembrados en la base de
+        datos de desarrollo. Cuando haya cuentas, es también el borrado que exige el
+        RGPD: si un cliente pide que se vayan sus datos, tienen que irse de verdad.
+        """
+        self._client.command(
+            "DELETE FROM spans WHERE project_id = %(project_id)s",
+            parameters={"project_id": project_id},
+        )
 
     def health(self) -> bool:
         try:

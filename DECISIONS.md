@@ -169,3 +169,42 @@ un test de regresión por cada filtro.
 no hay ninguno escuchando. **Motivo:** los fallos de SQL (alias, filtros que no se
 aplican, paginación) son invisibles para las pruebas en memoria; los dos bugs anteriores
 salieron de ahí. Que se salten solas mantiene `pytest` utilizable sin levantar nada.
+
+## 2026-09-06 — Hallazgos de la verificación de la Fase 0-1
+
+### D-026 — `FINAL` sólo donde no cuesta: fuera de la apertura de traza
+`SELECT ... FROM spans FINAL WHERE trace_id = ...` obliga a ClickHouse a leer la
+partición entera en lugar de los gránulos que el índice selecciona. Medido sobre
+800.000 spans: **300.349 filas leídas con `FINAL` frente a 16.384 sin él**, para una
+traza de 10 spans. Como es la consulta que se ejecuta en cada clic, se sustituye por
+`LIMIT 1 BY span_id` sobre `ingested_at DESC`, que da la misma garantía frente a
+reintentos del exportador y conserva la poda. En `list_traces` se mantiene `FINAL`:
+ahí la consulta es un escaneo por naturaleza y medido no cuesta nada extra
+(34 ms con `FINAL` frente a 53 ms sin él sobre 500.000 filas).
+
+### D-027 — Índice de salto sobre `trace_id`
+La clave de ordenación es `(project_id, trace_id, span_id)` y la UI abre trazas sin
+saber el proyecto. ClickHouse ya poda razonablemente por la clave primaria cuando hay
+pocos proyectos, pero con miles la poda se degrada. El bloom filter sobre `trace_id`
+cubre ese caso; el `EXPLAIN indexes=1` confirma que reduce de 41 a 2 gránulos.
+
+### D-028 — El flush de salida tiene un tope de tiempo que se cumple de verdad
+`force_flush` de OpenTelemetry no aborta un envío en curso: contra un backend caído se
+comía **9,3 segundos** pese a pedirle 3, y encima el `atexit` propio de OTel añadía otro
+`shutdown()` bloqueante. Medido: un script trivial tardaba ~9 s en terminar sólo por la
+telemetría. Ahora el envío va en un hilo demonio, se espera como mucho
+`LAPLACE_EXIT_FLUSH_MS` (2 s por defecto) y el `TracerProvider` se crea con
+`shutdown_on_exit=False`. **Motivo:** el SDK promete no ralentizar lo que observa; que
+el que falle sea nuestro backend no puede castigar al usuario. Sobrecoste medido de
+`@observe`: 0,24 ms por llamada.
+
+### D-029 — Las pruebas borran sus datos al terminar
+La base de datos de desarrollo es la misma que el usuario mira en la UI, y cada
+ejecución de la suite dejaba un proyecto `test-*` sembrado. La fixture llama ahora a
+`delete_project`, que además es el borrado por cliente que el RGPD exigirá cuando haya
+cuentas. Aviso: es una mutación, así que sirve para un proyecto, no para un bucle sobre
+miles.
+
+### D-030 — Fichero de licencia
+Faltaba el `LICENSE` pese a declarar Apache-2.0 en el README y en `pyproject.toml`.
+Añadido el texto íntegro. Sin él, "open source" no es una afirmación defendible.

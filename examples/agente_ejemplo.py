@@ -11,11 +11,12 @@ Variables:
     LAPLACE_ENDPOINT   por defecto http://localhost:8000
     LAPLACE_PROJECT    por defecto demo-viajes
 
-El agente genera a propósito tres patologías que el producto tiene que saber enseñar:
+El agente genera a propósito cuatro patologías que el producto tiene que saber enseñar:
 
   1. La misma tool llamada tres veces con los mismos argumentos (un bucle).
   2. Un paso de clasificación trivial resuelto con un modelo caro.
-  3. Una traza que falla, con la excepción registrada en el span.
+  3. Un agente que itera y se atasca: traza larga (~40 pasos) con el bucle dentro.
+  4. Una traza que falla, con la excepción registrada en el span.
 """
 
 from __future__ import annotations
@@ -158,6 +159,46 @@ def responder(pregunta: str, usuario: str = "u-7") -> str:
     return redactar(pregunta, vuelos, preferencias)
 
 
+@laplace.observe(type="tool")
+def consultar_precio(vuelo: str) -> dict:
+    time.sleep(random.uniform(0.03, 0.12))
+    return {"vuelo": vuelo, "precio_eur": 148 if vuelo == "IB3421" else 96}
+
+
+@laplace.observe(type="chain")
+def iteracion(numero: int, pregunta: str, historial: list[str]) -> str:
+    """Un ciclo razonar → actuar. Es el patrón que llena de pasos una traza real."""
+    decision = llamar_modelo(
+        MODELO_BARATO,
+        [
+            {"role": "system", "content": "Decide la siguiente acción."},
+            {"role": "user", "content": f"{pregunta}\nHasta ahora: {historial}"},
+        ],
+        f"accion_{numero}",
+        temperature=0.1,
+    )
+    # A partir de la tercera vuelta el agente se atasca y repite la misma consulta:
+    # mismos argumentos, mismo dedup_hash, bucle visible en el árbol.
+    vuelo = "IB3421" if numero >= 3 else f"VY{1800 + numero}"
+    consultar_precio(vuelo)
+    buscar_vuelos("MAD", "BCN", "2026-10-14")
+    return decision
+
+
+@laplace.observe(type="agent", name="agente_iterativo")
+def responder_iterando(pregunta: str, vueltas: int = 6) -> str:
+    """Traza larga: ~40 pasos con un bucle a partir de la tercera vuelta.
+
+    Sirve para comprobar que la vista de árbol sigue siendo legible y rápida cuando el
+    agente no resuelve a la primera, que es cuando de verdad se necesita mirarla.
+    """
+    preferencias = recuperar_preferencias("u-7")
+    historial: list[str] = []
+    for numero in range(1, vueltas + 1):
+        historial.append(iteracion(numero, pregunta, historial))
+    return redactar(pregunta, buscar_vuelos("MAD", "BCN", "2026-10-14"), preferencias)
+
+
 @laplace.observe(type="agent", name="agente_de_viajes")
 def responder_con_fallo(pregunta: str, usuario: str = "u-9") -> str:
     """Ejecución que revienta a mitad: la excepción queda en el span y en la traza."""
@@ -192,11 +233,15 @@ def main() -> int:
         respuesta = responder(pregunta)
         print(f"  [{i}] traza ok    — {respuesta[:60]}...")
 
+    laplace.set_context(session_id="conv-larga", user_id="u-7")
+    responder_iterando("Encuéntrame el vuelo más barato a Barcelona")
+    print("  [4] traza larga — agente iterativo, ~40 pasos con un bucle")
+
     laplace.set_context(session_id="conv-err", user_id="u-9")
     try:
         responder_con_fallo("Resérvame el primer vuelo que encuentres")
     except RuntimeError as exc:
-        print(f"  [4] traza error — {exc}")
+        print(f"  [5] traza error — {exc}")
 
     laplace.flush()
     print("listo. Abre http://localhost:3000 para ver las trazas.")

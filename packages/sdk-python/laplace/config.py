@@ -58,6 +58,10 @@ class LaplaceConfig:
     #: Exporta cada span en cuanto termina. Útil en scripts cortos y en tests;
     #: en producción el batch por defecto es mucho más barato.
     flush_on_exit: bool = True
+    #: Cuánto se espera, como mucho, al envío final cuando el proceso termina.
+    #: Con el backend sano sobra de largo (milisegundos); con el backend caído es lo
+    #: máximo que la telemetría puede retrasar la salida del programa del usuario.
+    exit_flush_timeout_ms: int = 2_000
     debug: bool = False
     #: Desactiva por completo la emisión sin tocar el código instrumentado.
     disabled: bool = False
@@ -76,6 +80,7 @@ class LaplaceConfig:
             ),
             service_name=os.getenv("LAPLACE_SERVICE_NAME", "laplace-agent"),
             service_version=os.getenv("LAPLACE_SERVICE_VERSION", ""),
+            exit_flush_timeout_ms=_env_int("LAPLACE_EXIT_FLUSH_MS", 2_000) or 2_000,
             debug=_env_bool("LAPLACE_DEBUG", False),
             disabled=_env_bool("LAPLACE_DISABLED", False),
         )

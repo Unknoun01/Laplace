@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import atexit
 import logging
+import threading
 from typing import Any
 
 from opentelemetry import trace as otel_trace
@@ -90,7 +91,11 @@ def init(
     if cfg.service_version:
         resource_attrs[semconv.SERVICE_VERSION] = cfg.service_version
 
-    provider = TracerProvider(resource=Resource.create(resource_attrs))
+    # `shutdown_on_exit=False` a propósito: el atexit que registra OpenTelemetry por
+    # su cuenta llama a `shutdown()`, que espera a que termine un envío con reintentos.
+    # Si el backend no responde, eso cuelga la salida del proceso del usuario durante
+    # decenas de segundos. Aquí se registra un cierre propio, con tope de tiempo.
+    provider = TracerProvider(resource=Resource.create(resource_attrs), shutdown_on_exit=False)
     provider.add_span_processor(_build_processor(cfg, batch=batch))
     _provider = provider
 
@@ -106,7 +111,7 @@ def init(
         otel_trace.set_tracer_provider(provider)
 
     if cfg.flush_on_exit:
-        atexit.register(flush)
+        atexit.register(_flush_at_exit)
 
     _auto_instrument(cfg)
 
@@ -152,14 +157,48 @@ def get_tracer() -> otel_trace.Tracer:
 
 
 def flush(timeout_millis: int = 10_000) -> bool:
-    """Fuerza el envío de los spans pendientes. Llamar antes de salir en scripts."""
+    """Fuerza el envío de los spans pendientes. Llamar antes de salir en scripts.
+
+    El tope de tiempo se respeta de verdad. `force_flush` de OpenTelemetry no aborta un
+    envío en curso: el exportador OTLP reintenta con backoff y, contra un endpoint que
+    no responde, se come decenas de segundos pasándose por alto el timeout que se le da.
+    Por eso el envío ocurre en un hilo demonio y aquí sólo se espera lo pactado: si no
+    llega a tiempo, se devuelve False y el proceso puede salir. Observar no puede
+    retrasar lo observado, y menos aún cuando el que falla es nuestro backend.
+    """
     if _provider is None:
         return True
-    try:
-        return bool(_provider.force_flush(timeout_millis))
-    except Exception:  # noqa: BLE001
-        logger.debug("laplace: fallo al hacer flush", exc_info=True)
+
+    outcome: dict[str, bool] = {}
+
+    def _run() -> None:
+        try:
+            outcome["ok"] = bool(_provider.force_flush(timeout_millis))
+        except Exception:  # noqa: BLE001
+            logger.debug("laplace: fallo al hacer flush", exc_info=True)
+            outcome["ok"] = False
+
+    worker = threading.Thread(target=_run, name="laplace-flush", daemon=True)
+    worker.start()
+    worker.join(timeout_millis / 1000)
+
+    if worker.is_alive():
+        logger.warning(
+            "laplace: el envío de spans no terminó en %d ms; se continúa sin esperar",
+            timeout_millis,
+        )
         return False
+    return outcome.get("ok", False)
+
+
+def _flush_at_exit() -> None:
+    """Envío final al terminar el proceso, con tope corto.
+
+    Con el backend sano esto tarda milisegundos. Con el backend caído es lo máximo que
+    la telemetría puede retrasar la salida del programa del usuario; se ajusta con
+    `LAPLACE_EXIT_FLUSH_MS` si alguien prefiere esperar más para no perder el último lote.
+    """
+    flush(get_config().exit_flush_timeout_ms)
 
 
 def shutdown() -> None:

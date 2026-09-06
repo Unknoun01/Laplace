@@ -72,6 +72,12 @@ CREATE TABLE IF NOT EXISTS spans
 
     ingested_at         DateTime64(3, 'UTC') DEFAULT now64(3),
 
+    -- Abrir una traza es la consulta más frecuente del producto y la UI no siempre
+    -- sabe el proyecto, así que `WHERE trace_id = ...` no puede apoyarse en el prefijo
+    -- de la clave de ordenación. Sin este índice, cada traza abierta escanea la tabla
+    -- entera. Los spans de una traza son contiguos en el orden (project_id, trace_id,
+    -- span_id), así que el bloom filter poda casi todos los gránulos.
+    INDEX idx_trace_id trace_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_start_time start_time TYPE minmax GRANULARITY 1,
     INDEX idx_session    session_id TYPE bloom_filter(0.01) GRANULARITY 4,
     INDEX idx_dedup      dedup_hash TYPE bloom_filter(0.01) GRANULARITY 4
@@ -80,3 +86,8 @@ ENGINE = ReplacingMergeTree(ingested_at)
 PARTITION BY toYYYYMM(start_time)
 ORDER BY (project_id, trace_id, span_id)
 SETTINGS index_granularity = 8192;
+
+-- Instalaciones anteriores al índice de trace_id: CREATE TABLE IF NOT EXISTS no toca
+-- una tabla que ya existe. No se materializa aquí, porque sería una mutación en cada
+-- arranque; las partes nuevas lo construyen solas y las viejas siguen leyéndose bien.
+ALTER TABLE spans ADD INDEX IF NOT EXISTS idx_trace_id trace_id TYPE bloom_filter(0.01) GRANULARITY 1;

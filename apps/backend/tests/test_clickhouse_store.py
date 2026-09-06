@@ -38,8 +38,12 @@ def store() -> ClickHouseStore:
 
 
 @pytest.fixture(scope="module")
-def dataset(store: ClickHouseStore) -> dict[str, str]:
-    """Dos trazas en un proyecto propio de esta ejecución: una correcta y una fallida."""
+def dataset(store: ClickHouseStore):
+    """Dos trazas en un proyecto propio de esta ejecución: una correcta y una fallida.
+
+    Se borra al terminar: la base de datos de desarrollo es la misma que mira el usuario
+    en la UI, y dejar proyectos `test-*` sembrados por cada ejecución es basura visible.
+    """
     project = f"test-{uuid.uuid4().hex[:8]}"
     ok_trace, error_trace = uuid.uuid4().hex, uuid.uuid4().hex
 
@@ -48,7 +52,10 @@ def dataset(store: ClickHouseStore) -> dict[str, str]:
         *_trace(project, error_trace, session="conv-2", failed=True),
     ]
     store.insert_spans(spans)
-    return {"project": project, "ok": ok_trace, "error": error_trace}
+
+    yield {"project": project, "ok": ok_trace, "error": error_trace}
+
+    store.delete_project(project)
 
 
 def _span(project: str, trace: str, span_id: str, parent: str | None, name: str,
@@ -213,12 +220,18 @@ def test_los_spans_vuelven_del_almacen_intactos(store, dataset):
     assert root.dedup_hash == "hash-agente"
 
 
-def test_reenviar_el_mismo_span_no_duplica_el_coste(store, dataset):
-    """El exportador OTLP reintenta: un span reescrito debe colapsar, no sumar."""
+def test_reenviar_el_mismo_span_no_duplica_ni_en_la_lista_ni_en_el_arbol(store, dataset):
+    """El exportador OTLP reintenta: un span reescrito debe colapsar, no sumar.
+
+    Las dos rutas de lectura lo consiguen de forma distinta —la lista con `FINAL`, la
+    apertura de traza con `LIMIT 1 BY span_id` para no perder la poda del índice— así
+    que las dos tienen que comprobarse.
+    """
     antes = next(
         t for t in store.list_traces(TraceFilter(project_id=dataset["project"])).traces
         if t.trace_id == dataset["ok"]
     )
+    spans_antes = store.get_trace_spans(dataset["ok"])
 
     store.insert_spans(_trace(dataset["project"], dataset["ok"], "conv-1", failed=False))
 
@@ -228,6 +241,12 @@ def test_reenviar_el_mismo_span_no_duplica_el_coste(store, dataset):
     )
     assert despues.span_count == antes.span_count
     assert despues.cost.total_usd == pytest.approx(antes.cost.total_usd)
+
+    spans_despues = store.get_trace_spans(dataset["ok"])
+    assert len(spans_despues) == len(spans_antes)
+    assert len({s.span_id for s in spans_despues}) == len(spans_despues)
+    # Y siguen llegando ordenados por inicio, que es lo que el árbol espera.
+    assert [s.start_time for s in spans_despues] == sorted(s.start_time for s in spans_despues)
 
 
 def test_el_proyecto_aparece_en_el_listado_con_su_volumen(store, dataset):

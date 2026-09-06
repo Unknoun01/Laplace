@@ -49,8 +49,9 @@ python examples/agente_ejemplo.py
 
 No necesita claves de API: el modelo es falso, pero los nombres de modelo y los
 recuentos de tokens son reales, así que el coste que calcula el backend es el que
-costaría de verdad. Genera a propósito un bucle de tool calls, un paso trivial resuelto
-con un modelo caro y una traza que falla.
+costaría de verdad. Genera a propósito las patologías que el producto tiene que saber
+enseñar: un bucle de tool calls, un paso trivial resuelto con un modelo caro, un agente
+iterativo de ~30 pasos que se atasca, y una traza que falla.
 
 ### Desarrollo sin Docker
 

@@ -85,6 +85,7 @@ Todo se puede fijar por entorno, para no tener que tocar el código en cada desp
 | `LAPLACE_CAPTURE_CONTENT`  | `true`                  | A `false` no se capturan prompts ni respuestas. |
 | `LAPLACE_MAX_PAYLOAD_BYTES`| `1048576`               | Límite por payload. `none` = sin límite.        |
 | `LAPLACE_DISABLED`         | `false`                 | Apaga la emisión sin tocar el código.           |
+| `LAPLACE_EXIT_FLUSH_MS`    | `2000`                  | Tope de espera al envío final, al salir.        |
 | `LAPLACE_DEBUG`            | `false`                 | Logs internos del SDK.                          |
 
 En scripts cortos, llama a `laplace.flush()` antes de salir (o deja que lo haga el
@@ -108,8 +109,17 @@ proceso ya instrumentado con OTel puede exportar a Laplace sin usar este SDK.
 
 ## Principio
 
-Observar nunca puede romper lo observado. Cualquier fallo interno del SDK se traga y se
-registra en debug: la función instrumentada se ejecuta igual.
+Observar nunca puede romper **ni frenar** lo observado. Cualquier fallo interno del SDK
+se traga y se registra en debug: la función instrumentada se ejecuta igual.
+
+Medido con el backend apagado, apuntando a un puerto donde no escucha nadie:
+
+- El agente termina y devuelve el mismo resultado; no se propaga ninguna excepción.
+- `@observe` añade **0,24 ms por llamada** (frente a los cientos de milisegundos que
+  cuesta cualquier llamada a un modelo).
+- Salir del proceso cuesta como mucho `LAPLACE_EXIT_FLUSH_MS` (2 s por defecto). El
+  `force_flush` de OpenTelemetry no respeta su propio timeout contra un endpoint muerto
+  —se comía 9 s—, así que el envío final va en un hilo demonio con tope propio.
 
 ## Licencia
 
