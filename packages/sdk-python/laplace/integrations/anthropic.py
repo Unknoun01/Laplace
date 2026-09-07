@@ -108,6 +108,8 @@ def _usage_tokens(source: Any) -> dict[str, int]:
 
 def _start_span(kwargs: dict[str, Any]) -> OtelSpan:
     model = kwargs.get("model")
+    # Antes de abrir el span: después, el activo ya sería éste y no su padre.
+    envolvente = c.enclosing_step()
     span = get_tracer().start_span(
         c.span_name(semconv.OPERATION_CHAT, model), kind=SpanKind.CLIENT
     )
@@ -117,6 +119,7 @@ def _start_span(kwargs: dict[str, Any]) -> OtelSpan:
         model=model,
         messages=_input_messages(kwargs),
         kwargs=kwargs,
+        enclosing=envolvente,
     )
     if kwargs.get("tools"):
         c.set_attr(span, "laplace.request.tools", c.payload(kwargs["tools"]) or "")

@@ -206,6 +206,17 @@ class Span(_Model):
     #: ingesta, no el SDK (D-007).
     dedup_hash: str = ""
 
+    #: Identidad del **paso** al que pertenece esta llamada: mismo sitio de llamada y
+    #: mismas instrucciones. Es lo que agrupan las reglas de detección. No es lo mismo
+    #: que `dedup_hash`, que además exige la misma entrada: dos llamadas del mismo paso
+    #: con datos distintos comparten `step_key` y no `dedup_hash` (D-060).
+    step_key: str = ""
+    #: Cómo se llama ese paso en la interfaz.
+    step_label: str = ""
+    #: Trozo de las instrucciones fijas, para distinguir dos pasos que se llaman desde
+    #: el mismo sitio. Vacío si no se capturan payloads.
+    step_hint: str = ""
+
     events: list[SpanEvent] = Field(default_factory=list)
     attributes: dict[str, Any] = Field(default_factory=dict)
 

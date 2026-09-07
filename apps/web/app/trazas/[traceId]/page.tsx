@@ -40,7 +40,7 @@ export default async function TrazaPage({ params, searchParams }: PageProps) {
 
   // Si esta ejecución repite pasos, enlazamos al problema que los explica.
   const looping = allNodes(trace.roots).find((node) => node.repeat_count >= 3);
-  const findingId = looping ? `repeticion:${looping.span.dedup_hash}` : null;
+  const findingId = looping ? `repeticion:${looping.span.step_key}` : null;
 
   return (
     <main>

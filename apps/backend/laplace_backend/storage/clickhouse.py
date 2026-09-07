@@ -91,6 +91,9 @@ COLUMNS = (
     "tags",
     "metadata",
     "dedup_hash",
+    "step_key",
+    "step_label",
+    "step_hint",
     "events",
     "attributes",
 )
@@ -132,13 +135,20 @@ def _utc(value: datetime) -> datetime:
 WINDOW_WHERE = "project_id = %(project_id)s AND start_time >= %(since)s AND start_time <= %(until)s"
 
 #: Un mismo paso, con la misma entrada, repetido dentro de una misma traza.
+#:
+#: Se detecta por entrada repetida (`dedup_hash`) pero se **reporta por paso**: un
+#: agente que reintenta lo mismo lo hace con cada pregunta de cada usuario, así que
+#: agrupar el informe por entrada llenaba el panel de tarjetas idénticas —una por
+#: pregunta— diciendo todas lo mismo. Es un solo problema y se arregla una sola vez.
 REPEATED_GROUPS_SQL = f"""
 SELECT
-    dedup_hash,
-    any(nombre)                      AS nombre,
+    paso,
+    modelo,
+    any(etiqueta)                    AS nombre,
+    any(pista)                       AS pista,
     any(tipo)                        AS tipo,
-    any(modelo)                      AS modelo,
-    count()                          AS trazas,
+    argMax(dedup_hash, n)            AS hash_ejemplo,
+    uniqExact(trace_id)              AS trazas,
     sum(n)                           AS total_spans,
     sum(n - 1)                       AS extra_spans,
     sum(coste - coste_primera)       AS extra_coste,
@@ -151,9 +161,11 @@ FROM (
     SELECT
         trace_id,
         dedup_hash,
-        any(name)                          AS nombre,
+        any(if(step_label != '', step_label, name)) AS etiqueta,
+        any(step_hint)                     AS pista,
         any(span_type)                     AS tipo,
         any(request_model)                 AS modelo,
+        any(if(step_key != '', step_key, name)) AS paso,
         count()                            AS n,
         sum(cost_total_usd)                AS coste,
         argMin(cost_total_usd, start_time) AS coste_primera,
@@ -168,7 +180,9 @@ FROM (
     GROUP BY trace_id, dedup_hash
     HAVING n >= %(min_repeats)s
 )
-GROUP BY dedup_hash
+-- Por paso Y modelo: un paso que se ejecuta con dos modelos son dos problemas, con
+-- dinero distinto, y mezclarlos dejaría las repeticiones de uno sin descontar del otro.
+GROUP BY paso, modelo
 ORDER BY extra_coste DESC, extra_spans DESC
 LIMIT %(limit)s
 """
@@ -176,7 +190,15 @@ LIMIT %(limit)s
 #: Uso por (paso, modelo): base de las reglas de modelo caro y de contexto fijo.
 MODEL_USAGE_SQL = f"""
 SELECT
-    name,
+    -- Las filas anteriores a la identidad de paso no la tienen. Caer al nombre del
+    -- span deja esas trazas exactamente como estaban, en lugar de juntarlas todas
+    -- bajo una clave vacía y dejar sin pareja al descuento que evita contar dos veces
+    -- el mismo ahorro (D-061).
+    -- El alias NO puede llamarse `step_key`: taparía la columna y ClickHouse dejaría
+    -- de encontrarla en el GROUP BY. Ya pasó una vez con `any(project_id) AS project_id`.
+    if(step_key != '', step_key, name) AS paso_clave,
+    any(if(step_label != '', step_label, name)) AS paso,
+    any(step_hint)           AS pista,
     request_model,
     count()                  AS llamadas,
     uniqExact(trace_id)      AS trazas,
@@ -192,7 +214,7 @@ SELECT
     any(trace_id)            AS traza_ejemplo
 FROM spans FINAL
 WHERE {WINDOW_WHERE} AND span_type = 'llm' AND request_model != ''
-GROUP BY name, request_model
+GROUP BY if(step_key != '', step_key, name), request_model
 HAVING llamadas >= %(min_calls)s
 ORDER BY coste DESC
 LIMIT %(limit)s
@@ -312,6 +334,9 @@ class ClickHouseStore:
             list(span.tags),
             _json(span.metadata),
             span.dedup_hash,
+            span.step_key,
+            span.step_label,
+            span.step_hint,
             _json([event.model_dump(mode="json") for event in span.events]),
             _json(span.attributes),
         ]
@@ -619,6 +644,9 @@ class ClickHouseStore:
             tags=list(r["tags"] or []),
             metadata=_loads(r["metadata"], {}) or {},
             dedup_hash=r["dedup_hash"],
+        step_key=r["step_key"],
+        step_label=r["step_label"],
+        step_hint=r["step_hint"],
             events=events,
             attributes=_loads(r["attributes"], {}) or {},
         )
@@ -726,24 +754,31 @@ class ClickHouseStore:
         params["min_repeats"] = min_repeats
         params["limit"] = limit
         sql = REPEATED_GROUPS_SQL
-        return [
+        # Por nombre de columna, no por posición: añadir una columna en medio de la
+        # consulta y desplazar el resto en silencio es un error demasiado barato de
+        # cometer para una función que decide cuánto dinero se le promete a alguien.
+        grupos = [
             RepeatedGroup(
-                dedup_hash=r[0],
-                name=r[1],
-                span_type=r[2],
-                model=r[3] or "",
-                traces=int(r[4]),
-                total_spans=int(r[5]),
-                extra_spans=int(r[6]),
-                extra_cost_usd=float(r[7]),
-                extra_duration_ms=float(r[8]),
-                extra_input_tokens=int(r[9]),
-                extra_output_tokens=int(r[10]),
-                max_per_trace=int(r[11]),
-                sample_trace_id=r[12],
+                dedup_hash=r["hash_ejemplo"],
+                name=r["nombre"],
+                hint=r["pista"],
+                span_type=r["tipo"],
+                model=r["modelo"] or "",
+                step_key=r["paso"] or "",
+                traces=int(r["trazas"]),
+                total_spans=int(r["total_spans"]),
+                extra_spans=int(r["extra_spans"]),
+                extra_cost_usd=float(r["extra_coste"]),
+                extra_duration_ms=float(r["extra_duracion"]),
+                extra_input_tokens=int(r["extra_tok_in"]),
+                extra_output_tokens=int(r["extra_tok_out"]),
+                max_per_trace=int(r["max_por_traza"]),
+                sample_trace_id=r["traza_ejemplo"],
             )
-            for r in self._client.query(sql, parameters=params).result_rows
+            for r in _named(self._client.query(sql, parameters=params))
         ]
+        # Mismo título para dos pasos distintos es peor que no enseñarlos.
+        return _disambiguate(grupos)
 
     def model_usage(
         self, project_id: str, window: Window, *, min_calls: int = 5, limit: int = 50
@@ -752,25 +787,28 @@ class ClickHouseStore:
         params["min_calls"] = min_calls
         params["limit"] = limit
         sql = MODEL_USAGE_SQL
-        return [
+        usos = [
             ModelUsage(
-                name=r[0],
-                model=r[1],
-                calls=int(r[2]),
-                traces=int(r[3]),
-                input_tokens=int(r[4]),
-                output_tokens=int(r[5]),
-                cached_input_tokens=int(r[6]),
-                cache_write_tokens=int(r[7]),
-                cache_saving_usd=float(r[8]),
-                cost_usd=float(r[9]),
-                avg_output_tokens=float(r[10]),
-                avg_input_tokens=float(r[11]),
-                min_input_tokens=int(r[12]),
-                sample_trace_id=r[13],
+                key=r["paso_clave"],
+                name=r["paso"],
+                hint=r["pista"],
+                model=r["request_model"],
+                calls=int(r["llamadas"]),
+                traces=int(r["trazas"]),
+                input_tokens=int(r["in_tok"]),
+                output_tokens=int(r["out_tok"]),
+                cached_input_tokens=int(r["cache_tok"]),
+                cache_write_tokens=int(r["cache_escrito"]),
+                cache_saving_usd=float(r["ahorro_cache"]),
+                cost_usd=float(r["coste"]),
+                avg_output_tokens=float(r["media_salida"]),
+                avg_input_tokens=float(r["media_entrada"]),
+                min_input_tokens=int(r["min_entrada"]),
+                sample_trace_id=r["traza_ejemplo"],
             )
-            for r in self._client.query(sql, parameters=params).result_rows
+            for r in _named(self._client.query(sql, parameters=params))
         ]
+        return _disambiguate(usos)
 
     def traces_with_repeats(
         self, project_id: str | None, trace_ids: list[str], *, min_repeats: int = 3
@@ -854,6 +892,30 @@ class ClickHouseStore:
         except Exception:  # noqa: BLE001
             logger.warning("clickhouse no responde", exc_info=True)
             return False
+
+
+def _named(result: Any) -> list[dict[str, Any]]:
+    """Filas como diccionarios, con las etiquetas que puso la propia consulta."""
+    return [dict(zip(result.column_names, row, strict=True)) for row in result.result_rows]
+
+
+def _disambiguate(filas: list[Any]) -> list[Any]:
+    """Dos pasos llamados desde el mismo sitio necesitan títulos distintos.
+
+    Pasa siempre que alguien no decora sus funciones internas: todas sus llamadas al
+    modelo cuelgan del mismo span, así que comparten sitio de llamada, que es la
+    etiqueta. Son pasos distintos —las instrucciones no se parecen en nada— y enseñar
+    dos tarjetas con el mismo título en el panel de ahorro es peor que no enseñarlas.
+    Se les añade el principio de sus instrucciones, que es lo que de verdad las separa.
+    """
+    repetidas = {f.name for f in filas if sum(1 for g in filas if g.name == f.name) > 1}
+    if not repetidas:
+        return filas
+    for fila in filas:
+        pista = getattr(fila, "hint", "")
+        if fila.name in repetidas and pista and pista != fila.name:
+            fila.name = f"{fila.name} — «{pista}»"
+    return filas
 
 
 def _statements(sql: str) -> list[str]:

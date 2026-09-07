@@ -244,11 +244,6 @@ def consultar_manual(pregunta: str, vuelta: int) -> str:
     with laplace.llm_span(
         model=MODELO_CARO,
         system="openai",
-        # Nombre propio: las reglas agrupan por (nombre del paso, modelo), y el nombre
-        # que pone el SDK por defecto es `chat <modelo>`, común a todas las llamadas.
-        # Sin distinguirlo, el suelo de tokens de entrada de este paso se mezclaría con
-        # el de la clasificación, que son veinte tokens, y la regla no vería nada.
-        name="consultar_manual",
         input_messages=[
             {"role": "system", "content": f"<manual de {TOKENS_MANUAL} tokens>"},
             {"role": "user", "content": f"{pregunta} (consulta {vuelta})"},
@@ -287,7 +282,6 @@ def consultar_manual_cacheado(pregunta: str, vuelta: int) -> str:
     with laplace.llm_span(
         model=MODELO_BARATO,
         system="openai",
-        name="consultar_manual_cacheado",
         input_messages=[
             {"role": "system", "content": f"<manual de {TOKENS_MANUAL} tokens, cacheado>"},
             {"role": "user", "content": f"{pregunta} (consulta {vuelta})"},

@@ -83,6 +83,8 @@ def _tier(kwargs: dict[str, Any], response: Any = None) -> str:
 
 def _start_span(kwargs: dict[str, Any]) -> OtelSpan:
     model = kwargs.get("model")
+    # Antes de abrir el span: después, el activo ya sería éste y no su padre.
+    envolvente = c.enclosing_step()
     span = get_tracer().start_span(
         c.span_name(semconv.OPERATION_CHAT, model), kind=SpanKind.CLIENT
     )
@@ -92,6 +94,7 @@ def _start_span(kwargs: dict[str, Any]) -> OtelSpan:
         model=model,
         messages=kwargs.get("messages"),
         kwargs=kwargs,
+        enclosing=envolvente,
     )
     if kwargs.get("tools"):
         c.set_attr(span, "laplace.request.tools", c.payload(kwargs["tools"]) or "")

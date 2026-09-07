@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from opentelemetry import trace
 from opentelemetry.trace import Span as OtelSpan
 
 from .. import semconv
@@ -42,6 +43,25 @@ def payload(value: Any) -> str | None:
     return dumps(value, cfg.max_payload_bytes)
 
 
+def enclosing_step() -> str | None:
+    """Nombre del span activo, que será el padre de la llamada al modelo.
+
+    Hay que leerlo **antes** de abrir el span de LLM: después, el span activo ya es el
+    nuevo. Es la mitad de la identidad de un paso; la otra mitad son las instrucciones
+    (D-060). Sin esto, todas las llamadas del agente al mismo modelo se agrupan juntas
+    aunque sean pasos distintos, porque el nombre por defecto es `chat <modelo>`.
+    """
+    try:
+        actual = trace.get_current_span()
+        if actual is None or not actual.get_span_context().is_valid:
+            return None
+        nombre = getattr(actual, "name", None)
+        return str(nombre) if nombre else None
+    except Exception:  # noqa: BLE001 - nunca romper la llamada del usuario
+        logger.debug("laplace: no se pudo leer el paso que envuelve", exc_info=True)
+        return None
+
+
 def span_name(operation: str, model: str | None) -> str:
     """Convención GenAI: `<operación> <modelo>` (ej. `chat gpt-4o-mini`)."""
     return f"{operation} {model}" if model else operation
@@ -55,8 +75,10 @@ def record_request(
     messages: Any,
     kwargs: dict[str, Any],
     operation: str = semconv.OPERATION_CHAT,
+    enclosing: str | None = None,
 ) -> None:
     set_attr(span, semconv.LAPLACE_SPAN_TYPE, semconv.SPAN_TYPE_LLM)
+    set_attr(span, semconv.LAPLACE_STEP_PARENT, enclosing)
     set_attr(span, semconv.GEN_AI_SYSTEM, system)
     set_attr(span, semconv.GEN_AI_OPERATION_NAME, operation)
     set_attr(span, semconv.GEN_AI_REQUEST_MODEL, model)

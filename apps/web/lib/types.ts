@@ -108,6 +108,13 @@ export interface Span {
   tags: string[];
   metadata: Record<string, unknown>;
   dedup_hash: string;
+  /**
+   * Identidad del paso: mismo sitio de llamada y mismas instrucciones. Es por lo que
+   * agrupan las reglas, y por lo que se busca la ficha de un problema.
+   */
+  step_key: string;
+  step_label: string;
+  step_hint: string;
   events: SpanEvent[];
   attributes: Record<string, unknown>;
 }

@@ -91,6 +91,12 @@ CREATE TABLE IF NOT EXISTS spans
     -- llamada repetida. Alimenta la detección de bucles y el diagnóstico.
     dedup_hash          String,
 
+    -- Identidad del PASO: mismo sitio de llamada y mismas instrucciones. Es por lo que
+    -- agrupan las reglas 2 y 3. No es dedup_hash, que ademas exige la misma entrada.
+    step_key            String,
+    step_label          String,
+    step_hint           String,
+
     events              String,
     attributes          String,
 
@@ -134,3 +140,10 @@ ALTER TABLE spans ADD COLUMN IF NOT EXISTS cost_rate_assumed UInt8 DEFAULT 0;
 ALTER TABLE spans ADD COLUMN IF NOT EXISTS price_note String DEFAULT '';
 ALTER TABLE spans ADD COLUMN IF NOT EXISTS billing_tier LowCardinality(String) DEFAULT 'standard';
 ALTER TABLE spans ADD COLUMN IF NOT EXISTS billing_region LowCardinality(String) DEFAULT 'global';
+
+-- Instalaciones anteriores a la identidad de paso (D-060). Antes las reglas agrupaban
+-- por el nombre del span, que para una llamada auto-instrumentada es `chat <modelo>`:
+-- todas las llamadas del agente al mismo modelo caian en el mismo grupo.
+ALTER TABLE spans ADD COLUMN IF NOT EXISTS step_key String DEFAULT '';
+ALTER TABLE spans ADD COLUMN IF NOT EXISTS step_label String DEFAULT '';
+ALTER TABLE spans ADD COLUMN IF NOT EXISTS step_hint String DEFAULT '';

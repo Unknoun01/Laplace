@@ -18,7 +18,7 @@ from laplace.schema import Cost, LLMAttributes, Span, TokenUsage, ToolAttributes
 
 from laplace_backend import insights
 from laplace_backend.config import Settings
-from laplace_backend.storage.base import Window
+from laplace_backend.storage.base import RepeatedGroup, Window
 from laplace_backend.storage.clickhouse import ClickHouseStore
 
 BASE = datetime.now(timezone.utc) - timedelta(hours=1)
@@ -374,3 +374,279 @@ def test_la_cache_se_tarifa_sobre_el_modelo_que_recomendamos(
     detalle = insights.detail(store, proyecto_caro_y_sin_cache, window, hallazgo.id)
     assert "gpt-5.6-luna" in detalle.savings_calculation
     assert "contar dos veces" in detalle.savings_calculation
+
+
+# ---------------------------------------------------------------------------------
+# Batería del doble conteo
+#
+# El mismo fallo —prometer dos veces el mismo dinero— ha aparecido ya por tres caminos
+# distintos: dos reglas sobre los mismos tokens, dos reglas sobre el mismo paso, y el
+# cruce del descuento quedándose sin pareja al cambiar la clave de agrupación. Cada
+# camino deja aquí su caso. Los casos se AÑADEN; ninguno sustituye a otro.
+# ---------------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def proyecto_un_paso_dos_entradas(store: ClickHouseStore):
+    """Un paso que repite DOS entradas distintas, tres veces cada una, por ejecución.
+
+    Genera dos `dedup_hash` bajo un mismo `step_key`. El mapa de descuento tiene que
+    sumar los dos grupos: quedarse con el último —que es lo que hacía el diccionario
+    por comprensión— deja la mitad de las repeticiones sin descontar, y la regla del
+    modelo caro vuelve a cobrar por ellas.
+    """
+    project = f"test-dos-hashes-{uuid.uuid4().hex[:8]}"
+    spans: list[Span] = []
+    for t in range(4):
+        trace = uuid.uuid4().hex
+        for entrada in ("A", "B"):
+            for i in range(3):
+                span = _span(
+                    project, trace, uuid.uuid4().hex[:16],
+                    # El nombre que pone la auto-instrumentación: el mismo para todo.
+                    "chat gpt-4o", "llm", t * 10 + i,
+                    dedup_hash=f"hash-{entrada}",
+                    step_key="paso-extraer",
+                    step_label="extraer_datos",
+                )
+                span.llm = _llm("gpt-4o", 100, 10, 0.001)
+                spans.append(span)
+    store.insert_spans(spans)
+    yield project
+    store.delete_project(project)
+
+
+def test_varios_hashes_del_mismo_paso_se_descuentan_todos(
+    store, window, proyecto_un_paso_dos_entradas
+):
+    """24 llamadas a $0,001: 8 legítimas (dos entradas × cuatro ejecuciones) y 16 de más.
+
+    La repetición se lleva las 16. A la regla del modelo caro sólo le pueden quedar 8.
+    """
+    findings = insights.detect(store, proyecto_un_paso_dos_entradas, window)
+    resumen = store.summarize_window(proyecto_un_paso_dos_entradas, window)
+
+    # Una sola tarjeta: son dos entradas repetidas pero un único paso que se repite,
+    # y es lo que el usuario arregla de una vez. El dinero es el de las dos.
+    repeticiones = [f for f in findings if f.kind == "repeticion"]
+    assert len(repeticiones) == 1
+    assert repeticiones[0].window_waste_usd == pytest.approx(0.016, rel=0.02)
+
+    # Aquí la cifra tiene que ser exacta, no «menor que». Con el mapa sobrescribiendo
+    # en vez de sumando, el ahorro salía de 1.600 tokens en vez de 800 y aun así se
+    # quedaba por debajo del gasto total: un tope holgado no habría notado nada.
+    modelo = next(f for f in findings if f.kind == "modelo_caro")
+    entrada, salida = 8 * 100, 8 * 10  # sólo las ocho llamadas legítimas
+    caro = (entrada * 2.5 + salida * 10.0) / 1e6
+    barato = (entrada * 0.15 + salida * 0.6) / 1e6
+    assert modelo.window_waste_usd == pytest.approx(caro - barato, rel=1e-6)
+
+    prometido = sum(f.window_waste_usd for f in findings)
+    assert prometido <= resumen.total_cost_usd, (
+        f"se promete ahorrar {prometido:.6f} de un gasto de {resumen.total_cost_usd:.6f}"
+    )
+
+
+@pytest.fixture(scope="module")
+def proyecto_dos_pasos_mismo_nombre(store: ClickHouseStore):
+    """Dos pasos distintos que la auto-instrumentación nombra igual (`chat <modelo>`).
+
+    Es el caso normal de quien acaba de instalar Laplace. Uno clasifica con veinte
+    tokens de entrada; el otro arrastra un manual de 20.000. Agrupados por nombre, el
+    suelo de entrada del grupo son veinte tokens y la regla del contexto fijo no ve
+    nada; agrupados por paso, la ve.
+    """
+    project = f"test-dos-pasos-{uuid.uuid4().hex[:8]}"
+    spans: list[Span] = []
+    for t in range(4):
+        trace = uuid.uuid4().hex
+        corto = _span(
+            project, trace, uuid.uuid4().hex[:16], "chat claude-sonnet-5", "llm", t * 10,
+            dedup_hash=uuid.uuid4().hex[:16],
+            step_key="paso-clasificar", step_label="clasificar",
+        )
+        corto.llm = _llm("claude-sonnet-5", 20, 5, 0.0001)
+        spans.append(corto)
+        for i in range(4):
+            largo = _span(
+                project, trace, uuid.uuid4().hex[:16], "chat claude-sonnet-5", "llm",
+                t * 10 + i + 1,
+                dedup_hash=uuid.uuid4().hex[:16],
+                step_key="paso-manual", step_label="responder_del_manual",
+            )
+            largo.llm = _llm("claude-sonnet-5", 20_000, 30, 0.0403)
+            spans.append(largo)
+    store.insert_spans(spans)
+    yield project
+    store.delete_project(project)
+
+
+def test_dos_pasos_con_el_mismo_nombre_no_se_mezclan(
+    store, window, proyecto_dos_pasos_mismo_nombre
+):
+    usos = {
+        u.key: u
+        for u in store.model_usage(proyecto_dos_pasos_mismo_nombre, window, min_calls=1)
+    }
+    assert set(usos) == {"paso-clasificar", "paso-manual"}
+    # Y cada uno conserva su suelo de entrada, que es lo que la regla 3 necesita.
+    assert usos["paso-clasificar"].min_input_tokens == 20
+    assert usos["paso-manual"].min_input_tokens == 20_000
+    assert usos["paso-manual"].name == "responder_del_manual"
+
+
+def test_el_contexto_fijo_aparece_pese_al_nombre_generico(
+    store, window, proyecto_dos_pasos_mismo_nombre
+):
+    """Agrupando por nombre, la llamada corta hundía el suelo y la regla callaba."""
+    hallazgo = _contexto(store, proyecto_dos_pasos_mismo_nombre, window)
+    assert hallazgo is not None
+    assert "responder_del_manual" in hallazgo.summary
+    assert hallazgo.window_waste_usd > 0
+
+    findings = insights.detect(store, proyecto_dos_pasos_mismo_nombre, window)
+    resumen = store.summarize_window(proyecto_dos_pasos_mismo_nombre, window)
+    prometido = sum(f.window_waste_usd for f in findings)
+    assert prometido <= resumen.total_cost_usd
+
+
+def test_la_ficha_se_encuentra_por_la_clave_del_paso(
+    store, window, proyecto_dos_pasos_mismo_nombre
+):
+    """El identificador del hallazgo lleva la clave, no el nombre, que ya no es único."""
+    hallazgo = _contexto(store, proyecto_dos_pasos_mismo_nombre, window)
+    assert hallazgo.id == "contexto_fijo:paso-manual:claude-sonnet-5"
+    detalle = insights.detail(store, proyecto_dos_pasos_mismo_nombre, window, hallazgo.id)
+    assert detalle is not None
+    assert detalle.window_waste_usd == pytest.approx(hallazgo.window_waste_usd)
+
+
+@pytest.fixture(scope="module")
+def proyecto_sin_identidad_de_paso(store: ClickHouseStore):
+    """Filas anteriores a la identidad de paso: `step_key` vacío, como en producción."""
+    project = f"test-legado-{uuid.uuid4().hex[:8]}"
+    spans: list[Span] = []
+    # Ocho ejecuciones, no cuatro: descontadas las repeticiones quedan ocho llamadas
+    # legítimas, que es lo que la regla del modelo caro necesita para llegar a mirar.
+    for t in range(8):
+        trace = uuid.uuid4().hex
+        for i in range(3):
+            span = _span(
+                project, trace, uuid.uuid4().hex[:16], "extraer", "llm", t * 10 + i,
+                dedup_hash="hash-legado",
+            )
+            span.llm = _llm("gpt-4o", 100, 10, 0.001)
+            spans.append(span)
+    store.insert_spans(spans)
+    yield project
+    store.delete_project(project)
+
+
+def test_las_trazas_ya_guardadas_siguen_descontando_sus_repeticiones(
+    store, window, proyecto_sin_identidad_de_paso
+):
+    """El día del despliegue, todo lo guardado tiene `step_key` vacío.
+
+    Si el cruce del descuento no cayera al nombre del span, ese día entero de datos
+    volvería a contar dos veces el ahorro de las repeticiones sin que nada avisara.
+    """
+    usos = store.model_usage(proyecto_sin_identidad_de_paso, window, min_calls=1)
+    assert [u.key for u in usos] == ["extraer"], "sin clave, la identidad es el nombre"
+
+    findings = insights.detect(store, proyecto_sin_identidad_de_paso, window)
+    resumen = store.summarize_window(proyecto_sin_identidad_de_paso, window)
+    assert sum(f.window_waste_usd for f in findings) <= resumen.total_cost_usd
+
+    # Exacto, por lo mismo que arriba: sin descuento el número sigue cabiendo dentro
+    # del gasto, así que un tope holgado dejaría pasar el doble conteo.
+    modelo = next(f for f in findings if f.kind == "modelo_caro")
+    entrada, salida = 8 * 100, 8 * 10  # una llamada legítima por ejecución
+    caro = (entrada * 2.5 + salida * 10.0) / 1e6
+    barato = (entrada * 0.15 + salida * 0.6) / 1e6
+    assert modelo.window_waste_usd == pytest.approx(caro - barato, rel=1e-6)
+
+
+@pytest.fixture(scope="module")
+def proyecto_manual_reintentado(store: ClickHouseStore):
+    """Un paso con contexto fijo enorme que además se reintenta entero.
+
+    Cuatro ejecuciones, cuatro llamadas idénticas por ejecución con 20.000 tokens de
+    instrucciones. La regla de repetición dice que tres de cada cuatro sobran. Si la
+    regla del contexto fijo sigue contando las dieciséis, promete cachear llamadas que
+    la otra regla ya ha dado por eliminadas.
+    """
+    project = f"test-manual-rep-{uuid.uuid4().hex[:8]}"
+    spans: list[Span] = []
+    for t in range(4):
+        trace = uuid.uuid4().hex
+        for i in range(4):
+            span = _span(
+                project, trace, uuid.uuid4().hex[:16], "chat claude-sonnet-5", "llm",
+                t * 10 + i,
+                dedup_hash=f"hash-manual-{t}",  # misma entrada dentro de cada ejecución
+                step_key="paso-manual", step_label="consultar_manual",
+            )
+            span.llm = _llm("claude-sonnet-5", 20_000, 300, 0.0430)
+            spans.append(span)
+    store.insert_spans(spans)
+    yield project
+    store.delete_project(project)
+
+
+def test_no_se_promete_cachear_llamadas_que_no_deberian_existir(
+    store, window, proyecto_manual_reintentado
+):
+    """Cuarto camino del doble conteo: descontar tokens pero no llamadas.
+
+    `_without_duplicates` recortaba los tokens y dejaba `calls` intacto, así que la
+    regla del contexto fijo seguía viendo dieciséis llamadas donde sólo quedaban cuatro
+    y prometía el ahorro de cachear doce que la regla de repetición ya había eliminado.
+    """
+    findings = insights.detect(store, proyecto_manual_reintentado, window)
+    resumen = store.summarize_window(proyecto_manual_reintentado, window)
+
+    repeticion = next(f for f in findings if f.kind == "repeticion")
+    assert repeticion.window_waste_usd > 0
+
+    # Quitadas las repeticiones queda una llamada por ejecución: dentro de una
+    # ejecución no hay ninguna segunda llamada que pueda encontrar la caché caliente,
+    # así que la regla del contexto fijo no tiene nada que prometer.
+    assert _contexto(store, proyecto_manual_reintentado, window) is None
+
+    prometido = sum(f.window_waste_usd for f in findings)
+    assert prometido <= resumen.total_cost_usd, (
+        f"se promete ahorrar {prometido:.6f} de un gasto de {resumen.total_cost_usd:.6f}"
+    )
+
+
+def test_el_mapa_de_descuento_suma_los_grupos_que_caen_en_la_misma_clave():
+    """Prueba directa, sin base de datos, del mapa que evita el doble conteo.
+
+    Hoy la consulta devuelve un grupo por (paso, modelo), así que dos grupos con la
+    misma clave no llegan a darse. Mañana puede volver a agruparse de otra forma —ya ha
+    cambiado dos veces— y el diccionario por comprensión que había aquí se quedaba con
+    el último grupo en silencio. Se comprueba la propiedad, no el camino por el que hoy
+    se llega a ella.
+    """
+    grupos = [
+        RepeatedGroup(
+            dedup_hash="a", name="extraer", span_type="llm", model="gpt-4o",
+            step_key="paso-x", extra_spans=2, extra_input_tokens=100, extra_output_tokens=10,
+        ),
+        RepeatedGroup(
+            dedup_hash="b", name="extraer", span_type="llm", model="gpt-4o",
+            step_key="paso-x", extra_spans=3, extra_input_tokens=200, extra_output_tokens=20,
+        ),
+    ]
+    assert insights._duplicate_tokens(grupos) == {("paso-x", "gpt-4o"): (300, 30, 5)}
+
+
+def test_el_mapa_de_descuento_ignora_lo_que_no_puede_cruzar():
+    """Sin paso o sin modelo no hay pareja posible: restar a ciegas sería peor."""
+    grupos = [
+        RepeatedGroup(dedup_hash="a", name="buscar", span_type="tool", model="",
+                      step_key="paso-y", extra_spans=4, extra_input_tokens=0),
+        RepeatedGroup(dedup_hash="b", name="x", span_type="llm", model="gpt-4o",
+                      step_key="", extra_spans=2, extra_input_tokens=50),
+    ]
+    assert insights._duplicate_tokens(grupos) == {}

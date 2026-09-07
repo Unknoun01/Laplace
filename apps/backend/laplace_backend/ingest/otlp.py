@@ -151,6 +151,79 @@ def dedup_hash(span_type: str, name: str, model: str | None, payload: Any) -> st
     return hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
 
 
+#: Cuánto de las instrucciones se guarda como pista legible para la interfaz.
+STEP_HINT_CHARS = 80
+
+
+def _system_text(messages: list[dict[str, Any]]) -> str:
+    """El texto de los mensajes de sistema, que es la parte fija de un prompt."""
+    partes: list[str] = []
+    for message in messages:
+        if str(message.get("role", "")).lower() != "system":
+            continue
+        content = message.get("content")
+        if isinstance(content, str):
+            partes.append(content)
+        elif content is not None:
+            partes.append(json.dumps(content, sort_keys=True, ensure_ascii=False, default=str))
+    return "\n".join(partes)
+
+
+def _tool_names(raw: Any) -> list[str]:
+    """Nombres de las herramientas declaradas, en los dos formatos de la industria."""
+    tools = _json_or(raw, None)
+    if not isinstance(tools, list):
+        return []
+    nombres = []
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        nombre = tool.get("name") or (tool.get("function") or {}).get("name")
+        if nombre:
+            nombres.append(str(nombre))
+    return sorted(set(nombres))
+
+
+def step_identity(
+    attrs: dict[str, Any], name: str, messages: list[dict[str, Any]], tools: Any
+) -> tuple[str, str, str]:
+    """Identidad estable de un paso: `(clave, etiqueta, pista)`.
+
+    Un paso es **una llamada al modelo hecha desde el mismo sitio y con las mismas
+    instrucciones**. Las dos mitades hacen falta:
+
+    - *Desde el mismo sitio* es el span que la envuelve (la función decorada con
+      `@observe`). Sin esto, el nombre del span de LLM es `chat <modelo>` para todas
+      las llamadas del agente y las tres reglas mezclan pasos que no tienen nada que
+      ver: basta una llamada corta para hundir el suelo de tokens de la regla del
+      contexto fijo y para que la del modelo caro compare medias sin sentido.
+    - *Con las mismas instrucciones* es la huella del prompt de sistema y de las
+      herramientas declaradas. Hace falta porque quien acaba de instalar Laplace no
+      decora nada: sus llamadas cuelgan todas del mismo span raíz, o de ninguno.
+
+    Si no hay ni lo uno ni lo otro —payloads desactivados y sin decorar— se cae al
+    nombre del span, que es lo que había antes. No se inventa una identidad que no se
+    puede sostener (D-060).
+    """
+    sitio = str(attrs.get(semconv.LAPLACE_STEP_PARENT) or "").strip()
+    instrucciones = _system_text(messages)
+    herramientas = _tool_names(tools)
+
+    huella = ""
+    if instrucciones or herramientas:
+        material = instrucciones + "\x00" + "\x00".join(herramientas)
+        huella = hashlib.sha256(material.encode("utf-8")).hexdigest()[:12]
+
+    if not sitio and not huella:
+        # Sin ninguna de las dos señales, el nombre es todo lo que hay.
+        return hashlib.sha256(name.encode("utf-8")).hexdigest()[:16], name, ""
+
+    clave = hashlib.sha256(f"{sitio}\x00{huella}".encode()).hexdigest()[:16]
+    pista = " ".join(instrucciones.split())[:STEP_HINT_CHARS]
+    etiqueta = sitio or pista or name
+    return clave, etiqueta, pista
+
+
 # ---------------------------------------------------------------------------------
 # OTLP -> Span
 # ---------------------------------------------------------------------------------
@@ -218,8 +291,16 @@ def _build_span(proto_span: Any, project_id: str, resource: dict[str, Any], pric
         dedup_payload = generic_input
         dedup_model = None
 
+    if llm is not None:
+        step_key, step_label, step_hint = step_identity(
+            attrs, name, llm.input_messages, attrs.get("laplace.request.tools")
+        )
+    else:
+        step_key = step_label = step_hint = ""
+
     consumed = {
         semconv.LAPLACE_SPAN_TYPE,
+        semconv.LAPLACE_STEP_PARENT,
         semconv.LAPLACE_SESSION_ID,
         semconv.LAPLACE_USER_ID,
         semconv.LAPLACE_TAGS,
@@ -257,6 +338,9 @@ def _build_span(proto_span: Any, project_id: str, resource: dict[str, Any], pric
         tags=[str(t) for t in (_json_or(attrs.get(semconv.LAPLACE_TAGS), []) or [])],
         metadata=_json_or(attrs.get(semconv.LAPLACE_METADATA), {}) or {},
         dedup_hash=dedup_hash(span_type, name, dedup_model, dedup_payload),
+        step_key=step_key,
+        step_label=step_label,
+        step_hint=step_hint,
         events=events,
         attributes={k: v for k, v in attrs.items() if k not in consumed},
     )

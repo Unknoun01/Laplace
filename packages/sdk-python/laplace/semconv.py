@@ -90,6 +90,12 @@ LAPLACE_USAGE_ESTIMATED = "laplace.usage.estimated"
 
 LAPLACE_STREAMING = "laplace.streaming"
 
+#: Nombre del paso que envuelve a esta llamada al modelo: la función decorada con
+#: `@observe` o el span manual dentro del que se hizo. Es lo que identifica «desde
+#: dónde» se llama, porque el nombre del propio span de LLM es `chat <modelo>` y ese
+#: es el mismo para todas las llamadas del agente (D-060).
+LAPLACE_STEP_PARENT = "laplace.step.parent"
+
 #: Metro de facturación de la llamada: `standard`, `batch` o `fast`. Sólo se pone
 #: cuando la petición lo dice; su ausencia significa estándar, que es el defecto de
 #: los dos proveedores, no una suposición nuestra.

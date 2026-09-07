@@ -429,6 +429,8 @@ function Attributes({ span }: { span: Span }) {
     ["parent_span_id", span.parent_span_id ?? "(raíz)"],
     ["laplace.span.type", span.type],
     ["laplace.dedup_hash", span.dedup_hash],
+    ["laplace.step.key", span.step_key],
+    ["laplace.step.label", span.step_label],
     ["start_time", span.start_time],
     ["end_time", span.end_time],
     ["duration_ms", span.duration_ms.toFixed(3)],

@@ -81,6 +81,8 @@ def llm_span(
     """
     tracer = get_tracer()
     span_name = name or c.span_name(operation, model)
+    # Antes de entrar en el span nuevo: dentro, el activo ya sería él.
+    envolvente = c.enclosing_step()
     with tracer.start_as_current_span(span_name, kind=SpanKind.CLIENT) as span:
         c.record_request(
             span,
@@ -89,6 +91,7 @@ def llm_span(
             messages=input_messages,
             kwargs=params,
             operation=operation,
+            enclosing=envolvente,
         )
         recorder = LLMSpanRecorder(span)
         try:

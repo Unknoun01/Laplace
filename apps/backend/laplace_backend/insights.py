@@ -240,7 +240,7 @@ def _repetition_finding(group: RepeatedGroup, summary: WindowSummary, days: int)
         )
 
     return Finding(
-        id=f"repeticion:{group.dedup_hash}",
+        id=f"repeticion:{group.step_key}",
         kind="repeticion",
         title=f"Tu agente repite «{group.name}» hasta {group.max_per_trace} veces seguidas",
         summary=resumen,
@@ -391,7 +391,7 @@ def _expensive_model_finding(
     veces_txt = f"{veces:.0f} veces" if veces >= 2 else "algo"
 
     return Finding(
-        id=f"modelo_caro:{usage.name}:{usage.model}",
+        id=f"modelo_caro:{usage.key}:{usage.model}",
         kind="modelo_caro",
         title=f"Usas el modelo caro para un paso muy corto: «{usage.name}»",
         summary=(
@@ -565,7 +565,7 @@ def _fixed_context_finding(usage: ModelUsage, summary: WindowSummary, days: int)
         return None
 
     return Finding(
-        id=f"contexto_fijo:{usage.name}:{usage.model}",
+        id=f"contexto_fijo:{usage.key}:{usage.model}",
         kind="contexto_fijo",
         title=(
             f"Reenvías las mismas {_miles(usage.min_input_tokens)} palabras en cada llamada"
@@ -680,22 +680,59 @@ def _fixed_context_detail(finding: Finding, usage: ModelUsage) -> FindingDetail:
 # ---------------------------------------------------------------------------------
 
 
+def _duplicate_tokens(
+    groups: list[RepeatedGroup],
+) -> dict[tuple[str, str], tuple[int, int, int]]:
+    """Lo que la regla de repetición ya reclama, por (paso, modelo).
+
+    Dos cuidados que este mapa ha necesitado aprender por las malas:
+
+    1. **Se cruza por `step_key`, no por nombre.** Desde que las reglas agrupan por
+       paso, cruzar por el nombre del span dejaría el descuento sin pareja y el ahorro
+       de las repeticiones se contaría dos veces (D-061).
+    2. **Se acumula, no se sobrescribe.** Un mismo paso genera un `dedup_hash` distinto
+       por cada entrada repetida, así que varios grupos caen en la misma clave. El
+       diccionario por comprensión que había antes se quedaba sólo con el último.
+    """
+    total: dict[tuple[str, str], tuple[int, int, int]] = {}
+    for group in groups:
+        if group.span_type != "llm" or not group.model or not group.step_key:
+            continue
+        clave = (group.step_key, group.model)
+        entrada, salida, llamadas = total.get(clave, (0, 0, 0))
+        total[clave] = (
+            entrada + group.extra_input_tokens,
+            salida + group.extra_output_tokens,
+            llamadas + group.extra_spans,
+        )
+    return total
+
+
 def _without_duplicates(
-    usage: ModelUsage, duplicates: dict[tuple[str, str], tuple[int, int]]
+    usage: ModelUsage, duplicates: dict[tuple[str, str], tuple[int, int, int]]
 ) -> ModelUsage:
-    """El mismo uso, descontando los tokens que ya cuenta la regla de repetición."""
-    extra_in, extra_out = duplicates.get((usage.name, usage.model), (0, 0))
-    if not extra_in and not extra_out:
+    """El mismo uso, descontando lo que ya cuenta la regla de repetición.
+
+    Se descuentan los tokens **y las llamadas**. Las llamadas importan tanto como los
+    tokens: la regla del contexto fijo cuenta cuántas veces se reenvía el prompt, y si
+    de esas llamadas la mitad no deberían existir, prometer que las cachearemos es
+    prometer un ahorro sobre trabajo que la otra regla ya ha dado por eliminado. Es la
+    cuarta forma que ha encontrado este proyecto de contar dos veces el mismo dinero.
+    """
+    extra_in, extra_out, extra_calls = duplicates.get((usage.key, usage.model), (0, 0, 0))
+    if not extra_in and not extra_out and not extra_calls:
         return usage
 
     input_tokens = max(usage.input_tokens - extra_in, 0)
     output_tokens = max(usage.output_tokens - extra_out, 0)
+    calls = max(usage.calls - extra_calls, 0)
     return replace(
         usage,
+        calls=calls,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
-        avg_output_tokens=(output_tokens / usage.calls) if usage.calls else 0.0,
-        avg_input_tokens=(input_tokens / usage.calls) if usage.calls else 0.0,
+        avg_output_tokens=(output_tokens / calls) if calls else 0.0,
+        avg_input_tokens=(input_tokens / calls) if calls else 0.0,
     )
 
 
@@ -718,11 +755,7 @@ def detect(store: Any, project_id: str, window: Window) -> list[Finding]:
     # repetición ya cuenta el 100% de las copias sobrantes. Contarlas otra vez en la
     # regla del modelo caro inflaría el ahorro total, que es el número que vendemos.
     # Se descuentan los tokens duplicados antes de evaluar el resto de reglas.
-    duplicados = {
-        (g.name, g.model): (g.extra_input_tokens, g.extra_output_tokens)
-        for g in grupos
-        if g.span_type == "llm" and g.model
-    }
+    duplicados = _duplicate_tokens(grupos)
 
     for uso in store.model_usage(project_id, window, min_calls=1):
         neto = _without_duplicates(uso, duplicados)
@@ -792,7 +825,7 @@ def detail(store: Any, project_id: str, window: Window, finding_id: str) -> Find
 
     if kind == "repeticion":
         for group in store.repeated_groups(project_id, window, min_repeats=MIN_REPEATS):
-            if group.dedup_hash != key:
+            if group.step_key != key:
                 continue
             finding = _repetition_finding(group, summary, dias)
             evidencia = store.sample_repetition(project_id, window, group.dedup_hash)
@@ -800,14 +833,12 @@ def detail(store: Any, project_id: str, window: Window, finding_id: str) -> Find
         return None
 
     if kind in ("modelo_caro", "contexto_fijo"):
-        name, _, model = key.rpartition(":")
-        duplicados = {
-            (g.name, g.model): (g.extra_input_tokens, g.extra_output_tokens)
-            for g in store.repeated_groups(project_id, window, min_repeats=MIN_REPEATS)
-            if g.span_type == "llm" and g.model
-        }
+        step_key, _, model = key.rpartition(":")
+        duplicados = _duplicate_tokens(
+            store.repeated_groups(project_id, window, min_repeats=MIN_REPEATS)
+        )
         for bruto in store.model_usage(project_id, window, min_calls=1):
-            if bruto.name != name or bruto.model != model:
+            if bruto.key != step_key or bruto.model != model:
                 continue
             uso = _without_duplicates(bruto, duplicados)
             if kind == "modelo_caro":

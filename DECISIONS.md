@@ -427,12 +427,82 @@ por 720 y el ahorro por 4,3: las dos cifras del inicio dejan de ser comparables 
 de reparto miente. `detect()` y `detail()` proyectan ahora sobre los mismos días
 observados que `overview()`.
 
-### D-059 — Las reglas agrupan por (nombre del paso, modelo), y el nombre por defecto es genérico
-`llm_span` y las integraciones automáticas nombran el span `chat <modelo>`, así que todas
-las llamadas a un mismo modelo caen en el mismo grupo aunque sean pasos distintos. Eso
-hunde el suelo de tokens de entrada de la regla del contexto fijo: basta una llamada corta
-para que el mínimo del grupo sea veinte tokens. El agente de ejemplo pasa `name=` a los
-pasos que quiere distinguir. Queda anotado como límite conocido: agrupar por el span padre
-—o por el nombre de la función instrumentada— daría grupos mejores, pero es un cambio en
-la semántica de las tres reglas y no entra en este encargo.
+### D-059 — ~~Las reglas agrupan por (nombre del paso, modelo)~~ — resuelto en D-060
+Quedó anotado como límite conocido: `llm_span` y las integraciones automáticas nombran
+el span `chat <modelo>`, así que todas las llamadas a un mismo modelo caían en el mismo
+grupo aunque fueran pasos distintos. El agente de ejemplo lo esquivaba pasando `name=`,
+que es exactamente lo que nadie hace en código real. Sustituido por D-060.
+
+### D-060 — Un paso es «llamada hecha desde el mismo sitio y con las mismas instrucciones»
+La identidad de un paso ya no es el nombre del span. Se calcula en la ingesta, como el
+`dedup_hash`, y tiene dos mitades porque ninguna basta sola:
+
+- **Desde el mismo sitio**: el span que envuelve la llamada, que el SDK captura leyendo
+  el span activo justo antes de abrir el de LLM (`laplace.step.parent`). Cubre a quien
+  decora sus funciones con `@observe`, que es la mitad de la documentación.
+- **Con las mismas instrucciones**: huella del prompt de sistema más los nombres de las
+  herramientas declaradas. Cubre a quien no decora nada: sus llamadas cuelgan todas del
+  mismo span, o de ninguno, y sin esto seguirían mezcladas.
+
+Si no hay ninguna de las dos —payloads desactivados y sin decorar— se cae al nombre del
+span, que es lo que había antes. No se inventa una identidad que no se puede sostener.
+
+El riesgo conocido es el contrario: un prompt de sistema con datos variables genera una
+huella distinta por llamada y parte un paso en muchos. Entonces las reglas se quedan
+calladas por falta de llamadas, que es el lado seguro. Mezclar da diagnósticos falsos;
+partir da silencio.
+
+Consecuencia visible: los hallazgos ya no se titulan `chat gpt-5.6-terra`. Se titulan
+con el nombre de la función que hace la llamada, sin que nadie tenga que nombrar nada.
+
+### D-061 — El descuento anti-doble-conteo cruza por paso, con vuelta al nombre
+El mapa que impide contar dos veces el mismo ahorro cruza `RepeatedGroup` con
+`ModelUsage`. Al cambiar la clave de agrupación, ese cruce se quedó sin pareja y las
+repeticiones volvieron a contarse dos veces: lo cazó el test de regresión del solape, que
+es justo para lo que está. Ahora las dos partes cruzan por `step_key`.
+
+Y una segunda mitad que no es teórica: **el día del despliegue, todo lo ya guardado tiene
+`step_key` vacío**. Las dos consultas caen al nombre del span cuando falta la clave, de
+modo que esas trazas se comportan exactamente como antes en lugar de juntarse todas bajo
+una clave vacía y dejar el descuento sin pareja durante una ventana entera.
+
+### D-062 — Las repeticiones se detectan por entrada pero se reportan por paso
+La señal sigue siendo `dedup_hash`: misma entrada, misma llamada. Pero un agente que
+reintenta lo hace con cada pregunta de cada usuario, así que agrupar el informe por
+entrada llenaba el panel de tarjetas idénticas —una por pregunta— diciendo todas lo
+mismo. En el agente sin instrumentar eran once tarjetas para tres problemas. Se agrupa
+por (paso, modelo), se enseña el número total y se guarda la entrada más repetida como
+evidencia. Por modelo también: el mismo paso con dos modelos son dos problemas con dinero
+distinto, y mezclarlos dejaría las repeticiones de uno sin descontar del otro.
+
+### D-063 — El descuento quita llamadas, no sólo tokens
+Cuarta forma que ha encontrado este proyecto de contar dos veces el mismo dinero.
+`_without_duplicates` recortaba los tokens y dejaba `calls` intacto, así que la regla del
+contexto fijo seguía viendo dieciséis llamadas donde sólo quedaban cuatro y prometía el
+ahorro de cachear doce que la regla de repetición ya había dado por eliminadas. También
+corregía mal la media de tokens de salida, que es el umbral de la regla del modelo caro.
+
+### D-064 — La batería del doble conteo se amplía, nunca se sustituye
+El mismo fallo ha aparecido por cuatro caminos distintos: dos reglas sobre los mismos
+tokens, dos reglas sobre el mismo paso, el cruce del descuento sin pareja, y el descuento
+de tokens sin llamadas. Cada uno deja su caso en `test_insights.py` y ninguno sustituye a
+otro. Dos exigencias sobre esos tests:
+
+1. **Las cifras se comprueban exactas, no con un tope.** Un `assert x < gasto_total` deja
+   pasar el doble conteo mientras quepa dentro del gasto, que es casi siempre.
+2. **Se comprueba que muerden.** Se rompe el motor a propósito de cuatro maneras y se
+   verifica que cada una tumba al menos un test. Un test de regresión que no puede fallar
+   es peor que no tenerlo, porque da confianza sin darla.
+
+El caso del mapa de descuento se comprueba además directamente sobre `_duplicate_tokens`,
+sin base de datos: la agrupación ya ha cambiado dos veces y la propiedad tiene que
+sobrevivir a la próxima.
+
+### D-065 — Dos agentes de ejemplo, y el que manda es el mal instrumentado
+`agente_ejemplo.py` está instrumentado con cuidado y sirve para enseñar el producto.
+`agente_sin_instrumentar.py` es lo que sale de leer diez líneas del README con prisa: un
+`@observe` en la entrada, las funciones internas sin decorar y ningún `name=` en ninguna
+parte. Es el que decide si el arreglo está hecho, porque es el primer usuario. Al ejemplo
+cuidado se le han quitado los `name=` que le quedaban: una demo que esquiva el problema
+no demuestra nada.
 

@@ -101,10 +101,17 @@ class RepeatedGroup:
     `extra_*` es lo que sobra: todo menos la primera ocurrencia de cada traza.
     """
 
+    #: Entrada repetida representativa del paso: la que más veces se repite. Sirve
+    #: para enseñar evidencia; el hallazgo es del paso entero, no de esta entrada.
     dedup_hash: str
     name: str
     span_type: str
     model: str
+    #: Paso al que pertenece la repetición. Sin él, el descuento que impide contar dos
+    #: veces el mismo ahorro no encuentra su pareja en `ModelUsage` (D-061).
+    step_key: str = ""
+    #: Trozo de las instrucciones, para distinguir dos pasos con el mismo título.
+    hint: str = ""
     traces: int = 0
     total_spans: int = 0
     extra_spans: int = 0
@@ -120,10 +127,16 @@ class RepeatedGroup:
 
 @dataclass
 class ModelUsage:
-    """Uso agregado de un modelo por paso, para razonar sobre alternativas."""
+    """Uso agregado de un modelo por paso, para razonar sobre alternativas.
 
+    El paso es `key`, no `name`: `name` es sólo cómo se llama en la pantalla (D-060).
+    """
+
+    key: str
     name: str
     model: str
+    #: Trozo de las instrucciones fijas, para distinguir dos pasos homónimos.
+    hint: str = ""
     calls: int = 0
     traces: int = 0
     input_tokens: int = 0
