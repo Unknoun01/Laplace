@@ -101,6 +101,9 @@ async def list_traces(
     search: str | None = None,
     span_type: str | None = None,
     sort: str = Query("recent", pattern="^(recent|cost|duration)$"),
+    #: Filtros que sólo ofrece el modo avanzado del explorador.
+    model: str | None = None,
+    min_cost_usd: float | None = Query(None, ge=0),
 ) -> TraceListPage:
     """Lista de trazas del proyecto y rango activos."""
     before, before_trace_id = decode_cursor(cursor)
@@ -117,6 +120,8 @@ async def list_traces(
         search=search,
         span_type=span_type,
         sort=sort,
+        model=model,
+        min_cost_usd=min_cost_usd,
     )
     store = _store(request)
     page = await run_in_threadpool(store.list_traces, filters)

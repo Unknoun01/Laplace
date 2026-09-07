@@ -34,6 +34,12 @@ Difficulty = Literal["easy", "mid", "hard"]
 
 DAYS_PER_MONTH = 30
 
+#: Por encima de esta proporción del gasto, un ahorro deja de sonar creíble aunque los
+#: números salgan. La interfaz lo presenta con cautela y enseña el desglose completo.
+CAUTION_SAVINGS_RATIO = 0.60
+#: Por debajo de esto no hay datos para proyectar un mes sin decirlo en la propia cifra.
+MIN_DAYS_FOR_PROJECTION = 1.0
+
 # Umbrales de las reglas. Configurables por proyecto cuando haya ajustes por proyecto;
 # hoy son constantes explícitas para que se puedan leer y discutir.
 MIN_REPEATS = 3
@@ -129,6 +135,19 @@ class Overview(BaseModel):
     error_rate: float = 0.0
     p95_duration_ms: float = 0.0
     cost_per_trace_usd: float = 0.0
+
+    #: Mientras esto no sea cero, el coste mostrado está incompleto y hay que decirlo.
+    unknown_cost_spans: int = 0
+    models_without_price: list[str] = Field(default_factory=list)
+
+    #: Días reales de datos en la ventana. Extrapolar a 30 días desde menos de uno es
+    #: una cifra que hay que presentar como lo que es.
+    observed_days: float = 0.0
+    #: True cuando la proyección mensual sale de menos de 24 h de datos.
+    thin_projection: bool = False
+    #: True cuando el evitable pasa del umbral de cautela: la UI lo presenta con
+    #: reservas en lugar de como promesa.
+    savings_needs_caution: bool = False
 
     findings: list[Finding] = Field(default_factory=list)
 
@@ -600,17 +619,38 @@ def detect(store: Any, project_id: str, window: Window) -> list[Finding]:
     return findings
 
 
+def _observed_days(summary: WindowSummary, window: Window) -> float:
+    """Días de datos reales, no los que pide el selector.
+
+    Un proyecto que empezó a enviar trazas hace dos horas no tiene siete días de datos
+    aunque el rango diga «7 días». Proyectar un mes desde esa ventana infla la cifra
+    sola, así que se proyecta sobre lo observado y se avisa cuando es poco.
+    """
+    if not summary.first_seen or not summary.last_seen:
+        return 0.0
+    span = (summary.last_seen - summary.first_seen).total_seconds() / 86_400
+    return max(min(span, float(window.days)), 1 / 24)
+
+
 def overview(store: Any, project_id: str, window: Window) -> Overview:
     """El héroe del inicio: coste actual, coste evitable y métricas."""
     summary = store.summarize_window(project_id, window)
     findings = detect(store, project_id, window)
 
-    mensual = _to_monthly(summary.total_cost_usd, window.days)
+    # Se proyecta sobre los días que de verdad hay datos, no sobre los que pide el
+    # selector: extrapolar 30 días desde una ventana vacía infla la cifra sola.
+    observados = _observed_days(summary, window)
+    mensual = _to_monthly(summary.total_cost_usd, observados)
     evitable = min(sum(f.monthly_saving_usd for f in findings), mensual)
 
     return Overview(
         project_id=project_id,
         days=window.days,
+        unknown_cost_spans=summary.unknown_cost_spans,
+        models_without_price=summary.models_without_price,
+        observed_days=round(observados, 2),
+        thin_projection=observados < MIN_DAYS_FOR_PROJECTION,
+        savings_needs_caution=bool(mensual > 0 and evitable / mensual > CAUTION_SAVINGS_RATIO),
         window_cost_usd=summary.total_cost_usd,
         monthly_cost_usd=mensual,
         monthly_avoidable_usd=evitable,

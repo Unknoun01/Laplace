@@ -266,6 +266,7 @@ def _build_llm(attrs: dict[str, Any], prices: Any) -> LLMAttributes:
         output_tokens=int(attrs.get(semconv.GEN_AI_USAGE_OUTPUT_TOKENS) or 0),
         cached_input_tokens=int(attrs.get(semconv.LAPLACE_USAGE_CACHED_INPUT_TOKENS) or 0),
         reasoning_tokens=int(attrs.get(semconv.LAPLACE_USAGE_REASONING_TOKENS) or 0),
+        estimated=bool(attrs.get(semconv.LAPLACE_USAGE_ESTIMATED) or False),
     )
     request_model = _str_or_none(attrs.get(semconv.GEN_AI_REQUEST_MODEL))
     response_model = _str_or_none(attrs.get(semconv.GEN_AI_RESPONSE_MODEL))
@@ -298,7 +299,8 @@ def _build_llm(attrs: dict[str, Any], prices: Any) -> LLMAttributes:
             input_usd=breakdown.input_usd,
             output_usd=breakdown.output_usd,
             total_usd=breakdown.total_usd,
-            estimated=breakdown.estimated,
+            unknown=breakdown.unknown,
+            rate=breakdown.rate,
         ),
         input_messages=_as_message_list(attrs.get(semconv.GEN_AI_INPUT_MESSAGES)),
         output_messages=_as_message_list(attrs.get(semconv.GEN_AI_OUTPUT_MESSAGES)),

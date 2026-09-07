@@ -87,6 +87,8 @@ def summarize(spans: list[Span], trace_id: str, project_id: str = "") -> TraceSu
     end = max(span.end_time for span in spans)
     roots = [span for span in spans if not span.parent_span_id]
     error_count = sum(1 for span in spans if span.status == "error")
+    # Pasos cuyo modelo no está en la tabla: el total de la traza está incompleto.
+    sin_tarifa = sum(1 for span in spans if span.cost.unknown)
 
     return TraceSummary(
         trace_id=trace_id,
@@ -106,11 +108,12 @@ def summarize(spans: list[Span], trace_id: str, project_id: str = "") -> TraceSu
             cached_input_tokens=sum(span.usage.cached_input_tokens for span in spans),
             reasoning_tokens=sum(span.usage.reasoning_tokens for span in spans),
         ),
+        unknown_cost_spans=sin_tarifa,
         cost=Cost(
             input_usd=sum(span.cost.input_usd for span in spans),
             output_usd=sum(span.cost.output_usd for span in spans),
             total_usd=sum(span.cost.total_usd for span in spans),
-            estimated=any(span.cost.estimated for span in spans if span.type == "llm"),
+            unknown=sin_tarifa > 0,
         ),
         session_id=next((s.session_id for s in spans if s.session_id), None),
         user_id=next((s.user_id for s in spans if s.user_id), None),

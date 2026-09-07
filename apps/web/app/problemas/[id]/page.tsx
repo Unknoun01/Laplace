@@ -147,7 +147,7 @@ export default async function ProblemaPage({ params, searchParams }: PageProps) 
         </Link>
         {trace && (
           <a
-            className="btn pro inline"
+            className="btn pro"
             href={`/api/export/${trace.summary.trace_id}`}
             download={`${trace.summary.trace_id}.json`}
           >

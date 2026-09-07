@@ -3,6 +3,7 @@ import { BigMoney, FindingCard, GapBar, Readout } from "@/components/pieces";
 import { BackendDown, NoProject, NoTracesYet, NothingToFix } from "@/components/states";
 import { backendReachable, getOverview, listProjects, parseDays } from "@/lib/api";
 import { duration, money, number, percent, tokens } from "@/lib/format";
+import type { Overview } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +34,10 @@ export default async function DiagnosticoPage({ searchParams }: PageProps) {
   if (overview.spans === 0) return <NoTracesYet project={project} />;
 
   const ahorra = overview.monthly_avoidable_usd > 0;
+  const proporcion =
+    overview.monthly_cost_usd > 0
+      ? overview.monthly_avoidable_usd / overview.monthly_cost_usd
+      : 0;
 
   return (
     <main className="reading">
@@ -70,6 +75,8 @@ export default async function DiagnosticoPage({ searchParams }: PageProps) {
           />
         )}
 
+        <Caveats overview={overview} proporcion={proporcion} />
+
         <Readout
           items={[
             [duration(overview.p95_duration_ms), "Latencia p95"],
@@ -78,6 +85,12 @@ export default async function DiagnosticoPage({ searchParams }: PageProps) {
             [number(overview.traces), "Trazas"],
             [number(overview.spans), "Pasos"],
             [money(overview.cost_per_trace_usd, overview.currency), "Coste por ejecución"],
+            [
+              overview.observed_days < 1
+                ? `${(overview.observed_days * 24).toFixed(1)} h`
+                : `${overview.observed_days.toFixed(1)} d`,
+              "Datos observados",
+            ],
           ]}
         />
       </section>
@@ -118,5 +131,54 @@ export default async function DiagnosticoPage({ searchParams }: PageProps) {
         </section>
       )}
     </main>
+  );
+}
+
+/**
+ * Avisos que acompañan a la cifra grande.
+ *
+ * Una cifra de ahorro que nadie se cree no vende nada: cuando el evitable es casi todo
+ * el gasto, o cuando la proyección sale de unas horas de datos, se dice aquí mismo en
+ * lugar de presentarlo como una promesa.
+ */
+function Caveats({ overview, proporcion }: { overview: Overview; proporcion: number }) {
+  const avisos: React.ReactNode[] = [];
+
+  if (overview.unknown_cost_spans > 0) {
+    avisos.push(
+      <>
+        <strong>Este total está incompleto.</strong> Hay {overview.unknown_cost_spans} pasos
+        cuyo modelo no está en nuestra tabla de precios, así que no sabemos cuánto cuestan y
+        no se suman: {overview.models_without_price.join(", ")}.
+      </>,
+    );
+  }
+  if (overview.thin_projection) {
+    avisos.push(
+      <>
+        La proyección mensual sale de <strong>menos de 24 horas</strong> de datos (
+        {overview.observed_days.toFixed(2)} días). Con tan poco, un día raro deforma el mes
+        entero: tómala como un orden de magnitud, no como una previsión.
+      </>,
+    );
+  }
+  if (overview.savings_needs_caution) {
+    avisos.push(
+      <>
+        El ahorro estimado es el <strong>{Math.round(proporcion * 100)} %</strong> de lo que
+        gastas. Es mucho: suele pasar en agentes pequeños o recién estrenados, donde unos
+        pocos pasos dominan la factura. Antes de darlo por bueno, mira el desglose de cada
+        problema.
+      </>,
+    );
+  }
+
+  if (avisos.length === 0) return null;
+  return (
+    <div className="caveats">
+      {avisos.map((aviso, index) => (
+        <p key={index}>{aviso}</p>
+      ))}
+    </div>
   );
 }

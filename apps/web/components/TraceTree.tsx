@@ -209,6 +209,9 @@ function SpanPanel({ node }: { node: TraceTreeNode }) {
         >
           {span.name}
         </span>
+        <span className="hint pro" style={{ marginRight: 8 }}>
+          {span.span_id}
+        </span>
         <span className="hint">{duration(span.duration_ms)}</span>
       </header>
 
@@ -309,17 +312,17 @@ function Metrics({ node }: { node: TraceTreeNode }) {
           <b title={llm.request_model ?? ""}>{llm.request_model ?? "—"}</b>
           <small>modelo</small>
         </div>
-        <div>
+        <div className={llm.usage.estimated ? "warn" : undefined}>
           <b>{number(llm.usage.input_tokens)}</b>
-          <small>tokens entrada</small>
+          <small>{llm.usage.estimated ? "tokens entrada (estimados)" : "tokens entrada"}</small>
         </div>
-        <div>
+        <div className={llm.usage.estimated ? "warn" : undefined}>
           <b>{number(llm.usage.output_tokens)}</b>
-          <small>tokens salida</small>
+          <small>{llm.usage.estimated ? "tokens salida (estimados)" : "tokens salida"}</small>
         </div>
-        <div className={llm.cost.estimated ? "warn" : undefined}>
-          <b>{money(llm.cost.total_usd, llm.cost.currency)}</b>
-          <small>{llm.cost.estimated ? "sin tarifa conocida" : "coste"}</small>
+        <div className={llm.cost.unknown ? "warn" : undefined}>
+          <b>{llm.cost.unknown ? "?" : money(llm.cost.total_usd, llm.cost.currency)}</b>
+          <small>{llm.cost.unknown ? "no sabemos el precio" : "coste"}</small>
         </div>
       </div>
     );
@@ -398,9 +401,18 @@ function Attributes({ span }: { span: Span }) {
     ["parent_span_id", span.parent_span_id ?? "(raíz)"],
     ["laplace.span.type", span.type],
     ["laplace.dedup_hash", span.dedup_hash],
-    ["inicio", span.start_time],
-    ["duration_ms", span.duration_ms.toFixed(1)],
+    ["start_time", span.start_time],
+    ["end_time", span.end_time],
+    ["duration_ms", span.duration_ms.toFixed(3)],
   ];
+  if (span.llm) {
+    rows.push([
+      "laplace.usage.estimated",
+      span.llm.usage.estimated ? "true (los contamos nosotros)" : "false (del proveedor)",
+    ]);
+    if (span.llm.cost.rate) rows.push(["tarifa aplicada", span.llm.cost.rate]);
+    if (span.llm.cost.unknown) rows.push(["tarifa aplicada", "ninguna: modelo desconocido"]);
+  }
   if (span.session_id) rows.push(["laplace.session.id", span.session_id]);
   if (span.user_id) rows.push(["laplace.user.id", span.user_id]);
   if (span.llm?.system) rows.push(["gen_ai.system", span.llm.system]);
@@ -418,8 +430,8 @@ function Attributes({ span }: { span: Span }) {
   }
 
   return (
-    <details className="fold">
-      <summary>Atributos</summary>
+    <details className="fold pro">
+      <summary>Atributos crudos</summary>
       <dl className="kv">
         {rows.map(([key, value]) => (
           <div key={key}>

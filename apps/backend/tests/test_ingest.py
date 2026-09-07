@@ -7,36 +7,10 @@ se rompe. No necesita ni ClickHouse ni claves de API.
 from __future__ import annotations
 
 import pytest
+from helpers import exporter, ingest
 from laplace import decorators, manual
-from opentelemetry import trace as otel_trace
-from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-from laplace_backend.ingest.otlp import parse_spans
 from laplace_backend.tree import build_tree, summarize
-
-_exporter = InMemorySpanExporter()
-
-
-@pytest.fixture(scope="session", autouse=True)
-def _provider() -> None:
-    provider = TracerProvider(resource=Resource.create({"laplace.project.id": "test-project"}))
-    provider.add_span_processor(SimpleSpanProcessor(_exporter))
-    otel_trace.set_tracer_provider(provider)
-
-
-@pytest.fixture(autouse=True)
-def _clear() -> None:
-    _exporter.clear()
-
-
-def ingest():
-    """Lo que el backend recibiría por el endpoint OTLP."""
-    return parse_spans(encode_spans(_exporter.get_finished_spans()))
-
 
 # ---------------------------------------------------------------------------------
 
@@ -84,7 +58,9 @@ def test_llm_span_guarda_tokens_separados_y_calcula_coste():
     assert span.llm.request_model == "gpt-4o-mini"
     assert span.llm.response_model == "gpt-4o-mini-2024-07-18"
     # Coste desglosado, resuelto por prefijo contra la tabla de precios.
-    assert span.llm.cost.estimated is False
+    assert span.llm.cost.unknown is False
+    # La tarifa aplicada queda anotada, para poder auditar el cálculo meses después.
+    assert span.llm.cost.rate.startswith("gpt-4o-mini @ ")
     assert span.llm.cost.input_usd == pytest.approx(1000 * 0.15 / 1e6)
     assert span.llm.cost.output_usd == pytest.approx(500 * 0.6 / 1e6)
     assert span.llm.cost.total_usd == pytest.approx(
@@ -95,14 +71,36 @@ def test_llm_span_guarda_tokens_separados_y_calcula_coste():
     assert span.llm.params["temperature"] == 0.5
 
 
-def test_modelo_desconocido_marca_el_coste_como_estimado():
+def test_un_modelo_sin_tarifa_no_cuesta_cero_sino_desconocido():
+    """Un 0 silencioso se suma a los totales y los corrompe sin que nadie se entere."""
     with manual.llm_span(model="modelo-inventado-7b", input_messages=[]) as llm:
         llm.record_response(input_tokens=100, output_tokens=50)
 
     span = ingest()[0]
-    assert span.llm.cost.total_usd == 0.0
-    # Nunca se muestra un coste inventado como si fuera exacto.
-    assert span.llm.cost.estimated is True
+    assert span.llm.cost.unknown is True
+    assert span.llm.cost.rate == ""
+
+
+def test_una_version_nueva_no_hereda_la_tarifa_de_la_anterior():
+    """Regresión: `claude-opus-4-5` cuesta un tercio que `claude-opus-4`.
+
+    Dejar que el prefijo colara habría cobrado el triple en silencio, y ese número es
+    el que vende el producto.
+    """
+    with manual.llm_span(model="claude-opus-4-5", input_messages=[]) as llm:
+        llm.record_response(input_tokens=1_000_000, output_tokens=0)
+    with manual.llm_span(model="claude-opus-4", input_messages=[]) as llm:
+        llm.record_response(input_tokens=1_000_000, output_tokens=0)
+
+    nuevo, viejo = ingest()
+    assert nuevo.llm.cost.total_usd == pytest.approx(5.0)
+    assert viejo.llm.cost.total_usd == pytest.approx(15.0)
+
+    # Y una versión futura que aún no está en la tabla no hereda nada: es desconocida.
+    exporter.clear()
+    with manual.llm_span(model="claude-opus-9", input_messages=[]) as llm:
+        llm.record_response(input_tokens=1000, output_tokens=10)
+    assert ingest()[0].llm.cost.unknown is True
 
 
 def test_las_llamadas_repetidas_comparten_dedup_hash():

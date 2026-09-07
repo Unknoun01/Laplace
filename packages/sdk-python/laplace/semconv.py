@@ -77,6 +77,12 @@ LAPLACE_METADATA = "laplace.metadata"
 
 LAPLACE_USAGE_CACHED_INPUT_TOKENS = "laplace.usage.cached_input_tokens"
 LAPLACE_USAGE_REASONING_TOKENS = "laplace.usage.reasoning_tokens"
+#: True cuando los tokens los hemos contado nosotros porque el proveedor no los dio.
+#: La interfaz distingue medido de estimado: no es lo mismo un coste que sale de la
+#: factura que uno que sale de dividir caracteres entre cuatro.
+LAPLACE_USAGE_ESTIMATED = "laplace.usage.estimated"
+
+LAPLACE_STREAMING = "laplace.streaming"
 
 LAPLACE_TOOL_ARGUMENTS = "laplace.tool.arguments"
 LAPLACE_TOOL_OUTPUT = "laplace.tool.output"

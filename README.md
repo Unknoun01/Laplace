@@ -54,10 +54,22 @@ Tres reglas deterministas, sin modelo de por medio
 | Modelo caro | Un paso con salida media corta que usa un modelo con alternativa más barata | Diferencia de tarifa sobre los tokens reales |
 | Contexto fijo | Un prompt con un suelo grande de tokens que se reenvía sin caché | Diferencia entre tarifa normal y de caché |
 
-Tres cosas que **no** hace, a propósito: no inventa dinero donde no lo hay (un bucle de
+Cuatro cosas que **no** hace, a propósito: no inventa dinero donde no lo hay (un bucle de
 herramientas no gasta tokens, así que enseña el tiempo perdido y lo dice), no cuenta dos
-veces el mismo ahorro cuando dos reglas se solapan, y no afirma que un modelo más barato
-acertará igual, porque eso exige evaluaciones y todavía no existen.
+veces el mismo ahorro cuando dos reglas se solapan, no afirma que un modelo más barato
+acertará igual (eso exige evaluaciones, que todavía no existen), y no presenta como
+completo un total al que le faltan pasos cuyo modelo no tiene tarifa conocida.
+
+## Los precios
+
+`apps/backend/laplace_backend/pricing/model_prices.json` lleva versión, y cada modelo
+declara de qué fuente oficial salen sus números y cuándo se verificó. **La tabla caduca**:
+los proveedores cambian precios y retiran modelos, así que hay que reverificarla al menos
+cada trimestre y subir `version`. Un test falla si las fuentes tienen más de 120 días.
+
+Si un modelo aparece en tus trazas y no está en la tabla, su coste **no** se cuenta como
+cero: se marca como desconocido y la interfaz avisa de que el total está incompleto. Otro
+test falla si eso pasa con los datos que haya cargados.
 
 ## Arrancar en local
 

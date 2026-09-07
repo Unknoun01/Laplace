@@ -59,10 +59,12 @@ COLUMNS = (
     "output_tokens",
     "cached_input_tokens",
     "reasoning_tokens",
+    "usage_estimated",
     "cost_input_usd",
     "cost_output_usd",
     "cost_total_usd",
-    "cost_estimated",
+    "cost_unknown",
+    "price_rate",
     "input_messages",
     "output_messages",
     "llm_params",
@@ -267,10 +269,12 @@ class ClickHouseStore:
             usage.output_tokens,
             usage.cached_input_tokens,
             usage.reasoning_tokens,
+            1 if usage.estimated else 0,
             cost.input_usd,
             cost.output_usd,
             cost.total_usd,
-            1 if cost.estimated else 0,
+            1 if cost.unknown else 0,
+            cost.rate,
             _json(llm.input_messages) if llm else "",
             _json(llm.output_messages) if llm else "",
             _json(llm.params) if llm else "",
@@ -306,12 +310,17 @@ class ClickHouseStore:
         }.get(filters.sort, "started DESC, trace_id DESC")
         por_tiempo = filters.sort not in ("cost", "duration")
 
-        having = ""
+        condiciones_having: list[str] = []
         if filters.before is not None and por_tiempo:
             params["before"] = _utc(filters.before)
             params["before_id"] = filters.before_trace_id or ""
             # Comparación por tupla: avanza aunque varias trazas compartan instante.
-            having = "HAVING (started, trace_id) < (%(before)s, %(before_id)s)"
+            condiciones_having.append("(started, trace_id) < (%(before)s, %(before_id)s)")
+        if filters.min_cost_usd is not None:
+            # El coste es una suma sobre los spans: sólo se puede filtrar tras agregar.
+            condiciones_having.append("cost_total_usd >= %(min_cost)s")
+            params["min_cost"] = float(filters.min_cost_usd)
+        having = ("HAVING " + " AND ".join(condiciones_having)) if condiciones_having else ""
 
         # Los alias de las agregaciones no pueden llamarse igual que la columna que
         # agregan: ClickHouse resuelve el nombre del WHERE contra el alias y falla con
@@ -337,9 +346,10 @@ class ClickHouseStore:
                 sum(cost_input_usd)                                    AS cost_input_usd,
                 sum(cost_output_usd)                                   AS cost_output_usd,
                 sum(cost_total_usd)                                    AS cost_total_usd,
-                max(cost_estimated)                                    AS cost_estimated,
+                countIf(cost_unknown = 1)                              AS unknown_cost_spans,
                 max(session_id)                                        AS trace_session_id,
-                max(user_id)                                           AS trace_user_id
+                max(user_id)                                           AS trace_user_id,
+                arrayDistinct(groupArrayIf(request_model, request_model != '')) AS modelos
             FROM spans FINAL
             {where}
             GROUP BY trace_id
@@ -371,6 +381,13 @@ class ClickHouseStore:
         if filters.session_id:
             clauses.append("session_id = %(session_id)s")
             params["session_id"] = filters.session_id
+        if filters.model:
+            # El modelo es de un span, no de la traza: se filtra por trazas que lo usan.
+            clauses.append(
+                "trace_id IN (SELECT DISTINCT trace_id FROM spans"
+                " WHERE request_model = %(model)s)"
+            )
+            params["model"] = filters.model
         if filters.user_id:
             clauses.append("user_id = %(user_id)s")
             params["user_id"] = filters.user_id
@@ -422,9 +439,10 @@ class ClickHouseStore:
             cost_input_usd,
             cost_output_usd,
             cost_total_usd,
-            cost_estimated,
+            unknown_cost_spans,
             session_id,
             user_id,
+            modelos,
         ) = row
 
         return TraceSummary(
@@ -445,12 +463,14 @@ class ClickHouseStore:
                 cached_input_tokens=int(cached_input_tokens),
                 reasoning_tokens=int(reasoning_tokens),
             ),
+            unknown_cost_spans=int(unknown_cost_spans),
             cost=Cost(
                 input_usd=float(cost_input_usd),
                 output_usd=float(cost_output_usd),
                 total_usd=float(cost_total_usd),
-                estimated=bool(cost_estimated),
+                unknown=int(unknown_cost_spans) > 0,
             ),
+            models=sorted(modelos or []),
             session_id=session_id or None,
             user_id=user_id or None,
         )
@@ -501,12 +521,14 @@ class ClickHouseStore:
                     output_tokens=int(r["output_tokens"]),
                     cached_input_tokens=int(r["cached_input_tokens"]),
                     reasoning_tokens=int(r["reasoning_tokens"]),
+                    estimated=bool(r["usage_estimated"]),
                 ),
                 cost=Cost(
                     input_usd=float(r["cost_input_usd"]),
                     output_usd=float(r["cost_output_usd"]),
                     total_usd=float(r["cost_total_usd"]),
-                    estimated=bool(r["cost_estimated"]),
+                    unknown=bool(r["cost_unknown"]),
+                    rate=r["price_rate"],
                 ),
                 input_messages=_loads(r["input_messages"], []) or [],
                 output_messages=_loads(r["output_messages"], []) or [],
@@ -601,7 +623,12 @@ class ClickHouseStore:
                 countIf(span_type = 'tool')                           AS tool_calls,
                 sum(input_tokens)                                     AS input_tokens,
                 sum(output_tokens)                                    AS output_tokens,
-                sum(cost_total_usd)                                   AS cost
+                sum(cost_total_usd)                                   AS cost,
+                countIf(cost_unknown = 1)                             AS sin_tarifa,
+                arrayDistinct(groupArrayIf(request_model, cost_unknown = 1 AND request_model != ''))
+                                                                      AS modelos_sin_tarifa,
+                min(start_time)                                       AS primero,
+                max(start_time)                                       AS ultimo
             FROM spans FINAL
             WHERE {WINDOW_WHERE}
         """
@@ -622,7 +649,8 @@ class ClickHouseStore:
         """
         p95 = self._client.query(p95_sql, parameters=params).result_rows
 
-        (traces, spans, error_traces, llm_calls, tool_calls, in_tok, out_tok, cost) = row[0]
+        (traces, spans, error_traces, llm_calls, tool_calls, in_tok, out_tok, cost,
+         sin_tarifa, modelos_sin_tarifa, primero, ultimo) = row[0]
         return WindowSummary(
             traces=int(traces),
             spans=int(spans),
@@ -633,6 +661,10 @@ class ClickHouseStore:
             output_tokens=int(out_tok),
             total_cost_usd=float(cost),
             p95_duration_ms=float(p95[0][0]) if p95 and p95[0][0] is not None else 0.0,
+            unknown_cost_spans=int(sin_tarifa),
+            models_without_price=sorted(modelos_sin_tarifa or []),
+            first_seen=_utc(primero) if primero else None,
+            last_seen=_utc(ultimo) if ultimo else None,
         )
 
     def repeated_groups(

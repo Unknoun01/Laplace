@@ -33,12 +33,19 @@ CREATE TABLE IF NOT EXISTS spans
     output_tokens       UInt32,
     cached_input_tokens UInt32,
     reasoning_tokens    UInt32,
+    -- 1 = los tokens los contó el SDK porque el proveedor no los dio (streaming sin
+    -- `include_usage`). El coste derivado es una aproximación, y se dice.
+    usage_estimated     UInt8,
 
     -- Coste desglosado por span, no sólo el total de la traza (contrato §4).
     cost_input_usd      Float64,
     cost_output_usd     Float64,
     cost_total_usd      Float64,
-    cost_estimated      UInt8,
+    -- 1 = no sabemos cuánto cuesta ese modelo. NO es lo mismo que coste cero.
+    cost_unknown        UInt8,
+    -- Tarifa aplicada: `<modelo de la tabla> @ <versión de la tabla>`. Sirve para
+    -- auditar un cálculo meses después, cuando los precios ya hayan cambiado.
+    price_rate          String,
 
     -- Payloads en crudo, sin truncar (contrato §3): el diagnóstico automático
     -- necesita el texto real para razonar sobre la causa del fallo.
@@ -91,3 +98,9 @@ SETTINGS index_granularity = 8192;
 -- una tabla que ya existe. No se materializa aquí, porque sería una mutación en cada
 -- arranque; las partes nuevas lo construyen solas y las viejas siguen leyéndose bien.
 ALTER TABLE spans ADD INDEX IF NOT EXISTS idx_trace_id trace_id TYPE bloom_filter(0.01) GRANULARITY 1;
+
+-- Instalaciones anteriores al coste desconocido. `cost_estimated` significaba "no había
+-- tarifa" pero guardaba un 0 que se sumaba a los totales; ahora se llama por su nombre.
+ALTER TABLE spans RENAME COLUMN IF EXISTS cost_estimated TO cost_unknown;
+ALTER TABLE spans ADD COLUMN IF NOT EXISTS price_rate String;
+ALTER TABLE spans ADD COLUMN IF NOT EXISTS usage_estimated UInt8 DEFAULT 0;

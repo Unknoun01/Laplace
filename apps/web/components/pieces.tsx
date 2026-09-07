@@ -82,7 +82,7 @@ export function FindingCard({ finding, href }: { finding: Finding; href: string 
         {finding.scope_label && <span className="chip where">{finding.scope_label}</span>}
         {flojo && <span className="chip where">No cuesta dinero, cuesta tiempo</span>}
       </footer>
-      <div className="techline pro flex">
+      <div className="techline pro">
         {finding.tech.map((item) => (
           <span key={item.label}>
             {item.label} <b>{item.value}</b>
@@ -96,7 +96,7 @@ export function FindingCard({ finding, href }: { finding: Finding; href: string 
 /** Fila de métricas técnicas del héroe. Sólo en modo avanzado. */
 export function Readout({ items }: { items: [string, string][] }) {
   return (
-    <div className="readout pro flex">
+    <div className="readout pro">
       {items.map(([value, label]) => (
         <div key={label}>
           <b className="num">{value}</b>

@@ -17,6 +17,7 @@ from opentelemetry.trace import SpanKind, Status, StatusCode
 from .. import semconv
 from .._tracer import get_tracer
 from . import _common as c
+from . import _streaming as st
 
 logger = logging.getLogger("laplace")
 
@@ -112,12 +113,60 @@ def _finish(span: OtelSpan, response: Any) -> None:
         logger.debug("laplace: fallo al leer la respuesta de openai", exc_info=True)
 
 
-def _mark_stream(span: OtelSpan) -> None:
-    # La captura de respuestas en streaming aún no está implementada (ver DECISIONS D-016):
-    # se registra la llamada, sin tokens ni contenido de salida.
-    c.set_attr(span, "laplace.streaming", True)
-    c.set_attr(span, "laplace.streaming.captured", False)
-    span.set_status(Status(StatusCode.OK))
+class _OpenAIStream:
+    """Junta los trozos de un `chat.completions` en streaming.
+
+    OpenAI sólo manda el recuento de tokens si la petición lleva
+    `stream_options={"include_usage": True}`. No se inyecta por nuestra cuenta: añadir
+    un chunk final que el código del usuario no espera es justo el tipo de cosa que un
+    SDK de observabilidad no puede permitirse. Sin ese recuento, se estima y se marca.
+    """
+
+    def __init__(self, kwargs: dict[str, Any]) -> None:
+        self._text: list[str] = []
+        self._finish: list[str] = []
+        self._model: str | None = kwargs.get("model")
+        self._id: str | None = None
+        self._input: int | None = None
+        self._output: int | None = None
+        self._cached: int | None = None
+        self._fallback_input = st.estimate_messages_tokens(kwargs.get("messages"))
+
+    def feed(self, chunk: Any) -> None:
+        self._model = getattr(chunk, "model", None) or self._model
+        self._id = getattr(chunk, "id", None) or self._id
+
+        for choice in getattr(chunk, "choices", None) or []:
+            delta = getattr(choice, "delta", None)
+            content = getattr(delta, "content", None)
+            if content:
+                self._text.append(content)
+            reason = getattr(choice, "finish_reason", None)
+            if reason:
+                self._finish.append(str(reason))
+
+        usage = getattr(chunk, "usage", None)
+        if usage is not None:
+            self._input = c.getattr_path(usage, "prompt_tokens", self._input)
+            self._output = c.getattr_path(usage, "completion_tokens", self._output)
+            self._cached = c.getattr_path(
+                usage, "prompt_tokens_details.cached_tokens", self._cached
+            )
+
+    def finish(self, span: OtelSpan) -> None:
+        st.record_stream_result(
+            span,
+            system=semconv.SYSTEM_OPENAI,
+            text="".join(self._text),
+            role="assistant",
+            model=self._model,
+            response_id=self._id,
+            finish_reasons=self._finish,
+            input_tokens=self._input,
+            output_tokens=self._output,
+            cached_input_tokens=self._cached,
+            fallback_input_tokens=self._fallback_input,
+        )
 
 
 def _wrap_sync(original: Any) -> Any:
@@ -132,9 +181,9 @@ def _wrap_sync(original: Any) -> Any:
             span.end()
             raise
         if kwargs.get("stream"):
-            _mark_stream(span)
-        else:
-            _finish(span, response)
+            # El span lo cierra el propio stream cuando termine de consumirse.
+            return st.wrap(response, span, _OpenAIStream(kwargs), is_async=False)
+        _finish(span, response)
         span.end()
         return response
 
@@ -155,9 +204,8 @@ def _wrap_async(original: Any) -> Any:
             span.end()
             raise
         if kwargs.get("stream"):
-            _mark_stream(span)
-        else:
-            _finish(span, response)
+            return st.wrap(response, span, _OpenAIStream(kwargs), is_async=True)
+        _finish(span, response)
         span.end()
         return response
 

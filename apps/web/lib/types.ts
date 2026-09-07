@@ -13,14 +13,24 @@ export interface TokenUsage {
   output_tokens: number;
   cached_input_tokens: number;
   reasoning_tokens: number;
+  /**
+   * Los tokens los contó el SDK porque el proveedor no los dio (streaming sin
+   * `include_usage`). El coste derivado es una aproximación, y se dice.
+   */
+  estimated: boolean;
 }
 
 export interface Cost {
   input_usd: number;
   output_usd: number;
   total_usd: number;
-  /** El modelo no estaba en la tabla de precios: el número es una aproximación. */
-  estimated: boolean;
+  /**
+   * No sabemos cuánto cuesta: el modelo no está en la tabla de precios. No es cero.
+   * Donde esto sea true, la interfaz tiene que decirlo en vez de enseñar un total.
+   */
+  unknown: boolean;
+  /** Tarifa aplicada: `<modelo de la tabla> @ <versión de la tabla>`. */
+  rate: string;
   currency: "USD";
 }
 
@@ -112,6 +122,10 @@ export interface TraceSummary {
   error_count: number;
   llm_call_count: number;
   tool_call_count: number;
+  /** Pasos cuyo modelo no está en la tabla: si es > 0, el coste está incompleto. */
+  unknown_cost_spans: number;
+  /** Modelos distintos usados en la traza. Sólo se pinta en modo avanzado. */
+  models: string[];
   usage: TokenUsage;
   cost: Cost;
   session_id: string | null;
@@ -237,5 +251,14 @@ export interface Overview {
   error_rate: number;
   p95_duration_ms: number;
   cost_per_trace_usd: number;
+  /** Mientras no sea cero, el coste mostrado está incompleto. */
+  unknown_cost_spans: number;
+  models_without_price: string[];
+  /** Días de datos reales sobre los que se proyecta el mes. */
+  observed_days: number;
+  /** La proyección sale de menos de 24 h de datos. */
+  thin_projection: boolean;
+  /** El evitable pasa del umbral de cautela: presentarlo con reservas. */
+  savings_needs_caution: boolean;
   findings: Finding[];
 }

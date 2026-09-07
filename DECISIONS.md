@@ -275,3 +275,74 @@ y salta filas.
 No en un estado interno ni en una cookie: así una pantalla concreta se puede enlazar y
 compartir tal y como se está viendo. El modo Diagnóstico/Avanzado sí va en `localStorage`,
 porque es una preferencia de la persona, no del enlace.
+
+## 2026-09-07 — Deuda que invalidaba las cifras (§1) y modo dual real (§2)
+
+### D-041 — Los precios se verifican contra la página oficial, con fuente y fecha
+La tabla anterior salía de mi conocimiento, sin respaldo. Verificada contra
+`developers.openai.com/api/docs/pricing` y `platform.claude.com/docs/en/about-claude/pricing`
+el 2026-09-07. **Estaba gravemente desactualizada**: le faltaban las familias GPT-5 y
+GPT-6 enteras, y tenía a Opus 4 como modelo vigente a 15/75 $ cuando el Opus actual
+cuesta 5/25 $. El fichero declara ahora `version`, un bloque `sources` con URL y fecha
+de verificación, y cada modelo dice de qué fuente sale. Cada cálculo guarda la tarifa
+aplicada (`<modelo> @ <versión>`), visible en modo avanzado.
+
+### D-042 — Resolver por prefijo no puede saltar de versión
+`claude-opus-4-5` empieza por `claude-opus-4`, así que la resolución ingenua le habría
+aplicado **el triple** de tarifa en silencio. Ahora un prefijo sólo se acepta si lo que
+sobra es un snapshot con fecha (`-20250929`, `-2024-07-18`) o una palabra (`-latest`);
+un `-5` o un `.7` son otra versión y no heredan nada. Consecuencia buscada: un modelo
+futuro que no esté en la tabla sale como desconocido en lugar de como barato.
+
+### D-043 — Un modelo sin tarifa cuesta "no lo sabemos", no cero
+`Cost.estimated` se convierte en `Cost.unknown`. Un 0 silencioso se suma a los totales y
+los corrompe sin que nadie se entere. El span se marca, la traza cuenta cuántos pasos
+tiene sin tarifa, el resumen del proyecto lista los modelos implicados, y el inicio dice
+"este total está incompleto" en lugar de enseñar una cifra que parece completa. Hay un
+test que falla si aparece en las trazas un modelo que no está en la tabla.
+
+### D-044 — Streaming: se acumulan tokens, contenido y coste
+El span de streaming ya no es un registro vacío. Se envuelve el stream en un proxy que
+delega por `__getattr__` (los clientes exponen atributos propios que el código del
+usuario puede estar usando), soporta iterar, `with` y `close`, y cierra el span aunque
+quien lo consume lo abandone a medias. Anthropic manda los recuentos en `message_start`
+y `message_delta`; OpenAI sólo si la petición lleva `stream_options={"include_usage":
+True}`.
+
+### D-045 — No se inyecta `stream_options` en la petición del usuario
+Añadirlo daría recuentos exactos, pero cambia la forma del stream que recibe el usuario:
+aparece un chunk final con `choices` vacío que su código puede no esperar. Un SDK de
+observabilidad no puede permitirse eso. Sin recuento se estima (≈4 caracteres por token),
+y el span queda marcado con `laplace.usage.estimated`, que la interfaz enseña: no es lo
+mismo un coste que sale de la factura que uno que sale de dividir caracteres.
+
+### D-046 — Se proyecta sobre los días observados, no sobre los que pide el selector
+Un proyecto que lleva dos horas enviando trazas no tiene siete días de datos aunque el
+rango diga «7 días». Se proyecta sobre el intervalo real entre el primer y el último
+span, y si es menos de 24 h el inicio lo dice en la propia cifra. Además, cuando el
+ahorro estimado pasa del 60 % del gasto, se presenta con cautela explícita en lugar de
+como promesa: un 91 % de desperdicio no se lo cree nadie aunque los números salgan.
+
+### D-047 — El modo avanzado se OCULTA en diagnóstico, no se muestra en avanzado
+El mecanismo original (`.pro { display:none }` más una regla por cada tipo de caja para
+volver a enseñarlo) perdía por especificidad contra cualquier componente que fijara su
+propio `display`: el botón "Exportar traza en JSON" se colaba en modo Diagnóstico, que
+es justo el bug que había que arreglar. Ahora la regla es
+`body:not([data-mode="pro"]) .pro { display: none !important }`: el elemento conserva su
+display natural y ocultarlo no depende del orden de las reglas. Desaparecen las variantes
+`.pro.inline`, `.pro.flex`, `.pro.grid` y `th.pro/td.pro`.
+
+### D-048 — Qué añade Avanzado en cada pantalla
+Antes de dar una pantalla por terminada: ¿qué cambia al pulsar Avanzado?
+- **Inicio:** fila de métricas técnicas, línea técnica de cada tarjeta, cálculo del ahorro.
+- **Ficha:** cómo se ha detectado con la consulta real, la traza completa, atributos del
+  paso señalado, pasos de arreglo con detalles de implementación, exportación.
+- **Explorador:** columnas de modelos, tokens de entrada y salida por separado e id
+  completo; filtros por modelo, por coste mínimo y por `session.id`.
+- **Traza:** `span_id` en la cabecera, id completo, modelos, atributos crudos `gen_ai.*`
+  y `laplace.*`, timings exactos, si los tokens fueron medidos o estimados, y exportación.
+
+### D-049 — Las piezas compartidas de los tests viven en `helpers.py`, no en `conftest.py`
+Los módulos de prueba necesitan *importar* el exportador en memoria y el ayudante de
+ingesta, no sólo recibirlos como fixture, y `conftest.py` no es importable entre tests
+sin convertir el directorio en paquete. `conftest.py` se queda con las fixtures.

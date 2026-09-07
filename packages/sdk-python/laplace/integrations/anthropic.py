@@ -12,6 +12,7 @@ from opentelemetry.trace import SpanKind, Status, StatusCode
 from .. import semconv
 from .._tracer import get_tracer
 from . import _common as c
+from . import _streaming as st
 
 logger = logging.getLogger("laplace")
 
@@ -112,11 +113,64 @@ def _finish(span: OtelSpan, response: Any) -> None:
         logger.debug("laplace: fallo al leer la respuesta de anthropic", exc_info=True)
 
 
-def _mark_stream(span: OtelSpan) -> None:
-    # Ver DECISIONS D-016: el streaming se registra, pero aún no se acumula.
-    c.set_attr(span, "laplace.streaming", True)
-    c.set_attr(span, "laplace.streaming.captured", False)
-    span.set_status(Status(StatusCode.OK))
+class _AnthropicStream:
+    """Junta los eventos de un `messages.create(stream=True)`.
+
+    Anthropic sí manda los recuentos: `message_start` trae los tokens de entrada y
+    `message_delta` los de salida, así que aquí el coste es medido, no estimado.
+    """
+
+    def __init__(self, kwargs: dict[str, Any]) -> None:
+        self._text: list[str] = []
+        self._finish: list[str] = []
+        self._model: str | None = kwargs.get("model")
+        self._id: str | None = None
+        self._role = "assistant"
+        self._input: int | None = None
+        self._output: int | None = None
+        self._cached: int | None = None
+        self._fallback_input = st.estimate_messages_tokens(_input_messages(kwargs))
+
+    def feed(self, event: Any) -> None:
+        tipo = getattr(event, "type", None)
+
+        if tipo == "message_start":
+            message = getattr(event, "message", None)
+            self._model = getattr(message, "model", None) or self._model
+            self._id = getattr(message, "id", None) or self._id
+            self._role = getattr(message, "role", None) or self._role
+            self._input = c.getattr_path(message, "usage.input_tokens", self._input)
+            self._cached = c.getattr_path(
+                message, "usage.cache_read_input_tokens", self._cached
+            )
+            # Algunos modelos ya adelantan tokens de salida aquí.
+            self._output = c.getattr_path(message, "usage.output_tokens", self._output)
+
+        elif tipo == "content_block_delta":
+            texto = c.getattr_path(event, "delta.text")
+            if texto:
+                self._text.append(str(texto))
+
+        elif tipo == "message_delta":
+            self._output = c.getattr_path(event, "usage.output_tokens", self._output)
+            razon = c.getattr_path(event, "delta.stop_reason")
+            if razon:
+                self._finish.append(str(razon))
+
+    def finish(self, span: OtelSpan) -> None:
+        st.record_stream_result(
+            span,
+            system=semconv.SYSTEM_ANTHROPIC,
+            text="".join(self._text),
+            role=self._role,
+            model=self._model,
+            response_id=self._id,
+            finish_reasons=self._finish,
+            input_tokens=self._input,
+            output_tokens=self._output,
+            cached_input_tokens=self._cached,
+            fallback_input_tokens=self._fallback_input,
+        )
 
 
 def _wrap_sync(original: Any) -> Any:
@@ -131,9 +185,9 @@ def _wrap_sync(original: Any) -> Any:
             span.end()
             raise
         if kwargs.get("stream"):
-            _mark_stream(span)
-        else:
-            _finish(span, response)
+            # El span lo cierra el propio stream cuando termine de consumirse.
+            return st.wrap(response, span, _AnthropicStream(kwargs), is_async=False)
+        _finish(span, response)
         span.end()
         return response
 
@@ -154,9 +208,8 @@ def _wrap_async(original: Any) -> Any:
             span.end()
             raise
         if kwargs.get("stream"):
-            _mark_stream(span)
-        else:
-            _finish(span, response)
+            return st.wrap(response, span, _AnthropicStream(kwargs), is_async=True)
+        _finish(span, response)
         span.end()
         return response
 

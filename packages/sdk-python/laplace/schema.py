@@ -41,6 +41,10 @@ class TokenUsage(_Model):
     output_tokens: int = 0
     cached_input_tokens: int = 0
     reasoning_tokens: int = 0
+    #: True cuando los tokens los ha contado el SDK porque el proveedor no los dio
+    #: (pasa en streaming sin `include_usage`). El coste derivado es una aproximación
+    #: y la interfaz lo dice: no es lo mismo que un recuento del proveedor.
+    estimated: bool = False
 
     @property
     def total_tokens(self) -> int:
@@ -50,14 +54,17 @@ class TokenUsage(_Model):
 class Cost(_Model):
     """Coste de un span, desglosado por entrada y salida.
 
-    `estimated=True` significa que el modelo no estaba en la tabla de precios y el
-    número es una aproximación (o cero). Nunca se presenta como exacto en la UI.
+    `unknown=True` significa que **no sabemos** cuánto cuesta: el modelo no está en la
+    tabla de precios. No es cero. Un cero silencioso se suma a los totales y los
+    corrompe sin que nadie se entere, así que la interfaz tiene que decirlo.
     """
 
     input_usd: float = 0.0
     output_usd: float = 0.0
     total_usd: float = 0.0
-    estimated: bool = False
+    unknown: bool = False
+    #: Tarifa aplicada, para auditarla: `<modelo de la tabla> @ <versión de la tabla>`.
+    rate: str = ""
     currency: Literal["USD"] = "USD"
 
 
@@ -211,6 +218,12 @@ class TraceSummary(_Model):
     error_count: int = 0
     llm_call_count: int = 0
     tool_call_count: int = 0
+    #: Pasos cuyo modelo no está en la tabla de precios. Si es > 0, el coste de esta
+    #: traza está incompleto y hay que decirlo, no redondear a la baja en silencio.
+    unknown_cost_spans: int = 0
+    #: Modelos distintos usados en la traza. La lista sólo se pinta en modo avanzado,
+    #: pero se sirve siempre: es una propiedad de la traza, no de la pantalla.
+    models: list[str] = Field(default_factory=list)
 
     usage: TokenUsage = Field(default_factory=TokenUsage)
     cost: Cost = Field(default_factory=Cost)

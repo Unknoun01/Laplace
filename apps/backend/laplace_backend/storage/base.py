@@ -33,6 +33,9 @@ class TraceFilter:
     #: Busca en el nombre de los spans y en el id de la traza.
     search: str | None = None
     span_type: str | None = None
+    #: Filtros que sólo ofrece el modo avanzado del explorador.
+    model: str | None = None
+    min_cost_usd: float | None = None
     #: `recent` (por defecto), `cost` o `duration`. El cursor sólo tiene sentido con
     #: `recent`: es el único orden estable frente a datos que siguen llegando.
     sort: str = "recent"
@@ -77,6 +80,14 @@ class WindowSummary:
     total_cost_usd: float = 0.0
     #: Latencia de traza, no de span: es la que sufre el usuario final.
     p95_duration_ms: float = 0.0
+    #: Pasos cuyo modelo no está en la tabla de precios, y los modelos implicados.
+    #: Mientras esto no sea cero, el coste del proyecto está incompleto.
+    unknown_cost_spans: int = 0
+    models_without_price: list[str] = field(default_factory=list)
+    #: Primer y último span vistos en la ventana. Sirven para saber sobre cuántos días
+    #: de datos reales se está proyectando, que no son los que pida el selector.
+    first_seen: datetime | None = None
+    last_seen: datetime | None = None
 
 
 @dataclass

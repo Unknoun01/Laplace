@@ -90,7 +90,7 @@ export default async function TrazaPage({ params, searchParams }: PageProps) {
 
       <div className="actions">
         <a
-          className="btn pro inline"
+          className="btn pro"
           href={`/api/export/${trace.summary.trace_id}`}
           download={`${trace.summary.trace_id}.json`}
         >
@@ -110,14 +110,23 @@ function Head({ summary }: { summary: TraceSummary }) {
         {summary.root_name || "(sin nombre)"}
       </h1>
       <div className="d-sub" style={{ marginBottom: 12 }}>
-        {summary.trace_id} · {summary.project_id} · {timestamp(summary.start_time)}
+        <span className="simple-only">{summary.trace_id.slice(0, 12)}</span>
+        <span className="pro">{summary.trace_id}</span> · {summary.project_id} ·{" "}
+        {timestamp(summary.start_time)}
         {summary.session_id ? ` · sesión ${summary.session_id}` : ""}
         {summary.user_id ? ` · usuario ${summary.user_id}` : ""}
       </div>
       <div className="d-cost">
         <div>
-          <b className="num">{money(summary.cost.total_usd, summary.cost.currency)}</b>
-          <span>coste</span>
+          <b className="num">
+            {money(summary.cost.total_usd, summary.cost.currency)}
+            {summary.unknown_cost_spans > 0 && "+"}
+          </b>
+          <span>
+            {summary.unknown_cost_spans > 0
+              ? `coste (faltan ${summary.unknown_cost_spans} pasos sin tarifa)`
+              : "coste"}
+          </span>
         </div>
         <div>
           <b className="num neutral">
@@ -140,6 +149,10 @@ function Head({ summary }: { summary: TraceSummary }) {
         <div>
           <b className="num neutral">{summary.tool_call_count}</b>
           <span>herramientas</span>
+        </div>
+        <div className="pro">
+          <b className="num neutral">{summary.models.join(", ") || "—"}</b>
+          <span>modelos</span>
         </div>
         {summary.error_count > 0 && (
           <div>

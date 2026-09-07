@@ -82,6 +82,9 @@ export interface TraceQuery {
   span_type?: string;
   /** `recent` (por defecto), `cost` o `duration`. */
   sort?: string;
+  /** Filtros que sólo ofrece el modo avanzado del explorador. */
+  model?: string;
+  min_cost_usd?: number;
   since?: string;
   /** Valor de `next_cursor` de la página anterior. Opaco: no construirlo a mano. */
   cursor?: string;

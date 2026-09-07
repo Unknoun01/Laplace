@@ -2,6 +2,7 @@ import Link from "next/link";
 import { BackendDown, NoProject } from "@/components/states";
 import {
   backendReachable,
+  getOverview,
   listProjects,
   listTraces,
   parseDays,
@@ -21,6 +22,10 @@ interface PageProps {
     type?: string;
     sort?: string;
     cursor?: string;
+    /** Filtros que sólo ofrece el modo avanzado. */
+    model?: string;
+    min_cost?: string;
+    session?: string;
   };
 }
 
@@ -55,18 +60,31 @@ export default async function TrazasPage({ searchParams }: PageProps) {
   const days = parseDays(searchParams.days);
   const sort = SORTS.some((s) => s.value === searchParams.sort) ? searchParams.sort! : "cost";
 
-  const page = await listTraces({
-    project_id: project,
-    since: windowStart(days),
-    search: searchParams.q,
-    status: searchParams.status,
-    span_type: searchParams.type,
-    sort,
-    cursor: searchParams.cursor,
-  });
+  const minCost = Number(searchParams.min_cost);
+  const [page, overview] = await Promise.all([
+    listTraces({
+      project_id: project,
+      since: windowStart(days),
+      search: searchParams.q,
+      status: searchParams.status,
+      span_type: searchParams.type,
+      sort,
+      cursor: searchParams.cursor,
+      model: searchParams.model,
+      min_cost_usd: Number.isFinite(minCost) && minCost > 0 ? minCost : undefined,
+      session_id: searchParams.session,
+    }),
+    // Sólo para poblar el desplegable de modelos del modo avanzado.
+    getOverview(project, days).catch(() => null),
+  ]);
 
   const repeats = new Set(page.with_repeats);
   const context = `project=${encodeURIComponent(project)}&days=${days}`;
+  // Los modelos que de verdad aparecen en el rango, no una lista inventada.
+  const modelos = [...new Set(page.traces.flatMap((t) => t.models))].sort();
+  if (overview) {
+    for (const m of overview.models_without_price) if (!modelos.includes(m)) modelos.push(m);
+  }
 
   return (
     <main>
@@ -117,6 +135,39 @@ export default async function TrazasPage({ searchParams }: PageProps) {
             </option>
           ))}
         </select>
+        {/* Filtros de desarrollador: en Diagnóstico la barra se queda limpia. */}
+        <select
+          name="model"
+          defaultValue={searchParams.model ?? ""}
+          className="field pro"
+          aria-label="Modelo"
+        >
+          <option value="">Cualquier modelo</option>
+          {modelos.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </select>
+        <input
+          type="text"
+          inputMode="decimal"
+          name="min_cost"
+          defaultValue={searchParams.min_cost ?? ""}
+          placeholder="Coste mínimo"
+          className="field pro"
+          style={{ width: 130 }}
+          aria-label="Coste mínimo en USD"
+        />
+        <input
+          type="text"
+          name="session"
+          defaultValue={searchParams.session ?? ""}
+          placeholder="session.id"
+          className="field pro"
+          style={{ width: 150 }}
+          aria-label="Identificador de sesión"
+        />
         <button type="submit" className="btn">
           Filtrar
         </button>
@@ -140,8 +191,11 @@ export default async function TrazasPage({ searchParams }: PageProps) {
             <thead>
               <tr>
                 <th>Traza</th>
+                <th className="pro">Modelos</th>
                 <th className="r hide-sm">Pasos</th>
-                <th className="r hide-sm">Tokens</th>
+                <th className="r hide-sm simple-only">Tokens</th>
+                <th className="r pro">Entrada</th>
+                <th className="r pro">Salida</th>
                 <th className="r">Coste</th>
                 <th className="r hide-sm">Duración</th>
                 <th className="r hide-sm">Cuándo</th>
@@ -211,14 +265,25 @@ function Row({
             )}
           </span>
           <div className="meta">
-            {trace.trace_id.slice(0, 12)}
+            <span className="simple-only">{trace.trace_id.slice(0, 12)}</span>
+            <span className="pro">{trace.trace_id}</span>
             {trace.session_id ? ` · sesión ${trace.session_id}` : ""}
           </div>
         </Link>
       </td>
+      <td className="pro" style={{ fontFamily: "var(--mono)", fontSize: 12 }}>
+        {trace.models.join(", ") || "—"}
+      </td>
       <td className="r hide-sm">{trace.span_count}</td>
-      <td className="r hide-sm">{tokens(trace.usage.input_tokens + trace.usage.output_tokens)}</td>
-      <td className="r money">{money(trace.cost.total_usd, trace.cost.currency)}</td>
+      <td className="r hide-sm simple-only">
+        {tokens(trace.usage.input_tokens + trace.usage.output_tokens)}
+      </td>
+      <td className="r pro">{tokens(trace.usage.input_tokens)}</td>
+      <td className="r pro">{tokens(trace.usage.output_tokens)}</td>
+      <td className="r money" title={trace.unknown_cost_spans > 0 ? "coste incompleto" : undefined}>
+        {money(trace.cost.total_usd, trace.cost.currency)}
+        {trace.unknown_cost_spans > 0 && <span style={{ color: "var(--amber)" }}> +?</span>}
+      </td>
       <td className="r hide-sm">{duration(trace.duration_ms)}</td>
       <td className="r hide-sm" title={timestamp(trace.start_time)}>
         {relative(trace.start_time)}
