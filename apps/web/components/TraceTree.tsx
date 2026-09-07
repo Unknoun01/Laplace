@@ -320,10 +320,38 @@ function Metrics({ node }: { node: TraceTreeNode }) {
           <b>{number(llm.usage.output_tokens)}</b>
           <small>{llm.usage.estimated ? "tokens salida (estimados)" : "tokens salida"}</small>
         </div>
-        <div className={llm.cost.unknown ? "warn" : undefined}>
-          <b>{llm.cost.unknown ? "?" : money(llm.cost.total_usd, llm.cost.currency)}</b>
-          <small>{llm.cost.unknown ? "no sabemos el precio" : "coste"}</small>
+        <div className={llm.cost.unknown || llm.cost.rate_assumed ? "warn" : undefined}>
+          <b>
+            {llm.cost.unknown ? "?" : money(llm.cost.total_usd, llm.cost.currency)}
+            {llm.cost.rate_assumed && !llm.cost.unknown && "+"}
+          </b>
+          <small title={llm.cost.rate_note || undefined}>
+            {llm.cost.unknown
+              ? "no sabemos el precio"
+              : llm.cost.rate_assumed
+                ? "coste mínimo (tarifa asumida)"
+                : "coste"}
+          </small>
         </div>
+        {/* La caché sólo aparece cuando hay caché: sin ella, esto sería ruido. */}
+        {llm.usage.cached_input_tokens > 0 && (
+          <div className="pro">
+            <b>{number(llm.usage.cached_input_tokens)}</b>
+            <small>desde caché ({money(llm.cost.cache_read_usd, llm.cost.currency)})</small>
+          </div>
+        )}
+        {llm.usage.cache_write_tokens + llm.usage.cache_write_1h_tokens > 0 && (
+          <div className="pro">
+            <b>{number(llm.usage.cache_write_tokens + llm.usage.cache_write_1h_tokens)}</b>
+            <small>escritos en caché ({money(llm.cost.cache_write_usd, llm.cost.currency)})</small>
+          </div>
+        )}
+        {llm.cost.cache_saving_usd > 0 && (
+          <div>
+            <b>{money(llm.cost.cache_saving_usd, llm.cost.currency)}</b>
+            <small>que ha ahorrado la caché</small>
+          </div>
+        )}
       </div>
     );
   }
@@ -412,6 +440,28 @@ function Attributes({ span }: { span: Span }) {
     ]);
     if (span.llm.cost.rate) rows.push(["tarifa aplicada", span.llm.cost.rate]);
     if (span.llm.cost.unknown) rows.push(["tarifa aplicada", "ninguna: modelo desconocido"]);
+    if (span.llm.cost.rate_assumed) rows.push(["tarifa asumida", span.llm.cost.rate_note]);
+    if (span.llm.usage.cached_input_tokens) {
+      rows.push([
+        "laplace.usage.cached_input_tokens",
+        String(span.llm.usage.cached_input_tokens),
+      ]);
+    }
+    if (span.llm.usage.cache_write_tokens) {
+      rows.push(["laplace.usage.cache_write_tokens", String(span.llm.usage.cache_write_tokens)]);
+    }
+    if (span.llm.usage.cache_write_1h_tokens) {
+      rows.push([
+        "laplace.usage.cache_write_1h_tokens",
+        String(span.llm.usage.cache_write_1h_tokens),
+      ]);
+    }
+    if (span.llm.billing_tier && span.llm.billing_tier !== "standard") {
+      rows.push(["laplace.billing.tier", span.llm.billing_tier]);
+    }
+    if (span.llm.billing_region && span.llm.billing_region !== "global") {
+      rows.push(["laplace.billing.region", span.llm.billing_region]);
+    }
   }
   if (span.session_id) rows.push(["laplace.session.id", span.session_id]);
   if (span.user_id) rows.push(["laplace.user.id", span.user_id]);

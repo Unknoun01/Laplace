@@ -154,6 +154,26 @@ function Head({ summary }: { summary: TraceSummary }) {
           <b className="num neutral">{summary.models.join(", ") || "—"}</b>
           <span>modelos</span>
         </div>
+        {summary.usage.cached_input_tokens > 0 && (
+          <div className="pro">
+            <b className="num good">{number(summary.usage.cached_input_tokens)}</b>
+            <span>tokens servidos desde caché</span>
+          </div>
+        )}
+        {summary.cost.cache_saving_usd > 0 && (
+          <div>
+            <b className="num good">
+              {money(summary.cost.cache_saving_usd, summary.cost.currency)}
+            </b>
+            <span>que te ha ahorrado la caché</span>
+          </div>
+        )}
+        {summary.assumed_rate_spans > 0 && (
+          <div className="pro">
+            <b className="num neutral">{summary.assumed_rate_spans}</b>
+            <span>pasos con tarifa asumida</span>
+          </div>
+        )}
         {summary.error_count > 0 && (
           <div>
             <b className="num" style={{ color: "var(--rose)" }}>

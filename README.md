@@ -52,7 +52,7 @@ Tres reglas deterministas, sin modelo de por medio
 |-------|-----------|------------------------|
 | Repetición | El mismo paso, con la misma entrada, 3+ veces en una ejecución | Coste íntegro de las copias sobrantes |
 | Modelo caro | Un paso con salida media corta que usa un modelo con alternativa más barata | Diferencia de tarifa sobre los tokens reales |
-| Contexto fijo | Un prompt con un suelo grande de tokens que se reenvía sin caché | Diferencia entre tarifa normal y de caché |
+| Contexto fijo | Un prompt con un suelo grande de tokens que se reenvía sin caché | Diferencia entre tarifa normal y de caché, menos lo que cuesta escribirla |
 
 Cuatro cosas que **no** hace, a propósito: no inventa dinero donde no lo hay (un bucle de
 herramientas no gasta tokens, así que enseña el tiempo perdido y lo dice), no cuenta dos
@@ -63,13 +63,41 @@ completo un total al que le faltan pasos cuyo modelo no tiene tarifa conocida.
 ## Los precios
 
 `apps/backend/laplace_backend/pricing/model_prices.json` lleva versión, y cada modelo
-declara de qué fuente oficial salen sus números y cuándo se verificó. **La tabla caduca**:
-los proveedores cambian precios y retiran modelos, así que hay que reverificarla al menos
-cada trimestre y subir `version`. Un test falla si las fuentes tienen más de 120 días.
+declara de qué fuente oficial salen sus números y cuándo se verificó.
 
-Si un modelo aparece en tus trazas y no está en la tabla, su coste **no** se cuenta como
-cero: se marca como desconocido y la interfaz avisa de que el total está incompleto. Otro
-test falla si eso pasa con los datos que haya cargados.
+**La tabla caduca, y rápido.** No es una formalidad: el 30 de julio de 2026 OpenAI
+recortó un modelo un 20 % y otro un 80 % el mismo día, y hay tarifas promocionales con
+fecha de vencimiento. Hay que reverificarla **cada 30 días** y subir `version`. Tres
+tests fallan solos si no se hace: uno cuando una fuente pasa de 30 días, otro cuando una
+tarifa promocional (campo `expires`) ha vencido, y otro cuando aparece en las trazas un
+modelo que no está en la tabla.
+
+Un modelo sin tarifa **no** cuesta cero: se marca como desconocido y la interfaz avisa de
+que el total está incompleto.
+
+### La entrada no se cobra a una sola tarifa
+
+Un agente repite su prompt de sistema en cada paso, así que la caché salta siempre.
+Cobrar toda la entrada a tarifa completa infla la factura del usuario y, con ella, el
+ahorro que le prometemos. El coste se calcula por tramos:
+
+| Tramo | Cómo se cobra |
+|-------|---------------|
+| Entrada nueva | Tarifa base del modelo |
+| Leída de caché | ~10 % de la base (2,5 % en algún modelo) |
+| Escrita en caché | 1,25× la base (2× si es la caché de una hora) |
+| Salida | Tarifa de salida |
+
+Sobre eso se apilan los metros que la petición pida: lote (−50 %), modo rápido (tarifa
+propia o 2×) y residencia de datos (+10 %). `input_tokens` es siempre el **total
+facturable** de entrada, con los tokens de caché dentro; los proveedores no coinciden en
+esto y la normalización la hace el SDK, no el usuario.
+
+Cuando no se puede saber qué metro aplicó —el tramo de contexto largo existe pero
+OpenAI no publica a partir de cuántos tokens entra— se cobra el estándar, el span queda
+marcado como **tarifa asumida** y la interfaz lo dice en modo avanzado. Ante la duda se
+elige siempre la interpretación que produce **menos** ahorro, nunca la que engorda
+nuestro número.
 
 ## Arrancar en local
 

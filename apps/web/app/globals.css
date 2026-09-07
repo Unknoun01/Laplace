@@ -478,6 +478,11 @@ body[data-mode="pro"] .simple-only {
 .d-cost div b.neutral {
   color: var(--ink);
 }
+/* Verde teal para el dinero que ya te has ahorrado: es la única cifra de esta fila
+   que no es un coste, y leerla en ámbar la haría parecer un problema. */
+.d-cost div b.good {
+  color: var(--teal);
+}
 .d-cost div span {
   color: var(--ink-3);
   font-size: 13px;

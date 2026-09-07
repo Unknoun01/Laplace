@@ -83,7 +83,11 @@ class WindowSummary:
     #: Pasos cuyo modelo no está en la tabla de precios, y los modelos implicados.
     #: Mientras esto no sea cero, el coste del proyecto está incompleto.
     unknown_cost_spans: int = 0
+    #: Pasos cobrados a tarifa estandar sin poder confirmar que metro aplico.
+    assumed_rate_spans: int = 0
     models_without_price: list[str] = field(default_factory=list)
+    #: Lo que la cache ya ha ahorrado en la ventana. Dinero medido, no proyectado.
+    cache_saving_usd: float = 0.0
     #: Primer y último span vistos en la ventana. Sirven para saber sobre cuántos días
     #: de datos reales se está proyectando, que no son los que pida el selector.
     first_seen: datetime | None = None
@@ -125,6 +129,11 @@ class ModelUsage:
     input_tokens: int = 0
     output_tokens: int = 0
     cached_input_tokens: int = 0
+    #: Tokens escritos en cache (las dos duraciones juntas). Si esto es cero y la
+    #: entrada minima es alta, el paso esta reenviando su contexto fijo sin cachearlo.
+    cache_write_tokens: int = 0
+    #: Lo que la cache ya ha ahorrado en este (paso, modelo).
+    cache_saving_usd: float = 0.0
     cost_usd: float = 0.0
     avg_output_tokens: float = 0.0
     avg_input_tokens: float = 0.0

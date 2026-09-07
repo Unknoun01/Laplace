@@ -231,6 +231,8 @@ def _build_span(proto_span: Any, project_id: str, resource: dict[str, Any], pric
         semconv.LAPLACE_TOOL_ARGUMENTS,
         semconv.LAPLACE_TOOL_OUTPUT,
         semconv.LAPLACE_RETRIEVAL_DOCUMENTS,
+        semconv.LAPLACE_BILLING_TIER,
+        semconv.LAPLACE_BILLING_REGION,
     }
 
     return Span(
@@ -265,17 +267,27 @@ def _build_llm(attrs: dict[str, Any], prices: Any) -> LLMAttributes:
         input_tokens=int(attrs.get(semconv.GEN_AI_USAGE_INPUT_TOKENS) or 0),
         output_tokens=int(attrs.get(semconv.GEN_AI_USAGE_OUTPUT_TOKENS) or 0),
         cached_input_tokens=int(attrs.get(semconv.LAPLACE_USAGE_CACHED_INPUT_TOKENS) or 0),
+        cache_write_tokens=int(attrs.get(semconv.LAPLACE_USAGE_CACHE_WRITE_TOKENS) or 0),
+        cache_write_1h_tokens=int(attrs.get(semconv.LAPLACE_USAGE_CACHE_WRITE_1H_TOKENS) or 0),
         reasoning_tokens=int(attrs.get(semconv.LAPLACE_USAGE_REASONING_TOKENS) or 0),
         estimated=bool(attrs.get(semconv.LAPLACE_USAGE_ESTIMATED) or False),
     )
     request_model = _str_or_none(attrs.get(semconv.GEN_AI_REQUEST_MODEL))
     response_model = _str_or_none(attrs.get(semconv.GEN_AI_RESPONSE_MODEL))
+    # Sin atributo, el metro es el estándar: es lo que los proveedores facturan por
+    # defecto, no una suposición que haya que marcar como tal.
+    tier = str(attrs.get(semconv.LAPLACE_BILLING_TIER) or "standard")
+    region = str(attrs.get(semconv.LAPLACE_BILLING_REGION) or "global")
 
     breakdown = prices.compute(
         response_model or request_model,
         input_tokens=usage.input_tokens,
         output_tokens=usage.output_tokens,
         cached_input_tokens=usage.cached_input_tokens,
+        cache_write_tokens=usage.cache_write_tokens,
+        cache_write_1h_tokens=usage.cache_write_1h_tokens,
+        tier=tier,
+        region=region,
     )
 
     params = {
@@ -294,12 +306,19 @@ def _build_llm(attrs: dict[str, Any], prices: Any) -> LLMAttributes:
         response_model=response_model,
         response_id=_str_or_none(attrs.get(semconv.GEN_AI_RESPONSE_ID)),
         operation=_str_or_none(attrs.get(semconv.GEN_AI_OPERATION_NAME)),
+        billing_tier=tier,
+        billing_region=region,
         usage=usage,
         cost=Cost(
             input_usd=breakdown.input_usd,
             output_usd=breakdown.output_usd,
             total_usd=breakdown.total_usd,
+            cache_read_usd=breakdown.cache_read_usd,
+            cache_write_usd=breakdown.cache_write_usd,
+            cache_saving_usd=breakdown.cache_saving_usd,
             unknown=breakdown.unknown,
+            rate_assumed=breakdown.assumed,
+            rate_note=breakdown.note,
             rate=breakdown.rate,
         ),
         input_messages=_as_message_list(attrs.get(semconv.GEN_AI_INPUT_MESSAGES)),

@@ -11,7 +11,11 @@ export type SpanStatus = "ok" | "error" | "unset";
 export interface TokenUsage {
   input_tokens: number;
   output_tokens: number;
+  /** Servidos desde caché. Van DENTRO de `input_tokens`, no se suman aparte. */
   cached_input_tokens: number;
+  /** Escritos en caché, por duración. También dentro de `input_tokens`. */
+  cache_write_tokens: number;
+  cache_write_1h_tokens: number;
   reasoning_tokens: number;
   /**
    * Los tokens los contó el SDK porque el proveedor no los dio (streaming sin
@@ -28,7 +32,18 @@ export interface Cost {
    * No sabemos cuánto cuesta: el modelo no está en la tabla de precios. No es cero.
    * Donde esto sea true, la interfaz tiene que decirlo en vez de enseñar un total.
    */
+  /** Parte de `input_usd` que se fue en leer y escribir caché. */
+  cache_read_usd: number;
+  cache_write_usd: number;
+  /** Lo que la caché ya ha ahorrado aquí. Dinero medido, no proyectado. */
+  cache_saving_usd: number;
   unknown: boolean;
+  /**
+   * No se pudo saber qué metro de facturación aplicó (contexto largo, residencia de
+   * datos, modo rápido) y se cobró el estándar. El coste real podría ser mayor.
+   */
+  rate_assumed: boolean;
+  rate_note: string;
   /** Tarifa aplicada: `<modelo de la tabla> @ <versión de la tabla>`. */
   rate: string;
   currency: "USD";
@@ -42,6 +57,9 @@ export interface LLMAttributes {
   operation: string | null;
   usage: TokenUsage;
   cost: Cost;
+  /** Metro pedido por la llamada: `standard`, `batch`, `fast`… */
+  billing_tier: string;
+  billing_region: string;
   input_messages: Record<string, unknown>[];
   output_messages: Record<string, unknown>[];
   params: Record<string, unknown>;
@@ -124,6 +142,8 @@ export interface TraceSummary {
   tool_call_count: number;
   /** Pasos cuyo modelo no está en la tabla: si es > 0, el coste está incompleto. */
   unknown_cost_spans: number;
+  /** Pasos cobrados a tarifa estándar sin poder confirmar qué metro aplicó. */
+  assumed_rate_spans: number;
   /** Modelos distintos usados en la traza. Sólo se pinta en modo avanzado. */
   models: string[];
   usage: TokenUsage;
@@ -254,6 +274,10 @@ export interface Overview {
   /** Mientras no sea cero, el coste mostrado está incompleto. */
   unknown_cost_spans: number;
   models_without_price: string[];
+  /** Pasos cobrados a tarifa estándar sin poder confirmar el metro. */
+  assumed_rate_spans: number;
+  /** Lo que la caché ya ha ahorrado en la ventana. Medido, no proyectado. */
+  window_cache_saving_usd: number;
   /** Días de datos reales sobre los que se proyecta el mes. */
   observed_days: number;
   /** La proyección sale de menos de 24 h de datos. */

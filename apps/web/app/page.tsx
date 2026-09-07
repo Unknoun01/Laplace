@@ -86,6 +86,10 @@ export default async function DiagnosticoPage({ searchParams }: PageProps) {
             [number(overview.spans), "Pasos"],
             [money(overview.cost_per_trace_usd, overview.currency), "Coste por ejecución"],
             [
+              money(overview.window_cache_saving_usd, overview.currency),
+              "Ya ahorrado por la caché",
+            ],
+            [
               overview.observed_days < 1
                 ? `${(overview.observed_days * 24).toFixed(1)} h`
                 : `${overview.observed_days.toFixed(1)} d`,
@@ -150,6 +154,19 @@ function Caveats({ overview, proporcion }: { overview: Overview; proporcion: num
         <strong>Este total está incompleto.</strong> Hay {overview.unknown_cost_spans} pasos
         cuyo modelo no está en nuestra tabla de precios, así que no sabemos cuánto cuestan y
         no se suman: {overview.models_without_price.join(", ")}.
+      </>,
+    );
+  }
+  if (overview.assumed_rate_spans > 0) {
+    avisos.push(
+      <>
+        En {overview.assumed_rate_spans}{" "}
+        {overview.assumed_rate_spans === 1 ? "paso no hemos podido" : "pasos no hemos podido"}{" "}
+        confirmar a qué tarifa se facturó —contexto largo, residencia de datos o modo
+        rápido son metros aparte que la respuesta del proveedor no siempre revela—, así
+        que <strong>hemos cobrado la estándar</strong>. Lo que ves es un suelo: el coste
+        real puede ser algo mayor, nunca menor. En cada paso, en modo avanzado, se dice
+        cuál es la duda.
       </>,
     );
   }

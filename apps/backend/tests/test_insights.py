@@ -63,7 +63,7 @@ def _llm(model: str, tok_in: int, tok_out: int, cost: float) -> LLMAttributes:
         request_model=model,
         response_model=model,
         usage=TokenUsage(input_tokens=tok_in, output_tokens=tok_out),
-        cost=Cost(input_usd=cost / 2, output_usd=cost / 2, total_usd=cost, estimated=False),
+        cost=Cost(input_usd=cost / 2, output_usd=cost / 2, total_usd=cost),
     )
 
 
@@ -196,3 +196,181 @@ def test_un_hallazgo_que_ya_no_se_da_devuelve_none(store, window, proyecto_con_r
 
 def test_un_proyecto_sin_datos_no_da_hallazgos(store, window):
     assert insights.detect(store, f"vacio-{uuid.uuid4().hex[:8]}", window) == []
+
+
+# ---------------------------------------------------------------------------------
+# Regla 3 — contexto fijo, ahora expresada en el modelo de caché real
+# ---------------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def proyecto_sin_cache(store: ClickHouseStore):
+    """Cuatro ejecuciones que reenvían 20.000 tokens de instrucciones en cada llamada."""
+    project = f"test-cache-{uuid.uuid4().hex[:8]}"
+    spans: list[Span] = []
+    for t in range(4):
+        trace = uuid.uuid4().hex
+        spans.append(_span(project, trace, uuid.uuid4().hex[:16], "agente", "agent", t * 10))
+        for i in range(4):
+            s = _span(
+                project,
+                trace,
+                uuid.uuid4().hex[:16],
+                "razonar",
+                "llm",
+                t * 10 + i,
+                dedup_hash=uuid.uuid4().hex[:16],  # entradas distintas: no es repetición
+            )
+            s.llm = LLMAttributes(
+                system="anthropic",
+                request_model="claude-sonnet-5",
+                response_model="claude-sonnet-5",
+                usage=TokenUsage(input_tokens=20_000 + i * 100, output_tokens=200),
+                cost=Cost(total_usd=(20_000 * 2.0 + 200 * 10.0) / 1e6),
+            )
+            spans.append(s)
+    store.insert_spans(spans)
+    yield project
+    store.delete_project(project)
+
+
+def _contexto(store, project, window):
+    hallazgos = [f for f in insights.detect(store, project, window) if f.kind == "contexto_fijo"]
+    return hallazgos[0] if hallazgos else None
+
+
+def test_el_ahorro_de_la_cache_descuenta_lo_que_cuesta_escribirla(
+    store, window, proyecto_sin_cache
+):
+    """No basta con decir «pásalo a caché»: escribirla cuesta 1,25x la entrada.
+
+    Antes se anunciaba la diferencia entera entre tarifa de entrada y tarifa de lectura,
+    que es un ahorro que el propio motor de precios sabe que no llega entero.
+    """
+    hallazgo = _contexto(store, proyecto_sin_cache, window)
+    assert hallazgo is not None, "la regla del contexto fijo debería dispararse"
+
+    tabla = insights.get_price_table()
+    precio = tabla.lookup("claude-sonnet-5")
+    # 16 llamadas en 4 trazas: 12 encontrarían la caché caliente, 4 la escriben.
+    bruto = 20_000 * 12 * (precio.input - precio.cached_input) / 1e6
+    escritura = 20_000 * 4 * (precio.cache_write - precio.input) / 1e6
+
+    assert hallazgo.window_waste_usd == pytest.approx(bruto - escritura, rel=1e-6)
+    assert hallazgo.window_waste_usd < bruto, "el coste de escribir la caché no se descuenta"
+
+
+def test_la_ficha_del_contexto_fijo_ensena_las_dos_patas_del_calculo(
+    store, window, proyecto_sin_cache
+):
+    hallazgo = _contexto(store, proyecto_sin_cache, window)
+    detalle = insights.detail(store, proyecto_sin_cache, window, hallazgo.id)
+    assert detalle is not None
+    assert "escritura de caché" in detalle.savings_calculation
+    assert "conservadora" in detalle.savings_note
+
+
+@pytest.fixture(scope="module")
+def proyecto_con_cache(store: ClickHouseStore):
+    """El mismo agente, ya cacheando. La regla no tiene nada que recomendar."""
+    project = f"test-cacheon-{uuid.uuid4().hex[:8]}"
+    spans: list[Span] = []
+    for t in range(4):
+        trace = uuid.uuid4().hex
+        for i in range(4):
+            s = _span(
+                project, trace, uuid.uuid4().hex[:16], "razonar", "llm", t * 10 + i,
+                dedup_hash=uuid.uuid4().hex[:16],
+            )
+            s.llm = LLMAttributes(
+                system="anthropic",
+                request_model="claude-sonnet-5",
+                response_model="claude-sonnet-5",
+                usage=TokenUsage(
+                    input_tokens=20_000,
+                    output_tokens=200,
+                    cached_input_tokens=20_000 if i else 0,
+                    cache_write_tokens=0 if i else 20_000,
+                ),
+                # Estos spans se insertan ya tarifados, como si vinieran de la
+                # ingesta: el ahorro por caché es el que habría calculado el motor.
+                cost=Cost(
+                    total_usd=0.01,
+                    cache_saving_usd=(20_000 * (2.0 - 0.2) / 1e6) if i else 0.0,
+                ),
+            )
+            spans.append(s)
+    store.insert_spans(spans)
+    yield project
+    store.delete_project(project)
+
+
+def test_a_quien_ya_usa_la_cache_no_se_le_recomienda_activarla(store, window, proyecto_con_cache):
+    assert _contexto(store, proyecto_con_cache, window) is None
+
+
+def test_lo_que_la_cache_ya_ahorra_se_mide_y_llega_al_heroe(store, window, proyecto_con_cache):
+    """Dinero medido, no proyectado: sale de tokens reales y de la tabla de tarifas."""
+    resumen = insights.overview(store, proyecto_con_cache, window)
+    # 12 llamadas × 20.000 tokens leídos, de 2 $/1M a 0,20 $/1M.
+    assert resumen.window_cache_saving_usd == pytest.approx(12 * 20_000 * 1.8 / 1e6, rel=1e-6)
+
+
+@pytest.fixture(scope="module")
+def proyecto_caro_y_sin_cache(store: ClickHouseStore):
+    """Un paso que dispara las reglas 2 y 3 a la vez: modelo caro Y contexto sin caché.
+
+    Respuestas cortísimas (la regla del modelo caro pide salida media pequeña) sobre un
+    prompt fijo enorme (la del contexto fijo pide un suelo de entrada grande).
+    """
+    project = f"test-solape-{uuid.uuid4().hex[:8]}"
+    spans: list[Span] = []
+    for t in range(4):
+        trace = uuid.uuid4().hex
+        for i in range(5):
+            s = _span(
+                project, trace, uuid.uuid4().hex[:16], "clasificar", "llm", t * 10 + i,
+                dedup_hash=uuid.uuid4().hex[:16],
+            )
+            s.llm = LLMAttributes(
+                system="openai",
+                request_model="gpt-5.6-terra",
+                response_model="gpt-5.6-terra",
+                usage=TokenUsage(input_tokens=20_000, output_tokens=20),
+                cost=Cost(total_usd=(20_000 * 2.0 + 20 * 12.0) / 1e6),
+            )
+            spans.append(s)
+    store.insert_spans(spans)
+    yield project
+    store.delete_project(project)
+
+
+def test_dos_reglas_sobre_el_mismo_paso_no_suman_el_mismo_dinero_dos_veces(
+    store, window, proyecto_caro_y_sin_cache
+):
+    """Cambiar de modelo y activar la caché son arreglos que se aplican encadenados.
+
+    Si la regla de la caché siguiera tarifando sobre el modelo caro, los dos hallazgos
+    juntos prometerían más ahorro del que el paso llega a costar. Aquí se comprueba lo
+    único que de verdad importa: que la suma no pase del gasto real.
+    """
+    hallazgos = insights.detect(store, proyecto_caro_y_sin_cache, window)
+    tipos = {f.kind for f in hallazgos}
+    assert {"modelo_caro", "contexto_fijo"} <= tipos, "el escenario tiene que disparar las dos"
+
+    resumen = store.summarize_window(proyecto_caro_y_sin_cache, window)
+    prometido = sum(f.window_waste_usd for f in hallazgos)
+    assert prometido <= resumen.total_cost_usd, (
+        f"las reglas prometen ahorrar {prometido:.6f} de un gasto de "
+        f"{resumen.total_cost_usd:.6f}: se está contando dinero dos veces"
+    )
+
+
+def test_la_cache_se_tarifa_sobre_el_modelo_que_recomendamos(
+    store, window, proyecto_caro_y_sin_cache
+):
+    """Y la ficha lo dice, en vez de dejar al usuario sumando dos cifras incompatibles."""
+    hallazgo = _contexto(store, proyecto_caro_y_sin_cache, window)
+    detalle = insights.detail(store, proyecto_caro_y_sin_cache, window, hallazgo.id)
+    assert "gpt-5.6-luna" in detalle.savings_calculation
+    assert "contar dos veces" in detalle.savings_calculation

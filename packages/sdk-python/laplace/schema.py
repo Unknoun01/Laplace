@@ -35,11 +35,23 @@ class TokenUsage(_Model):
 
     Entrada y salida se guardan **siempre por separado**: sin eso no se puede
     calcular cuánto costaría el mismo paso con otro modelo (Norte B).
+
+    `input_tokens` es el **total facturable de entrada**: los tokens leídos de caché y
+    los escritos en caché van dentro de esa cifra, y los campos de caché dicen qué
+    parte del total fue cada cosa. Los proveedores no coinciden en esto (OpenAI incluye
+    los cacheados en `prompt_tokens`, Anthropic los devuelve aparte), así que la
+    normalización la hace cada integración del SDK y aquí llega ya en un solo criterio
+    (D-050). Sin eso, el mismo agente costaría distinto según el proveedor.
     """
 
     input_tokens: int = 0
     output_tokens: int = 0
+    #: Tokens de entrada servidos desde caché (cache hit). Subconjunto de `input_tokens`.
     cached_input_tokens: int = 0
+    #: Tokens escritos en caché de duración corta. Subconjunto de `input_tokens`.
+    cache_write_tokens: int = 0
+    #: Tokens escritos en caché de larga duración. Subconjunto de `input_tokens`.
+    cache_write_1h_tokens: int = 0
     reasoning_tokens: int = 0
     #: True cuando los tokens los ha contado el SDK porque el proveedor no los dio
     #: (pasa en streaming sin `include_usage`). El coste derivado es una aproximación
@@ -49,6 +61,17 @@ class TokenUsage(_Model):
     @property
     def total_tokens(self) -> int:
         return self.input_tokens + self.output_tokens
+
+    @property
+    def uncached_input_tokens(self) -> int:
+        """La entrada que se paga a tarifa completa."""
+        return max(
+            0,
+            self.input_tokens
+            - self.cached_input_tokens
+            - self.cache_write_tokens
+            - self.cache_write_1h_tokens,
+        )
 
 
 class Cost(_Model):
@@ -62,7 +85,18 @@ class Cost(_Model):
     input_usd: float = 0.0
     output_usd: float = 0.0
     total_usd: float = 0.0
+    #: Parte de `input_usd` que se fue en leer y en escribir caché.
+    cache_read_usd: float = 0.0
+    cache_write_usd: float = 0.0
+    #: Lo que la caché ya ha ahorrado en este span frente a pagar esa entrada entera a
+    #: tarifa entera. Es dinero medido: no es una promesa ni una proyección.
+    cache_saving_usd: float = 0.0
     unknown: bool = False
+    #: True cuando no se ha podido saber qué metro de facturación aplicó (contexto
+    #: largo, residencia de datos, modo rápido) y se ha cobrado el estándar. El coste
+    #: podría ser mayor; `rate_note` dice por qué.
+    rate_assumed: bool = False
+    rate_note: str = ""
     #: Tarifa aplicada, para auditarla: `<modelo de la tabla> @ <versión de la tabla>`.
     rate: str = ""
     currency: Literal["USD"] = "USD"
@@ -86,6 +120,15 @@ class LLMAttributes(_Model):
     response_model: str | None = None
     response_id: str | None = None
     operation: str | None = None
+
+    #: Metro de facturación pedido por quien hizo la llamada: `standard`, `batch` o
+    #: `fast`. Es texto libre a propósito: los proveedores tienen niveles propios
+    #: (`flex`, `scale`…) y guardarlos tal cual permite decir «no tenemos tarifa para
+    #: esto» en vez de fingir que era el estándar. Ausente = estándar, que es el
+    #: defecto real de los dos proveedores.
+    billing_tier: str = "standard"
+    #: `regional` cuando la petición pide residencia de datos, que lleva recargo.
+    billing_region: str = "global"
 
     usage: TokenUsage = Field(default_factory=TokenUsage)
     cost: Cost = Field(default_factory=Cost)
@@ -221,6 +264,9 @@ class TraceSummary(_Model):
     #: Pasos cuyo modelo no está en la tabla de precios. Si es > 0, el coste de esta
     #: traza está incompleto y hay que decirlo, no redondear a la baja en silencio.
     unknown_cost_spans: int = 0
+    #: Pasos cobrados a tarifa estándar sin poder confirmar qué metro aplicó. El coste
+    #: real podría ser mayor; se dice en modo avanzado.
+    assumed_rate_spans: int = 0
     #: Modelos distintos usados en la traza. La lista sólo se pinta en modo avanzado,
     #: pero se sirve siempre: es una propiedad de la traza, no de la pantalla.
     models: list[str] = Field(default_factory=list)

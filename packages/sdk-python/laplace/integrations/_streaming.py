@@ -190,6 +190,10 @@ def record_stream_result(
     output_tokens: int | None,
     cached_input_tokens: int | None,
     fallback_input_tokens: int,
+    cache_write_tokens: int | None = None,
+    cache_write_1h_tokens: int | None = None,
+    tier: str = "standard",
+    region: str = "global",
 ) -> None:
     """Cierra un span de streaming con los mismos atributos que uno normal.
 
@@ -213,7 +217,10 @@ def record_stream_result(
         input_tokens=entrada,
         output_tokens=salida,
         cached_input_tokens=cached_input_tokens,
+        cache_write_tokens=cache_write_tokens,
+        cache_write_1h_tokens=cache_write_1h_tokens,
     )
+    c.record_billing(span, tier=tier, region=region)
     c.set_attr(span, semconv.LAPLACE_STREAMING, True)
     # Sólo se marca como estimado cuando de verdad lo es: si el proveedor dio el
     # recuento, esto es un dato medido y la UI no tiene por qué desconfiar de él.

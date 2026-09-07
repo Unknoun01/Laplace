@@ -80,17 +80,57 @@ def record_usage(
     input_tokens: int | None,
     output_tokens: int | None,
     cached_input_tokens: int | None = None,
+    cache_write_tokens: int | None = None,
+    cache_write_1h_tokens: int | None = None,
     reasoning_tokens: int | None = None,
 ) -> None:
-    """Tokens de entrada y de salida, siempre por separado (contrato §2)."""
+    """Tokens de entrada y de salida, siempre por separado (contrato §2).
+
+    `input_tokens` es el total facturable de entrada, con los tokens de caché dentro
+    (D-050). Cada integración normaliza a ese criterio antes de llamar aquí: OpenAI ya
+    los incluye en `prompt_tokens`, Anthropic los devuelve aparte y hay que sumarlos.
+    Sin esa normalización, el mismo agente costaría distinto según el proveedor.
+    """
     if input_tokens is not None:
         set_attr(span, semconv.GEN_AI_USAGE_INPUT_TOKENS, int(input_tokens))
     if output_tokens is not None:
         set_attr(span, semconv.GEN_AI_USAGE_OUTPUT_TOKENS, int(output_tokens))
     if cached_input_tokens:
         set_attr(span, semconv.LAPLACE_USAGE_CACHED_INPUT_TOKENS, int(cached_input_tokens))
+    if cache_write_tokens:
+        set_attr(span, semconv.LAPLACE_USAGE_CACHE_WRITE_TOKENS, int(cache_write_tokens))
+    if cache_write_1h_tokens:
+        set_attr(span, semconv.LAPLACE_USAGE_CACHE_WRITE_1H_TOKENS, int(cache_write_1h_tokens))
     if reasoning_tokens:
         set_attr(span, semconv.LAPLACE_USAGE_REASONING_TOKENS, int(reasoning_tokens))
+
+
+def record_billing(span: OtelSpan, *, tier: str | None, region: str | None) -> None:
+    """El metro de facturación que pidió la llamada, cuando la petición lo dice.
+
+    Sólo se anota lo que se puede leer de la petición. No anotar nada significa
+    estándar y global, que es lo que los dos proveedores facturan por defecto: es un
+    dato, no una suposición. Lo que sí es una suposición —un extremo regional que no
+    se ve desde aquí— lo marca el motor de precios como tarifa asumida.
+    """
+    if tier and tier != "standard":
+        set_attr(span, semconv.LAPLACE_BILLING_TIER, str(tier))
+    if region and region != "global":
+        set_attr(span, semconv.LAPLACE_BILLING_REGION, str(region))
+
+
+def cache_write_split(short: Any, long: Any, total: Any) -> tuple[int, int]:
+    """Reparte los tokens escritos en caché entre duración corta y larga.
+
+    Si el proveedor da el desglose, se usa. Si sólo da el total, va entero a la corta,
+    que es la tarifa más barata de las dos: cobrar de más por una suposición nuestra
+    engordaría la factura del usuario y, con ella, el ahorro que le prometemos.
+    """
+    corta = int(short or 0)
+    larga = int(long or 0)
+    if corta or larga:
+        return corta, larga
+    return int(total or 0), 0
 
 
 def record_response(

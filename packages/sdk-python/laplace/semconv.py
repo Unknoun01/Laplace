@@ -75,7 +75,13 @@ LAPLACE_USER_ID = "laplace.user.id"
 LAPLACE_TAGS = "laplace.tags"
 LAPLACE_METADATA = "laplace.metadata"
 
+#: Tokens de entrada servidos desde caché. Subconjunto de `gen_ai.usage.input_tokens`,
+#: que en el contrato es el total facturable de entrada (D-050).
 LAPLACE_USAGE_CACHED_INPUT_TOKENS = "laplace.usage.cached_input_tokens"
+#: Tokens escritos en caché. Se cobran por encima de la tarifa de entrada (1,25x en
+#: caché corta, 2x en la de una hora), así que no contarlos aparte falsea la factura.
+LAPLACE_USAGE_CACHE_WRITE_TOKENS = "laplace.usage.cache_write_tokens"
+LAPLACE_USAGE_CACHE_WRITE_1H_TOKENS = "laplace.usage.cache_write_1h_tokens"
 LAPLACE_USAGE_REASONING_TOKENS = "laplace.usage.reasoning_tokens"
 #: True cuando los tokens los hemos contado nosotros porque el proveedor no los dio.
 #: La interfaz distingue medido de estimado: no es lo mismo un coste que sale de la
@@ -83,6 +89,13 @@ LAPLACE_USAGE_REASONING_TOKENS = "laplace.usage.reasoning_tokens"
 LAPLACE_USAGE_ESTIMATED = "laplace.usage.estimated"
 
 LAPLACE_STREAMING = "laplace.streaming"
+
+#: Metro de facturación de la llamada: `standard`, `batch` o `fast`. Sólo se pone
+#: cuando la petición lo dice; su ausencia significa estándar, que es el defecto de
+#: los dos proveedores, no una suposición nuestra.
+LAPLACE_BILLING_TIER = "laplace.billing.tier"
+#: `regional` cuando la petición pide residencia de datos, que lleva recargo.
+LAPLACE_BILLING_REGION = "laplace.billing.region"
 
 LAPLACE_TOOL_ARGUMENTS = "laplace.tool.arguments"
 LAPLACE_TOOL_OUTPUT = "laplace.tool.output"

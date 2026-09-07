@@ -36,6 +36,8 @@ class LLMSpanRecorder:
         input_tokens: int | None = None,
         output_tokens: int | None = None,
         cached_input_tokens: int | None = None,
+        cache_write_tokens: int | None = None,
+        cache_write_1h_tokens: int | None = None,
         reasoning_tokens: int | None = None,
         response_model: str | None = None,
         response_id: str | None = None,
@@ -53,6 +55,8 @@ class LLMSpanRecorder:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cached_input_tokens=cached_input_tokens,
+            cache_write_tokens=cache_write_tokens,
+            cache_write_1h_tokens=cache_write_1h_tokens,
             reasoning_tokens=reasoning_tokens,
         )
 

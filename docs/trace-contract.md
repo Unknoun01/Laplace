@@ -63,10 +63,15 @@ A nivel de **recurso** (todos los spans del proceso): `laplace.project.id`, `ser
 | `gen_ai.system`                     | string   | `openai`, `anthropic`, ...                     |
 | `gen_ai.request.model`              | string   | **Modelo exacto**, nunca una categoría.        |
 | `gen_ai.response.model`             | string   | El que devuelve el proveedor (puede diferir).  |
-| `gen_ai.usage.input_tokens`         | int      | Separado de la salida, siempre.                |
+| `gen_ai.usage.input_tokens`         | int      | **Total facturable** de entrada, caché incluida.|
 | `gen_ai.usage.output_tokens`        | int      | Separado de la entrada, siempre.               |
-| `laplace.usage.cached_input_tokens` | int      | Tokens de entrada servidos desde caché.        |
+| `laplace.usage.cached_input_tokens` | int      | Servidos desde caché. Subconjunto de la entrada.|
+| `laplace.usage.cache_write_tokens`  | int      | Escritos en caché corta. Subconjunto de la entrada.|
+| `laplace.usage.cache_write_1h_tokens`| int     | Escritos en caché de una hora. Idem.           |
+| `laplace.usage.estimated`           | bool     | Los tokens los contamos nosotros, no el proveedor.|
 | `laplace.usage.reasoning_tokens`    | int      | Tokens de razonamiento, si el proveedor los da.|
+| `laplace.billing.tier`              | string   | `batch`, `fast`… Ausente = estándar.           |
+| `laplace.billing.region`            | string   | `regional` si la petición pide residencia de datos.|
 | `gen_ai.request.temperature`        | double   | Idem `.max_tokens`, `.top_p`.                  |
 | `gen_ai.response.finish_reasons`    | string[] |                                                |
 | `gen_ai.response.id`                | string   |                                                |
@@ -76,6 +81,14 @@ A nivel de **recurso** (todos los spans del proceso): `laplace.project.id`, `ser
 > **Por qué input y output por separado y el modelo exacto:** son la base del cálculo
 > "este paso costaría 10x menos con otro modelo" del panel de ahorro. Guardar sólo
 > `total_tokens`, o una familia de modelo en vez del modelo exacto, hace ese cálculo imposible.
+
+> **Por qué la entrada es el total con la caché dentro (D-050):** los proveedores no
+> coinciden. OpenAI incluye los tokens cacheados en `prompt_tokens`; Anthropic los
+> devuelve aparte en `cache_read_input_tokens` y `cache_creation_input_tokens`. Guardar
+> cada uno como venga haría que el mismo agente costara distinto según con quién hablara.
+> El contrato fija un criterio —el total facturable— y la normalización la hace cada
+> integración del SDK, no el usuario. Los tres campos de caché dicen qué parte del total
+> fue cada cosa, que es lo que permite cobrar cada tramo a su tarifa.
 
 ### Spans de tipo `tool`
 
@@ -117,11 +130,32 @@ tabla de precios del backend (`apps/backend/laplace_backend/pricing/model_prices
 Se guarda **desglosado por span**:
 
 ```
-cost_input_usd, cost_output_usd, cost_total_usd, cost_estimated (bool)
+cost_input_usd, cost_output_usd, cost_total_usd,
+cost_cache_read_usd, cost_cache_write_usd, cost_cache_saving_usd,
+cost_unknown (bool), cost_rate_assumed (bool), price_rate, price_note
 ```
 
-`cost_estimated = true` cuando el modelo no está en la tabla de precios y se ha aplicado
-una heurística (o cero). Nunca se muestra un coste inventado como si fuera exacto.
+La entrada **no se cobra a una sola tarifa**. Cada tramo de tokens va con su metro: la
+entrada nueva a la tarifa base, la leída de caché a ~10 % de ella, la escrita en caché a
+1,25× (o 2× si es la de una hora). Encima se apilan los metros que pida la petición:
+lote (−50 %), modo rápido y residencia de datos (+10 %). Un agente repite su prompt de
+sistema en cada paso, así que la caché salta siempre: cobrarla al 100 % infla la factura
+del usuario y, con ella, el ahorro que le prometemos.
+
+`cost_cache_saving_usd` es lo que la caché **ya** ha ahorrado en ese span, frente a pagar
+esa misma entrada a tarifa entera. Es dinero medido, no una proyección.
+
+`cost_unknown = true` cuando el modelo no está en la tabla de precios. El coste **no es
+cero**: es desconocido, y la interfaz dice que el total está incompleto.
+
+`cost_rate_assumed = true` cuando no se ha podido saber qué metro aplicó y se ha cobrado
+el estándar; `price_note` dice por qué. Ocurre, por ejemplo, con el tramo de contexto
+largo: OpenAI publica sus tarifas pero no el número de tokens a partir del cual entran.
+Ante la duda se elige siempre la interpretación conservadora —la que produce menos
+ahorro—, y la cifra se presenta como un suelo (D-051).
+
+`price_rate` guarda `<modelo de la tabla> @ <versión de la tabla>`, para poder auditar un
+cálculo meses después, cuando los precios ya hayan cambiado.
 
 El coste de un nodo del árbol se presenta en dos formas: **propio** (el del span) y
 **subárbol** (la suma de sus descendientes). El subárbol se calcula al servir el árbol;

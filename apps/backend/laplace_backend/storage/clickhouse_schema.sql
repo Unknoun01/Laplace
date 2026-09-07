@@ -31,7 +31,12 @@ CREATE TABLE IF NOT EXISTS spans
     -- Entrada y salida SIEMPRE por separado: es la base del panel de ahorro.
     input_tokens        UInt32,
     output_tokens       UInt32,
+    -- Los tokens de cache van DENTRO de input_tokens, que es el total facturable
+    -- (contrato §2). Aqui se guarda que parte del total fue cada cosa, porque cada
+    -- tramo se cobra a una tarifa distinta y sin el desglose la factura no cuadra.
     cached_input_tokens UInt32,
+    cache_write_tokens  UInt32,
+    cache_write_1h_tokens UInt32,
     reasoning_tokens    UInt32,
     -- 1 = los tokens los contó el SDK porque el proveedor no los dio (streaming sin
     -- `include_usage`). El coste derivado es una aproximación, y se dice.
@@ -46,6 +51,18 @@ CREATE TABLE IF NOT EXISTS spans
     -- Tarifa aplicada: `<modelo de la tabla> @ <versión de la tabla>`. Sirve para
     -- auditar un cálculo meses después, cuando los precios ya hayan cambiado.
     price_rate          String,
+    -- Reparto del coste de entrada entre leer y escribir cache.
+    cost_cache_read_usd  Float64,
+    cost_cache_write_usd Float64,
+    -- Lo que la cache YA ha ahorrado en este span. Dinero medido, no proyectado.
+    cost_cache_saving_usd Float64,
+    -- 1 = no se pudo saber que metro aplico (contexto largo, residencia de datos,
+    -- modo rapido) y se cobro el estandar. El coste real podria ser mayor.
+    cost_rate_assumed   UInt8,
+    price_note          String,
+    -- Metro pedido por la llamada: standard, batch, fast (o lo que diga el proveedor).
+    billing_tier        LowCardinality(String),
+    billing_region      LowCardinality(String),
 
     -- Payloads en crudo, sin truncar (contrato §3): el diagnóstico automático
     -- necesita el texto real para razonar sobre la causa del fallo.
@@ -104,3 +121,16 @@ ALTER TABLE spans ADD INDEX IF NOT EXISTS idx_trace_id trace_id TYPE bloom_filte
 ALTER TABLE spans RENAME COLUMN IF EXISTS cost_estimated TO cost_unknown;
 ALTER TABLE spans ADD COLUMN IF NOT EXISTS price_rate String;
 ALTER TABLE spans ADD COLUMN IF NOT EXISTS usage_estimated UInt8 DEFAULT 0;
+
+-- Instalaciones anteriores al modelo de cache por tramos (§1.1 del encargo). Antes se
+-- cobraba toda la entrada a una sola tarifa, lo que inflaba la factura de cualquier
+-- agente con cache activa, que son casi todos.
+ALTER TABLE spans ADD COLUMN IF NOT EXISTS cache_write_tokens UInt32 DEFAULT 0;
+ALTER TABLE spans ADD COLUMN IF NOT EXISTS cache_write_1h_tokens UInt32 DEFAULT 0;
+ALTER TABLE spans ADD COLUMN IF NOT EXISTS cost_cache_read_usd Float64 DEFAULT 0;
+ALTER TABLE spans ADD COLUMN IF NOT EXISTS cost_cache_write_usd Float64 DEFAULT 0;
+ALTER TABLE spans ADD COLUMN IF NOT EXISTS cost_cache_saving_usd Float64 DEFAULT 0;
+ALTER TABLE spans ADD COLUMN IF NOT EXISTS cost_rate_assumed UInt8 DEFAULT 0;
+ALTER TABLE spans ADD COLUMN IF NOT EXISTS price_note String DEFAULT '';
+ALTER TABLE spans ADD COLUMN IF NOT EXISTS billing_tier LowCardinality(String) DEFAULT 'standard';
+ALTER TABLE spans ADD COLUMN IF NOT EXISTS billing_region LowCardinality(String) DEFAULT 'global';

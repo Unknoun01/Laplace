@@ -65,6 +65,22 @@ def uninstrument() -> None:
 # ---------------------------------------------------------------------------------
 
 
+def _tier(kwargs: dict[str, Any], response: Any = None) -> str:
+    """El nivel de servicio pedido, tal y como lo llama OpenAI.
+
+    `priority` es el modo rápido, que se factura aparte. `auto` y `default` son el
+    estándar. Cualquier otro (`flex`, `scale`…) se guarda tal cual: el motor de precios
+    dirá que no tiene tarifa para él en lugar de cobrarlo como si fuera el normal.
+    """
+    valor = c.getattr_path(response, "service_tier") if response is not None else None
+    valor = valor or kwargs.get("service_tier")
+    if not valor or valor in ("auto", "default"):
+        return "standard"
+    if valor == "priority":
+        return "fast"
+    return str(valor)
+
+
 def _start_span(kwargs: dict[str, Any]) -> OtelSpan:
     model = kwargs.get("model")
     span = get_tracer().start_span(
@@ -82,7 +98,7 @@ def _start_span(kwargs: dict[str, Any]) -> OtelSpan:
     return span
 
 
-def _finish(span: OtelSpan, response: Any) -> None:
+def _finish(span: OtelSpan, kwargs: dict[str, Any], response: Any) -> None:
     """Vuelca la respuesta al span. Los tokens de entrada y salida van separados."""
     try:
         choices = getattr(response, "choices", None) or []
@@ -97,6 +113,8 @@ def _finish(span: OtelSpan, response: Any) -> None:
             ],
             messages=[c.dump_model(getattr(ch, "message", ch)) for ch in choices],
         )
+        # `prompt_tokens` de OpenAI ya incluye los tokens servidos desde caché, que es
+        # justo el criterio del contrato: no hay que sumar nada aquí.
         c.record_usage(
             span,
             input_tokens=c.getattr_path(response, "usage.prompt_tokens"),
@@ -108,6 +126,7 @@ def _finish(span: OtelSpan, response: Any) -> None:
                 response, "usage.completion_tokens_details.reasoning_tokens"
             ),
         )
+        c.record_billing(span, tier=_tier(kwargs, response), region=None)
         span.set_status(Status(StatusCode.OK))
     except Exception:  # noqa: BLE001
         logger.debug("laplace: fallo al leer la respuesta de openai", exc_info=True)
@@ -130,6 +149,7 @@ class _OpenAIStream:
         self._input: int | None = None
         self._output: int | None = None
         self._cached: int | None = None
+        self._tier = _tier(kwargs)
         self._fallback_input = st.estimate_messages_tokens(kwargs.get("messages"))
 
     def feed(self, chunk: Any) -> None:
@@ -144,6 +164,10 @@ class _OpenAIStream:
             reason = getattr(choice, "finish_reason", None)
             if reason:
                 self._finish.append(str(reason))
+
+        tier = getattr(chunk, "service_tier", None)
+        if tier:
+            self._tier = _tier({"service_tier": tier})
 
         usage = getattr(chunk, "usage", None)
         if usage is not None:
@@ -166,6 +190,7 @@ class _OpenAIStream:
             output_tokens=self._output,
             cached_input_tokens=self._cached,
             fallback_input_tokens=self._fallback_input,
+            tier=self._tier,
         )
 
 
@@ -183,7 +208,7 @@ def _wrap_sync(original: Any) -> Any:
         if kwargs.get("stream"):
             # El span lo cierra el propio stream cuando termine de consumirse.
             return st.wrap(response, span, _OpenAIStream(kwargs), is_async=False)
-        _finish(span, response)
+        _finish(span, kwargs, response)
         span.end()
         return response
 
@@ -205,7 +230,7 @@ def _wrap_async(original: Any) -> Any:
             raise
         if kwargs.get("stream"):
             return st.wrap(response, span, _OpenAIStream(kwargs), is_async=True)
-        _finish(span, response)
+        _finish(span, kwargs, response)
         span.end()
         return response
 

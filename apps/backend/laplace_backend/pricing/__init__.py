@@ -3,15 +3,23 @@
 El coste se calcula aquí, en la ingesta, nunca en el SDK: los precios cambian y no
 pueden quedar congelados en la versión que el usuario tenga instalada (D-005).
 
-Dos reglas que sostienen la credibilidad de todo el producto:
+Cuatro reglas que sostienen la credibilidad de todo el producto:
 
 1. **Un modelo sin tarifa no cuesta cero, cuesta "no lo sabemos".** Un 0 silencioso se
    suma a los totales y los corrompe sin que nadie se entere. El span se marca como
    coste desconocido y la interfaz lo dice.
-2. **Resolver por prefijo no puede saltar de versión.** `claude-opus-4-5` no puede
+2. **Resolver por prefijo no puede saltar de versión.** `claude-opus-4-6` no puede
    heredar la tarifa de `claude-opus-4` (que es el triple). Sólo se acepta el prefijo
    cuando lo que sobra es un sufijo de snapshot o una palabra, nunca otro número de
    versión.
+3. **La entrada no se cobra a una sola tarifa.** Un agente repite su prompt de sistema
+   en cada paso, así que el caché salta siempre: cobrar el 100 % de esa entrada infla
+   la factura del usuario y, con ella, el ahorro que le prometemos. Se cobra cada tramo
+   de tokens con el metro que le corresponde (D-050).
+4. **Ante la duda, la tarifa que menos ahorro produce.** Cuando no se puede saber qué
+   metro aplicó —contexto largo, residencia de datos, modo rápido—, se cobra el
+   estándar y el span queda marcado como tarifa asumida, visible en modo avanzado.
+   Nunca se elige en silencio la tarifa que engorda nuestro número (D-051).
 """
 
 from __future__ import annotations
@@ -20,18 +28,31 @@ import json
 import logging
 import re
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 logger = logging.getLogger("laplace.pricing")
 
 _PRICES_PATH = Path(__file__).with_name("model_prices.json")
 _MILLION = 1_000_000.0
 
+#: Metro de facturación pedido por quien hizo la llamada.
+BillingTier = Literal["standard", "batch", "fast"]
+#: Enrutado de la petición. `regional` = residencia de datos, que lleva recargo.
+BillingRegion = Literal["global", "regional"]
+
 #: Lo que puede sobrar tras un prefijo para seguir siendo el mismo modelo: un snapshot
-#: con fecha (`-20250929`, `-2024-07-18`) o una palabra (`-latest`, `-preview`). Un
-#: `-5` o un `.7` son otra versión del modelo y NO heredan la tarifa.
-_SNAPSHOT_SUFFIX = re.compile(r"^-(\d{8}|\d{4}-\d{2}-\d{2}|v\d+|[a-z][a-z0-9]*)$")
+#: con fecha (`-20250929`, `-2024-07-18`), una revisión (`-v1`) o una de las pocas
+#: palabras que los proveedores usan para decir «el mismo modelo».
+#:
+#: La lista de palabras es cerrada a propósito. Aceptar cualquier palabra dejaba pasar
+#: `-pro`, `-mini`, `-nano` y `-cyber`, que no son snapshots sino modelos distintos con
+#: precios muy distintos: `gpt-5.5-pro` cuesta seis veces `gpt-5.5`, y un futuro
+#: `gpt-5.6-terra-mini` habría heredado en silencio la tarifa de `gpt-5.6-terra`. Con
+#: la lista cerrada, un sufijo desconocido deja el modelo como «coste desconocido», que
+#: es el lado por el que hay que equivocarse.
+_SNAPSHOT_SUFFIX = re.compile(r"^-(\d{8}|\d{4}-\d{2}-\d{2}|v\d+|latest|preview|beta|stable|exp)$")
 
 
 def _candidates(model: str) -> list[str]:
@@ -60,34 +81,86 @@ def _candidates(model: str) -> list[str]:
 
 @dataclass(frozen=True)
 class ModelPrice:
-    """Precio en USD por 1M de tokens."""
+    """Precio en USD por 1M de tokens, con todos sus metros.
+
+    Un campo a `None` significa "el proveedor no publica ese metro para este modelo",
+    que no es lo mismo que valer cero: por ejemplo, un modelo sin `cache_write` no
+    cobra aparte por escribir en caché, y esos tokens van a la tarifa de entrada.
+    """
 
     model: str
     input: float
     output: float
+    #: Lectura de caché (cache hit).
     cached_input: float | None = None
+    #: Escritura de caché de duración corta (5 min en Anthropic, automática en OpenAI).
+    cache_write: float | None = None
+    #: Escritura de caché de larga duración (1 h en Anthropic).
+    cache_write_1h: float | None = None
+
+    #: Tramo de contexto largo. Se guarda pero **no se aplica solo**: ver `compute`.
+    long_context_input: float | None = None
+    long_context_output: float | None = None
+    long_context_cached_input: float | None = None
+    long_context_cache_write: float | None = None
+
+    #: Modo rápido, cuando el proveedor publica tarifa propia para este modelo.
+    fast_input: float | None = None
+    fast_output: float | None = None
+
+    #: True si el modelo admite el recargo por residencia de datos.
+    region_surcharge: bool = False
+    #: Fecha en la que caduca una tarifa promocional, si la tiene.
+    expires: str | None = None
+
     #: Modelo más barato del mismo proveedor que proponer para tareas cortas.
     alternative: str | None = None
     #: Clave del bloque `sources`: de dónde salen estos números.
     source: str = ""
+    note: str = ""
 
 
 @dataclass(frozen=True)
 class Source:
+    """Una página de precios, con las reglas uniformes que publica."""
+
     url: str
     verified_at: str
+    #: Descuento del API de lotes, publicado como regla uniforme (0,5 = 50 %).
+    batch_multiplier: float | None = None
+    #: Recargo por residencia de datos (1,1 = 10 % adicional).
+    region_multiplier: float | None = None
+    #: Multiplicador del modo rápido cuando el proveedor no publica tarifa por modelo.
+    fast_multiplier: float | None = None
+    #: Tokens de entrada a partir de los cuales el tramo de contexto largo *podría*
+    #: aplicar. No se usa para cobrar: sólo para marcar el coste como asumido.
+    long_context_flag_tokens: int | None = None
+    note: str = ""
 
 
 @dataclass(frozen=True)
 class CostBreakdown:
+    """Coste de un span, desglosado por metro."""
+
     input_usd: float = 0.0
     output_usd: float = 0.0
     total_usd: float = 0.0
+    #: Parte de `input_usd` que se ha ido en leer y escribir caché.
+    cache_read_usd: float = 0.0
+    cache_write_usd: float = 0.0
+    #: Lo que la caché ya ha ahorrado en este span, frente a pagar esa entrada entera
+    #: a tarifa estándar. Es dinero medido, no una promesa.
+    cache_saving_usd: float = 0.0
+
     #: True cuando no hay tarifa para ese modelo. El coste NO es cero: es desconocido.
     unknown: bool = True
+    #: True cuando no se ha podido saber qué metro aplicó y se ha cobrado el estándar.
+    assumed: bool = False
     #: Tarifa aplicada, para poder auditarla en modo avanzado.
     #: Formato: `<modelo de la tabla> @ <versión de la tabla>`.
     rate: str = ""
+    #: Por qué la tarifa es una suposición, cuando lo es.
+    note: str = ""
 
 
 class PriceTable:
@@ -116,16 +189,37 @@ class PriceTable:
                 model=name,
                 input=float(entry.get("input", 0.0)),
                 output=float(entry.get("output", 0.0)),
-                cached_input=(
-                    float(entry["cached_input"]) if entry.get("cached_input") is not None else None
-                ),
+                cached_input=_opt(entry.get("cached_input")),
+                cache_write=_opt(entry.get("cache_write")),
+                cache_write_1h=_opt(entry.get("cache_write_1h")),
+                long_context_input=_opt(entry.get("long_context_input")),
+                long_context_output=_opt(entry.get("long_context_output")),
+                long_context_cached_input=_opt(entry.get("long_context_cached_input")),
+                long_context_cache_write=_opt(entry.get("long_context_cache_write")),
+                fast_input=_opt(entry.get("fast_input")),
+                fast_output=_opt(entry.get("fast_output")),
+                region_surcharge=bool(entry.get("region_surcharge", False)),
+                expires=entry.get("expires") or None,
                 alternative=entry.get("alternative") or None,
                 source=entry.get("source", ""),
+                note=entry.get("note", ""),
             )
             for name, entry in (raw.get("models") or {}).items()
         }
         sources = {
-            key: Source(url=value.get("url", ""), verified_at=value.get("verified_at", ""))
+            key: Source(
+                url=value.get("url", ""),
+                verified_at=value.get("verified_at", ""),
+                batch_multiplier=_opt(value.get("batch_multiplier")),
+                region_multiplier=_opt(value.get("region_multiplier")),
+                fast_multiplier=_opt(value.get("fast_multiplier")),
+                long_context_flag_tokens=(
+                    int(value["long_context_flag_tokens"])
+                    if value.get("long_context_flag_tokens") is not None
+                    else None
+                ),
+                note=value.get("note", ""),
+            )
             for key, value in (raw.get("sources") or {}).items()
         }
         version = str(raw.get("version", "desconocida"))
@@ -149,7 +243,7 @@ class PriceTable:
 
         Los proveedores versionan los modelos con un snapshot (`gpt-4o-mini-2024-07-18`),
         y ese sí hereda la tarifa del modelo base. Lo que no puede heredarla es otra
-        versión del modelo: `claude-opus-4-5` cuesta un tercio que `claude-opus-4`, y
+        versión del modelo: `claude-opus-4-6` cuesta un tercio que `claude-opus-4`, y
         dejar que el prefijo colara habría cobrado el triple en silencio.
         """
         if not model:
@@ -166,6 +260,8 @@ class PriceTable:
                     return self._models[prefix]
         return None
 
+    # -- cálculo -----------------------------------------------------------------
+
     def compute(
         self,
         model: str | None,
@@ -173,28 +269,200 @@ class PriceTable:
         input_tokens: int,
         output_tokens: int,
         cached_input_tokens: int = 0,
+        cache_write_tokens: int = 0,
+        cache_write_1h_tokens: int = 0,
+        tier: str = "standard",
+        region: str = "global",
+        today: date | None = None,
     ) -> CostBreakdown:
+        """Coste del span cobrando cada tramo de tokens con su metro.
+
+        `input_tokens` es el total facturable de entrada: los tokens leídos de caché y
+        los escritos en caché van **dentro** de esa cifra, no aparte (contrato §2). El
+        resto —lo que no salió de la caché ni entró en ella— se cobra a tarifa base.
+        """
         price = self.lookup(model)
         if price is None:
             if model:
                 logger.info("modelo sin tarifa conocida: %s (coste desconocido)", model)
             return CostBreakdown(unknown=True)
 
-        # Los tokens cacheados vienen incluidos en input_tokens: se descuentan del
-        # precio normal y se cobran a su tarifa reducida.
-        cached = max(0, min(cached_input_tokens, input_tokens))
-        uncached = input_tokens - cached
-        cached_rate = price.cached_input if price.cached_input is not None else price.input
+        source = self._sources.get(price.source)
+        notas: list[str] = []
 
-        input_usd = (uncached * price.input + cached * cached_rate) / _MILLION
-        output_usd = (output_tokens * price.output) / _MILLION
+        base_in, base_out = self._tier_rates(price, source, tier, notas)
+        multiplicador = self._region_multiplier(price, source, region, notas)
+        self._flag_long_context(price, source, input_tokens, notas)
+        self._flag_expired(price, today or date.today(), notas)
+
+        # Tarifas de caché. Si el proveedor no publica una, esos tokens van a la tarifa
+        # de entrada: es lo que de verdad ocurre, no un descuento inventado.
+        lectura = price.cached_input if price.cached_input is not None else base_in
+        escritura = price.cache_write if price.cache_write is not None else base_in
+        escritura_1h = price.cache_write_1h if price.cache_write_1h is not None else escritura
+        # Las tarifas de caché se publican sobre la entrada base; si el metro elegido
+        # cambia la entrada (lote, modo rápido), se mueven con ella en la misma
+        # proporción, que es como los proveedores dicen que se apilan.
+        proporcion = base_in / price.input if price.input else 1.0
+        lectura *= proporcion
+        escritura *= proporcion
+        escritura_1h *= proporcion
+
+        leidos = max(0, cached_input_tokens)
+        escritos = max(0, cache_write_tokens)
+        escritos_1h = max(0, cache_write_1h_tokens)
+        # El total facturable manda: si los tramos suman más que la entrada declarada,
+        # se recortan en lugar de cobrar tokens que el proveedor no facturó.
+        exceso = leidos + escritos + escritos_1h - max(0, input_tokens)
+        if exceso > 0:
+            escritos_1h, exceso = max(0, escritos_1h - exceso), max(0, exceso - escritos_1h)
+            escritos, exceso = max(0, escritos - exceso), max(0, exceso - escritos)
+            leidos = max(0, leidos - exceso)
+        normales = max(0, input_tokens - leidos - escritos - escritos_1h)
+
+        cache_read_usd = leidos * lectura / _MILLION * multiplicador
+        cache_write_usd = (escritos * escritura + escritos_1h * escritura_1h) / _MILLION
+        cache_write_usd *= multiplicador
+        input_usd = normales * base_in / _MILLION * multiplicador
+        input_usd += cache_read_usd + cache_write_usd
+        output_usd = output_tokens * base_out / _MILLION * multiplicador
+
+        # Lo que la caché ya ha ahorrado: esos tokens leídos, a tarifa entera.
+        ahorrado = leidos * (base_in - lectura) / _MILLION * multiplicador
+
         return CostBreakdown(
             input_usd=input_usd,
             output_usd=output_usd,
             total_usd=input_usd + output_usd,
+            cache_read_usd=cache_read_usd,
+            cache_write_usd=cache_write_usd,
+            cache_saving_usd=max(0.0, ahorrado),
             unknown=False,
+            assumed=bool(notas),
             rate=f"{price.model} @ {self._version}",
+            note=" ".join(notas),
         )
+
+    # -- metros --------------------------------------------------------------------
+
+    def _tier_rates(
+        self, price: ModelPrice, source: Source | None, tier: str, notas: list[str]
+    ) -> tuple[float, float]:
+        """Tarifas de entrada y salida del metro pedido, o el estándar si no se puede."""
+        if tier == "batch":
+            factor = source.batch_multiplier if source else None
+            if factor is None:
+                notas.append(
+                    "La llamada dice ir por el API de lotes, pero no tenemos publicado "
+                    "el descuento de ese proveedor: se ha cobrado la tarifa estándar."
+                )
+                return price.input, price.output
+            return price.input * factor, price.output * factor
+
+        if tier == "fast":
+            if price.fast_input is not None and price.fast_output is not None:
+                return price.fast_input, price.fast_output
+            factor = source.fast_multiplier if source else None
+            if factor is None:
+                notas.append(
+                    "La llamada pide modo rápido y el proveedor no publica tarifa de "
+                    "modo rápido para este modelo: se ha cobrado la estándar."
+                )
+                return price.input, price.output
+            return price.input * factor, price.output * factor
+
+        if tier not in ("", "standard"):
+            # `flex`, `scale`… existen y no tenemos su precio. Cobrarlos como estándar
+            # sin decirlo sería inventarse la factura de alguien.
+            notas.append(
+                f"La llamada pide el nivel de servicio «{tier}», del que no tenemos "
+                f"tarifa publicada: se ha cobrado la estándar."
+            )
+        return price.input, price.output
+
+    def _region_multiplier(
+        self, price: ModelPrice, source: Source | None, region: str, notas: list[str]
+    ) -> float:
+        if region != "regional":
+            return 1.0
+        factor = source.region_multiplier if source else None
+        if factor is None or not price.region_surcharge:
+            notas.append(
+                "La llamada va por un extremo con residencia de datos, pero este modelo "
+                "no tiene publicado recargo regional: se ha cobrado la tarifa global."
+            )
+            return 1.0
+        return factor
+
+    def _flag_long_context(
+        self, price: ModelPrice, source: Source | None, input_tokens: int, notas: list[str]
+    ) -> None:
+        """El tramo de contexto largo existe, pero nadie publica dónde empieza.
+
+        Cobrarlo por nuestra cuenta sería inventarnos el umbral, y además engordaría el
+        ahorro que anunciamos. Se cobra el estándar y se dice que puede quedarse corto.
+        """
+        if price.long_context_input is None or source is None:
+            return
+        umbral = source.long_context_flag_tokens
+        if umbral is None or input_tokens < umbral:
+            return
+        notas.append(
+            f"Por encima de {umbral:,} tokens de entrada puede aplicar el tramo de "
+            f"contexto largo (${price.long_context_input}/1M en lugar de "
+            f"${price.input}/1M), pero el proveedor no publica a partir de cuántos "
+            f"tokens entra. Se ha cobrado el estándar, que es la lectura conservadora.".replace(
+                ",", "."
+            )
+        )
+
+    def _flag_expired(self, price: ModelPrice, today: date, notas: list[str]) -> None:
+        if not price.expires:
+            return
+        try:
+            caduca = date.fromisoformat(price.expires)
+        except ValueError:
+            return
+        if today <= caduca:
+            return
+        notas.append(
+            f"Esta tarifa era promocional y venció el {caduca.isoformat()}. El coste "
+            f"que sale de aquí ya no es fiable: hay que reverificar la tabla."
+        )
+
+    # -- estado de la tabla ---------------------------------------------------------
+
+    def stale_sources(self, max_age_days: int, today: date | None = None) -> dict[str, int]:
+        """Fuentes cuya última verificación pasa de `max_age_days`, con su antigüedad."""
+        hoy = today or date.today()
+        viejas: dict[str, int] = {}
+        for key, source in self._sources.items():
+            try:
+                antiguedad = (hoy - date.fromisoformat(source.verified_at)).days
+            except ValueError:
+                viejas[key] = 10**6
+                continue
+            if antiguedad > max_age_days:
+                viejas[key] = antiguedad
+        return viejas
+
+    def expired_rates(self, today: date | None = None) -> list[str]:
+        """Modelos con tarifa promocional ya vencida."""
+        hoy = today or date.today()
+        vencidos = []
+        for name, price in self._models.items():
+            if not price.expires:
+                continue
+            try:
+                if date.fromisoformat(price.expires) < hoy:
+                    vencidos.append(name)
+            except ValueError:
+                vencidos.append(name)
+        return sorted(vencidos)
+
+
+def _opt(value: Any) -> float | None:
+    return None if value is None else float(value)
 
 
 _table: PriceTable | None = None

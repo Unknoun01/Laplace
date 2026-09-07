@@ -239,6 +239,14 @@ function SpanAttributes({ span }: { span: Span }) {
   if (span.llm) {
     rows.push(["gen_ai.usage.input_tokens", String(span.llm.usage.input_tokens)]);
     rows.push(["gen_ai.usage.output_tokens", String(span.llm.usage.output_tokens)]);
+    // La caché es la mitad del cálculo de coste: sin verla, la cifra no se audita.
+    rows.push([
+      "laplace.usage.cached_input_tokens",
+      String(span.llm.usage.cached_input_tokens),
+    ]);
+    rows.push(["laplace.usage.cache_write_tokens", String(span.llm.usage.cache_write_tokens)]);
+    if (span.llm.cost.rate) rows.push(["tarifa aplicada", span.llm.cost.rate]);
+    if (span.llm.cost.rate_assumed) rows.push(["tarifa asumida", span.llm.cost.rate_note]);
   }
   if (span.session_id) rows.push(["laplace.session.id", span.session_id]);
   if (span.user_id) rows.push(["laplace.user.id", span.user_id]);

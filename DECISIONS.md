@@ -346,3 +346,93 @@ Antes de dar una pantalla por terminada: ¿qué cambia al pulsar Avanzado?
 Los módulos de prueba necesitan *importar* el exportador en memoria y el ayudante de
 ingesta, no sólo recibirlos como fixture, y `conftest.py` no es importable entre tests
 sin convertir el directorio en paquete. `conftest.py` se queda con las fixtures.
+
+### D-050 — `input_tokens` es el total facturable, con la caché dentro
+Los proveedores no cuentan igual: OpenAI incluye los tokens servidos desde caché en
+`prompt_tokens`, y Anthropic los devuelve aparte en `cache_read_input_tokens` y
+`cache_creation_input_tokens`. Guardar cada uno como venga haría que el mismo agente
+costara distinto según con quién hablara. El contrato fija un criterio único —
+`gen_ai.usage.input_tokens` es el total facturable de entrada, y los campos
+`laplace.usage.cached_input_tokens`, `cache_write_tokens` y `cache_write_1h_tokens` dicen
+qué parte del total fue cada cosa— y la normalización la hace cada integración del SDK.
+
+### D-051 — Ante un metro de facturación que no se puede determinar, se cobra el estándar y se dice
+Contexto largo, residencia de datos y modo rápido son metros con tarifa propia. Algunos
+se leen de la petición (`speed="fast"`, `inference_geo`, `service_tier`) y se aplican;
+otros no se ven desde el SDK. El tramo de contexto largo es el caso feo: OpenAI publica
+las tarifas pero **no** el número de tokens a partir del cual entran. Se cobra el
+estándar, se marca el span como tarifa asumida con el motivo, y la interfaz presenta la
+cifra como un suelo. Es la interpretación conservadora: la que produce menos ahorro. La
+alternativa —elegir el tramo caro— habría engordado nuestro número de ahorro con un
+umbral inventado.
+
+### D-052 — El sufijo de prefijo válido es una lista cerrada de palabras, no cualquier palabra
+El arreglo anterior aceptaba como snapshot cualquier `-palabra`, lo que dejaba pasar
+`-pro`, `-mini`, `-nano` y `-cyber`: `gpt-5.5-pro` cuesta seis veces `gpt-5.5`, y un
+futuro `gpt-5.6-terra-mini` habría heredado en silencio la tarifa de `gpt-5.6-terra`. Se
+aceptan sólo fechas, `-vN` y `latest|preview|beta|stable|exp`. Un sufijo desconocido deja
+el modelo como coste desconocido, que es el lado por el que hay que equivocarse. Hay un
+test que recorre la tabla buscando pares en esa relación.
+
+### D-053 — Auditoría de identificadores: no había ninguno inventado, faltaban cinco reales
+El encargo pedía eliminar los IDs que no aparecieran en la documentación oficial. Al
+recorrer la tabla entrada por entrada contra las dos páginas de precios no se encontró
+ninguno inventado: **no se ha eliminado nada**. El ejemplo que motivaba la revisión,
+`claude-opus-4-5`, sí existe y sigue publicado a 5/25 $. Lo que sí faltaban eran cinco
+modelos reales de OpenAI que la tabla no recogía —`gpt-5.6-cyber`, `gpt-5.5-cyber`,
+`gpt-3.5-turbo-0125`, `gpt-3.5-turbo-instruct`, `davinci-002` y `babbage-002`—, cuyo
+coste salía como desconocido. Se han añadido. A los dos modelos `cyber` no se les asigna
+alternativa barata: están especializados en ciberseguridad y no son intercambiables con
+un generalista, así que recomendar el cambio sería recomendar otro resultado.
+
+### D-054 — El descuento de lote y el recargo regional viven en `sources`, no en cada modelo
+Las dos páginas los publican como regla uniforme (50 % de descuento en lote, 1,1x en
+residencia de datos), no como columna por modelo. Repetir el número en cincuenta entradas
+sería cincuenta sitios donde equivocarse. Las escrituras de caché sí van por modelo,
+porque la tabla de Anthropic las publica una a una; se han derivado de los
+multiplicadores documentados (1,25x y 2x) y el generador comprueba que coinciden con los
+valores publicados.
+
+### D-055 — El ahorro de la regla de contexto fijo descuenta lo que cuesta escribir la caché
+Anunciar la diferencia entera entre tarifa de entrada y tarifa de lectura es prometer un
+ahorro que el propio motor de precios sabe que no llega entero: la primera llamada de
+cada ejecución paga 1,25× por escribir la caché. Se descuenta una escritura por traza, lo
+que además supone que la caché **no** sobrevive de una ejecución a la siguiente. Si
+aguanta más, el usuario ahorrará más de lo que le dijimos, que es la dirección correcta
+del error.
+
+### D-056 — El agente de ejemplo usa modelos vigentes y genera contexto fijo
+`gpt-4o`/`gpt-4o-mini` eran varias generaciones anteriores y hacían que las cifras se
+leyeran como un ejercicio de museo. Ahora compara `gpt-5.6-terra` con `gpt-5.6-luna`, que
+son diez veces uno del otro. Se ha añadido una sexta patología —un manual de 20.000
+tokens reenviado en cada llamada sin marcarlo como cacheable— porque la tercera regla no
+llegaba a dispararse nunca con los datos que generaba la demo, y una regla que no se
+puede ver funcionando cuenta como no hecha.
+
+### D-057 — Cambiar de modelo y activar la caché se cuentan encadenados, no sumados
+Las reglas 2 y 3 pueden dispararse sobre el mismo paso. Tarifando las dos sobre el modelo
+caro, en la demo prometían 470 $ + 368 $ sobre un gasto de 525 $: el tope
+`min(suma, gasto)` lo tapaba, pero el dinero estaba contado dos veces. Ahora, cuando a un
+paso ya se le recomienda un modelo más barato, el ahorro de la caché se calcula **con las
+tarifas del modelo nuevo**. Son dos arreglos que se aplican uno detrás del otro, así que
+la suma es exacta; y si el usuario sólo cachea sin cambiar de modelo, ahorrará más de lo
+que le dijimos. La ficha explica el encadenado en vez de dejar dos cifras incompatibles.
+Hay un test que comprueba que la suma de hallazgos de un paso no pasa de lo que ese paso
+cuesta.
+
+### D-058 — Los días observados los usa todo el motor, no sólo el héroe
+El gasto total se proyectaba sobre los días con datos reales y el ahorro sobre los días
+del selector. Con una hora de datos en una ventana de siete días, eso multiplica el total
+por 720 y el ahorro por 4,3: las dos cifras del inicio dejan de ser comparables y la barra
+de reparto miente. `detect()` y `detail()` proyectan ahora sobre los mismos días
+observados que `overview()`.
+
+### D-059 — Las reglas agrupan por (nombre del paso, modelo), y el nombre por defecto es genérico
+`llm_span` y las integraciones automáticas nombran el span `chat <modelo>`, así que todas
+las llamadas a un mismo modelo caen en el mismo grupo aunque sean pasos distintos. Eso
+hunde el suelo de tokens de entrada de la regla del contexto fijo: basta una llamada corta
+para que el mínimo del grupo sea veinte tokens. El agente de ejemplo pasa `name=` a los
+pasos que quiere distinguir. Queda anotado como límite conocido: agrupar por el span padre
+—o por el nombre de la función instrumentada— daría grupos mejores, pero es un cambio en
+la semántica de las tres reglas y no entra en este encargo.
+

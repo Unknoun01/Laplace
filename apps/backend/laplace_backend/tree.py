@@ -89,6 +89,12 @@ def summarize(spans: list[Span], trace_id: str, project_id: str = "") -> TraceSu
     error_count = sum(1 for span in spans if span.status == "error")
     # Pasos cuyo modelo no está en la tabla: el total de la traza está incompleto.
     sin_tarifa = sum(1 for span in spans if span.cost.unknown)
+    asumidos = sum(1 for span in spans if span.cost.rate_assumed)
+    # Los modelos de la traza. La lista de trazas ya los servía; aquí faltaban, así que
+    # el modo avanzado enseñaba un guión en la ficha de la traza abierta.
+    modelos = sorted(
+        {span.llm.request_model for span in spans if span.llm and span.llm.request_model}
+    )
 
     return TraceSummary(
         trace_id=trace_id,
@@ -106,14 +112,22 @@ def summarize(spans: list[Span], trace_id: str, project_id: str = "") -> TraceSu
             input_tokens=sum(span.usage.input_tokens for span in spans),
             output_tokens=sum(span.usage.output_tokens for span in spans),
             cached_input_tokens=sum(span.usage.cached_input_tokens for span in spans),
+            cache_write_tokens=sum(span.usage.cache_write_tokens for span in spans),
+            cache_write_1h_tokens=sum(span.usage.cache_write_1h_tokens for span in spans),
             reasoning_tokens=sum(span.usage.reasoning_tokens for span in spans),
         ),
         unknown_cost_spans=sin_tarifa,
+        assumed_rate_spans=asumidos,
+        models=modelos,
         cost=Cost(
             input_usd=sum(span.cost.input_usd for span in spans),
             output_usd=sum(span.cost.output_usd for span in spans),
             total_usd=sum(span.cost.total_usd for span in spans),
+            cache_read_usd=sum(span.cost.cache_read_usd for span in spans),
+            cache_write_usd=sum(span.cost.cache_write_usd for span in spans),
+            cache_saving_usd=sum(span.cost.cache_saving_usd for span in spans),
             unknown=sin_tarifa > 0,
+            rate_assumed=asumidos > 0,
         ),
         session_id=next((s.session_id for s in spans if s.session_id), None),
         user_id=next((s.user_id for s in spans if s.user_id), None),

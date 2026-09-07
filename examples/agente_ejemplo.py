@@ -17,7 +17,10 @@ El agente genera a propósito cinco patologías que el producto tiene que saber 
   2. Un paso de clasificación trivial resuelto con un modelo caro.
   3. Un agente que itera y se atasca: traza larga (~30 pasos) con el bucle dentro.
   4. La misma llamada al modelo reintentada tres veces, que sí se paga.
-  5. Una traza que falla, con la excepción registrada en el span.
+  5. Un manual de 20.000 tokens reenviado entero en cada llamada, sin caché.
+  6. El mismo agente ya arreglado, cacheando el manual: sirve para comparar y para
+     comprobar que el motor de coste sabe reflejar la mejora que recomienda.
+  7. Una traza que falla, con la excepción registrada en el span.
 """
 
 from __future__ import annotations
@@ -29,8 +32,16 @@ import time
 
 import laplace
 
-MODELO_CARO = "gpt-4o"
-MODELO_BARATO = "gpt-4o-mini"
+# Modelos vigentes: comparar contra una generación retirada haría que las cifras se
+# leyeran como un ejercicio de museo. `terra` cuesta diez veces lo que `luna`, que es
+# justo la diferencia que la regla del modelo caro tiene que saber señalar.
+MODELO_CARO = "gpt-5.6-terra"
+MODELO_BARATO = "gpt-5.6-luna"
+
+#: Instrucciones largas que van pegadas a cada petición del paso «consultar_manual»:
+#: es el contexto fijo que la tercera regla detecta. 20.000 tokens de tarifas, reglas
+#: de equipaje y política de cambios, reenviados enteros en cada llamada.
+TOKENS_MANUAL = 20_000
 
 
 # ---------------------------------------------------------------------------------
@@ -98,7 +109,7 @@ def clasificar_intencion(pregunta: str) -> str:
     """Clasificar es una tarea trivial. Aquí se usa el modelo caro a propósito.
 
     Es exactamente el derroche que el panel de ahorro tendrá que señalar: el mismo
-    resultado con `gpt-4o-mini` costaría unas 17 veces menos.
+    resultado con el modelo pequeño de la misma familia costaría diez veces menos.
     """
     return llamar_modelo(
         MODELO_CARO,
@@ -220,6 +231,89 @@ def extraer_datos(pregunta: str) -> dict:
     return {"origen": "MAD", "destino": "BCN"}
 
 
+@laplace.observe(type="chain")
+def consultar_manual(pregunta: str, vuelta: int) -> str:
+    """Reenvía el manual entero en cada llamada, sin marcar nada como cacheable.
+
+    Es el derroche más silencioso de todos: no falla nada, no se repite ninguna llamada,
+    simplemente se paga a tarifa completa un texto que el proveedor ya ha visto doce
+    veces. Aquí se emite a propósito sin tokens de caché para que la tercera regla lo
+    encuentre; en cuanto el agente marque ese bloque como cacheable, la regla deja de
+    dispararse y el ahorro pasa a verse medido en el propio coste.
+    """
+    with laplace.llm_span(
+        model=MODELO_CARO,
+        system="openai",
+        # Nombre propio: las reglas agrupan por (nombre del paso, modelo), y el nombre
+        # que pone el SDK por defecto es `chat <modelo>`, común a todas las llamadas.
+        # Sin distinguirlo, el suelo de tokens de entrada de este paso se mezclaría con
+        # el de la clasificación, que son veinte tokens, y la regla no vería nada.
+        name="consultar_manual",
+        input_messages=[
+            {"role": "system", "content": f"<manual de {TOKENS_MANUAL} tokens>"},
+            {"role": "user", "content": f"{pregunta} (consulta {vuelta})"},
+        ],
+        temperature=0,
+    ) as llm:
+        time.sleep(random.uniform(0.05, 0.2))
+        llm.record_response(
+            output_messages=[{"role": "assistant", "content": "Equipaje de mano incluido."}],
+            # Sin `cached_input_tokens`: nadie ha activado la caché de prompt.
+            input_tokens=TOKENS_MANUAL + 40 + vuelta,
+            output_tokens=18,
+            response_model=MODELO_CARO,
+            finish_reasons=["stop"],
+        )
+    return "Equipaje de mano incluido."
+
+
+@laplace.observe(type="agent", name="agente_de_equipaje")
+def responder_sobre_equipaje(pregunta: str, consultas: int = 6) -> str:
+    """Seis consultas al manual dentro de una misma ejecución."""
+    for vuelta in range(consultas):
+        consultar_manual(pregunta, vuelta)
+    return "Equipaje de mano incluido en todas las tarifas menos la básica."
+
+
+@laplace.observe(type="chain")
+def consultar_manual_cacheado(pregunta: str, vuelta: int) -> str:
+    """El mismo paso, con el manual marcado como cacheable. El arreglo, ya aplicado.
+
+    La primera consulta de cada ejecución escribe la caché (se paga a 1,25x) y las demás
+    la leen (a un 10 %). Sirve para ver las dos caras: el hallazgo desaparece del panel y
+    el dinero que la caché ahorra pasa a verse medido, no prometido.
+    """
+    primera = vuelta == 0
+    with laplace.llm_span(
+        model=MODELO_BARATO,
+        system="openai",
+        name="consultar_manual_cacheado",
+        input_messages=[
+            {"role": "system", "content": f"<manual de {TOKENS_MANUAL} tokens, cacheado>"},
+            {"role": "user", "content": f"{pregunta} (consulta {vuelta})"},
+        ],
+        temperature=0,
+    ) as llm:
+        time.sleep(random.uniform(0.02, 0.08))
+        llm.record_response(
+            output_messages=[{"role": "assistant", "content": "Equipaje de mano incluido."}],
+            input_tokens=TOKENS_MANUAL + 40 + vuelta,
+            cache_write_tokens=TOKENS_MANUAL if primera else 0,
+            cached_input_tokens=0 if primera else TOKENS_MANUAL,
+            output_tokens=18,
+            response_model=MODELO_BARATO,
+            finish_reasons=["stop"],
+        )
+    return "Equipaje de mano incluido."
+
+
+@laplace.observe(type="agent", name="agente_de_equipaje_arreglado")
+def responder_sobre_equipaje_arreglado(pregunta: str, consultas: int = 6) -> str:
+    for vuelta in range(consultas):
+        consultar_manual_cacheado(pregunta, vuelta)
+    return "Equipaje de mano incluido en todas las tarifas menos la básica."
+
+
 @laplace.observe(type="agent", name="agente_extractor")
 def responder_con_reintentos(pregunta: str) -> str:
     datos = extraer_datos(pregunta)
@@ -269,11 +363,21 @@ def main() -> int:
     responder_con_reintentos("Vuelo de Madrid a Barcelona")
     print("  [5] traza con reintentos — la misma llamada al modelo tres veces")
 
+    for i in range(1, 4):
+        laplace.set_context(session_id=f"conv-equipaje-{i}", user_id="u-5")
+        responder_sobre_equipaje("¿Cuánto equipaje puedo llevar?")
+    print("  [6] contexto fijo — el manual entero reenviado en 18 llamadas sin caché")
+
+    for i in range(1, 4):
+        laplace.set_context(session_id=f"conv-equipaje-ok-{i}", user_id="u-5")
+        responder_sobre_equipaje_arreglado("¿Cuánto equipaje puedo llevar?")
+    print("  [7] el mismo agente ya cacheando — para comparar las dos facturas")
+
     laplace.set_context(session_id="conv-err", user_id="u-9")
     try:
         responder_con_fallo("Resérvame el primer vuelo que encuentres")
     except RuntimeError as exc:
-        print(f"  [6] traza error — {exc}")
+        print(f"  [8] traza error — {exc}")
 
     laplace.flush()
     print("listo. Abre http://localhost:3000 para ver las trazas.")
