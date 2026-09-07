@@ -20,14 +20,44 @@ parte y los cimientos de las otras dos.
 | 1.5 | Ingesta OTLP + API de lectura | ✅ |
 | 1.6 | Lista de trazas + vista de árbol | ✅ |
 | 1.7 | Modo local `laplace ui` con SQLite | pendiente |
-| 2 | Detección de bucles y **panel de ahorro** | pendiente |
-| 3 | **Diagnóstico automático** de trazas fallidas | pendiente |
+| 2 | Detección de derroche y **panel de ahorro** | ✅ |
+| 2.b | Alertas (Slack) cuando se supera un umbral | pendiente |
+| 3 | **Diagnóstico automático** con modelo | pendiente |
 | 4+ | Evaluación, gestión de prompts, dashboards | pendiente |
 
 Las fases 2 y 3 son el producto, no extras: son lo que separa a Laplace de un visor de
-trazas. El contrato de datos y el cálculo de coste ya están construidos anticipándolas
-(coste desglosado por span, payloads en crudo, `dedup_hash` para detectar repeticiones,
-y huecos reservados para diagnósticos y anotaciones).
+trazas.
+
+## Las dos mitades de la interfaz
+
+El mismo producto sirve a dos públicos con un botón. En **Diagnóstico** se habla en
+cristiano y manda el dinero; en **Avanzado** aparece la capa técnica: la consulta que
+disparó cada alerta, los atributos de cada span, el árbol completo y la exportación en
+JSON. El modo es global y se recuerda.
+
+- **Diagnóstico** (`/`) — cuánto te cuesta el agente, cuánto puedes dejar de pagar, y
+  las cosas que arreglar ordenadas por dinero recuperable.
+- **Problema** (`/problemas/…`) — qué pasa, por qué, cómo se ha detectado, cómo se
+  arregla y cuánto te ahorras, con el cálculo detrás.
+- **Trazas** (`/trazas`) — exploración libre: filtros, búsqueda y orden por coste.
+- **Traza** (`/trazas/…`) — el árbol navegable, con coste por rama y repeticiones
+  marcadas.
+
+## Qué detecta hoy
+
+Tres reglas deterministas, sin modelo de por medio
+([`insights.py`](apps/backend/laplace_backend/insights.py)):
+
+| Regla | Qué busca | Cómo calcula el ahorro |
+|-------|-----------|------------------------|
+| Repetición | El mismo paso, con la misma entrada, 3+ veces en una ejecución | Coste íntegro de las copias sobrantes |
+| Modelo caro | Un paso con salida media corta que usa un modelo con alternativa más barata | Diferencia de tarifa sobre los tokens reales |
+| Contexto fijo | Un prompt con un suelo grande de tokens que se reenvía sin caché | Diferencia entre tarifa normal y de caché |
+
+Tres cosas que **no** hace, a propósito: no inventa dinero donde no lo hay (un bucle de
+herramientas no gasta tokens, así que enseña el tiempo perdido y lo dice), no cuenta dos
+veces el mismo ahorro cuando dos reglas se solapan, y no afirma que un modelo más barato
+acertará igual, porque eso exige evaluaciones y todavía no existen.
 
 ## Arrancar en local
 

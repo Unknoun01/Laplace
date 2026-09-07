@@ -278,8 +278,13 @@ class TraceListPage(_Model):
     """Página de la lista de trazas."""
 
     traces: list[TraceSummary] = Field(default_factory=list)
-    #: Timestamp del último elemento; se pasa como `before` para pedir la siguiente página.
+    #: Cursor opaco de la siguiente página. `None` cuando no hay más, o cuando el orden
+    #: pedido no es paginable de forma estable (por coste, por duración).
     next_cursor: str | None = None
+    #: De las trazas de esta página, las que tienen algún paso repetido con la misma
+    #: entrada. Es una anotación de la página, no del contrato de la traza: se calcula
+    #: al servir y sirve para marcar el bucle en la lista.
+    with_repeats: list[str] = Field(default_factory=list)
 
 
 class Project(_Model):

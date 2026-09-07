@@ -30,6 +30,8 @@ class ModelPrice:
     input: float
     output: float
     cached_input: float | None = None
+    #: Modelo más barato de la misma familia que proponer para tareas cortas.
+    alternative: str | None = None
 
 
 @dataclass(frozen=True)
@@ -65,6 +67,7 @@ class PriceTable:
                 cached_input=(
                     float(entry["cached_input"]) if entry.get("cached_input") is not None else None
                 ),
+                alternative=entry.get("alternative") or None,
             )
             for name, entry in (raw.get("models") or {}).items()
         }

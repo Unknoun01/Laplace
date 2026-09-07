@@ -208,3 +208,70 @@ miles.
 ### D-030 — Fichero de licencia
 Faltaba el `LICENSE` pese a declarar Apache-2.0 en el README y en `pyproject.toml`.
 Añadido el texto íntegro. Sin él, "open source" no es una afirmación defendible.
+
+## 2026-09-07 — Interfaz definitiva y motor de detección (Fase 2)
+
+### D-031 — La UI reproduce el mock; se cae Tailwind y se usa CSS propio
+El documento de dirección fija tokens, tipografía y densidad, y prohíbe introducir otro
+lenguaje visual. Reproducirlo con utilidades de Tailwind obligaba a traducir cada regla
+del mock y a vigilar que no se colara una clase ajena al sistema. Se pasa a CSS propio
+con las mismas clases del mock (`.card`, `.node`, `.kv`, `.chip`…). **Sustituye a D-012.**
+De paso desaparece la clase de fallo que ya nos mordió una vez: clases construidas en
+tiempo de ejecución que Tailwind no ve y no genera.
+
+### D-032 — Las pantallas de diagnóstico necesitaban adelantar la Fase 2
+El inicio y la ficha no son maquetación: piden reglas de detección reales. Se han
+construido tres, deterministas y sin modelo (`apps/backend/laplace_backend/insights.py`):
+repetición exacta dentro de una traza, modelo caro para un paso de salida corta, y
+contexto fijo reenviado sin caché. El diagnóstico con modelo (Fase 3) rellenará el hueco
+`trace_diagnoses` que ya existe; la ficha ya sabe pintarlo cuando llegue.
+
+### D-033 — Las reglas no pueden solaparse: se descuenta el doble conteo
+La regla de repetición se lleva el coste íntegro de las copias sobrantes. Si esas copias
+son llamadas a un modelo caro, la regla del modelo **no puede volver a contarlas**: al
+principio el ahorro total salía por encima del gasto real. Ahora los tokens duplicados se
+restan del uso antes de evaluar el resto de reglas, y hay un test de regresión que
+comprueba que la suma de hallazgos cuadra con el evitable del héroe y nunca lo supera.
+**Motivo:** el ahorro es el número que vende el producto; inflarlo lo invalida entero.
+
+### D-034 — Un hallazgo que no cuesta dinero lo dice, no lo disimula
+Repetir una herramienta no consume tokens. La tarjeta de ese hallazgo enseña **tiempo**
+en lugar de dinero, se marca como secundaria y baja al final del orden. Alternativa
+descartada: atribuirle una parte del coste de las llamadas al modelo de alrededor, que
+habría sido una cifra inventada.
+
+### D-035 — No se muestra ninguna métrica de calidad del modelo alternativo
+El mock enseñaba un "acierto medido 98,2 %" en la tarjeta del modelo caro. Ese número no
+se puede medir sin evaluaciones (Fase 4), así que no se enseña. Lo que sí se afirma es el
+ahorro, que es aritmética sobre tokens reales, y se acompaña de un paso explícito:
+"comprueba que la calidad aguanta".
+
+### D-036 — El coste se muestra en USD, leyendo la moneda de la API
+El mock hablaba en euros. Se mantiene el criterio de D-022: la UI lee `currency` de la
+respuesta y formatea con ese símbolo, sin incrustarlo en el componente. Mientras no haya
+una fuente de tipo de cambio diaria, la API devuelve USD y eso se ve. El día que exista
+conversión por proyecto no habrá que tocar ninguna pantalla.
+
+### D-037 — La consulta que se enseña es la que se ejecuta
+"Cómo lo hemos detectado" muestra el SQL real: las consultas del motor viven en
+constantes de módulo (`REPEATED_GROUPS_SQL`, `MODEL_USAGE_SQL`) que usan tanto el almacén
+como la API. Copiarlas a mano en la interfaz habría acabado en una consulta que dice una
+cosa y un backend que hace otra.
+
+### D-038 — El identificador de un hallazgo es determinista, no se guarda
+`tipo:clave` (por ejemplo `repeticion:<dedup_hash>`). La ficha se recalcula sobre la misma
+ventana. **Consecuencia buscada:** si el usuario arregla el problema y vuelve, la ficha
+devuelve 404 y la pantalla dice "ese problema ya no aparece", que es justo lo que
+queremos comunicar.
+
+### D-039 — Ordenar por coste no es paginable con cursor
+El explorador ordena por coste de serie, que es lo que pide la dirección de interfaz. El
+cursor `(inicio, trace_id)` sólo da una secuencia estable en el orden temporal, así que
+con orden por coste o duración no se devuelve cursor y la lista enseña las N más caras
+del rango, diciéndolo. **Descartado:** paginar por offset, que con datos entrando duplica
+y salta filas.
+
+### D-040 — El proyecto y el rango viven en la URL
+No en un estado interno ni en una cookie: así una pantalla concreta se puede enlazar y
+compartir tal y como se está viendo. El modo Diagnóstico/Avanzado sí va en `localStorage`,
+porque es una preferencia de la persona, no del enlace.

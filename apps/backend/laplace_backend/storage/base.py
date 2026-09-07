@@ -33,6 +33,9 @@ class TraceFilter:
     #: Busca en el nombre de los spans y en el id de la traza.
     search: str | None = None
     span_type: str | None = None
+    #: `recent` (por defecto), `cost` o `duration`. El cursor sólo tiene sentido con
+    #: `recent`: es el único orden estable frente a datos que siguen llegando.
+    sort: str = "recent"
 
 
 def encode_cursor(summary: TraceSummary) -> str:
@@ -49,6 +52,74 @@ def decode_cursor(cursor: str | None) -> tuple[datetime | None, str | None]:
         return datetime.fromisoformat(timestamp), trace_id or None
     except ValueError:
         return None, None
+
+
+@dataclass
+class Window:
+    """Ventana temporal de análisis. Todas las pantallas comparten una."""
+
+    since: datetime
+    until: datetime
+    days: int
+
+
+@dataclass
+class WindowSummary:
+    """Lo que ha pasado en el proyecto durante la ventana."""
+
+    traces: int = 0
+    spans: int = 0
+    error_traces: int = 0
+    llm_calls: int = 0
+    tool_calls: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_cost_usd: float = 0.0
+    #: Latencia de traza, no de span: es la que sufre el usuario final.
+    p95_duration_ms: float = 0.0
+
+
+@dataclass
+class RepeatedGroup:
+    """Un mismo paso repetido dentro de una misma traza (contrato §5).
+
+    `extra_*` es lo que sobra: todo menos la primera ocurrencia de cada traza.
+    """
+
+    dedup_hash: str
+    name: str
+    span_type: str
+    model: str
+    traces: int = 0
+    total_spans: int = 0
+    extra_spans: int = 0
+    extra_cost_usd: float = 0.0
+    extra_duration_ms: float = 0.0
+    #: Tokens de las ocurrencias sobrantes. Sirven para que la regla del modelo caro
+    #: no vuelva a contar lo que ya cuenta la regla de repetición.
+    extra_input_tokens: int = 0
+    extra_output_tokens: int = 0
+    max_per_trace: int = 0
+    sample_trace_id: str = ""
+
+
+@dataclass
+class ModelUsage:
+    """Uso agregado de un modelo por paso, para razonar sobre alternativas."""
+
+    name: str
+    model: str
+    calls: int = 0
+    traces: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cached_input_tokens: int = 0
+    cost_usd: float = 0.0
+    avg_output_tokens: float = 0.0
+    avg_input_tokens: float = 0.0
+    #: Suelo de tokens de entrada: aproxima la parte fija del prompt que se reenvía.
+    min_input_tokens: int = 0
+    sample_trace_id: str = ""
 
 
 @dataclass
@@ -84,6 +155,29 @@ class SpanStore(Protocol):
 
     def list_projects(self) -> list[ProjectStats]:
         """Proyectos con datos."""
+
+    def summarize_window(self, project_id: str, window: Window) -> WindowSummary:
+        """Totales del proyecto en la ventana. Alimenta el héroe."""
+
+    def repeated_groups(
+        self, project_id: str, window: Window, *, min_repeats: int = 3, limit: int = 20
+    ) -> list[RepeatedGroup]:
+        """Pasos repetidos con la misma entrada dentro de una traza."""
+
+    def model_usage(
+        self, project_id: str, window: Window, *, min_calls: int = 5, limit: int = 50
+    ) -> list[ModelUsage]:
+        """Uso por (paso, modelo), para las reglas de modelo caro y contexto fijo."""
+
+    def traces_with_repeats(
+        self, project_id: str | None, trace_ids: list[str], *, min_repeats: int = 3
+    ) -> set[str]:
+        """De esas trazas, cuáles tienen algún paso repetido con la misma entrada."""
+
+    def sample_repetition(
+        self, project_id: str, window: Window, dedup_hash: str, limit: int = 40
+    ) -> list[Span]:
+        """Las ocurrencias repetidas de una traza concreta, como evidencia."""
 
     def health(self) -> bool:
         """True si el almacén responde."""

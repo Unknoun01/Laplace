@@ -155,7 +155,10 @@ export interface Trace {
 
 export interface TraceListPage {
   traces: TraceSummary[];
+  /** `null` cuando no hay más, o cuando el orden pedido no es paginable de forma estable. */
   next_cursor: string | null;
+  /** De las trazas de esta página, las que repiten algún paso con la misma entrada. */
+  with_repeats: string[];
 }
 
 export interface ProjectStats {
@@ -164,4 +167,75 @@ export interface ProjectStats {
   span_count: number;
   total_cost_usd: number;
   last_seen: string | null;
+}
+
+// ---------------------------------------------------------------------------------
+// Motor de detección (Fase 2). Espejo de apps/backend/laplace_backend/insights.py.
+// No forma parte del contrato de traza: son modelos de la API de diagnóstico.
+// ---------------------------------------------------------------------------------
+
+export type FindingKind = "repeticion" | "modelo_caro" | "contexto_fijo";
+export type Difficulty = "easy" | "mid" | "hard";
+
+export interface TechItem {
+  label: string;
+  value: string;
+}
+
+export interface FixStep {
+  title: string;
+  body: string;
+  code: string | null;
+  /** Sólo se muestra en modo avanzado. */
+  advanced: boolean;
+}
+
+export interface Finding {
+  id: string;
+  kind: FindingKind;
+  title: string;
+  summary: string;
+  window_waste_usd: number;
+  monthly_saving_usd: number;
+  currency: string;
+  window_waste_ms: number;
+  difficulty: Difficulty;
+  difficulty_label: string;
+  scope_label: string;
+  /** false = cuesta tiempo, no dinero. La tarjeta lo dice sin disimular. */
+  costs_money: boolean;
+  tech: TechItem[];
+  sample_trace_id: string;
+}
+
+export interface FindingDetail extends Finding {
+  what_happens: string;
+  why: string;
+  detection_explanation: string;
+  /** La consulta que se ejecutó de verdad, no una copia a mano. */
+  detection_query: string;
+  fix_steps: FixStep[];
+  savings_calculation: string;
+  savings_note: string;
+  evidence: Span[];
+}
+
+export interface Overview {
+  project_id: string;
+  days: number;
+  currency: string;
+  window_cost_usd: number;
+  monthly_cost_usd: number;
+  monthly_avoidable_usd: number;
+  monthly_necessary_usd: number;
+  traces: number;
+  spans: number;
+  llm_calls: number;
+  tool_calls: number;
+  input_tokens: number;
+  output_tokens: number;
+  error_rate: number;
+  p95_duration_ms: number;
+  cost_per_trace_usd: number;
+  findings: Finding[];
 }

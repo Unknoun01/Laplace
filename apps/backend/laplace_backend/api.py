@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
@@ -12,8 +12,10 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTrace
 from starlette.concurrency import run_in_threadpool
 
 from .ingest.otlp import decode_request, parse_spans
+from .insights import FindingDetail, Overview, overview
+from .insights import detail as finding_detail
 from .pricing import get_price_table, reload_price_table
-from .storage.base import TraceFilter, decode_cursor
+from .storage.base import TraceFilter, Window, decode_cursor
 from .tree import build_tree, summarize
 
 logger = logging.getLogger("laplace.api")
@@ -98,8 +100,9 @@ async def list_traces(
     user_id: str | None = None,
     search: str | None = None,
     span_type: str | None = None,
+    sort: str = Query("recent", pattern="^(recent|cost|duration)$"),
 ) -> TraceListPage:
-    """Lista de trazas, más reciente primero."""
+    """Lista de trazas del proyecto y rango activos."""
     before, before_trace_id = decode_cursor(cursor)
     filters = TraceFilter(
         project_id=project_id,
@@ -113,9 +116,20 @@ async def list_traces(
         user_id=user_id,
         search=search,
         span_type=span_type,
+        sort=sort,
     )
-    page = await run_in_threadpool(_store(request).list_traces, filters)
-    return TraceListPage(traces=page.traces, next_cursor=page.next_cursor)
+    store = _store(request)
+    page = await run_in_threadpool(store.list_traces, filters)
+
+    # Marca de bucle: una segunda consulta sobre las trazas ya seleccionadas.
+    ids = [t.trace_id for t in page.traces]
+    with_repeats = await run_in_threadpool(store.traces_with_repeats, project_id, ids)
+
+    return TraceListPage(
+        traces=page.traces,
+        next_cursor=page.next_cursor,
+        with_repeats=sorted(with_repeats),
+    )
 
 
 @router.get("/api/traces/{trace_id}", response_model=Trace)
@@ -135,6 +149,48 @@ async def get_trace(
         diagnosis=await run_in_threadpool(metadata.get_diagnosis, trace_id),
         annotations=await run_in_threadpool(metadata.list_annotations, trace_id),
     )
+
+
+# ---------------------------------------------------------------------------------
+# Diagnóstico y ahorro (Fase 2)
+# ---------------------------------------------------------------------------------
+
+
+def _window(days: int) -> Window:
+    """Ventana de análisis. Todas las pantallas comparten el mismo rango."""
+    until = datetime.now(timezone.utc)
+    return Window(since=until - timedelta(days=days), until=until, days=days)
+
+
+@router.get("/api/overview", response_model=Overview)
+async def get_overview(
+    request: Request,
+    project_id: str,
+    days: int = Query(7, ge=1, le=90),
+) -> Overview:
+    """Cuánto cuesta el agente, cuánto sobra y qué hay que arreglar."""
+    return await run_in_threadpool(overview, _store(request), project_id, _window(days))
+
+
+@router.get("/api/findings/{finding_id:path}", response_model=FindingDetail)
+async def get_finding(
+    request: Request,
+    finding_id: str,
+    project_id: str,
+    days: int = Query(7, ge=1, le=90),
+) -> FindingDetail:
+    """Ficha completa de un hallazgo.
+
+    El identificador es determinista (`tipo:clave`), así que se recalcula sobre la misma
+    ventana en lugar de guardarse. Si el problema ya no aparece —porque el usuario lo
+    arregló— devuelve 404, que es exactamente lo que queremos decir.
+    """
+    found = await run_in_threadpool(
+        finding_detail, _store(request), project_id, _window(days), finding_id
+    )
+    if found is None:
+        raise HTTPException(status_code=404, detail="ese problema ya no aparece en esta ventana")
+    return found
 
 
 @router.get("/api/projects")

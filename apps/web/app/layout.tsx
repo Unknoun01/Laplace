@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { Suspense } from "react";
+import { TopBar } from "@/components/TopBar";
+import { listProjects } from "@/lib/api";
+import type { ProjectStats } from "@/lib/types";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -7,39 +10,52 @@ export const metadata: Metadata = {
   description: "Observabilidad y optimización de agentes de IA.",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+/**
+ * Restaura el modo antes del primer pintado.
+ *
+ * Va como script en línea a propósito: si el modo se aplicara desde React, un
+ * desarrollador con "Avanzado" guardado vería primero la versión simple y luego un
+ * salto. El salto es peor que el script.
+ */
+const RESTORE_MODE = `
+try {
+  var m = localStorage.getItem("laplace.mode");
+  document.body.dataset.mode = m === "pro" ? "pro" : "simple";
+} catch (e) {
+  document.body.dataset.mode = "simple";
+}`;
+
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Si el backend no responde, la barra se pinta vacía y cada pantalla explica el
+  // problema: el armazón nunca debe caerse por eso.
+  let projects: ProjectStats[] = [];
+  try {
+    projects = await listProjects();
+  } catch {
+    projects = [];
+  }
+
   return (
     <html lang="es">
-      <body className="min-h-full">
-        <div className="flex min-h-screen flex-col">
-          <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/80 backdrop-blur dark:border-slate-800 dark:bg-slate-950/80">
-            <div className="mx-auto flex h-14 max-w-[1800px] items-center gap-6 px-6">
-              <Link href="/" className="flex items-center gap-2.5 font-semibold tracking-tight">
-                <LaplaceMark />
-                Laplace
-              </Link>
-              <span className="hidden text-sm text-slate-500 dark:text-slate-400 sm:block">
-                Trazas
-              </span>
-            </div>
-          </header>
-          <main className="mx-auto w-full max-w-[1800px] flex-1 px-6 py-6">{children}</main>
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
+        <link
+          href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;450;500;600&display=swap"
+          rel="stylesheet"
+        />
+      </head>
+      {/* El script de abajo cambia `data-mode` antes de que React hidrate, así que
+          este atributo diverge a propósito entre servidor y cliente. */}
+      <body data-mode="simple" suppressHydrationWarning>
+        <script dangerouslySetInnerHTML={{ __html: RESTORE_MODE }} />
+        <div className="shell wide">
+          <Suspense fallback={<div className="topbar" />}>
+            <TopBar projects={projects} />
+          </Suspense>
+          {children}
         </div>
       </body>
     </html>
-  );
-}
-
-function LaplaceMark() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden className="text-sky-500">
-      <path
-        d="M3 16.5C6.5 16.5 6 3.5 10 3.5s3.5 13 7 13"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-    </svg>
   );
 }

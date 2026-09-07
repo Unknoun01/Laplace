@@ -11,12 +11,13 @@ Variables:
     LAPLACE_ENDPOINT   por defecto http://localhost:8000
     LAPLACE_PROJECT    por defecto demo-viajes
 
-El agente genera a propósito cuatro patologías que el producto tiene que saber enseñar:
+El agente genera a propósito cinco patologías que el producto tiene que saber enseñar:
 
   1. La misma tool llamada tres veces con los mismos argumentos (un bucle).
   2. Un paso de clasificación trivial resuelto con un modelo caro.
-  3. Un agente que itera y se atasca: traza larga (~40 pasos) con el bucle dentro.
-  4. Una traza que falla, con la excepción registrada en el span.
+  3. Un agente que itera y se atasca: traza larga (~30 pasos) con el bucle dentro.
+  4. La misma llamada al modelo reintentada tres veces, que sí se paga.
+  5. Una traza que falla, con la excepción registrada en el span.
 """
 
 from __future__ import annotations
@@ -199,6 +200,33 @@ def responder_iterando(pregunta: str, vueltas: int = 6) -> str:
     return redactar(pregunta, buscar_vuelos("MAD", "BCN", "2026-10-14"), preferencias)
 
 
+@laplace.observe(type="chain")
+def extraer_datos(pregunta: str) -> dict:
+    """Reintenta la MISMA llamada al modelo cuando no sabe leer la respuesta.
+
+    Es un patrón habitual de verdad: el modelo devuelve algo que no parsea y el código
+    reintenta sin cambiar el prompt. A diferencia de repetir una herramienta, esto sí
+    se paga: cada reintento es una llamada al modelo completa.
+    """
+    mensajes = [
+        {"role": "system", "content": "Devuelve origen y destino en JSON. Sólo JSON."},
+        {"role": "user", "content": pregunta},
+    ]
+    for intento in range(3):
+        # La respuesta viene cortada y no parsea, así que se reintenta igual que estaba.
+        llamar_modelo(MODELO_CARO, mensajes, '{"origen": "MAD"', temperature=0)
+        if intento == 2:  # al tercero se da por bueno y se sigue
+            break
+    return {"origen": "MAD", "destino": "BCN"}
+
+
+@laplace.observe(type="agent", name="agente_extractor")
+def responder_con_reintentos(pregunta: str) -> str:
+    datos = extraer_datos(pregunta)
+    vuelos = buscar_vuelos(datos["origen"], datos["destino"], "2026-10-14")
+    return redactar(pregunta, vuelos, [])
+
+
 @laplace.observe(type="agent", name="agente_de_viajes")
 def responder_con_fallo(pregunta: str, usuario: str = "u-9") -> str:
     """Ejecución que revienta a mitad: la excepción queda en el span y en la traza."""
@@ -235,13 +263,17 @@ def main() -> int:
 
     laplace.set_context(session_id="conv-larga", user_id="u-7")
     responder_iterando("Encuéntrame el vuelo más barato a Barcelona")
-    print("  [4] traza larga — agente iterativo, ~40 pasos con un bucle")
+    print("  [4] traza larga — agente iterativo, ~30 pasos con un bucle")
+
+    laplace.set_context(session_id="conv-reintentos", user_id="u-3")
+    responder_con_reintentos("Vuelo de Madrid a Barcelona")
+    print("  [5] traza con reintentos — la misma llamada al modelo tres veces")
 
     laplace.set_context(session_id="conv-err", user_id="u-9")
     try:
         responder_con_fallo("Resérvame el primer vuelo que encuentres")
     except RuntimeError as exc:
-        print(f"  [5] traza error — {exc}")
+        print(f"  [6] traza error — {exc}")
 
     laplace.flush()
     print("listo. Abre http://localhost:3000 para ver las trazas.")

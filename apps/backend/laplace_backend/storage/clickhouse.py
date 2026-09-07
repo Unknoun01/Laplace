@@ -22,7 +22,16 @@ from laplace.schema import (
 )
 
 from ..config import Settings
-from .base import ProjectStats, TraceFilter, TracePage, encode_cursor
+from .base import (
+    ModelUsage,
+    ProjectStats,
+    RepeatedGroup,
+    TraceFilter,
+    TracePage,
+    Window,
+    WindowSummary,
+    encode_cursor,
+)
 
 logger = logging.getLogger("laplace.storage")
 
@@ -100,6 +109,81 @@ def _utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+
+# ---------------------------------------------------------------------------------
+# Consultas del motor de detección (Fase 2)
+#
+# Son constantes de módulo, no cadenas incrustadas en los métodos, porque la interfaz
+# enseña al usuario **la consulta que de verdad se ha ejecutado** ("cómo lo hemos
+# detectado"). Si estuviera copiada a mano en la UI, acabaría mintiendo.
+# ---------------------------------------------------------------------------------
+
+WINDOW_WHERE = "project_id = %(project_id)s AND start_time >= %(since)s AND start_time <= %(until)s"
+
+#: Un mismo paso, con la misma entrada, repetido dentro de una misma traza.
+REPEATED_GROUPS_SQL = f"""
+SELECT
+    dedup_hash,
+    any(nombre)                      AS nombre,
+    any(tipo)                        AS tipo,
+    any(modelo)                      AS modelo,
+    count()                          AS trazas,
+    sum(n)                           AS total_spans,
+    sum(n - 1)                       AS extra_spans,
+    sum(coste - coste_primera)       AS extra_coste,
+    sum(duracion - duracion_primera) AS extra_duracion,
+    sum(tok_in - tok_in_primera)     AS extra_tok_in,
+    sum(tok_out - tok_out_primera)   AS extra_tok_out,
+    max(n)                           AS max_por_traza,
+    argMax(trace_id, n)              AS traza_ejemplo
+FROM (
+    SELECT
+        trace_id,
+        dedup_hash,
+        any(name)                          AS nombre,
+        any(span_type)                     AS tipo,
+        any(request_model)                 AS modelo,
+        count()                            AS n,
+        sum(cost_total_usd)                AS coste,
+        argMin(cost_total_usd, start_time) AS coste_primera,
+        sum(duration_ms)                   AS duracion,
+        argMin(duration_ms, start_time)    AS duracion_primera,
+        sum(input_tokens)                  AS tok_in,
+        argMin(input_tokens, start_time)   AS tok_in_primera,
+        sum(output_tokens)                 AS tok_out,
+        argMin(output_tokens, start_time)  AS tok_out_primera
+    FROM spans FINAL
+    WHERE {WINDOW_WHERE} AND dedup_hash != ''
+    GROUP BY trace_id, dedup_hash
+    HAVING n >= %(min_repeats)s
+)
+GROUP BY dedup_hash
+ORDER BY extra_coste DESC, extra_spans DESC
+LIMIT %(limit)s
+"""
+
+#: Uso por (paso, modelo): base de las reglas de modelo caro y de contexto fijo.
+MODEL_USAGE_SQL = f"""
+SELECT
+    name,
+    request_model,
+    count()                  AS llamadas,
+    uniqExact(trace_id)      AS trazas,
+    sum(input_tokens)        AS in_tok,
+    sum(output_tokens)       AS out_tok,
+    sum(cached_input_tokens) AS cache_tok,
+    sum(cost_total_usd)      AS coste,
+    avg(output_tokens)       AS media_salida,
+    avg(input_tokens)        AS media_entrada,
+    min(input_tokens)        AS min_entrada,
+    any(trace_id)            AS traza_ejemplo
+FROM spans FINAL
+WHERE {WINDOW_WHERE} AND span_type = 'llm' AND request_model != ''
+GROUP BY name, request_model
+HAVING llamadas >= %(min_calls)s
+ORDER BY coste DESC
+LIMIT %(limit)s
+"""
 
 
 class ClickHouseStore:
@@ -214,8 +298,16 @@ class ClickHouseStore:
         where, params = self._where(filters)
         params["limit"] = max(1, min(filters.limit, 200))
 
+        # El cursor sólo se aplica al orden temporal: ordenar por coste sobre datos que
+        # siguen entrando no da una secuencia estable que paginar.
+        orden = {
+            "cost": "cost_total_usd DESC, trace_id DESC",
+            "duration": "duration_ms DESC, trace_id DESC",
+        }.get(filters.sort, "started DESC, trace_id DESC")
+        por_tiempo = filters.sort not in ("cost", "duration")
+
         having = ""
-        if filters.before is not None:
+        if filters.before is not None and por_tiempo:
             params["before"] = _utc(filters.before)
             params["before_id"] = filters.before_trace_id or ""
             # Comparación por tupla: avanza aunque varias trazas compartan instante.
@@ -252,15 +344,15 @@ class ClickHouseStore:
             {where}
             GROUP BY trace_id
             {having}
-            ORDER BY started DESC, trace_id DESC
+            ORDER BY {orden}
             LIMIT %(limit)s
         """
         rows = self._client.query(sql, parameters=params).result_rows
 
         traces = [self._to_summary(row) for row in rows]
-        # Sólo hay siguiente página si ésta vino llena.
+        # Sólo hay siguiente página si ésta vino llena y el orden es paginable.
         full_page = len(traces) == params["limit"]
-        next_cursor = encode_cursor(traces[-1]) if full_page else None
+        next_cursor = encode_cursor(traces[-1]) if full_page and por_tiempo else None
         return TracePage(traces=traces, next_cursor=next_cursor)
 
     def _where(self, filters: TraceFilter) -> tuple[str, dict[str, Any]]:
@@ -488,6 +580,179 @@ class ClickHouseStore:
             )
             for row in self._client.query(sql).result_rows
         ]
+
+    # -- analítica para el motor de detección (Fase 2) -------------------------------
+
+    def _window_params(self, project_id: str, window: Window) -> dict[str, Any]:
+        return {
+            "project_id": project_id,
+            "since": _utc(window.since),
+            "until": _utc(window.until),
+        }
+
+
+    def summarize_window(self, project_id: str, window: Window) -> WindowSummary:
+        sql = f"""
+            SELECT
+                uniqExact(trace_id)                                   AS traces,
+                count()                                               AS spans,
+                uniqExactIf(trace_id, status = 'error')               AS error_traces,
+                countIf(span_type = 'llm')                            AS llm_calls,
+                countIf(span_type = 'tool')                           AS tool_calls,
+                sum(input_tokens)                                     AS input_tokens,
+                sum(output_tokens)                                    AS output_tokens,
+                sum(cost_total_usd)                                   AS cost
+            FROM spans FINAL
+            WHERE {WINDOW_WHERE}
+        """
+        params = self._window_params(project_id, window)
+        row = self._client.query(sql, parameters=params).result_rows
+        if not row:
+            return WindowSummary()
+
+        # La latencia que importa es la de la traza entera, no la de un span suelto:
+        # es la que espera el usuario final del agente.
+        p95_sql = f"""
+            SELECT quantile(0.95)(duracion) FROM (
+                SELECT dateDiff('millisecond', min(start_time), max(end_time)) AS duracion
+                FROM spans FINAL
+                WHERE {WINDOW_WHERE}
+                GROUP BY trace_id
+            )
+        """
+        p95 = self._client.query(p95_sql, parameters=params).result_rows
+
+        (traces, spans, error_traces, llm_calls, tool_calls, in_tok, out_tok, cost) = row[0]
+        return WindowSummary(
+            traces=int(traces),
+            spans=int(spans),
+            error_traces=int(error_traces),
+            llm_calls=int(llm_calls),
+            tool_calls=int(tool_calls),
+            input_tokens=int(in_tok),
+            output_tokens=int(out_tok),
+            total_cost_usd=float(cost),
+            p95_duration_ms=float(p95[0][0]) if p95 and p95[0][0] is not None else 0.0,
+        )
+
+    def repeated_groups(
+        self, project_id: str, window: Window, *, min_repeats: int = 3, limit: int = 20
+    ) -> list[RepeatedGroup]:
+        """Agrupa primero por (traza, hash) y luego por hash.
+
+        Los dos niveles importan: repetir tres veces dentro de una traza es un bucle;
+        aparecer tres veces en tres trazas distintas es uso normal.
+        """
+        params = self._window_params(project_id, window)
+        params["min_repeats"] = min_repeats
+        params["limit"] = limit
+        sql = REPEATED_GROUPS_SQL
+        return [
+            RepeatedGroup(
+                dedup_hash=r[0],
+                name=r[1],
+                span_type=r[2],
+                model=r[3] or "",
+                traces=int(r[4]),
+                total_spans=int(r[5]),
+                extra_spans=int(r[6]),
+                extra_cost_usd=float(r[7]),
+                extra_duration_ms=float(r[8]),
+                extra_input_tokens=int(r[9]),
+                extra_output_tokens=int(r[10]),
+                max_per_trace=int(r[11]),
+                sample_trace_id=r[12],
+            )
+            for r in self._client.query(sql, parameters=params).result_rows
+        ]
+
+    def model_usage(
+        self, project_id: str, window: Window, *, min_calls: int = 5, limit: int = 50
+    ) -> list[ModelUsage]:
+        params = self._window_params(project_id, window)
+        params["min_calls"] = min_calls
+        params["limit"] = limit
+        sql = MODEL_USAGE_SQL
+        return [
+            ModelUsage(
+                name=r[0],
+                model=r[1],
+                calls=int(r[2]),
+                traces=int(r[3]),
+                input_tokens=int(r[4]),
+                output_tokens=int(r[5]),
+                cached_input_tokens=int(r[6]),
+                cost_usd=float(r[7]),
+                avg_output_tokens=float(r[8]),
+                avg_input_tokens=float(r[9]),
+                min_input_tokens=int(r[10]),
+                sample_trace_id=r[11],
+            )
+            for r in self._client.query(sql, parameters=params).result_rows
+        ]
+
+    def traces_with_repeats(
+        self, project_id: str | None, trace_ids: list[str], *, min_repeats: int = 3
+    ) -> set[str]:
+        """Marca de bucle para la lista.
+
+        Se resuelve en una segunda consulta sobre las trazas ya seleccionadas (unas
+        decenas) en lugar de complicar la agregación de la lista con dos niveles.
+        """
+        if not trace_ids:
+            return set()
+        params: dict[str, Any] = {"trace_ids": trace_ids, "min_repeats": min_repeats}
+        where = "trace_id IN %(trace_ids)s AND dedup_hash != ''"
+        if project_id:
+            where += " AND project_id = %(project_id)s"
+            params["project_id"] = project_id
+
+        sql = f"""
+            SELECT DISTINCT trace_id FROM (
+                SELECT trace_id, dedup_hash, count() AS n
+                FROM spans FINAL
+                WHERE {where}
+                GROUP BY trace_id, dedup_hash
+                HAVING n >= %(min_repeats)s
+            )
+        """
+        return {row[0] for row in self._client.query(sql, parameters=params).result_rows}
+
+    def sample_repetition(
+        self, project_id: str, window: Window, dedup_hash: str, limit: int = 40
+    ) -> list[Span]:
+        """La traza donde más se repite ese paso, con sus ocurrencias."""
+        params = self._window_params(project_id, window)
+        params["dedup_hash"] = dedup_hash
+        params["limit"] = limit
+
+        trace_sql = f"""
+            SELECT trace_id, count() AS n
+            FROM spans FINAL
+            WHERE {WINDOW_WHERE} AND dedup_hash = %(dedup_hash)s
+            GROUP BY trace_id
+            ORDER BY n DESC
+            LIMIT 1
+        """
+        rows = self._client.query(trace_sql, parameters=params).result_rows
+        if not rows:
+            return []
+        params["trace_id"] = rows[0][0]
+
+        columns = ", ".join(COLUMNS)
+        sql = f"""
+            SELECT {columns} FROM (
+                SELECT {columns}
+                FROM spans
+                WHERE trace_id = %(trace_id)s AND dedup_hash = %(dedup_hash)s
+                ORDER BY span_id, ingested_at DESC
+                LIMIT 1 BY span_id
+            )
+            ORDER BY start_time
+            LIMIT %(limit)s
+        """
+        rows = self._client.query(sql, parameters=params).result_rows
+        return [self._to_span(row) for row in rows]
 
     def delete_project(self, project_id: str) -> None:
         """Borra todos los spans de un proyecto.
