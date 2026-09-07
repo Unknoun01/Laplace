@@ -12,7 +12,6 @@ import logging
 from pathlib import Path
 from typing import Any
 
-import psycopg
 from laplace.schema import Annotation, Diagnosis, Project
 
 from ..config import Settings
@@ -28,7 +27,12 @@ class MetadataStore:
     def __init__(self, settings: Settings) -> None:
         self._dsn = settings.postgres_dsn
 
-    def _connect(self) -> psycopg.Connection:
+    def _connect(self) -> Any:
+        # Import perezoso: `psycopg` es una dependencia opcional (extra `cloud`). En
+        # modo local no hay Postgres, y exigir el driver para abrir la interfaz en el
+        # portátil sería cobrar por algo que no se usa (D-068).
+        import psycopg
+
         return psycopg.connect(self._dsn, autocommit=True)
 
     def migrate(self) -> None:

@@ -18,3 +18,8 @@ exporter = InMemorySpanExporter()
 def ingest():
     """Lo que el backend recibiría por el endpoint OTLP, ya traducido al contrato."""
     return parse_spans(encode_spans(exporter.get_finished_spans()))
+
+
+def otlp_body() -> bytes:
+    """Lo mismo, pero sin traducir: el sobre protobuf tal cual viaja por la red."""
+    return encode_spans(exporter.get_finished_spans()).SerializeToString()

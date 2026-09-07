@@ -9,10 +9,16 @@ import type {
 /**
  * Cliente del backend.
  *
- * Se llama desde Server Components, así que la URL es la del servicio, no la del
- * navegador. Nada se cachea: mirar trazas es mirar lo que acaba de pasar.
+ * Se llama desde el navegador y **siempre contra el mismo origen**. En modo local, la
+ * interfaz la sirve el propio proceso de Python que atiende la API. En la nube, Next
+ * reescribe `/api` y `/health` hacia el backend (ver `next.config.mjs`). Así no hay
+ * URL que configurar en el build, ni CORS que abrir, ni una variable que se olvide en
+ * un despliegue y deje la interfaz en blanco (D-069).
+ *
+ * Nada se cachea: mirar trazas es mirar lo que acaba de pasar.
  */
-const API_URL = process.env.LAPLACE_API_URL ?? "http://localhost:8000";
+const API_URL =
+  typeof window === "undefined" ? (process.env.LAPLACE_API_URL ?? "http://localhost:8000") : "";
 
 export class ApiError extends Error {
   constructor(
@@ -26,7 +32,7 @@ export class ApiError extends Error {
 type Params = Record<string, string | number | undefined>;
 
 async function get<T>(path: string, params?: Params): Promise<T> {
-  const url = new URL(path, API_URL);
+  const url = new URL(path, API_URL || window.location.origin);
   for (const [key, value] of Object.entries(params ?? {})) {
     if (value !== undefined && value !== "") url.searchParams.set(key, String(value));
   }
@@ -95,9 +101,11 @@ export function listTraces(query: TraceQuery = {}): Promise<TraceListPage> {
   return get<TraceListPage>("/api/traces", { limit: 50, ...query });
 }
 
-export async function getTrace(traceId: string): Promise<Trace | null> {
+export async function getTrace(traceId: string, projectId?: string): Promise<Trace | null> {
   try {
-    return await get<Trace>(`/api/traces/${traceId}`);
+    // El proyecto va siempre que se sepa: un identificador de traza es único dentro
+    // de un proyecto, no entre proyectos.
+    return await get<Trace>(`/api/traces/${traceId}`, { project_id: projectId });
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) return null;
     throw error;

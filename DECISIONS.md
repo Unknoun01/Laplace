@@ -506,3 +506,75 @@ parte. Es el que decide si el arreglo está hecho, porque es el primer usuario. 
 cuidado se le han quitado los `name=` que le quedaban: una demo que esquiva el problema
 no demuestra nada.
 
+### D-066 — La traducción de fila a modelo se comparte entre los dos almacenes
+`row_to_span` y `row_to_summary` vivían dentro del almacén de ClickHouse. Si el de
+SQLite hubiera tenido las suyas, las dos copias habrían empezado a separarse el primer
+día que alguien añadiera un campo, y el modo local habría dejado de enseñar lo mismo sin
+que nadie lo notara. Están en `storage/_rows.py`, junto con la lista de columnas, y las
+usan los dos. Las filas llegan como diccionarios, con las etiquetas que puso la propia
+consulta: por posición, añadir una columna en medio desplaza el resto en silencio, y ya
+pasó una vez.
+
+### D-067 — «Cómo lo hemos detectado» enseña la consulta del almacén que respondió
+La ficha de un problema muestra la consulta que se ha ejecutado, no una de ejemplo. El
+motor la importaba directamente del módulo de ClickHouse, así que en modo local habría
+enseñado una consulta que nadie ejecutó —y que ni siquiera correría, porque SQLite no
+tiene `uniqExact` ni `argMax`—. Ahora se la pide al almacén, que es quien sabe cuál usó.
+De paso, eso rompe la última dependencia del motor con ClickHouse.
+
+### D-068 — Los drivers de la nube son un extra, no una dependencia
+`clickhouse-connect` y `psycopg` pasan a `laplace-backend[cloud]`, con imports
+perezosos. Quien instala `laplace-trace[ui]` para mirar su agente en el portátil no
+tiene por qué descargar dos drivers de bases de datos que no va a arrancar. Simétrico:
+`fastapi` y `uvicorn` no entran en el SDK por defecto, porque un SDK de trazas no puede
+arrastrar un servidor web a la imagen de producción de nadie.
+
+### D-069 — La interfaz se sirve desde el mismo origen que la API, y se exporta a HTML
+Es la decisión que hace posible el modo local, y toca a las dos mitades del producto.
+
+Las páginas pasan de componentes de servidor a componentes de cliente que piden sus
+datos por `fetch`. Con eso, `next build` con `output: "export"` produce HTML estático que
+`laplace ui` sirve desde Python: **la misma aplicación**, sin necesitar Node en la
+máquina de quien la instala. Un `pip install` no puede exigir una cadena de herramientas
+de JavaScript.
+
+Consecuencias, todas asumidas a propósito:
+
+* **Un solo origen.** En local, Python sirve la interfaz y la API. En la nube, Next
+  reescribe `/api` y `/health` hacia el backend. Así no hay ninguna URL de backend
+  incrustada en el build, ni CORS que abrir, ni una variable que se olvide en un
+  despliegue y deje la pantalla en blanco.
+* **Las rutas con identificador pasan a parámetro de consulta**: `/traza?id=…` y
+  `/problema?id=…`. Una exportación estática no puede generar páginas para trazas que
+  todavía no existen.
+* **La exportación en JSON se arma en el navegador** con la traza ya cargada, en vez de
+  con una ruta de servidor sólo para poner una cabecera.
+* Se pierde el renderizado en servidor. Para una herramienta que mira lo que acaba de
+  pasar y no cachea nada, el intercambio sale a cuenta: se gana que el producto quepa
+  en un `pip install`.
+
+El HTML exportado lo mete en el paquete `python scripts/build_ui.py`, que es un paso de
+publicación. En el repositorio no está versionado: `laplace ui` lo busca en
+`apps/web/out` cuando corre desde el árbol de código.
+
+### D-070 — `laplace demo` manda datos inventados, y lo dice tres veces
+Quien acaba de instalar no tiene todavía un agente instrumentado, y una pantalla vacía no
+enseña qué hace el producto. `laplace demo` emite ocho trazas con las tres patologías que
+Laplace detecta. Van a un proyecto llamado `demo`, salen por la misma ingesta que
+cualquier traza real —no hay una vía especial— y tanto el comando como la pantalla de
+estado vacío avisan de que son datos simulados. La alternativa era enseñar un panel vacío
+en el primer minuto, que es la peor primera impresión posible.
+
+### D-071 — SQLite deduplica por clave primaria, no por motor de fusión
+El exportador OTLP reintenta en timeouts y 5xx. En ClickHouse eso lo resuelve
+`ReplacingMergeTree` más `LIMIT 1 BY`; en SQLite lo resuelve `INSERT OR REPLACE` sobre
+`(project_id, trace_id, span_id)`, que es más simple y exacto desde el primer momento.
+Es la única diferencia de comportamiento entre los dos almacenes, y va a favor del local.
+
+### D-072 — La demo no puede sembrar el generador de números aleatorios
+`random.seed(0)` en el ejemplo hacía deterministas los identificadores de traza de
+OpenTelemetry, que salen de `random.getrandbits`. Dos ejecuciones de `laplace demo`
+producían las mismas trazas, indistinguibles entre proyectos. Se quitó, y de paso la
+ficha de una traza pide su proyecto al leerla: un identificador de traza es único dentro
+de un proyecto, no entre proyectos.
+

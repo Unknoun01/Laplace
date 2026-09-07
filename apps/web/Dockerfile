@@ -6,6 +6,10 @@ RUN npm install --no-audit --no-fund
 
 FROM node:22-alpine AS builder
 WORKDIR /app
+# Con `output: standalone`, Next resuelve las reescrituras durante el build y las
+# congela en el servidor que genera. El destino tiene que estar aqui, no en el runtime.
+ARG LAPLACE_API_URL=http://backend:8000
+ENV LAPLACE_API_URL=$LAPLACE_API_URL
 COPY --from=deps /app/node_modules ./node_modules
 COPY apps/web .
 RUN npm run build

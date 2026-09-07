@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { TopBar } from "@/components/TopBar";
-import { listProjects } from "@/lib/api";
-import type { ProjectStats } from "@/lib/types";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -25,16 +23,7 @@ try {
   document.body.dataset.mode = "simple";
 }`;
 
-export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  // Si el backend no responde, la barra se pinta vacía y cada pantalla explica el
-  // problema: el armazón nunca debe caerse por eso.
-  let projects: ProjectStats[] = [];
-  try {
-    projects = await listProjects();
-  } catch {
-    projects = [];
-  }
-
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="es">
       <head>
@@ -51,7 +40,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <script dangerouslySetInnerHTML={{ __html: RESTORE_MODE }} />
         <div className="shell wide">
           <Suspense fallback={<div className="topbar" />}>
-            <TopBar projects={projects} />
+            <TopBar />
           </Suspense>
           {children}
         </div>

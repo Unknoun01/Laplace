@@ -2,26 +2,17 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import threading
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import clickhouse_connect
-from laplace.schema import (
-    Cost,
-    LLMAttributes,
-    RetrievalAttributes,
-    Span,
-    SpanEvent,
-    TokenUsage,
-    ToolAttributes,
-    TraceSummary,
-)
+from laplace.schema import Span
 
 from ..config import Settings
+from ._rows import COLUMNS, row_to_span, row_to_summary, span_to_row
+from ._rows import utc as _utc
 from .base import (
     ModelUsage,
     ProjectStats,
@@ -30,99 +21,13 @@ from .base import (
     TracePage,
     Window,
     WindowSummary,
+    disambiguate,
     encode_cursor,
 )
 
 logger = logging.getLogger("laplace.storage")
 
 _SCHEMA = Path(__file__).with_name("clickhouse_schema.sql")
-
-#: Orden de columnas de la tabla `spans`. Los inserts se construyen contra esta lista.
-COLUMNS = (
-    "project_id",
-    "trace_id",
-    "span_id",
-    "parent_span_id",
-    "name",
-    "span_type",
-    "status",
-    "status_message",
-    "start_time",
-    "end_time",
-    "duration_ms",
-    "gen_ai_system",
-    "operation",
-    "request_model",
-    "response_model",
-    "response_id",
-    "input_tokens",
-    "output_tokens",
-    "cached_input_tokens",
-    "cache_write_tokens",
-    "cache_write_1h_tokens",
-    "reasoning_tokens",
-    "usage_estimated",
-    "cost_input_usd",
-    "cost_output_usd",
-    "cost_total_usd",
-    "cost_unknown",
-    "price_rate",
-    "cost_cache_read_usd",
-    "cost_cache_write_usd",
-    "cost_cache_saving_usd",
-    "cost_rate_assumed",
-    "price_note",
-    "billing_tier",
-    "billing_region",
-    "input_messages",
-    "output_messages",
-    "llm_params",
-    "finish_reasons",
-    "tool_name",
-    "tool_call_id",
-    "tool_arguments",
-    "tool_output",
-    "retrieval_query",
-    "retrieval_documents",
-    "input_payload",
-    "output_payload",
-    "session_id",
-    "user_id",
-    "tags",
-    "metadata",
-    "dedup_hash",
-    "step_key",
-    "step_label",
-    "step_hint",
-    "events",
-    "attributes",
-)
-
-
-def _json(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        return value
-    try:
-        return json.dumps(value, ensure_ascii=False, default=str)
-    except (TypeError, ValueError):
-        return json.dumps({"_unserializable": str(value)[:2000]})
-
-
-def _loads(text: str, fallback: Any) -> Any:
-    if not text:
-        return fallback
-    try:
-        return json.loads(text)
-    except (TypeError, ValueError):
-        return text
-
-
-def _utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
 
 # ---------------------------------------------------------------------------------
 # Consultas del motor de detección (Fase 2)
@@ -268,78 +173,10 @@ class ClickHouseStore:
             return 0
         self._client.insert(
             "spans",
-            [self._to_row(span) for span in spans],
+            [span_to_row(span) for span in spans],
             column_names=list(COLUMNS),
         )
         return len(spans)
-
-    @staticmethod
-    def _to_row(span: Span) -> list[Any]:
-        llm = span.llm
-        tool = span.tool
-        retrieval = span.retrieval
-        usage = llm.usage if llm else TokenUsage()
-        cost = llm.cost if llm else Cost()
-
-        return [
-            span.project_id,
-            span.trace_id,
-            span.span_id,
-            span.parent_span_id or "",
-            span.name,
-            span.type,
-            span.status,
-            span.status_message,
-            _utc(span.start_time),
-            _utc(span.end_time),
-            float(span.duration_ms),
-            (llm.system if llm else None) or "",
-            (llm.operation if llm else None) or "",
-            (llm.request_model if llm else None) or "",
-            (llm.response_model if llm else None) or "",
-            (llm.response_id if llm else None) or "",
-            usage.input_tokens,
-            usage.output_tokens,
-            usage.cached_input_tokens,
-            usage.cache_write_tokens,
-            usage.cache_write_1h_tokens,
-            usage.reasoning_tokens,
-            1 if usage.estimated else 0,
-            cost.input_usd,
-            cost.output_usd,
-            cost.total_usd,
-            1 if cost.unknown else 0,
-            cost.rate,
-            cost.cache_read_usd,
-            cost.cache_write_usd,
-            cost.cache_saving_usd,
-            1 if cost.rate_assumed else 0,
-            cost.rate_note,
-            (llm.billing_tier if llm else None) or "standard",
-            (llm.billing_region if llm else None) or "global",
-            _json(llm.input_messages) if llm else "",
-            _json(llm.output_messages) if llm else "",
-            _json(llm.params) if llm else "",
-            list(llm.finish_reasons) if llm else [],
-            (tool.name if tool else None) or "",
-            (tool.call_id if tool else None) or "",
-            _json(tool.arguments) if tool else "",
-            _json(tool.output) if tool else "",
-            (retrieval.query if retrieval else None) or "",
-            _json(retrieval.documents) if retrieval else "",
-            _json(span.input),
-            _json(span.output),
-            span.session_id or "",
-            span.user_id or "",
-            list(span.tags),
-            _json(span.metadata),
-            span.dedup_hash,
-            span.step_key,
-            span.step_label,
-            span.step_hint,
-            _json([event.model_dump(mode="json") for event in span.events]),
-            _json(span.attributes),
-        ]
 
     # -- lectura -------------------------------------------------------------------
 
@@ -406,9 +243,7 @@ class ClickHouseStore:
             ORDER BY {orden}
             LIMIT %(limit)s
         """
-        rows = self._client.query(sql, parameters=params).result_rows
-
-        traces = [self._to_summary(row) for row in rows]
+        traces = [row_to_summary(r) for r in _named(self._client.query(sql, parameters=params))]
         # Sólo hay siguiente página si ésta vino llena y el orden es paginable.
         full_page = len(traces) == params["limit"]
         next_cursor = encode_cursor(traces[-1]) if full_page and por_tiempo else None
@@ -468,71 +303,6 @@ class ClickHouseStore:
 
         return ("WHERE " + " AND ".join(clauses) if clauses else "", params)
 
-    @staticmethod
-    def _to_summary(row: tuple) -> TraceSummary:
-        (
-            trace_id,
-            project_id,
-            root_name,
-            started,
-            ended,
-            duration_ms,
-            span_count,
-            error_count,
-            llm_call_count,
-            tool_call_count,
-            input_tokens,
-            output_tokens,
-            cached_input_tokens,
-            cache_write_tokens,
-            cache_write_1h_tokens,
-            reasoning_tokens,
-            cost_input_usd,
-            cost_output_usd,
-            cost_total_usd,
-            cache_saving_usd,
-            unknown_cost_spans,
-            assumed_rate_spans,
-            session_id,
-            user_id,
-            modelos,
-        ) = row
-
-        return TraceSummary(
-            trace_id=trace_id,
-            project_id=project_id,
-            root_name=root_name,
-            status="error" if error_count else "ok",
-            start_time=_utc(started),
-            end_time=_utc(ended),
-            duration_ms=float(duration_ms),
-            span_count=int(span_count),
-            error_count=int(error_count),
-            llm_call_count=int(llm_call_count),
-            tool_call_count=int(tool_call_count),
-            usage=TokenUsage(
-                input_tokens=int(input_tokens),
-                output_tokens=int(output_tokens),
-                cached_input_tokens=int(cached_input_tokens),
-                cache_write_tokens=int(cache_write_tokens),
-                cache_write_1h_tokens=int(cache_write_1h_tokens),
-                reasoning_tokens=int(reasoning_tokens),
-            ),
-            unknown_cost_spans=int(unknown_cost_spans),
-            assumed_rate_spans=int(assumed_rate_spans),
-            cost=Cost(
-                input_usd=float(cost_input_usd),
-                output_usd=float(cost_output_usd),
-                total_usd=float(cost_total_usd),
-                cache_saving_usd=float(cache_saving_usd),
-                unknown=int(unknown_cost_spans) > 0,
-                rate_assumed=int(assumed_rate_spans) > 0,
-            ),
-            models=sorted(modelos or []),
-            session_id=session_id or None,
-            user_id=user_id or None,
-        )
-
     def get_trace_spans(self, trace_id: str, project_id: str | None = None) -> list[Span]:
         params: dict[str, Any] = {"trace_id": trace_id}
         where = "trace_id = %(trace_id)s"
@@ -558,98 +328,7 @@ class ClickHouseStore:
             )
             ORDER BY start_time
         """
-        rows = self._client.query(sql, parameters=params).result_rows
-        return [self._to_span(row) for row in rows]
-
-    @staticmethod
-    def _to_span(row: tuple) -> Span:
-        r = dict(zip(COLUMNS, row, strict=True))
-        span_type = r["span_type"]
-
-        llm = None
-        if span_type == "llm":
-            llm = LLMAttributes(
-                system=r["gen_ai_system"] or None,
-                operation=r["operation"] or None,
-                request_model=r["request_model"] or None,
-                response_model=r["response_model"] or None,
-                response_id=r["response_id"] or None,
-                usage=TokenUsage(
-                    input_tokens=int(r["input_tokens"]),
-                    output_tokens=int(r["output_tokens"]),
-                    cached_input_tokens=int(r["cached_input_tokens"]),
-                    cache_write_tokens=int(r["cache_write_tokens"]),
-                    cache_write_1h_tokens=int(r["cache_write_1h_tokens"]),
-                    reasoning_tokens=int(r["reasoning_tokens"]),
-                    estimated=bool(r["usage_estimated"]),
-                ),
-                cost=Cost(
-                    input_usd=float(r["cost_input_usd"]),
-                    output_usd=float(r["cost_output_usd"]),
-                    total_usd=float(r["cost_total_usd"]),
-                    cache_read_usd=float(r["cost_cache_read_usd"]),
-                    cache_write_usd=float(r["cost_cache_write_usd"]),
-                    cache_saving_usd=float(r["cost_cache_saving_usd"]),
-                    unknown=bool(r["cost_unknown"]),
-                    rate_assumed=bool(r["cost_rate_assumed"]),
-                    rate_note=r["price_note"],
-                    rate=r["price_rate"],
-                ),
-                billing_tier=r["billing_tier"] or "standard",
-                billing_region=r["billing_region"] or "global",
-                input_messages=_loads(r["input_messages"], []) or [],
-                output_messages=_loads(r["output_messages"], []) or [],
-                params=_loads(r["llm_params"], {}) or {},
-                finish_reasons=list(r["finish_reasons"] or []),
-            )
-
-        tool = None
-        if span_type == "tool":
-            tool = ToolAttributes(
-                name=r["tool_name"] or None,
-                call_id=r["tool_call_id"] or None,
-                arguments=_loads(r["tool_arguments"], None),
-                output=_loads(r["tool_output"], None),
-            )
-
-        retrieval = None
-        if span_type == "retrieval":
-            retrieval = RetrievalAttributes(
-                query=r["retrieval_query"] or None,
-                documents=_loads(r["retrieval_documents"], []) or [],
-            )
-
-        raw_events = _loads(r["events"], []) or []
-        events = [SpanEvent(**event) for event in raw_events if isinstance(event, dict)]
-
-        return Span(
-            span_id=r["span_id"],
-            trace_id=r["trace_id"],
-            parent_span_id=r["parent_span_id"] or None,
-            project_id=r["project_id"],
-            name=r["name"],
-            type=span_type,
-            status=r["status"],
-            status_message=r["status_message"],
-            start_time=_utc(r["start_time"]),
-            end_time=_utc(r["end_time"]),
-            duration_ms=float(r["duration_ms"]),
-            llm=llm,
-            tool=tool,
-            retrieval=retrieval,
-            input=_loads(r["input_payload"], None),
-            output=_loads(r["output_payload"], None),
-            session_id=r["session_id"] or None,
-            user_id=r["user_id"] or None,
-            tags=list(r["tags"] or []),
-            metadata=_loads(r["metadata"], {}) or {},
-            dedup_hash=r["dedup_hash"],
-        step_key=r["step_key"],
-        step_label=r["step_label"],
-        step_hint=r["step_hint"],
-            events=events,
-            attributes=_loads(r["attributes"], {}) or {},
-        )
+        return [row_to_span(r) for r in _named(self._client.query(sql, parameters=params))]
 
     def list_projects(self) -> list[ProjectStats]:
         sql = """
@@ -742,6 +421,14 @@ class ClickHouseStore:
             last_seen=_utc(ultimo) if ultimo else None,
         )
 
+    @property
+    def repeated_groups_sql(self) -> str:
+        return REPEATED_GROUPS_SQL
+
+    @property
+    def model_usage_sql(self) -> str:
+        return MODEL_USAGE_SQL
+
     def repeated_groups(
         self, project_id: str, window: Window, *, min_repeats: int = 3, limit: int = 20
     ) -> list[RepeatedGroup]:
@@ -778,7 +465,7 @@ class ClickHouseStore:
             for r in _named(self._client.query(sql, parameters=params))
         ]
         # Mismo título para dos pasos distintos es peor que no enseñarlos.
-        return _disambiguate(grupos)
+        return disambiguate(grupos)
 
     def model_usage(
         self, project_id: str, window: Window, *, min_calls: int = 5, limit: int = 50
@@ -808,7 +495,7 @@ class ClickHouseStore:
             )
             for r in _named(self._client.query(sql, parameters=params))
         ]
-        return _disambiguate(usos)
+        return disambiguate(usos)
 
     def traces_with_repeats(
         self, project_id: str | None, trace_ids: list[str], *, min_repeats: int = 3
@@ -870,8 +557,7 @@ class ClickHouseStore:
             ORDER BY start_time
             LIMIT %(limit)s
         """
-        rows = self._client.query(sql, parameters=params).result_rows
-        return [self._to_span(row) for row in rows]
+        return [row_to_span(r) for r in _named(self._client.query(sql, parameters=params))]
 
     def delete_project(self, project_id: str) -> None:
         """Borra todos los spans de un proyecto.
@@ -897,25 +583,6 @@ class ClickHouseStore:
 def _named(result: Any) -> list[dict[str, Any]]:
     """Filas como diccionarios, con las etiquetas que puso la propia consulta."""
     return [dict(zip(result.column_names, row, strict=True)) for row in result.result_rows]
-
-
-def _disambiguate(filas: list[Any]) -> list[Any]:
-    """Dos pasos llamados desde el mismo sitio necesitan títulos distintos.
-
-    Pasa siempre que alguien no decora sus funciones internas: todas sus llamadas al
-    modelo cuelgan del mismo span, así que comparten sitio de llamada, que es la
-    etiqueta. Son pasos distintos —las instrucciones no se parecen en nada— y enseñar
-    dos tarjetas con el mismo título en el panel de ahorro es peor que no enseñarlas.
-    Se les añade el principio de sus instrucciones, que es lo que de verdad las separa.
-    """
-    repetidas = {f.name for f in filas if sum(1 for g in filas if g.name == f.name) > 1}
-    if not repetidas:
-        return filas
-    for fila in filas:
-        pista = getattr(fila, "hint", "")
-        if fila.name in repetidas and pista and pista != fila.name:
-            fila.name = f"{fila.name} — «{pista}»"
-    return filas
 
 
 def _statements(sql: str) -> list[str]:

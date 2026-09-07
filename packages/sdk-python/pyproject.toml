@@ -29,9 +29,16 @@ dependencies = [
     "pydantic>=2.0",
 ]
 
+[project.scripts]
+laplace = "laplace.cli:main"
+
 [project.optional-dependencies]
 openai = ["openai>=1.0"]
 anthropic = ["anthropic>=0.30"]
+# Todo lo que hace falta para `laplace ui`: el backend con su almacén SQLite y el
+# servidor. No entra por defecto porque un SDK de trazas no puede arrastrar FastAPI a
+# la imagen de producción de nadie (D-068).
+ui = ["laplace-backend>=0.1.0", "uvicorn[standard]>=0.29"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
@@ -48,9 +55,13 @@ path = "laplace/version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["laplace"]
+# La interfaz exportada. La deja ahí `python scripts/build_ui.py` antes de publicar;
+# en el repositorio no está, y `laplace ui` la busca en `apps/web/out` (D-069).
+artifacts = ["laplace/ui/**"]
 
 [tool.hatch.build.targets.sdist]
 include = ["laplace", "README.md", "pyproject.toml"]
+artifacts = ["laplace/ui/**"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

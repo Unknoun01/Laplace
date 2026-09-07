@@ -24,6 +24,20 @@ import laplace
 laplace.init(project="mi-agente")
 ```
 
+### Verlo funcionando en local
+
+```bash
+pip install "laplace-trace[ui]"
+laplace ui
+```
+
+Levanta el producto entero —ingesta, API e interfaz— contra un fichero SQLite en
+`~/.laplace`. Sin cuenta, sin servidor y sin Docker; nada sale de tu máquina. Apunta el
+SDK ahí con `endpoint="http://127.0.0.1:8100"`.
+
+`laplace demo` manda unas trazas simuladas, en un proyecto aparte, para ver qué detecta
+sin escribir código.
+
 A partir de ahí, cada llamada a OpenAI o Anthropic se traza sola. Para que los pasos
 propios del agente aparezcan en el árbol, decóralos:
 

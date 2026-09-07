@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { DEFAULT_DAYS, RANGES } from "@/lib/api";
+import { DEFAULT_DAYS, RANGES, listProjects } from "@/lib/api";
 import type { ProjectStats } from "@/lib/types";
 
 /**
@@ -12,10 +12,19 @@ import type { ProjectStats } from "@/lib/types";
  * El proyecto y el rango viven en la URL, no en un estado interno: así una pantalla
  * concreta se puede enlazar y compartir tal cual se está viendo.
  */
-export function TopBar({ projects }: { projects: ProjectStats[] }) {
+export function TopBar() {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
+
+  // La lista de proyectos la pide la propia barra. Si el backend no responde se queda
+  // vacía y cada pantalla explica el problema: el armazón nunca debe caerse por eso.
+  const [projects, setProjects] = useState<ProjectStats[]>([]);
+  useEffect(() => {
+    listProjects()
+      .then(setProjects)
+      .catch(() => setProjects([]));
+  }, []);
 
   const project = params.get("project") ?? projects[0]?.id ?? "";
   const days = Number(params.get("days")) || DEFAULT_DAYS;
@@ -57,7 +66,11 @@ export function TopBar({ projects }: { projects: ProjectStats[] }) {
         </Link>
         <Link
           href={`/trazas${query}`}
-          aria-current={pathname.startsWith("/trazas") ? "page" : undefined}
+          aria-current={
+            pathname.startsWith("/traza") || pathname.startsWith("/problema")
+              ? "page"
+              : undefined
+          }
         >
           Trazas
         </Link>

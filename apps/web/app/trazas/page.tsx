@@ -1,33 +1,13 @@
+"use client";
+
 import Link from "next/link";
-import { BackendDown, NoProject } from "@/components/states";
-import {
-  backendReachable,
-  getOverview,
-  listProjects,
-  listTraces,
-  parseDays,
-  windowStart,
-} from "@/lib/api";
+import { useSearchParams } from "next/navigation";
+import { Suspense } from "react";
+import { BackendDown, NoProject, TableSkeleton } from "@/components/states";
+import { getOverview, listProjects, listTraces, parseDays, windowStart } from "@/lib/api";
 import { duration, money, relative, timestamp, tokens } from "@/lib/format";
 import type { TraceSummary } from "@/lib/types";
-
-export const dynamic = "force-dynamic";
-
-interface PageProps {
-  searchParams: {
-    project?: string;
-    days?: string;
-    q?: string;
-    status?: string;
-    type?: string;
-    sort?: string;
-    cursor?: string;
-    /** Filtros que sólo ofrece el modo avanzado. */
-    model?: string;
-    min_cost?: string;
-    session?: string;
-  };
-}
+import { useApi } from "@/lib/useApi";
 
 const SORTS = [
   { value: "cost", label: "Más caras primero" },
@@ -48,36 +28,49 @@ const TYPES = [
  * No está escondida detrás de un diagnóstico. Un desarrollador entra aquí, filtra y
  * abre la traza que quiera, tenga o no un problema detectado.
  */
-export default async function TrazasPage({ searchParams }: PageProps) {
-  if (!(await backendReachable())) {
-    return <BackendDown apiUrl={process.env.LAPLACE_API_URL ?? "http://localhost:8000"} />;
-  }
+function Contenido() {
+  const params = useSearchParams();
+  const pedido = params.get("project") ?? "";
+  const days = parseDays(params.get("days") ?? undefined);
+  const sort = SORTS.some((s) => s.value === params.get("sort")) ? params.get("sort")! : "cost";
+  const q = params.get("q") ?? "";
+  const status = params.get("status") ?? "";
+  const type = params.get("type") ?? "";
+  const model = params.get("model") ?? "";
+  const minCostRaw = params.get("min_cost") ?? "";
+  const session = params.get("session") ?? "";
+  const cursor = params.get("cursor") ?? "";
 
-  const projects = await listProjects();
-  if (projects.length === 0) return <NoProject />;
+  const estado = useApi(async () => {
+    const projects = await listProjects();
+    if (projects.length === 0) return null;
+    const project = projects.find((p) => p.id === pedido)?.id ?? projects[0].id;
+    const minCost = Number(minCostRaw);
+    const [page, overview] = await Promise.all([
+      listTraces({
+        project_id: project,
+        since: windowStart(days),
+        search: q || undefined,
+        status: status || undefined,
+        span_type: type || undefined,
+        sort,
+        cursor: cursor || undefined,
+        model: model || undefined,
+        min_cost_usd: Number.isFinite(minCost) && minCost > 0 ? minCost : undefined,
+        session_id: session || undefined,
+      }),
+      // Sólo para poblar el desplegable de modelos del modo avanzado.
+      getOverview(project, days).catch(() => null),
+    ]);
+    return { project, page, overview };
+  }, [pedido, days, sort, q, status, type, model, minCostRaw, session, cursor]);
 
-  const project = projects.find((p) => p.id === searchParams.project)?.id ?? projects[0].id;
-  const days = parseDays(searchParams.days);
-  const sort = SORTS.some((s) => s.value === searchParams.sort) ? searchParams.sort! : "cost";
+  if (estado.fase === "cargando") return <TableSkeleton />;
+  if (estado.fase === "sin-backend") return <BackendDown />;
+  if (estado.fase === "error") return <BackendDown mensaje={estado.error.message} />;
+  if (estado.datos === null) return <NoProject />;
 
-  const minCost = Number(searchParams.min_cost);
-  const [page, overview] = await Promise.all([
-    listTraces({
-      project_id: project,
-      since: windowStart(days),
-      search: searchParams.q,
-      status: searchParams.status,
-      span_type: searchParams.type,
-      sort,
-      cursor: searchParams.cursor,
-      model: searchParams.model,
-      min_cost_usd: Number.isFinite(minCost) && minCost > 0 ? minCost : undefined,
-      session_id: searchParams.session,
-    }),
-    // Sólo para poblar el desplegable de modelos del modo avanzado.
-    getOverview(project, days).catch(() => null),
-  ]);
-
+  const { project, page, overview } = estado.datos;
   const repeats = new Set(page.with_repeats);
   const context = `project=${encodeURIComponent(project)}&days=${days}`;
   // Los modelos que de verdad aparecen en el rango, no una lista inventada.
@@ -101,27 +94,17 @@ export default async function TrazasPage({ searchParams }: PageProps) {
         <input
           type="search"
           name="q"
-          defaultValue={searchParams.q ?? ""}
+          defaultValue={q}
           placeholder="Buscar por paso, herramienta o id de traza"
           className="field grow"
           aria-label="Buscar"
         />
-        <select
-          name="status"
-          defaultValue={searchParams.status ?? ""}
-          className="field"
-          aria-label="Estado"
-        >
+        <select name="status" defaultValue={status} className="field" aria-label="Estado">
           <option value="">Cualquier estado</option>
           <option value="error">Sólo con error</option>
           <option value="ok">Sólo correctas</option>
         </select>
-        <select
-          name="type"
-          defaultValue={searchParams.type ?? ""}
-          className="field"
-          aria-label="Tipo de paso"
-        >
+        <select name="type" defaultValue={type} className="field" aria-label="Tipo de paso">
           {TYPES.map((t) => (
             <option key={t.value} value={t.value}>
               {t.label}
@@ -136,12 +119,7 @@ export default async function TrazasPage({ searchParams }: PageProps) {
           ))}
         </select>
         {/* Filtros de desarrollador: en Diagnóstico la barra se queda limpia. */}
-        <select
-          name="model"
-          defaultValue={searchParams.model ?? ""}
-          className="field pro"
-          aria-label="Modelo"
-        >
+        <select name="model" defaultValue={model} className="field pro" aria-label="Modelo">
           <option value="">Cualquier modelo</option>
           {modelos.map((m) => (
             <option key={m} value={m}>
@@ -153,7 +131,7 @@ export default async function TrazasPage({ searchParams }: PageProps) {
           type="text"
           inputMode="decimal"
           name="min_cost"
-          defaultValue={searchParams.min_cost ?? ""}
+          defaultValue={minCostRaw}
           placeholder="Coste mínimo"
           className="field pro"
           style={{ width: 130 }}
@@ -162,7 +140,7 @@ export default async function TrazasPage({ searchParams }: PageProps) {
         <input
           type="text"
           name="session"
-          defaultValue={searchParams.session ?? ""}
+          defaultValue={session}
           placeholder="session.id"
           className="field pro"
           style={{ width: 150 }}
@@ -176,9 +154,7 @@ export default async function TrazasPage({ searchParams }: PageProps) {
       {page.traces.length === 0 ? (
         <div className="state">
           <h2>Ninguna traza coincide</h2>
-          <p>
-            Prueba a quitar filtros o a ampliar el rango temporal en la barra de arriba.
-          </p>
+          <p>Prueba a quitar filtros o a ampliar el rango temporal en la barra de arriba.</p>
           <div className="actions">
             <Link href={`/trazas?${context}`} className="btn">
               Quitar filtros
@@ -246,7 +222,7 @@ function Row({
   return (
     <tr>
       <td>
-        <Link href={`/trazas/${trace.trace_id}?${context}`}>
+        <Link href={`/traza?${context}&id=${trace.trace_id}`}>
           <span>
             <i className={`dot ${failed ? "error" : "ok"}`} aria-label={failed ? "con error" : "ok"} />
             {trace.root_name || "(sin nombre)"}
@@ -289,5 +265,20 @@ function Row({
         {relative(trace.start_time)}
       </td>
     </tr>
+  );
+}
+
+
+/**
+ * `useSearchParams` obliga a un límite de Suspense para poder exportar la página como
+ * HTML estático: sin él, Next no sabe qué pintar antes de que el navegador conozca la
+ * URL. El esqueleto es el mismo que se ve mientras llegan los datos, así que no hay
+ * dos saltos.
+ */
+export default function TrazasPage() {
+  return (
+    <Suspense fallback={<TableSkeleton />}>
+      <Contenido />
+    </Suspense>
   );
 }

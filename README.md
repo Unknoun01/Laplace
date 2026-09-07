@@ -19,7 +19,7 @@ parte y los cimientos de las otras dos.
 | 1.4 | SDK de Python (`@observe` + auto-instrumentación) | ✅ |
 | 1.5 | Ingesta OTLP + API de lectura | ✅ |
 | 1.6 | Lista de trazas + vista de árbol | ✅ |
-| 1.7 | Modo local `laplace ui` con SQLite | pendiente |
+| 1.7 | Modo local `laplace ui` con SQLite | ✅ |
 | 2 | Detección de derroche y **panel de ahorro** | ✅ |
 | 2.b | Alertas (Slack) cuando se supera un umbral | pendiente |
 | 3 | **Diagnóstico automático** con modelo | pendiente |
@@ -99,7 +99,39 @@ marcado como **tarifa asumida** y la interfaz lo dice en modo avanzado. Ante la 
 elige siempre la interpretación que produce **menos** ahorro, nunca la que engorda
 nuestro número.
 
-## Arrancar en local
+## Empezar en un minuto
+
+Sin cuenta, sin servidor y sin Docker. Laplace entero corre en un proceso de Python
+contra un fichero SQLite en `~/.laplace`:
+
+```bash
+pip install "laplace-trace[ui]"
+laplace ui
+```
+
+Se abre el navegador. Para ver qué detecta antes de instrumentar nada:
+
+```bash
+laplace demo          # trazas simuladas, en un proyecto aparte
+```
+
+Y para que aparezcan las tuyas, una línea en tu agente:
+
+```python
+import laplace
+laplace.init(project="mi-agente", endpoint="http://127.0.0.1:8100")
+```
+
+Es **el mismo producto** que la versión de nube: la misma ingesta, las mismas tres
+reglas de detección, el mismo panel de ahorro y la misma interfaz. Lo único que cambia
+es dónde están las filas (D-015), y hay un test que compara los dos almacenes sobre los
+mismos spans para que no puedan derivar.
+
+Medido de verdad, en un entorno limpio: **55 segundos** desde no tener nada instalado
+hasta ver la primera traza en pantalla (49 s de `pip install`, 4 s de arranque, 2 s de
+ingesta).
+
+## Arrancar la instalación completa
 
 ```bash
 docker compose up

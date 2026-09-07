@@ -10,6 +10,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="LAPLACE_", env_file=".env", extra="ignore")
 
+    #: `clickhouse` en la nube, `sqlite` en local. Es lo ÚNICO que cambia entre los
+    #: dos modos: la ingesta, la API, las reglas y la interfaz son el mismo código.
+    store: str = "clickhouse"
+    #: Fichero del modo local. `laplace ui` lo pone en `~/.laplace/laplace.db`.
+    sqlite_path: str = "laplace.db"
+
     clickhouse_host: str = "localhost"
     clickhouse_port: int = 8123
     clickhouse_user: str = "laplace"

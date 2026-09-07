@@ -1,15 +1,14 @@
+"use client";
+
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 import { BigMoney, FindingCard, GapBar, Readout } from "@/components/pieces";
-import { BackendDown, NoProject, NoTracesYet, NothingToFix } from "@/components/states";
-import { backendReachable, getOverview, listProjects, parseDays } from "@/lib/api";
+import { BackendDown, Cargando, NoProject, NoTracesYet, NothingToFix } from "@/components/states";
+import { getOverview, listProjects, parseDays } from "@/lib/api";
 import { duration, money, number, percent, tokens } from "@/lib/format";
 import type { Overview } from "@/lib/types";
-
-export const dynamic = "force-dynamic";
-
-interface PageProps {
-  searchParams: { project?: string; days?: string };
-}
+import { useApi } from "@/lib/useApi";
 
 /**
  * Inicio: el dinero primero.
@@ -18,21 +17,27 @@ interface PageProps {
  * costar. Todo lo demás cuelga de ahí. La capa técnica (latencia, tokens, spans) sólo
  * aparece en modo avanzado.
  */
-export default async function DiagnosticoPage({ searchParams }: PageProps) {
-  if (!(await backendReachable())) {
-    return <BackendDown apiUrl={process.env.LAPLACE_API_URL ?? "http://localhost:8000"} />;
-  }
+function Contenido() {
+  const params = useSearchParams();
+  const pedido = params.get("project") ?? "";
+  const days = parseDays(params.get("days") ?? undefined);
 
-  const projects = await listProjects();
-  if (projects.length === 0) return <NoProject />;
+  const estado = useApi(async () => {
+    const projects = await listProjects();
+    if (projects.length === 0) return { project: "", overview: null };
+    const project = projects.find((p) => p.id === pedido)?.id ?? projects[0].id;
+    return { project, overview: await getOverview(project, days) };
+  }, [pedido, days]);
 
-  const project = projects.find((p) => p.id === searchParams.project)?.id ?? projects[0].id;
-  const days = parseDays(searchParams.days);
-  const overview = await getOverview(project, days);
-  const query = `?project=${encodeURIComponent(project)}&days=${days}`;
+  if (estado.fase === "cargando") return <Cargando />;
+  if (estado.fase === "sin-backend") return <BackendDown />;
+  if (estado.fase === "error") return <BackendDown mensaje={estado.error.message} />;
 
+  const { project, overview } = estado.datos;
+  if (!overview) return <NoProject />;
   if (overview.spans === 0) return <NoTracesYet project={project} />;
 
+  const query = `?project=${encodeURIComponent(project)}&days=${days}`;
   const ahorra = overview.monthly_avoidable_usd > 0;
   const proporcion =
     overview.monthly_cost_usd > 0
@@ -43,7 +48,8 @@ export default async function DiagnosticoPage({ searchParams }: PageProps) {
     <main className="reading">
       <section className="hero">
         <h1>
-          Tu agente «{project}», al ritmo de {days === 1 ? "las últimas 24 horas" : `estos ${days} días`}
+          Tu agente «{project}», al ritmo de{" "}
+          {days === 1 ? "las últimas 24 horas" : `estos ${days} días`}
         </h1>
 
         <div className="pair">
@@ -123,7 +129,7 @@ export default async function DiagnosticoPage({ searchParams }: PageProps) {
             <FindingCard
               key={finding.id}
               finding={finding}
-              href={`/problemas/${encodeURIComponent(finding.id)}${query}`}
+              href={`/problema${query}&id=${encodeURIComponent(finding.id)}`}
             />
           ))}
           <p className="disclaimer">
@@ -197,5 +203,20 @@ function Caveats({ overview, proporcion }: { overview: Overview; proporcion: num
         <p key={index}>{aviso}</p>
       ))}
     </div>
+  );
+}
+
+
+/**
+ * `useSearchParams` obliga a un límite de Suspense para poder exportar la página como
+ * HTML estático: sin él, Next no sabe qué pintar antes de que el navegador conozca la
+ * URL. El esqueleto es el mismo que se ve mientras llegan los datos, así que no hay
+ * dos saltos.
+ */
+export default function DiagnosticoPage() {
+  return (
+    <Suspense fallback={<Cargando />}>
+      <Contenido />
+    </Suspense>
   );
 }

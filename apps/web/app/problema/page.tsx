@@ -1,32 +1,42 @@
+"use client";
+
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 import { StaticTree } from "@/components/StaticTree";
-import { BackendDown, NotFound } from "@/components/states";
-import { backendReachable, getFinding, getTrace, listProjects, parseDays } from "@/lib/api";
+import { BackendDown, NotFound, TableSkeleton } from "@/components/states";
+import { getFinding, getTrace, listProjects, parseDays } from "@/lib/api";
 import { duration, money, oneLine } from "@/lib/format";
 import type { FindingDetail, Span } from "@/lib/types";
-
-export const dynamic = "force-dynamic";
-
-interface PageProps {
-  params: { id: string };
-  searchParams: { project?: string; days?: string };
-}
+import { useApi } from "@/lib/useApi";
 
 /**
  * Ficha de un problema: qué pasa → por qué → (avanzado: cómo lo hemos detectado,
  * la traza y los atributos) → cómo arreglarlo → cuánto te ahorras.
  */
-export default async function ProblemaPage({ params, searchParams }: PageProps) {
-  if (!(await backendReachable())) {
-    return <BackendDown apiUrl={process.env.LAPLACE_API_URL ?? "http://localhost:8000"} />;
-  }
+function Contenido() {
+  const params = useSearchParams();
+  const findingId = params.get("id") ?? "";
+  const pedido = params.get("project") ?? "";
+  const days = parseDays(params.get("days") ?? undefined);
 
-  const projects = await listProjects();
-  const project = projects.find((p) => p.id === searchParams.project)?.id ?? projects[0]?.id ?? "";
-  const days = parseDays(searchParams.days);
+  const estado = useApi(async () => {
+    const projects = await listProjects();
+    const project = projects.find((p) => p.id === pedido)?.id ?? projects[0]?.id ?? "";
+    const finding = await getFinding(findingId, project, days);
+    const trace = finding?.sample_trace_id
+      ? await getTrace(finding.sample_trace_id, project)
+      : null;
+    return { project, finding, trace };
+  }, [findingId, pedido, days]);
+
+  if (estado.fase === "cargando") return <TableSkeleton />;
+  if (estado.fase === "sin-backend") return <BackendDown />;
+  if (estado.fase === "error") return <BackendDown mensaje={estado.error.message} />;
+
+  const { project, finding, trace } = estado.datos;
   const query = `?project=${encodeURIComponent(project)}&days=${days}`;
 
-  const finding = await getFinding(decodeURIComponent(params.id), project, days);
   if (!finding) {
     return (
       <NotFound
@@ -37,7 +47,6 @@ export default async function ProblemaPage({ params, searchParams }: PageProps) 
     );
   }
 
-  const trace = finding.sample_trace_id ? await getTrace(finding.sample_trace_id) : null;
   const flaggedHash = finding.tech.find((t) => t.label === "laplace.dedup_hash")?.value;
 
   return (
@@ -85,7 +94,7 @@ export default async function ProblemaPage({ params, searchParams }: PageProps) 
           <h2>La traza completa</h2>
           <p>
             Una ejecución real donde se ve el problema.{" "}
-            <Link href={`/trazas/${trace.summary.trace_id}${query}`}>
+            <Link href={`/traza${query}&id=${trace.summary.trace_id}`}>
               Ábrela para navegarla paso a paso →
             </Link>
           </p>
@@ -139,21 +148,12 @@ export default async function ProblemaPage({ params, searchParams }: PageProps) 
 
       <div className="actions">
         {/* Recarga completa a propósito: recalcula el diagnóstico desde cero. */}
-        <a href={`/problemas/${encodeURIComponent(finding.id)}${query}`} className="btn primary">
+        <a href={`/problema${query}&id=${encodeURIComponent(finding.id)}`} className="btn primary">
           Ya lo he arreglado, vuelve a medir
         </a>
         <Link href={`/trazas${query}&q=${encodeURIComponent(nameOf(finding))}`} className="btn">
           Ver las trazas afectadas
         </Link>
-        {trace && (
-          <a
-            className="btn pro"
-            href={`/api/export/${trace.summary.trace_id}`}
-            download={`${trace.summary.trace_id}.json`}
-          >
-            Exportar traza en JSON
-          </a>
-        )}
       </div>
     </main>
   );
@@ -232,6 +232,8 @@ function SpanAttributes({ span }: { span: Span }) {
     ["span_id", span.span_id],
     ["laplace.span.type", span.type],
     ["laplace.dedup_hash", span.dedup_hash],
+    ["laplace.step.key", span.step_key],
+    ["laplace.step.label", span.step_label],
     ["duration_ms", span.duration_ms.toFixed(0)],
   ];
   if (span.tool?.name) rows.push(["gen_ai.tool.name", span.tool.name]);
@@ -274,5 +276,20 @@ function Markup({ text }: { text: string }) {
         return <span key={index}>{part}</span>;
       })}
     </p>
+  );
+}
+
+
+/**
+ * `useSearchParams` obliga a un límite de Suspense para poder exportar la página como
+ * HTML estático: sin él, Next no sabe qué pintar antes de que el navegador conozca la
+ * URL. El esqueleto es el mismo que se ve mientras llegan los datos, así que no hay
+ * dos saltos.
+ */
+export default function ProblemaPage() {
+  return (
+    <Suspense fallback={<TableSkeleton />}>
+      <Contenido />
+    </Suspense>
   );
 }

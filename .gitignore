@@ -28,3 +28,8 @@ data/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Interfaz exportada dentro del paquete de Python: la genera scripts/build_ui.py
+# antes de publicar, no se versiona.
+packages/sdk-python/laplace/ui/
+apps/web/out/

@@ -24,7 +24,6 @@ from laplace.schema import Span
 from pydantic import BaseModel, Field
 
 from .pricing import get_price_table
-from .storage import clickhouse as ch
 from .storage.base import ModelUsage, RepeatedGroup, Window, WindowSummary
 
 logger = logging.getLogger("laplace.insights")
@@ -263,7 +262,7 @@ def _repetition_finding(group: RepeatedGroup, summary: WindowSummary, days: int)
 
 
 def _repetition_detail(
-    finding: Finding, group: RepeatedGroup, evidence: list[Span]
+    finding: Finding, group: RepeatedGroup, evidence: list[Span], query: str
 ) -> FindingDetail:
     cuesta = group.extra_cost_usd > 0
     detalle = FindingDetail(**finding.model_dump())
@@ -288,7 +287,7 @@ def _repetition_detail(
         f"por hash: repetirse dentro de una ejecución es un bucle, aparecer en ejecuciones "
         f"distintas es uso normal."
     )
-    detalle.detection_query = ch.REPEATED_GROUPS_SQL.strip()
+    detalle.detection_query = query.strip()
 
     detalle.fix_steps = [
         FixStep(
@@ -414,7 +413,9 @@ def _expensive_model_finding(
     )
 
 
-def _expensive_model_detail(finding: Finding, usage: ModelUsage) -> FindingDetail:
+def _expensive_model_detail(
+    finding: Finding, usage: ModelUsage, query: str
+) -> FindingDetail:
     table = get_price_table()
     price = table.lookup(usage.model)
     cheaper = table.lookup(price.alternative) if price and price.alternative else None
@@ -438,7 +439,7 @@ def _expensive_model_detail(finding: Finding, usage: ModelUsage) -> FindingDetai
         f"tiene una alternativa más barata de la misma familia en la tabla de precios. El "
         f"ahorro se recalcula con los tokens reales, no con una estimación."
     )
-    detalle.detection_query = ch.MODEL_USAGE_SQL.strip()
+    detalle.detection_query = query.strip()
 
     modelo_alt = price.alternative if price else ""
     detalle.fix_steps = [
@@ -592,7 +593,9 @@ def _fixed_context_finding(usage: ModelUsage, summary: WindowSummary, days: int)
     )
 
 
-def _fixed_context_detail(finding: Finding, usage: ModelUsage) -> FindingDetail:
+def _fixed_context_detail(
+    finding: Finding, usage: ModelUsage, query: str
+) -> FindingDetail:
     table = get_price_table()
     encadenado = _cheaper_model_if_recommended(usage)
     price = table.lookup(encadenado or usage.model)
@@ -619,7 +622,7 @@ def _fixed_context_detail(finding: Finding, usage: ModelUsage) -> FindingDetail:
         f"usa como suelo del prompt fijo: es una aproximación conservadora, porque la parte "
         f"común real puede ser mayor."
     )
-    detalle.detection_query = ch.MODEL_USAGE_SQL.strip()
+    detalle.detection_query = query.strip()
 
     detalle.fix_steps = [
         FixStep(
@@ -829,7 +832,7 @@ def detail(store: Any, project_id: str, window: Window, finding_id: str) -> Find
                 continue
             finding = _repetition_finding(group, summary, dias)
             evidencia = store.sample_repetition(project_id, window, group.dedup_hash)
-            return _repetition_detail(finding, group, evidencia)
+            return _repetition_detail(finding, group, evidencia, store.repeated_groups_sql)
         return None
 
     if kind in ("modelo_caro", "contexto_fijo"):
@@ -843,9 +846,10 @@ def detail(store: Any, project_id: str, window: Window, finding_id: str) -> Find
             uso = _without_duplicates(bruto, duplicados)
             if kind == "modelo_caro":
                 finding = _expensive_model_finding(uso, summary, dias)
-                return _expensive_model_detail(finding, uso) if finding else None
+                consulta = store.model_usage_sql
+                return _expensive_model_detail(finding, uso, consulta) if finding else None
             finding = _fixed_context_finding(uso, summary, dias)
-            return _fixed_context_detail(finding, uso) if finding else None
+            return _fixed_context_detail(finding, uso, store.model_usage_sql) if finding else None
         return None
 
     return None

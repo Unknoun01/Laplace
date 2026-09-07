@@ -1,31 +1,35 @@
+"use client";
+
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 import { TraceTree } from "@/components/TraceTree";
-import { BackendDown, NotFound } from "@/components/states";
-import { backendReachable, getTrace, parseDays } from "@/lib/api";
+import { BackendDown, NotFound, TableSkeleton } from "@/components/states";
+import { getTrace, parseDays } from "@/lib/api";
 import { duration, money, number, timestamp } from "@/lib/format";
 import { allNodes } from "@/lib/tree";
-import type { TraceSummary } from "@/lib/types";
-
-export const dynamic = "force-dynamic";
-
-interface PageProps {
-  params: { traceId: string };
-  searchParams: { project?: string; days?: string };
-}
+import type { Trace, TraceSummary } from "@/lib/types";
+import { useApi } from "@/lib/useApi";
 
 /**
  * Una traza, entera y navegable. Se llega desde el explorador o desde la ficha de un
  * problema, y desde aquí se vuelve al problema: observar y diagnosticar conectados en
  * los dos sentidos.
  */
-export default async function TrazaPage({ params, searchParams }: PageProps) {
-  if (!(await backendReachable())) {
-    return <BackendDown apiUrl={process.env.LAPLACE_API_URL ?? "http://localhost:8000"} />;
-  }
+function Contenido() {
+  const params = useSearchParams();
+  const traceId = params.get("id") ?? "";
+  const days = parseDays(params.get("days") ?? undefined);
+  const proyecto = params.get("project") ?? "";
 
-  const trace = await getTrace(params.traceId);
-  const days = parseDays(searchParams.days);
-  const project = searchParams.project ?? trace?.summary.project_id ?? "";
+  const estado = useApi(() => getTrace(traceId, proyecto || undefined), [traceId, proyecto]);
+
+  if (estado.fase === "cargando") return <TableSkeleton />;
+  if (estado.fase === "sin-backend") return <BackendDown />;
+  if (estado.fase === "error") return <BackendDown mensaje={estado.error.message} />;
+
+  const trace = estado.datos;
+  const project = proyecto || trace?.summary.project_id || "";
   const context = `project=${encodeURIComponent(project)}&days=${days}`;
 
   if (!trace) {
@@ -78,7 +82,7 @@ export default async function TrazaPage({ params, searchParams }: PageProps) {
           ) : (
             <>
               Esta ejecución repite pasos con la misma entrada.{" "}
-              <Link href={`/problemas/${encodeURIComponent(findingId!)}?${context}`}>
+              <Link href={`/problema?${context}&id=${encodeURIComponent(findingId!)}`}>
                 Ver qué cuesta y cómo arreglarlo →
               </Link>
             </>
@@ -89,15 +93,33 @@ export default async function TrazaPage({ params, searchParams }: PageProps) {
       <TraceTree trace={trace} />
 
       <div className="actions">
-        <a
-          className="btn pro"
-          href={`/api/export/${trace.summary.trace_id}`}
-          download={`${trace.summary.trace_id}.json`}
-        >
-          Exportar traza en JSON
-        </a>
+        <ExportarJSON trace={trace} />
       </div>
     </main>
+  );
+}
+
+/**
+ * Descarga la traza tal cual la devuelve la API.
+ *
+ * El JSON se arma en el navegador con lo que ya está cargado: así no hace falta una
+ * ruta de servidor sólo para adjuntar una cabecera, y funciona igual servido desde
+ * Python que desde Node (D-069).
+ */
+function ExportarJSON({ trace }: { trace: Trace }) {
+  const descargar = () => {
+    const blob = new Blob([JSON.stringify(trace, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const enlace = document.createElement("a");
+    enlace.href = url;
+    enlace.download = `${trace.summary.trace_id}.json`;
+    enlace.click();
+    URL.revokeObjectURL(url);
+  };
+  return (
+    <button type="button" className="btn pro" onClick={descargar}>
+      Exportar traza en JSON
+    </button>
   );
 }
 
@@ -184,5 +206,20 @@ function Head({ summary }: { summary: TraceSummary }) {
         )}
       </div>
     </div>
+  );
+}
+
+
+/**
+ * `useSearchParams` obliga a un límite de Suspense para poder exportar la página como
+ * HTML estático: sin él, Next no sabe qué pintar antes de que el navegador conozca la
+ * URL. El esqueleto es el mismo que se ve mientras llegan los datos, así que no hay
+ * dos saltos.
+ */
+export default function TrazaPage() {
+  return (
+    <Suspense fallback={<TableSkeleton />}>
+      <Contenido />
+    </Suspense>
   );
 }

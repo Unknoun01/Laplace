@@ -69,10 +69,13 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      args:
+        LAPLACE_API_URL: http://backend:8000
     container_name: laplace-web
     environment:
-      # El frontend lee desde el servidor (Server Components), por eso apunta al
-      # nombre del servicio y no a localhost.
+      # El navegador habla siempre con el mismo origen y Next hace de puente hacia el
+      # backend (ver `rewrites` en next.config.mjs). Así la interfaz no lleva ninguna
+      # URL incrustada en el build y no hay CORS que abrir (D-069).
       LAPLACE_API_URL: http://backend:8000
     ports:
       - "3000:3000"

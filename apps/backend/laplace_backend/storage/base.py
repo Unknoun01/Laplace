@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from laplace.schema import Span, TraceSummary
 
@@ -170,9 +170,42 @@ class TracePage:
     next_cursor: str | None = None
 
 
+def disambiguate(filas: list[Any]) -> list[Any]:
+    """Dos pasos llamados desde el mismo sitio necesitan títulos distintos.
+
+    Vive aquí, no en un almacén concreto, porque el criterio tiene que ser el mismo en
+    los dos: un hallazgo no puede titularse distinto según dónde estén las filas. Pasa
+    siempre que alguien no decora sus funciones internas, que es el caso normal
+    (D-060): todas sus llamadas cuelgan del mismo span, así que comparten la etiqueta.
+    Se les añade el principio de sus instrucciones, que es lo que de verdad las separa.
+    """
+    repetidas = {f.name for f in filas if sum(1 for g in filas if g.name == f.name) > 1}
+    if not repetidas:
+        return filas
+    for fila in filas:
+        pista = getattr(fila, "hint", "")
+        if fila.name in repetidas and pista and pista != fila.name:
+            fila.name = f"{fila.name} — «{pista}»"
+    return filas
+
+
 @runtime_checkable
 class SpanStore(Protocol):
     """Lo que el backend necesita de un almacén de trazas."""
+
+    @property
+    def repeated_groups_sql(self) -> str:
+        """La consulta que detecta repeticiones, tal cual se ejecuta.
+
+        La interfaz enseña al usuario **la consulta que de verdad se ha ejecutado** en
+        «cómo lo hemos detectado». Como cada almacén tiene la suya —SQLite no tiene
+        `uniqExact` ni `argMax`—, la pide aquí en vez de importar la de ClickHouse, que
+        es lo que hacía antes y habría mentido en modo local (D-067).
+        """
+
+    @property
+    def model_usage_sql(self) -> str:
+        """La consulta que agrega el uso por paso, tal cual se ejecuta."""
 
     def migrate(self) -> None:
         """Crea el esquema si no existe. Idempotente."""

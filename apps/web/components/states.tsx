@@ -1,4 +1,16 @@
+"use client";
+
 import Link from "next/link";
+
+/**
+ * El endpoint al que apuntar el SDK: el origen desde el que se está sirviendo esta
+ * pantalla. En modo local es `http://127.0.0.1:8100`, y decirlo aquí ahorra el viaje a
+ * la documentación que el modo local promete no hacer falta.
+ */
+function endpointActual(): string {
+  if (typeof window === "undefined") return "";
+  return window.location.origin;
+}
 
 /**
  * Estados. Son lo que separa una demo de un producto acabado: un proyecto vacío, un
@@ -6,20 +18,31 @@ import Link from "next/link";
  * pantalla rota.
  */
 
-export function BackendDown({ apiUrl }: { apiUrl: string }) {
+export function BackendDown({ mensaje }: { mensaje?: string }) {
   return (
     <div className="state bad">
       <h2>No podemos conectar con el backend</h2>
       <p>
-        No responde en <code>{apiUrl}</code>. Levanta la infraestructura con{" "}
-        <code>docker compose up</code> y vuelve a intentarlo.
+        No responde. Si estás en local, arráncalo con <code>laplace ui</code>; si es la
+        instalación completa, con <code>docker compose up</code>.
       </p>
+      {mensaje && <pre>{mensaje}</pre>}
       <div className="actions">
-        <Link href="/" className="btn primary">
+        <a href="." className="btn primary">
           Reintentar
-        </Link>
+        </a>
       </div>
     </div>
+  );
+}
+
+/** Mientras llegan los datos. Sobrio: es lo que se ve durante 200 ms, no una pantalla. */
+export function Cargando() {
+  return (
+    <main className="reading">
+      <HeroSkeleton />
+      <CardsSkeleton />
+    </main>
   );
 }
 
@@ -31,10 +54,12 @@ export function NoProject() {
         En cuanto tu agente envíe su primera ejecución, aparecerá aquí. Instrumentarlo es
         una línea:
       </p>
-      <pre>{'import laplace\n\nlaplace.init(project="mi-agente")'}</pre>
+      <pre>
+        {`import laplace\n\nlaplace.init(\n    project=\"mi-agente\",\n    endpoint=\"${endpointActual()}\",\n)`}
+      </pre>
       <p style={{ marginTop: 18 }}>
-        ¿Sólo quieres verlo funcionando? Lanza el agente de ejemplo del repositorio:{" "}
-        <code>python examples/agente_ejemplo.py</code>
+        ¿Sólo quieres verlo funcionando? <code>laplace demo</code> manda unas trazas de
+        ejemplo —datos inventados, en un proyecto aparte— para ver qué detecta.
       </p>
     </div>
   );
@@ -49,7 +74,9 @@ export function NoTracesYet({ project }: { project: string }) {
         Prueba a ampliar el rango en la barra de arriba, o lanza tu agente con Laplace
         activado.
       </p>
-      <pre>{'import laplace\n\nlaplace.init(project="' + project + '")'}</pre>
+      <pre>
+        {`import laplace\n\nlaplace.init(\n    project=\"${project}\",\n    endpoint=\"${endpointActual()}\",\n)`}
+      </pre>
     </div>
   );
 }

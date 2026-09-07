@@ -11,7 +11,7 @@ COPY packages/sdk-python /app/packages/sdk-python
 COPY apps/backend /app/apps/backend
 
 RUN pip install --no-cache-dir /app/packages/sdk-python \
- && pip install --no-cache-dir /app/apps/backend
+ && pip install --no-cache-dir "/app/apps/backend[cloud]"
 
 EXPOSE 8000
 
