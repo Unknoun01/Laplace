@@ -14,13 +14,17 @@ from ..config import Settings
 from ._rows import COLUMNS, row_to_span, row_to_summary, span_to_row
 from ._rows import utc as _utc
 from .base import (
+    Bucket,
     ModelUsage,
     ProjectStats,
     RepeatedGroup,
+    StepFacts,
     TraceFilter,
     TracePage,
     Window,
+    WindowFacts,
     WindowSummary,
+    densify,
     disambiguate,
     encode_cursor,
 )
@@ -60,6 +64,8 @@ SELECT
     sum(duracion - duracion_primera) AS extra_duracion,
     sum(tok_in - tok_in_primera)     AS extra_tok_in,
     sum(tok_out - tok_out_primera)   AS extra_tok_out,
+    sum(sin_tarifa - sin_tarifa_primera) AS extra_sin_tarifa,
+    sum(asumida - asumida_primera)       AS extra_asumida,
     max(n)                           AS max_por_traza,
     argMax(trace_id, n)              AS traza_ejemplo
 FROM (
@@ -79,7 +85,12 @@ FROM (
         sum(input_tokens)                  AS tok_in,
         argMin(input_tokens, start_time)   AS tok_in_primera,
         sum(output_tokens)                 AS tok_out,
-        argMin(output_tokens, start_time)  AS tok_out_primera
+        argMin(output_tokens, start_time)  AS tok_out_primera,
+        -- Sólo de las ocurrencias sobrantes: son las únicas cuyo dinero reclamamos.
+        sum(cost_unknown)                        AS sin_tarifa,
+        argMin(cost_unknown, start_time)         AS sin_tarifa_primera,
+        sum(cost_rate_assumed)                   AS asumida,
+        argMin(cost_rate_assumed, start_time)    AS asumida_primera
     FROM spans FINAL
     WHERE {WINDOW_WHERE} AND dedup_hash != ''
     GROUP BY trace_id, dedup_hash
@@ -90,6 +101,44 @@ FROM (
 GROUP BY paso, modelo
 ORDER BY extra_coste DESC, extra_spans DESC
 LIMIT %(limit)s
+"""
+
+#: La ventana troceada en tramos, **agregando primero por traza**.
+#:
+#: El orden importa y es lo que separa este panel de un Grafana peor: si se agrupase
+#: por span, «coste del tramo» subiría con el volumen y no diría nada. Agrupando antes
+#: por traza, cada tramo sabe cuántas ejecuciones hubo y qué costó cada una.
+#:
+#: La duración es de traza —de su primer span a su último— porque los spans se solapan
+#: y sumarlos daría un número sin significado.
+TIMESERIES_SQL = f"""
+SELECT
+    intDiv(dateDiff('second', toDateTime64(%(origen)s, 3), inicio), %(ancho_s)s) AS tramo,
+    count()          AS trazas,
+    sum(pasos)       AS pasos,
+    sum(llamadas)    AS llamadas,
+    sum(fallo)       AS trazas_con_error,
+    sum(coste)       AS coste,
+    sum(tok_in)      AS tok_in,
+    sum(tok_out)     AS tok_out,
+    sum(dateDiff('millisecond', inicio, fin)) AS duracion
+FROM (
+    SELECT
+        trace_id,
+        min(start_time)          AS inicio,
+        max(end_time)            AS fin,
+        count()                  AS pasos,
+        countIf(span_type = 'llm') AS llamadas,
+        sum(cost_total_usd)      AS coste,
+        sum(input_tokens)        AS tok_in,
+        sum(output_tokens)       AS tok_out,
+        max(status = 'error')    AS fallo
+    FROM spans FINAL
+    WHERE {WINDOW_WHERE}
+    GROUP BY trace_id
+)
+GROUP BY tramo
+ORDER BY tramo
 """
 
 #: Uso por (paso, modelo): base de las reglas de modelo caro y de contexto fijo.
@@ -113,6 +162,8 @@ SELECT
     sum(cache_write_tokens + cache_write_1h_tokens) AS cache_escrito,
     sum(cost_cache_saving_usd) AS ahorro_cache,
     sum(cost_total_usd)      AS coste,
+    countIf(cost_unknown = 1)      AS sin_tarifa,
+    countIf(cost_rate_assumed = 1) AS tarifa_asumida,
     avg(output_tokens)       AS media_salida,
     avg(input_tokens)        AS media_entrada,
     min(input_tokens)        AS min_entrada,
@@ -459,6 +510,8 @@ class ClickHouseStore:
                 extra_duration_ms=float(r["extra_duracion"]),
                 extra_input_tokens=int(r["extra_tok_in"]),
                 extra_output_tokens=int(r["extra_tok_out"]),
+                extra_unknown_cost_spans=int(r["extra_sin_tarifa"] or 0),
+                extra_assumed_rate_spans=int(r["extra_asumida"] or 0),
                 max_per_trace=int(r["max_por_traza"]),
                 sample_trace_id=r["traza_ejemplo"],
             )
@@ -488,6 +541,8 @@ class ClickHouseStore:
                 cache_write_tokens=int(r["cache_escrito"]),
                 cache_saving_usd=float(r["ahorro_cache"]),
                 cost_usd=float(r["coste"]),
+                unknown_cost_spans=int(r["sin_tarifa"] or 0),
+                assumed_rate_spans=int(r["tarifa_asumida"] or 0),
                 avg_output_tokens=float(r["media_salida"]),
                 avg_input_tokens=float(r["media_entrada"]),
                 min_input_tokens=int(r["min_entrada"]),
@@ -558,6 +613,74 @@ class ClickHouseStore:
             LIMIT %(limit)s
         """
         return [row_to_span(r) for r in _named(self._client.query(sql, parameters=params))]
+
+    # -- panel (Fase 4) ---------------------------------------------------------------
+
+    def timeseries(
+        self, project_id: str, window: Window, bucket_minutes: int
+    ) -> list[Bucket]:
+        params = self._window_params(project_id, window)
+        params["origen"] = _utc(window.since)
+        params["ancho_s"] = bucket_minutes * 60
+        filas = _named(self._client.query(TIMESERIES_SQL, parameters=params))
+        return densify(
+            [
+                (
+                    int(r["tramo"]),
+                    Bucket(
+                        start=window.since,
+                        traces=int(r["trazas"]),
+                        spans=int(r["pasos"] or 0),
+                        llm_calls=int(r["llamadas"] or 0),
+                        error_traces=int(r["trazas_con_error"] or 0),
+                        cost_usd=float(r["coste"] or 0.0),
+                        input_tokens=int(r["tok_in"] or 0),
+                        output_tokens=int(r["tok_out"] or 0),
+                        duration_ms_sum=float(r["duracion"] or 0.0),
+                    ),
+                )
+                for r in filas
+            ],
+            window,
+            bucket_minutes,
+        )
+
+    def window_facts(self, project_id: str, since: Any, until: Any) -> WindowFacts:
+        params = {"project_id": project_id, "since": _utc(since), "until": _utc(until)}
+        cabecera = self._client.query(
+            f"""SELECT uniqExact(trace_id), sum(cost_total_usd)
+                FROM spans FINAL WHERE {WINDOW_WHERE}""",
+            parameters=params,
+        ).result_rows
+        modelos = self._client.query(
+            f"""SELECT DISTINCT request_model FROM spans FINAL
+                WHERE {WINDOW_WHERE} AND request_model != ''""",
+            parameters=params,
+        ).result_rows
+        herramientas = self._client.query(
+            f"""SELECT DISTINCT if(tool_name != '', tool_name, name) FROM spans FINAL
+                WHERE {WINDOW_WHERE} AND span_type = 'tool'""",
+            parameters=params,
+        ).result_rows
+        pasos = self._client.query(
+            f"""SELECT if(step_label != '', step_label, name) AS paso,
+                       sum(cost_total_usd), count()
+                FROM spans FINAL WHERE {WINDOW_WHERE}
+                GROUP BY paso""",
+            parameters=params,
+        ).result_rows
+        fila = cabecera[0] if cabecera else (0, 0.0)
+        return WindowFacts(
+            traces=int(fila[0] or 0),
+            cost_usd=float(fila[1] or 0.0),
+            models={r[0] for r in modelos if r[0]},
+            tools={r[0] for r in herramientas if r[0]},
+            steps={
+                r[0]: StepFacts(cost_usd=float(r[1] or 0.0), calls=int(r[2]))
+                for r in pasos
+                if r[0]
+            },
+        )
 
     def delete_project(self, project_id: str) -> None:
         """Borra todos los spans de un proyecto.

@@ -1,6 +1,7 @@
 import type {
   FindingDetail,
   Overview,
+  Panel,
   ProjectStats,
   Trace,
   TraceListPage,
@@ -62,6 +63,10 @@ export function parseDays(raw: string | undefined): number {
 
 export function getOverview(projectId: string, days: number): Promise<Overview> {
   return get<Overview>("/api/overview", { project_id: projectId, days });
+}
+
+export function getPanel(projectId: string, days: number): Promise<Panel> {
+  return get<Panel>("/api/panel", { project_id: projectId, days });
 }
 
 export async function getFinding(

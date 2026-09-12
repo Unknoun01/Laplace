@@ -557,6 +557,12 @@ El HTML exportado lo mete en el paquete `python scripts/build_ui.py`, que es un 
 publicación. En el repositorio no está versionado: `laplace ui` lo busca en
 `apps/web/out` cuando corre desde el árbol de código.
 
+**Revisada el 8 de septiembre de 2026 y confirmada.** La pregunta era si merecía la pena
+recuperar el renderizado en servidor. No: mantener una sola aplicación pesa más que el
+SSR en una herramienta que mira lo que acaba de pasar y no cachea nada, y exigir Node
+para un `pip install` rompería el modo local, que es la puerta de entrada al producto.
+No se revierte.
+
 ### D-070 — `laplace demo` manda datos inventados, y lo dice tres veces
 Quien acaba de instalar no tiene todavía un agente instrumentado, y una pantalla vacía no
 enseña qué hace el producto. `laplace demo` emite ocho trazas con las tres patologías que
@@ -578,3 +584,237 @@ producían las mismas trazas, indistinguibles entre proyectos. Se quitó, y de p
 ficha de una traza pide su proyecto al leerla: un identificador de traza es único dentro
 de un proyecto, no entre proyectos.
 
+
+## 2026-09-08 — La proyección deja de mentir, y las alertas a Slack (§3)
+
+### D-073 — Por debajo de un día de datos no se proyecta a mes; se enseña lo gastado
+Era lo más urgente que quedaba abierto: con una hora de datos, el panel anunciaba
+**468 $/mes**. Había un aviso en pantalla, y no bastaba. El número se lee antes que el
+aviso, y una cifra absurda en la primera pantalla no se corrige leyendo el párrafo de
+debajo: quema la confianza en todo lo demás. Y esa primera pantalla es exactamente el
+momento del modo local recién instalado.
+
+El criterio cambia de «proyecta y avisa» a «proyecta sólo cuando puedas»:
+
+* Con menos de `MIN_DAYS_FOR_PROJECTION` (un día) de datos observados,
+  `monthly_cost_usd`, `monthly_avoidable_usd`, `monthly_necessary_usd` y el
+  `monthly_saving_usd` de cada hallazgo valen **`None`**, no cero. Cero se lee como «no
+  cuesta nada», que es lo contrario de lo que queremos decir.
+* En su lugar existen siempre `window_cost_usd`, `window_avoidable_usd` y
+  `window_necessary_usd`: dinero medido, ya gastado. La pantalla enseña eso y dice desde
+  cuándo: «te ha costado 0,65 $ — en menos de un minuto de datos».
+* **La ventana usada es visible en los dos casos.** Cuando se proyecta, se dice desde
+  cuántos días se extrapola —los observados, no los del selector—; cuando no, se dice
+  cuánto se lleva midiendo y cuánto falta para que aparezca la previsión.
+* Gasto y ahorro comparten base **siempre**, y ahora también comparten la decisión de
+  proyectar o no: `_projection_base()` es el único sitio que la toma. Es la regresión de
+  D-058 con dos formas nuevas de repetirse (un total proyectado contra un ahorro
+  observado, o al revés), así que tiene su propio test.
+
+Dos efectos secundarios buenos:
+
+* **Se cae el suelo de una hora de `_observed_days`.** Existía para que la división no
+  explotase, y de paso convertía «llevas diez segundos de datos» en «llevas una hora»,
+  que es una ventana que nadie ha observado. Ahora la división está protegida por la
+  puerta de la proyección, así que el número puede decir la verdad.
+* **Los hallazgos se ordenan por dinero ya gastado**, no por el proyectado. Da
+  exactamente el mismo orden —la proyección multiplica a todos por lo mismo— pero existe
+  también cuando no hay proyección.
+
+**Descartado:** dejar sólo el aviso (es lo que ya había y no funciona); proyectar con un
+intervalo de confianza (una barra de error sobre una hora de datos es rigor decorativo
+sobre una muestra que no lo aguanta); usar el mínimo entre lo proyectado y algún tope
+(inventar un techo es inventar otra cifra).
+
+### D-074 — Una alerta por hallazgo y periodo de calma: agrupación *y* silencio
+El riesgo de este punto no es no avisar, es avisar de más. Una alerta que se repite se
+ignora, y en cuanto se ignora una se ignoran todas. El criterio elegido, que es a la vez
+agrupación y periodo de calma:
+
+1. **Un proyecto, un mensaje.** Todos los hallazgos que vencen en el mismo ciclo viajan
+   en una sola notificación. Seis mensajes seguidos se leen como spam.
+2. **Periodo de calma por hallazgo** (`quiet_hours`, 24 h por defecto). Tras avisar de
+   un hallazgo no se vuelve a avisar de él hasta que pase, **aunque el problema siga
+   ahí**. Es el freno principal.
+3. **Empeorar no reabre el silencio.** «Volvemos a avisar porque ha subido» suena
+   razonable y es la puerta trasera por la que regresa la repetición: cualquier cifra
+   oscila, así que cualquier umbral de empeoramiento acaba disparando solo.
+4. **Un hallazgo sólo se olvida tras un periodo de calma entero sin verse.** Si se
+   olvidara en cuanto baja del umbral, uno que baila alrededor del umbral entraría y
+   saldría del estado y cada reentrada contaría como «nuevo». Por eso se guarda
+   `seen_at` además de `notified_at`.
+5. **No hay mensajes de «resuelto».** Son otro mensaje por problema, y el problema ya se
+   ve en la pantalla.
+6. **El mensaje dice cuántos está callando.** Si no, el silencio se lee como que el
+   problema ha desaparecido.
+
+El umbral se compara contra **dinero ya gastado en la ventana**, no contra la proyección
+mensual. Con D-073, un proyecto recién instalado no tiene proyección; si el umbral la
+mirase, no podría alertar nunca, que es justo cuando más se agradece. Además el dinero
+gastado es un hecho y la proyección es una estimación: se dispara sobre el hecho.
+
+Un hallazgo que sólo cuesta tiempo (`costs_money=False`) nunca cruza un umbral en
+dólares, así que **no alerta**. Es deliberado: una alerta de coste habla de coste, y sale
+en la pantalla con los segundos que tira.
+
+**Descartado:** un mensaje por hallazgo (ruido); avisar en cada ciclo mientras el
+problema exista (es literalmente el fallo que hay que evitar); un resumen diario fijo a
+una hora (llega tarde para lo nuevo y repite lo viejo); dejar el periodo de calma en el
+código (un agente de juguete y uno de producción no tienen el mismo «esto merece que me
+despierten», y por eso `min_usd`, `quiet_hours`, `muted` y `muted_kinds` son por
+proyecto, en un JSON que se versiona y se revisa en un PR).
+
+### D-075 — Las alertas son el mismo código en local y en la nube; el estado va donde ya va lo mutable
+Nada de «en local no tiene sentido». El ciclo de alertas vive en el `lifespan` de la
+misma aplicación FastAPI que sirve la API, así que `laplace ui` —que es esa aplicación
+con otras variables de entorno— alerta igual que un despliegue con Docker. Se encienden
+con las mismas variables (`LAPLACE_ALERTS_*`), y el CLI sólo rellena
+`LAPLACE_ALERTS_BASE_URL` con su propio puerto para que el enlace de la alerta abra la
+ficha del problema en el Laplace que tienes delante.
+
+Lo único que cambia es dónde se recuerda qué se ha avisado, y cambia igual que todo lo
+demás: **SQLite en local, Postgres en la nube**. Si no hay ninguno de los dos, el estado
+queda en memoria y se dice por el log que un reinicio puede repetir un aviso; es una
+degradación, no un modo de funcionamiento.
+
+Están **apagadas por defecto**. Nada que mande mensajes fuera se enciende solo. Y el
+webhook se valida contra `slack.com` antes de cada envío: una errata en la configuración
+no puede acabar publicando la factura de alguien en un host cualquiera.
+
+### D-076 — Un hallazgo con coste no fiable se anuncia como suelo, nunca como cifra
+La regla conservadora del proyecto, aplicada a lo que sale fuera. Cada hallazgo lleva
+ahora sus propios contadores de pasos sin tarifa (`unknown_cost_spans`) y de pasos
+cobrados a tarifa asumida (`assumed_rate_spans`), agregados por las mismas consultas que
+lo detectan; de ahí sale `cost_is_floor`. Antes esas marcas sólo existían a nivel de
+proyecto, así que un hallazgo limpio y uno dudoso se presentaban igual.
+
+Donde eso importa:
+
+* La alerta escribe «al menos 5,00 $», no «5,00 $», y añade por qué: hay pasos cuyo
+  modelo no está en la tabla o cuyo metro de facturación no se ha podido confirmar, así
+  que el coste real puede ser mayor, nunca menor.
+* La tarjeta del inicio antepone `≥` y lleva su etiqueta.
+* Un hallazgo con coste incompleto **cuenta menos de lo que vale** para el umbral, así
+  que puede quedarse por debajo y no alertar. Se acepta: equivocarse callando es el lado
+  correcto.
+
+El descuento anti-doble-conteo (`_without_duplicates`) resta tokens y llamadas pero no
+estos contadores. Deja marcado como suelo algún hallazgo que quizá ya no lo sea, que es
+otra vez el lado seguro del error.
+
+## 2026-09-08 — El panel (§4) y el modo en vivo
+
+### D-077 — El panel mide por unidad de trabajo, y dice la lectura con palabras
+Un panel de líneas con tokens y latencia no aporta nada frente a Grafana, así que este
+sólo existe por dos ideas. La primera: **las métricas protagonistas son todas por
+ejecución** —coste, tokens, pasos, duración— y los totales van debajo, en letra pequeña
+y con la etiqueta «como contexto». Si el gasto sube un 40 % y hay un 40 % más de
+ejecuciones no pasa nada; si sube con las mismas ejecuciones, hay degradación. Un panel
+de totales pinta las dos cosas igual.
+
+La segunda mitad de la idea es que **la lectura se dice en una frase**, no se deduce de
+dos series. `read_out()` compara el periodo con el inmediatamente anterior de la misma
+duración y emite un veredicto de seis:
+
+| Situación | Veredicto | Lo que se lee |
+|---|---|---|
+| Sube el gasto y suben las ejecuciones | `normal` | «Subida acompañada de más ejecuciones: normal.» |
+| Sube el gasto, ejecuciones planas | `revisar` | «Subida sin más ejecuciones: revisar.» |
+| Suben las dos | `mixto` | Se separa la parte de volumen de la de coste unitario |
+| **Bajan las ejecuciones y el gasto no** | `revisar` | La degradación que un panel de totales no ve |
+| Baja el coste por ejecución | `mejora` | |
+| Baja el gasto sólo por menos tráfico | `estable` | «no una mejora: si el tráfico vuelve, el gasto vuelve» |
+
+Debajo del veredicto van siempre las tres cifras que lo sostienen —gasto, ejecuciones y
+coste unitario— con su concordancia: «las ejecuciones **suben** un 40 %», no «sube».
+Una frase mal escrita hace dudar de los números que la acompañan.
+
+Un cambio por debajo del 10 % (`MATERIAL_CHANGE`) no es un cambio y no se dice su
+porcentaje: sin ese umbral, el panel gritaría «degradación» cada vez que alguien
+despliega un prompt un poco más largo. La duración por ejecución es **de traza**, de su
+primer span al último, y no suma de spans: los spans se solapan y sumarlos daría un
+número que no es la espera de nadie.
+
+**Descartado:** un panel de series temporales al uso (es un Grafana peor); percentiles
+por defecto (interesan para latencia, no para lo que cuesta una unidad de trabajo);
+mostrar sólo la variación sin las cifras absolutas (un «+40 %» sin saber sobre qué no se
+puede accionar).
+
+### D-078 — Un pico se atribuye con datos o se dice que no se sabe
+La segunda idea. Un pico sin causa es una alarma sin acción, y una causa inventada es
+peor que ninguna. El criterio, entero:
+
+* **Un pico es coste por ejecución, no gasto del tramo.** Una hora punta con el triple
+  de tráfico no es una anomalía, es un martes por la mañana; si el criterio fuese el
+  gasto, el panel señalaría cada hora de demanda y nadie volvería a mirarlo.
+* **La línea base es la mediana** de los tramos con ejecuciones, no la media: una media
+  contaminada por el propio pico sube con él y acaba escondiéndolo.
+* **Sin al menos seis tramos con datos no se habla de picos.** Con tres, un pico es la
+  mitad de la muestra y la mediana no es línea base de nada. Se dice por qué, no se
+  esconde la sección.
+* **Las causas son comprobables en las trazas**, y todas de la misma forma —«esto está
+  aquí y no estaba antes»—: un modelo que aparece por primera vez, una herramienta
+  nueva, un paso nuevo, o un paso que se lleva más del 40 % del sobrecoste **comparado
+  por ejecución** (en bruto saldría siempre el paso más caro del agente). La versión de
+  prompt entra aquí cuando exista la Fase 5, y el hueco ya está en la lista de tipos.
+* **Si nada de eso da resultado, se escribe «No identificamos la causa»** y se enlazan
+  igualmente las trazas del tramo. Es una respuesta honesta y accionable. Ninguna
+  correlación estadística, ningún «coincide con».
+* Cuando un paso se lleva más del 95 % del sobrecoste se dice «prácticamente todo» en
+  vez de un porcentaje: la parte de un paso puede pasar del 100 % del neto —si otro se
+  ha abaratado a la vez— y un «101 %» se lee como un error de cálculo aunque sea cierto.
+
+El enlace de cada pico lleva al explorador con el rango exacto del tramo y orden por
+coste: de la alerta al dato en un clic.
+
+### D-079 — Modo en vivo por polling; los WebSockets son una evolución, no un pendiente
+El explorador se refresca solo cada cinco segundos, con indicador y botón de pausa. Es
+polling contra la misma API de lectura que ya existe. Un socket obliga a un servidor con
+estado, a reconexión, a latidos y a un camino distinto en local y en la nube; mirar
+trazas es mirar lo que acaba de pasar, y cinco segundos no cambian ninguna decisión.
+Cuando haya volumen para que el coste del polling importe, se cambia por debajo sin
+tocar la pantalla.
+
+Cuatro detalles que no son opcionales:
+
+* **Sólo con el orden por más recientes y sin cursor.** Sobre un orden por coste, «lo
+  nuevo» no va arriba, y añadir filas al principio mentiría sobre el orden pedido. El
+  botón, en ese caso, cambia el orden en lugar de desactivarse en silencio.
+* **No se encadenan peticiones.** Si una tarda más que el intervalo no se lanza otra
+  encima: contra un backend lento, eso convierte una pestaña abierta en una carga.
+* **Al pausar se queda lo que ya ha llegado.** Borrarlo castigaría justo a quien ha
+  visto algo y quiere mirarlo con calma.
+* **Se para al desmontar.** Un intervalo huérfano sigue pidiendo para siempre.
+
+### D-080 — El periodo anterior tiene que ser utilizable, o no hay comparación
+Es D-073 otra vez, con otra cara. Comparar el rango actual contra un periodo anterior en
+el que el proyecto casi no existía produce «el gasto sube un 193.100 %», que es un
+número real y absurdo: sale de dividir entre casi nada, y quien lo lea dejará de creerse
+el resto de la pantalla, que sí es cierto. Ese número apareció en la primera prueba del
+panel con datos sembrados.
+
+Dos guardas, las dos en `comparable()`: el periodo anterior necesita **al menos 5
+ejecuciones** y estar **cubierto por datos al menos a la mitad**. Si no las cumple, todas
+las variaciones valen `None` —no cero—, el veredicto es `sin-base` y la pantalla dice el
+motivo concreto y que las cifras de abajo son lo observado, medido, sin comparación.
+
+Lo mismo dentro de la serie: un tramo sin ejecuciones tiene coste por ejecución `None`,
+se deja **en blanco** en la gráfica y se explica al pie. Pintarlo como cero dibujaría una
+bajada del coste que nadie ha tenido.
+
+### D-081 — La interfaz del árbol gana a la copia del paquete, y se dice cuál se sirve
+`_ui_dir()` buscaba primero `packages/sdk-python/laplace/ui`. Con ese orden, cualquier
+`scripts/build_ui.py` ejecutado alguna vez dejaba una copia que **tapaba en silencio**
+todos los `next build` posteriores: se desarrolla contra una interfaz vieja sin ningún
+aviso y sólo se nota cuando algo recién escrito no aparece. Costó un rato.
+
+Ahora gana `apps/web/out`. No hay conflicto en producción: dentro de un wheel esa ruta no
+existe, así que allí sólo hay un candidato. Y al arrancar se deja escrito por el log qué
+directorio se está sirviendo, y un aviso si hay una segunda copia construida sin usar.
+
+### D-082 — La duración de la serie se redondea al milisegundo en SQLite
+`julianday()` trabaja en días con coma flotante y a escala de milisegundo deja restos de
+microsegundo que ClickHouse, que cuenta con `dateDiff('millisecond')`, no tiene. Nadie
+mide una espera en microsegundos, y redondeando, las dos series son idénticas y el test
+de paridad del panel puede comparar exacto en vez de con una tolerancia que taparía una
+divergencia de verdad.

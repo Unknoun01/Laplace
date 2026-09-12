@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -49,6 +50,26 @@ def build_metadata(settings: Settings):
     return build_metadata_store(settings)
 
 
+def build_alerts(settings: Settings, store):
+    """El evaluador de alertas, o `None` si están apagadas.
+
+    Es el mismo objeto en local y en la nube: cambia dónde se guarda el estado, igual
+    que cambia dónde se guardan las trazas. `laplace ui` levanta las alertas con las
+    mismas variables de entorno que un despliegue (D-075).
+    """
+    if not settings.alerts_enabled:
+        return None
+    from .alerts import AlertConfig, AlertRunner, build_alert_state
+
+    config = AlertConfig(settings)
+    if not config.base_url:
+        logger.warning(
+            "las alertas van sin enlace: falta LAPLACE_ALERTS_BASE_URL con la raíz "
+            "pública de la interfaz"
+        )
+    return AlertRunner(store, config, build_alert_state(settings))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
@@ -71,7 +92,28 @@ async def lifespan(app: FastAPI):
         else f"{settings.clickhouse_host}:{settings.clickhouse_port}/{settings.clickhouse_database}"
     )
     logger.info("laplace backend listo — almacén=%s (%s)", settings.store, destino)
-    yield
+    _log_ui_dir()
+
+    app.state.alerts = build_alerts(settings, app.state.store)
+    tarea = None
+    if app.state.alerts is not None:
+        from .alerts import alert_loop
+
+        tarea = asyncio.create_task(
+            alert_loop(app.state.alerts, settings.alerts_interval_seconds)
+        )
+        logger.info(
+            "alertas a Slack activas — repaso cada %ds, umbral %s$, calma %sh",
+            settings.alerts_interval_seconds,
+            settings.alerts_min_usd,
+            settings.alerts_quiet_hours,
+        )
+
+    try:
+        yield
+    finally:
+        if tarea is not None:
+            tarea.cancel()
 
 
 app = FastAPI(
@@ -94,23 +136,59 @@ app.add_middleware(
 app.include_router(router)
 
 
-def _ui_dir() -> Path | None:
-    """Dónde están los ficheros de la interfaz, si están.
-
-    Se busca primero dentro del paquete del SDK —que es donde los mete el build de
-    distribución— y luego en el árbol del repositorio, para que `laplace ui` funcione
-    en desarrollo sin instalar nada. Si no hay ninguno, la API sigue en pie y sólo
-    falta la interfaz: se dice cómo construirla en lugar de servir un 404 mudo.
-    """
-    candidatos = []
+def _ui_candidates() -> list[Path]:
+    """Los sitios donde puede estar la interfaz, **en orden de preferencia**."""
+    candidatos = [Path(__file__).resolve().parents[3] / "apps" / "web" / "out"]
     try:
         import laplace
 
         candidatos.append(Path(laplace.__file__).parent / "ui")
     except Exception:  # noqa: BLE001
         pass
-    candidatos.append(Path(__file__).resolve().parents[3] / "apps" / "web" / "out")
-    return next((c for c in candidatos if (c / "index.html").exists()), None)
+    return candidatos
+
+
+def _ui_dir() -> Path | None:
+    """Dónde están los ficheros de la interfaz, si están.
+
+    **El árbol del repositorio gana a la copia del paquete**, y ese orden importa. Al
+    revés —que era como estaba— cualquier `scripts/build_ui.py` ejecutado alguna vez
+    dejaba una copia en `packages/sdk-python/laplace/ui` que **tapaba en silencio** los
+    `next build` posteriores: se desarrolla contra una interfaz vieja sin ningún aviso,
+    y sólo se nota cuando algo que acabas de escribir no aparece. Ya costó un rato una
+    vez.
+
+    Invertirlo no crea conflicto en producción: dentro de un wheel `apps/web/out` no
+    existe, así que allí sólo hay un candidato. Y para no dejarlo a la fe, al arrancar
+    se dice por el log qué directorio se está usando (`_log_ui_dir`).
+
+    Si no hay ninguno, la API sigue en pie y sólo falta la interfaz: se dice cómo
+    construirla en lugar de servir un 404 mudo.
+    """
+    return next((c for c in _ui_candidates() if (c / "index.html").exists()), None)
+
+
+def _log_ui_dir() -> None:
+    """Deja escrito al arrancar qué build se está sirviendo.
+
+    Saber eso es la diferencia entre depurar un cambio y depurar una copia vieja, y si
+    hay dos copias construidas lo dice: la que no se usa es exactamente la que va a
+    confundir a alguien dentro de tres semanas.
+    """
+    candidatos = _ui_candidates()
+    elegido = _ui_dir()
+    if elegido is None:
+        logger.warning(
+            "no encuentro la interfaz construida en %s", " ni ".join(map(str, candidatos))
+        )
+        return
+    logger.info("interfaz servida desde %s", elegido)
+    otras = [c for c in candidatos if c != elegido and (c / "index.html").exists()]
+    if otras:
+        logger.warning(
+            "hay otra copia construida que NO se está usando: %s",
+            ", ".join(str(c) for c in otras),
+        )
 
 
 @app.get("/{ruta:path}", include_in_schema=False)

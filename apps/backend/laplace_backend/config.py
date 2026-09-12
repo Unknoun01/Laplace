@@ -36,6 +36,26 @@ class Settings(BaseSettings):
 
     log_level: str = "info"
 
+    # -- alertas a Slack (Fase 2, punto 3) -------------------------------------------
+    #: Apagadas por defecto. Nada que mande mensajes fuera se enciende solo.
+    alerts_enabled: bool = False
+    #: El webhook vive en el entorno y no en el fichero de ajustes: es un secreto.
+    alerts_slack_webhook: str = ""
+    #: JSON con los ajustes por proyecto (umbral, silencio, webhook propio). Ver
+    #: `AlertConfig` en `alerts.py` para el formato.
+    alerts_config_path: str = ""
+    #: Raíz pública de la interfaz, para el enlace a la ficha del problema. Sin esto
+    #: la alerta se manda sin enlace: mejor eso que un enlace a ninguna parte.
+    alerts_base_url: str = ""
+    #: Cada cuánto se repasan los proyectos. No es la frecuencia con la que se avisa:
+    #: de eso se encarga el periodo de calma por hallazgo (D-074).
+    alerts_interval_seconds: int = 300
+    #: Ventana de análisis de las alertas, y umbral por defecto en dólares YA GASTADOS.
+    alerts_window_days: int = 7
+    alerts_min_usd: float = 1.0
+    #: Horas de silencio por hallazgo tras avisar de él.
+    alerts_quiet_hours: float = 24.0
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 import { BackendDown, NoProject, TableSkeleton } from "@/components/states";
 import { getOverview, listProjects, listTraces, parseDays, windowStart } from "@/lib/api";
 import { duration, money, relative, timestamp, tokens } from "@/lib/format";
-import type { TraceSummary } from "@/lib/types";
+import type { TraceListPage, TraceSummary } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
+import { LIVE_INTERVAL_MS, type Live, useLive } from "@/lib/useLive";
 
 const SORTS = [
   { value: "cost", label: "Más caras primero" },
@@ -29,6 +30,7 @@ const TYPES = [
  * abre la traza que quiera, tenga o no un problema detectado.
  */
 function Contenido() {
+  const router = useRouter();
   const params = useSearchParams();
   const pedido = params.get("project") ?? "";
   const days = parseDays(params.get("days") ?? undefined);
@@ -71,7 +73,6 @@ function Contenido() {
   if (estado.datos === null) return <NoProject />;
 
   const { project, page, overview } = estado.datos;
-  const repeats = new Set(page.with_repeats);
   const context = `project=${encodeURIComponent(project)}&days=${days}`;
   // Los modelos que de verdad aparecen en el rango, no una lista inventada.
   const modelos = [...new Set(page.traces.flatMap((t) => t.models))].sort();
@@ -162,50 +163,161 @@ function Contenido() {
           </div>
         </div>
       ) : (
-        <>
-          <table className="tbl">
-            <thead>
-              <tr>
-                <th>Traza</th>
-                <th className="pro">Modelos</th>
-                <th className="r hide-sm">Pasos</th>
-                <th className="r hide-sm simple-only">Tokens</th>
-                <th className="r pro">Entrada</th>
-                <th className="r pro">Salida</th>
-                <th className="r">Coste</th>
-                <th className="r hide-sm">Duración</th>
-                <th className="r hide-sm">Cuándo</th>
-              </tr>
-            </thead>
-            <tbody>
-              {page.traces.map((trace) => (
-                <Row
-                  key={trace.trace_id}
-                  trace={trace}
-                  context={context}
-                  looping={repeats.has(trace.trace_id)}
-                />
-              ))}
-            </tbody>
-          </table>
-
-          <div className="pager">
-            <span style={{ color: "var(--ink-3)" }}>
-              {page.traces.length} trazas
-              {page.next_cursor ? "" : " (todas las del rango)"}
-            </span>
-            {page.next_cursor && (
-              <Link
-                className="btn small"
-                href={`/trazas?${context}&sort=${sort}&cursor=${encodeURIComponent(page.next_cursor)}`}
-              >
-                Más antiguas →
-              </Link>
-            )}
-          </div>
-        </>
+        <Listado
+          page={page}
+          project={project}
+          days={days}
+          sort={sort}
+          cursor={cursor}
+          context={context}
+          onLive={() => {
+            // El modo en vivo sólo tiene sentido con las más recientes delante: sobre
+            // un orden por coste, «lo nuevo» no va arriba, y añadir filas al principio
+            // sería mentir sobre el orden. Un clic lleva al orden que sí lo permite.
+            const next = new URLSearchParams(params.toString());
+            next.set("sort", "recent");
+            next.delete("cursor");
+            router.push(`/trazas?${next.toString()}`);
+          }}
+          recargar={() =>
+            listTraces({
+              project_id: project,
+              since: windowStart(days),
+              search: q || undefined,
+              status: status || undefined,
+              span_type: type || undefined,
+              sort: "recent",
+              model: model || undefined,
+              session_id: session || undefined,
+            }).then((p) => p.traces)
+          }
+        />
       )}
     </main>
+  );
+}
+
+/**
+ * La tabla, con el modo en vivo.
+ *
+ * Vive aparte porque tiene estado propio y los hooks no pueden ir detrás de los
+ * retornos tempranos de `Contenido`. Sólo se ofrece «en vivo» cuando el orden es
+ * por recientes y no hay cursor: en cualquier otro caso, añadir filas arriba
+ * contradiría el orden que el usuario ha pedido.
+ */
+function Listado({
+  page,
+  project,
+  days,
+  sort,
+  cursor,
+  context,
+  recargar,
+  onLive,
+}: {
+  page: TraceListPage;
+  project: string;
+  days: number;
+  sort: string;
+  cursor: string;
+  context: string;
+  recargar: () => Promise<TraceSummary[]>;
+  onLive: () => void;
+}) {
+  const puedeVivir = sort === "recent" && !cursor;
+  const [enVivo, setEnVivo] = useState(false);
+  const live = useLive(page.traces, recargar, puedeVivir && enVivo);
+  const repeats = new Set(page.with_repeats);
+  const activo = puedeVivir && enVivo;
+  // Al pausar se dejan de pedir trazas, pero las que ya han llegado **se quedan**:
+  // borrarlas al pausar castigaría justo al que ha visto algo y quiere mirarlo con
+  // calma. Antes de encender nada, `live.traces` es exactamente la carga inicial.
+  const traces = live.traces;
+
+  return (
+    <>
+      <div className="pager" style={{ marginBottom: 6 }}>
+        <span style={{ color: "var(--ink-3)" }}>
+          {activo ? (
+            <Latido live={live} />
+          ) : (
+            `${traces.length} trazas${live.recibidas > 0 ? " · en pausa" : ""}`
+          )}
+        </span>
+        <button
+          type="button"
+          className={`live${activo ? " on" : ""}`}
+          onClick={puedeVivir ? () => setEnVivo((v) => !v) : onLive}
+          title={
+            puedeVivir
+              ? `Se comprueba cada ${LIVE_INTERVAL_MS / 1000} segundos`
+              : "El modo en vivo necesita el orden por más recientes: al pulsar se cambia"
+          }
+        >
+          <i aria-hidden />
+          {activo ? "En vivo · pausar" : "Ver en vivo"}
+        </button>
+      </div>
+
+      <table className="tbl">
+        <thead>
+          <tr>
+            <th>Traza</th>
+            <th className="pro">Modelos</th>
+            <th className="r hide-sm">Pasos</th>
+            <th className="r hide-sm simple-only">Tokens</th>
+            <th className="r pro">Entrada</th>
+            <th className="r pro">Salida</th>
+            <th className="r">Coste</th>
+            <th className="r hide-sm">Duración</th>
+            <th className="r hide-sm">Cuándo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {traces.map((trace) => (
+            <Row
+              key={trace.trace_id}
+              trace={trace}
+              context={context}
+              looping={repeats.has(trace.trace_id)}
+              nueva={live.nuevas.has(trace.trace_id)}
+            />
+          ))}
+        </tbody>
+      </table>
+
+      <div className="pager">
+        <span style={{ color: "var(--ink-3)" }}>
+          {traces.length} trazas{page.next_cursor ? "" : " (todas las del rango)"}
+        </span>
+        {page.next_cursor && (
+          <Link
+            className="btn small"
+            href={`/trazas?${context}&sort=${sort}&cursor=${encodeURIComponent(page.next_cursor)}`}
+          >
+            Más antiguas →
+          </Link>
+        )}
+      </div>
+    </>
+  );
+}
+
+/** El estado del modo en vivo, dicho en una línea. */
+function Latido({ live }: { live: Live }) {
+  if (live.fallando) return <>El backend no responde; se sigue intentando.</>;
+  return (
+    <>
+      {live.recibidas > 0
+        ? `${live.recibidas} ${live.recibidas === 1 ? "traza nueva" : "trazas nuevas"} desde que lo encendiste.`
+        : "Esperando trazas nuevas."}
+      {live.ultima && (
+        <span className="pro">
+          {" "}
+          Última comprobación: {timestamp(live.ultima.toISOString())}.
+        </span>
+      )}
+    </>
   );
 }
 
@@ -213,14 +325,16 @@ function Row({
   trace,
   context,
   looping,
+  nueva,
 }: {
   trace: TraceSummary;
   context: string;
   looping: boolean;
+  nueva?: boolean;
 }) {
   const failed = trace.status === "error";
   return (
-    <tr>
+    <tr className={nueva ? "nueva" : undefined}>
       <td>
         <Link href={`/traza?${context}&id=${trace.trace_id}`}>
           <span>

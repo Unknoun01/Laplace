@@ -237,9 +237,16 @@ export interface Finding {
   title: string;
   summary: string;
   window_waste_usd: number;
-  monthly_saving_usd: number;
+  /** Proyección a 30 días, o `null` cuando no hay días suficientes para proyectar. */
+  monthly_saving_usd: number | null;
+  /** Días de datos reales detrás de `window_waste_usd`. */
+  observed_days: number;
   currency: string;
   window_waste_ms: number;
+  /** La cifra es un SUELO: hay pasos sin tarifa o cobrados a tarifa asumida. */
+  cost_is_floor: boolean;
+  unknown_cost_spans: number;
+  assumed_rate_spans: number;
   difficulty: Difficulty;
   difficulty_label: string;
   scope_label: string;
@@ -266,9 +273,13 @@ export interface Overview {
   days: number;
   currency: string;
   window_cost_usd: number;
-  monthly_cost_usd: number;
-  monthly_avoidable_usd: number;
-  monthly_necessary_usd: number;
+  /** Evitable y necesario DENTRO de la ventana: dinero medido, existe siempre. */
+  window_avoidable_usd: number;
+  window_necessary_usd: number;
+  /** Las tres son `null` a la vez cuando no hay base para proyectar (D-073). */
+  monthly_cost_usd: number | null;
+  monthly_avoidable_usd: number | null;
+  monthly_necessary_usd: number | null;
   traces: number;
   spans: number;
   llm_calls: number;
@@ -287,9 +298,92 @@ export interface Overview {
   window_cache_saving_usd: number;
   /** Días de datos reales sobre los que se proyecta el mes. */
   observed_days: number;
-  /** La proyección sale de menos de 24 h de datos. */
-  thin_projection: boolean;
+  /** Hay días suficientes y los `monthly_*` traen cifra. */
+  projected: boolean;
+  /** Días de datos que hacen falta para poder proyectar. */
+  min_days_for_projection: number;
+  /** Qué parte del gasto observado es evitable, entre 0 y 1. */
+  avoidable_ratio: number;
   /** El evitable pasa del umbral de cautela: presentarlo con reservas. */
   savings_needs_caution: boolean;
   findings: Finding[];
+}
+
+// ---------------------------------------------------------------------------------
+// Panel (Fase 4). Espejo de apps/backend/laplace_backend/panel.py.
+// ---------------------------------------------------------------------------------
+
+export type Verdict = "sin-base" | "estable" | "normal" | "revisar" | "mejora" | "mixto";
+
+export interface Metric {
+  label: string;
+  /** `null` cuando no hay base para calcularla. Nunca cero por defecto (D-073). */
+  value: number | null;
+  previous: number | null;
+  /** 0,25 = 25 % más. `null` si falta un lado o si el anterior era cero. */
+  change_ratio: number | null;
+  unit: "money" | "tokens" | "count" | "duration" | string;
+  /** Por qué no hay cifra. Vacío cuando la hay. */
+  unavailable: string;
+}
+
+/** La lectura del panel en palabras: la pieza que justifica el panel entero. */
+export interface Reading {
+  verdict: Verdict;
+  headline: string;
+  detail: string;
+}
+
+export interface SpikeCause {
+  kind: "modelo_nuevo" | "herramienta_nueva" | "paso_nuevo" | "paso_disparado" | "volumen";
+  text: string;
+  evidence: string;
+}
+
+export interface Spike {
+  start: string;
+  end: string;
+  traces: number;
+  cost_usd: number;
+  cost_per_trace_usd: number;
+  times_baseline: number;
+  baseline_cost_per_trace_usd: number;
+  excess_usd: number;
+  causes: SpikeCause[];
+  /** Vacío cuando hay causas. Cuando no, dice justo eso y no otra cosa. */
+  unattributed: string;
+  /** Filtro listo para el explorador: las trazas responsables del pico. */
+  traces_query: Record<string, string>;
+}
+
+export interface PanelBucket {
+  start: string;
+  traces: number;
+  cost_usd: number;
+  /** `null` en un tramo sin ejecuciones: no es cero, es que no hay nada que dividir. */
+  cost_per_trace_usd: number | null;
+  tokens_per_trace: number | null;
+  steps_per_trace: number | null;
+  duration_ms_per_trace: number | null;
+  is_spike: boolean;
+}
+
+export interface Panel {
+  project_id: string;
+  days: number;
+  currency: string;
+  observed_days: number;
+  bucket_minutes: number;
+  /** Hay un periodo anterior utilizable con el que comparar. */
+  has_previous: boolean;
+  /** Por qué no lo hay. Se enseña en vez de pintar variaciones vacías. */
+  comparison_unavailable: string;
+  /** Las protagonistas, todas por ejecución. */
+  per_execution: Metric[];
+  /** Contexto secundario: un total que sube no es noticia por sí solo. */
+  totals: Metric[];
+  reading: Reading;
+  buckets: PanelBucket[];
+  spikes: Spike[];
+  spikes_unavailable: string;
 }

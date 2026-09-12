@@ -86,6 +86,23 @@ CREATE TABLE IF NOT EXISTS dataset_items (
 
 CREATE INDEX IF NOT EXISTS dataset_items_dataset_idx ON dataset_items (dataset_id);
 
+-- ---------------------------------------------------------------------------
+-- Estado de las alertas (Fase 2, punto 3).
+-- Lo unico que hace falta recordar para no repetirse: cuando se aviso de cada
+-- hallazgo. `notified_at` abre el periodo de calma; `seen_at` es lo que impide
+-- que un problema que sigue vivo se olvide y vuelva a contar como nuevo (D-074).
+-- En modo local esta misma tabla vive en el fichero SQLite.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS alert_state (
+    project_id  TEXT NOT NULL,
+    finding_id  TEXT NOT NULL,
+    notified_at TIMESTAMPTZ NOT NULL,
+    seen_at     TIMESTAMPTZ NOT NULL,
+    amount_usd  DOUBLE PRECISION NOT NULL DEFAULT 0,
+    times       INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (project_id, finding_id)
+);
+
 INSERT INTO projects (id, name)
 VALUES ('default', 'default')
 ON CONFLICT (id) DO NOTHING;

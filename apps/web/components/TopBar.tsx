@@ -74,6 +74,9 @@ export function TopBar() {
         >
           Trazas
         </Link>
+        <Link href={`/panel${query}`} aria-current={pathname === "/panel" ? "page" : undefined}>
+          Panel
+        </Link>
         {/* Huecos de fases posteriores: la navegación ya les guarda el sitio. */}
         <span className="soon" title="Llegará en una fase posterior">
           Evaluaciones

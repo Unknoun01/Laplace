@@ -267,6 +267,38 @@ def test_los_dos_almacenes_dan_el_mismo_diagnostico(store, clickhouse, window):
         clickhouse.delete_project(project)
 
 
+def test_los_dos_almacenes_marcan_igual_lo_que_es_un_suelo(store, clickhouse, window):
+    """Las marcas de coste no fiable también tienen que salir iguales por los dos lados.
+
+    Se agregan con SQL distinto —`SUM(CASE WHEN orden > 1 …)` en SQLite frente a
+    `sum(x) - argMin(x, start_time)` y `countIf` en ClickHouse— así que es exactamente
+    el sitio donde los dos almacenes pueden divergir sin que nadie se entere. Y lo que
+    decide es si una alerta afirma una cifra o la anuncia como suelo (D-076).
+    """
+    project = f"paridad-suelo-{uuid.uuid4().hex[:8]}"
+    spans = _agente(project)
+    for s in spans:
+        if s.llm is not None:
+            s.llm.cost.rate_assumed = True
+    store.insert_spans(spans)
+    clickhouse.insert_spans(spans)
+    try:
+        aqui = {f.id: f for f in insights.detect(store, project, window)}
+        alli = {f.id: f for f in insights.detect(clickhouse, project, window)}
+        assert set(aqui) == set(alli)
+
+        con_dinero = [f for f in aqui.values() if f.costs_money]
+        assert con_dinero, "sin hallazgos con dinero no se comprueba nada"
+        for finding_id, hallazgo in aqui.items():
+            otro = alli[finding_id]
+            assert hallazgo.cost_is_floor == otro.cost_is_floor, finding_id
+            assert hallazgo.assumed_rate_spans == otro.assumed_rate_spans, finding_id
+            assert hallazgo.unknown_cost_spans == otro.unknown_cost_spans, finding_id
+        assert all(f.cost_is_floor for f in con_dinero)
+    finally:
+        clickhouse.delete_project(project)
+
+
 def test_los_dos_almacenes_leen_la_misma_traza(store, clickhouse):
     project = f"paridad-traza-{uuid.uuid4().hex[:8]}"
     spans = _agente(project)
@@ -282,3 +314,131 @@ def test_los_dos_almacenes_leen_la_misma_traza(store, clickhouse):
         ]
     finally:
         clickhouse.delete_project(project)
+
+
+# ---------------------------------------------------------------------------------
+# La proyección mensual: cuándo se hace y cuándo no (D-073)
+#
+# El fallo que arreglan estas pruebas: con una hora de datos, el panel anunciaba
+# 468 $/mes. El aviso estaba, pero el número se lee antes que el aviso.
+# ---------------------------------------------------------------------------------
+
+
+def _repartir(spans: list[Span], dias: float) -> list[Span]:
+    """Estira los mismos spans para que abarquen `dias` de calendario.
+
+    Cambia sólo cuándo pasaron las cosas, nunca cuánto costaron: así el gasto de la
+    ventana es idéntico y lo único que se mueve es la base de la proyección.
+    """
+    inicio = min(s.start_time for s in spans)
+    fin = max(s.start_time for s in spans)
+    ancho = (fin - inicio).total_seconds() or 1.0
+    base = datetime.now(timezone.utc) - timedelta(days=dias)
+    for s in spans:
+        avance = (s.start_time - inicio).total_seconds() / ancho
+        s.start_time = base + timedelta(days=dias * avance)
+        s.end_time = s.start_time + timedelta(milliseconds=s.duration_ms)
+    return spans
+
+
+def test_con_minutos_de_datos_no_se_proyecta_el_mes(store, window):
+    """El caso del modo local recién instalado, que es la primera impresión.
+
+    Con minutos de datos no hay mes que proyectar: se enseña lo gastado de verdad, con
+    la ventana que lo respalda. Multiplicar por 720 daba una cifra absurda, y una cifra
+    absurda en la primera pantalla quema la confianza en todo lo demás.
+    """
+    project = "recien-instalado"
+    store.insert_spans(_repartir(_agente(project), dias=10 / 1440))  # 10 minutos
+    resumen = insights.overview(store, project, window)
+
+    assert resumen.projected is False
+    assert resumen.monthly_cost_usd is None
+    assert resumen.monthly_avoidable_usd is None
+    assert resumen.monthly_necessary_usd is None
+
+    # Y lo observado sí está, con cifras que suman.
+    assert resumen.window_cost_usd > 0
+    assert resumen.observed_days < 1
+    assert resumen.window_avoidable_usd + resumen.window_necessary_usd == pytest.approx(
+        resumen.window_cost_usd
+    )
+
+    assert resumen.findings, "sin proyección se siguen encontrando problemas"
+    for hallazgo in resumen.findings:
+        assert hallazgo.monthly_saving_usd is None
+        assert hallazgo.observed_days == pytest.approx(resumen.observed_days, abs=1e-6)
+
+
+def test_con_dias_suficientes_se_proyecta_y_se_dice_desde_donde(store, window):
+    project = "con-recorrido"
+    store.insert_spans(_repartir(_agente(project), dias=3))
+    resumen = insights.overview(store, project, window)
+
+    assert resumen.projected is True
+    assert resumen.observed_days == pytest.approx(3, abs=0.05)
+    assert resumen.monthly_cost_usd == pytest.approx(
+        resumen.window_cost_usd / resumen.observed_days * 30, rel=1e-3
+    )
+
+    # Y la ficha dice sobre qué ventana se ha extrapolado, no sólo que se extrapoló.
+    hallazgo = max(resumen.findings, key=lambda f: f.window_waste_usd)
+    detalle = insights.detail(store, project, window, hallazgo.id)
+    assert "3 días" in detalle.savings_calculation
+    assert "30 días" in detalle.savings_calculation
+
+
+def test_gasto_y_ahorro_se_proyectan_siempre_sobre_la_misma_base(store, window):
+    """La regresión de D-058, ahora con la puerta de la proyección de por medio.
+
+    Ya mordió una vez: el total se multiplicaba por 720 y el ahorro por 4,3, y la barra
+    de reparto del inicio comparaba dos cifras que no eran comparables. Con dos bases
+    posibles —proyectar o no— hay dos formas nuevas de repetirlo, así que se comprueba
+    que las dos cifras cambian a la vez y que su proporción no se mueve.
+    """
+    for dias in (10 / 1440, 3):
+        project = f"misma-base-{dias}"
+        store.insert_spans(_repartir(_agente(project), dias=dias))
+        resumen = insights.overview(store, project, window)
+
+        proyectadas = [
+            resumen.monthly_cost_usd,
+            resumen.monthly_avoidable_usd,
+            resumen.monthly_necessary_usd,
+        ]
+        # O están las tres, o no está ninguna. Nunca un total proyectado contra un
+        # ahorro observado, que es exactamente cómo se miente sin querer.
+        assert len({c is None for c in proyectadas}) == 1
+
+        observada = resumen.window_avoidable_usd / resumen.window_cost_usd
+        assert observada == pytest.approx(resumen.avoidable_ratio, rel=1e-9)
+        if resumen.projected:
+            assert resumen.monthly_avoidable_usd / resumen.monthly_cost_usd == pytest.approx(
+                observada, rel=1e-9
+            )
+
+
+def test_un_hallazgo_con_tarifa_asumida_se_marca_como_suelo(store, window):
+    """Regla conservadora: una cifra que puede quedarse corta se presenta como suelo.
+
+    Lo usa la tarjeta del inicio (`≥ $X`) y, sobre todo, la alerta a Slack: afirmar una
+    cifra exacta que el propio motor de precios sabe incompleta es la clase de error que
+    hace que nadie se vuelva a creer una alerta.
+    """
+    project = "suelo"
+    spans = _agente(project)
+    for s in spans:
+        if s.llm is not None:
+            s.llm.cost.rate_assumed = True
+    store.insert_spans(spans)
+
+    hallazgos = insights.detect(store, project, window)
+    con_dinero = [f for f in hallazgos if f.costs_money]
+    assert con_dinero
+    assert all(f.cost_is_floor for f in con_dinero)
+    assert all(f.assumed_rate_spans > 0 for f in con_dinero)
+
+    # Y un proyecto sano no se marca, que si no la marca no dice nada.
+    limpio = "sin-suelo"
+    store.insert_spans(_agente(limpio))
+    assert not any(f.cost_is_floor for f in insights.detect(store, limpio, window))

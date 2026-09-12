@@ -63,17 +63,31 @@ export function GapBar({
   );
 }
 
-/** Tarjeta de problema: título llano, precio en ámbar, chips y línea técnica. */
+/**
+ * Tarjeta de problema: título llano, precio en ámbar, chips y línea técnica.
+ *
+ * El precio dice siempre **de qué periodo habla**. Cuando hay días suficientes es el
+ * mes proyectado; cuando no, es el dinero ya gastado en la ventana observada, y lo
+ * pone. Una cifra sin periodo se lee como el periodo que le convenga al lector.
+ */
 export function FindingCard({ finding, href }: { finding: Finding; href: string }) {
   const flojo = !finding.costs_money;
+  const proyecta = finding.monthly_saving_usd !== null;
 
   return (
     <Link href={href} className={`card${flojo ? " low" : ""}`}>
       <div className="card-top">
         <h3>{finding.title}</h3>
         <div className="price">
-          {flojo ? duration(finding.window_waste_ms) : money(finding.monthly_saving_usd, finding.currency)}
-          <small>{flojo ? "de espera evitable" : "al mes"}</small>
+          {flojo
+            ? duration(finding.window_waste_ms)
+            : `${finding.cost_is_floor ? "≥ " : ""}${money(
+                proyecta ? finding.monthly_saving_usd! : finding.window_waste_usd,
+                finding.currency,
+              )}`}
+          {/* Sin proyección la cifra es dinero ya gastado. La ventana concreta la dice
+              una vez la cabecera de la sección: repetirla en cada tarjeta es ruido. */}
+          <small>{flojo ? "de espera evitable" : proyecta ? "al mes" : "ya gastado"}</small>
         </div>
       </div>
       <p>{finding.summary}</p>
@@ -81,6 +95,9 @@ export function FindingCard({ finding, href }: { finding: Finding; href: string 
         <span className={`chip ${finding.difficulty}`}>{finding.difficulty_label}</span>
         {finding.scope_label && <span className="chip where">{finding.scope_label}</span>}
         {flojo && <span className="chip where">No cuesta dinero, cuesta tiempo</span>}
+        {!flojo && finding.cost_is_floor && (
+          <span className="chip where">Es un suelo: el coste real puede ser mayor</span>
+        )}
       </footer>
       <div className="techline pro">
         {finding.tech.map((item) => (

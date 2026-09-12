@@ -54,6 +54,10 @@ def comando_ui(args: argparse.Namespace) -> int:
     # En local la interfaz y la API salen del mismo origen, así que CORS sobra; se deja
     # abierto para que un agente que exporte desde otro puerto pueda enviar igual.
     os.environ.setdefault("LAPLACE_CORS_ORIGINS", "*")
+    # Las alertas a Slack son el mismo código que en la nube y se encienden con las
+    # mismas variables (D-075). Aquí sólo se rellena la raíz del enlace, que en local
+    # es este propio servidor: sin ella la alerta saldría sin enlace a la ficha.
+    os.environ.setdefault("LAPLACE_ALERTS_BASE_URL", f"http://127.0.0.1:{args.port}")
 
     try:
         import uvicorn
@@ -68,6 +72,9 @@ def comando_ui(args: argparse.Namespace) -> int:
     print("En tu agente:\n")
     print("    import laplace")
     print(f'    laplace.init(project="mi-agente", endpoint="{url}")\n')
+
+    if os.environ.get("LAPLACE_ALERTS_ENABLED", "").lower() in ("1", "true", "yes"):
+        print("Alertas a Slack: activas.\n")
 
     if not args.no_browser:
         # Un hilo aparte: el navegador se abre cuando el servidor ya escucha, y si no

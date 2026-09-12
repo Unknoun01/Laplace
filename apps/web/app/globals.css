@@ -1235,3 +1235,238 @@ code {
     display: none;
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * Panel (Fase 4). Mismo lenguaje que el resto: sin paleta nueva ni radios nuevos.
+ * ------------------------------------------------------------------------- */
+
+/* La lectura en palabras. Es lo primero que se lee de la pantalla, así que ocupa
+   el sitio que en el inicio ocupa la cifra grande. */
+.verdict {
+  border: 1px solid var(--hair);
+  border-left-width: 3px;
+  border-radius: var(--r);
+  background: var(--panel);
+  padding: 16px 18px;
+  margin: 20px 0 32px;
+}
+.verdict b {
+  display: block;
+  font-size: 19px;
+  line-height: 1.35;
+  margin-bottom: 8px;
+}
+.verdict p {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 14px;
+}
+.verdict.revisar {
+  border-left-color: var(--amber);
+}
+.verdict.revisar b {
+  color: var(--amber);
+}
+.verdict.mixto {
+  border-left-color: var(--amber);
+}
+.verdict.mejora {
+  border-left-color: var(--teal);
+}
+.verdict.mejora b {
+  color: var(--teal);
+}
+.verdict.normal,
+.verdict.estable {
+  border-left-color: var(--chain);
+}
+.verdict.sin-base {
+  border-left-color: var(--hair);
+}
+.verdict.sin-base b {
+  color: var(--ink-2);
+}
+
+h2.sub {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 28px 0 4px;
+}
+
+.mgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin: 14px 0 8px;
+}
+.mcard {
+  border: 1px solid var(--hair-soft);
+  border-radius: var(--r);
+  background: var(--panel);
+  padding: 12px 14px;
+}
+.mcard small {
+  display: block;
+  color: var(--ink-3);
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+.mcard b {
+  display: block;
+  font-size: 22px;
+  line-height: 1.2;
+}
+.mgrid.small .mcard b {
+  font-size: 17px;
+}
+.mcard b.none {
+  color: var(--ink-3);
+}
+.mcard .delta,
+.mcard .why {
+  display: block;
+  font-size: 12px;
+  margin-top: 5px;
+  color: var(--ink-3);
+}
+/* Subir es la dirección mala en todas las métricas de esta pantalla; bajar, la buena. */
+.mcard .delta.up {
+  color: var(--amber);
+}
+.mcard .delta.down {
+  color: var(--teal);
+}
+
+.chart {
+  margin: 26px 0 10px;
+}
+.chart-head,
+.chart-foot {
+  display: flex;
+  justify-content: space-between;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+.chart-head {
+  margin-bottom: 8px;
+}
+.chart-foot {
+  margin-top: 6px;
+  font-family: var(--mono);
+}
+.chart .legend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 1px;
+  margin: 0 4px 0 10px;
+}
+.chart .legend i.bar {
+  background: var(--iris);
+}
+.chart .legend i.vol {
+  background: var(--hair);
+}
+.chart svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  border: 1px solid var(--hair-soft);
+  border-radius: var(--r);
+  background: var(--panel);
+}
+.chart rect.vol {
+  fill: var(--hair);
+}
+.chart rect.bar {
+  fill: var(--iris);
+}
+.chart rect.bar.spike {
+  fill: var(--amber);
+}
+
+/* Una tarjeta de pico no es un enlace entero: dentro hay varios destinos. */
+.card.static {
+  cursor: default;
+}
+.card.static:hover {
+  border-color: var(--hair);
+}
+.causes {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  color: var(--ink);
+  font-size: 14px;
+}
+.causes li {
+  margin-bottom: 6px;
+}
+.causes .pro {
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.unattributed {
+  margin: 12px 0 0;
+  color: var(--ink-2);
+  font-size: 14px;
+  border-left: 2px solid var(--hair);
+  padding-left: 12px;
+}
+
+/* ---------------------------------------------------------------------------
+ * Modo en vivo del explorador.
+ * ------------------------------------------------------------------------- */
+
+.live {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--hair);
+  border-radius: var(--r);
+  background: var(--panel);
+  color: var(--ink-2);
+  font-size: 12px;
+  padding: 5px 10px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.live:hover {
+  border-color: var(--chain);
+}
+.live i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ink-3);
+}
+.live.on i {
+  background: var(--teal);
+  animation: latido 2s ease-in-out infinite;
+}
+.live.on {
+  color: var(--ink);
+}
+@keyframes latido {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+/* Sin animación para quien la ha desactivado en su sistema. */
+@media (prefers-reduced-motion: reduce) {
+  .live.on i {
+    animation: none;
+  }
+}
+/* Una traza recién llegada se marca un momento para que se vea que ha entrado. */
+tr.nueva td {
+  animation: entra 1.6s ease-out;
+}
+@keyframes entra {
+  from { background: rgba(79, 179, 164, 0.16); }
+  to { background: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  tr.nueva td {
+    animation: none;
+  }
+}

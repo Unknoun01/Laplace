@@ -94,3 +94,47 @@ def test_una_traza_entra_y_sale_por_el_mismo_proceso(app_local):
     assert len(proyectos) == 1
     trazas = app_local.get("/api/traces", params={"project_id": proyectos[0]["id"]})
     assert trazas.json()["traces"], "la traza tiene que verse por la misma API"
+
+
+def test_la_interfaz_del_arbol_gana_a_la_copia_del_paquete(tmp_path, monkeypatch):
+    """El orden de `_ui_dir()` es una regla, no una casualidad.
+
+    Al revés, una copia vieja dejada por `scripts/build_ui.py` tapa cualquier
+    `next build` posterior sin decir nada, y se depura contra una interfaz que no es la
+    que se acaba de escribir. Pasó una vez y no se nota hasta que se pierde media hora.
+    """
+    from laplace_backend import main
+
+    arbol = tmp_path / "arbol"
+    paquete = tmp_path / "paquete"
+    for carpeta, marca in ((arbol, "recién construida"), (paquete, "copia vieja")):
+        carpeta.mkdir()
+        (carpeta / "index.html").write_text(marca, encoding="utf-8")
+
+    monkeypatch.setattr(main, "_ui_candidates", lambda: [arbol, paquete])
+    assert main._ui_dir() == arbol
+
+    # Y si sólo existe la del paquete —que es el caso de un wheel instalado— se usa esa.
+    (arbol / "index.html").unlink()
+    assert main._ui_dir() == paquete
+
+
+def test_se_avisa_cuando_hay_dos_copias_construidas(tmp_path, monkeypatch, caplog):
+    """La copia que NO se usa es la que va a confundir a alguien dentro de tres semanas."""
+    import logging
+
+    from laplace_backend import main
+
+    arbol = tmp_path / "arbol"
+    paquete = tmp_path / "paquete"
+    for carpeta in (arbol, paquete):
+        carpeta.mkdir()
+        (carpeta / "index.html").write_text("x", encoding="utf-8")
+
+    monkeypatch.setattr(main, "_ui_candidates", lambda: [arbol, paquete])
+    with caplog.at_level(logging.INFO, logger="laplace"):
+        main._log_ui_dir()
+
+    assert f"interfaz servida desde {arbol}" in caplog.text
+    assert "NO se está usando" in caplog.text
+    assert str(paquete) in caplog.text

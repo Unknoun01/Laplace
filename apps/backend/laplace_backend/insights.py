@@ -36,7 +36,11 @@ DAYS_PER_MONTH = 30
 #: Por encima de esta proporción del gasto, un ahorro deja de sonar creíble aunque los
 #: números salgan. La interfaz lo presenta con cautela y enseña el desglose completo.
 CAUTION_SAVINGS_RATIO = 0.60
-#: Por debajo de esto no hay datos para proyectar un mes sin decirlo en la propia cifra.
+#: Por debajo de esto NO se proyecta a mes. No se avisa de que la cifra es frágil: se
+#: enseña lo que se ha gastado de verdad, con la ventana que lo respalda. Con una hora
+#: de datos, multiplicar por 720 produce un número absurdo, y el número se lee antes
+#: que el aviso: quema la confianza en todo lo demás en la primera pantalla, que es
+#: justo el momento del modo local recién instalado (D-073).
 MIN_DAYS_FOR_PROJECTION = 1.0
 
 # Umbrales de las reglas. Configurables por proyecto cuando haya ajustes por proyecto;
@@ -76,11 +80,22 @@ class Finding(BaseModel):
 
     #: Lo desperdiciado dentro de la ventana analizada (dinero real, ya gastado).
     window_waste_usd: float = 0.0
-    #: Proyección a 30 días al ritmo de la ventana. Es una estimación.
-    monthly_saving_usd: float = 0.0
+    #: Proyección a 30 días al ritmo de la ventana. Es una estimación, y es `None`
+    #: cuando no hay días suficientes para hacerla: entonces sólo existe lo observado.
+    monthly_saving_usd: float | None = None
+    #: Días de datos reales detrás de `window_waste_usd`. La pantalla lo enseña junto
+    #: a la cifra: una cantidad sin su ventana no quiere decir nada.
+    observed_days: float = 0.0
     currency: str = "USD"
     #: Segundos perdidos. Es lo que se enseña cuando el desperdicio no es dinero.
     window_waste_ms: float = 0.0
+
+    #: El dinero de este hallazgo es un SUELO, no un total: alguno de los pasos que
+    #: lo componen tiene el coste incompleto (modelo sin tarifa) o cobrado a tarifa
+    #: asumida. Quien afirme la cifra —la pantalla, una alerta— tiene que decirlo.
+    cost_is_floor: bool = False
+    unknown_cost_spans: int = 0
+    assumed_rate_spans: int = 0
 
     difficulty: Difficulty = "easy"
     difficulty_label: str = ""
@@ -120,10 +135,18 @@ class Overview(BaseModel):
     currency: str = "USD"
 
     window_cost_usd: float = 0.0
-    #: Proyección a 30 días al ritmo de la ventana.
-    monthly_cost_usd: float = 0.0
-    monthly_avoidable_usd: float = 0.0
-    monthly_necessary_usd: float = 0.0
+    #: Lo evitable y lo necesario DENTRO de la ventana: dinero ya gastado, medido.
+    #: Existen siempre, hasta con minutos de datos, y son lo que se enseña cuando no
+    #: se puede proyectar.
+    window_avoidable_usd: float = 0.0
+    window_necessary_usd: float = 0.0
+
+    #: Proyección a 30 días al ritmo de la ventana. Las tres son `None` a la vez
+    #: cuando no hay base para proyectar: o se proyectan gasto y ahorro sobre los
+    #: mismos días, o la barra de reparto miente (D-058).
+    monthly_cost_usd: float | None = None
+    monthly_avoidable_usd: float | None = None
+    monthly_necessary_usd: float | None = None
 
     traces: int = 0
     spans: int = 0
@@ -145,11 +168,18 @@ class Overview(BaseModel):
     #: la tarifa de lectura a la de entrada sobre tokens reales—, no una promesa.
     window_cache_saving_usd: float = 0.0
 
-    #: Días reales de datos en la ventana. Extrapolar a 30 días desde menos de uno es
-    #: una cifra que hay que presentar como lo que es.
+    #: Días reales de datos en la ventana, que no son los que pide el selector. Es la
+    #: base de la proyección, y la pantalla la enseña siempre que proyecte.
     observed_days: float = 0.0
-    #: True cuando la proyección mensual sale de menos de 24 h de datos.
-    thin_projection: bool = False
+    #: True cuando hay días suficientes y los campos `monthly_*` traen cifra.
+    projected: bool = False
+    #: Días de datos que hacen falta para proyectar. La pantalla lo usa para decir
+    #: cuánto queda en lugar de dejar el hueco sin explicar.
+    min_days_for_projection: float = MIN_DAYS_FOR_PROJECTION
+    #: Qué parte del gasto observado es evitable, entre 0 y 1. Se calcula sobre la
+    #: ventana y no sobre la proyección: así existe también cuando no se proyecta, y
+    #: es exactamente el mismo número en los dos casos.
+    avoidable_ratio: float = 0.0
     #: True cuando el evitable pasa del umbral de cautela: la UI lo presenta con
     #: reservas en lugar de como promesa.
     savings_needs_caution: bool = False
@@ -162,28 +192,51 @@ class Overview(BaseModel):
 # ---------------------------------------------------------------------------------
 
 
-def _to_monthly(amount: float, days: float) -> float:
-    if days <= 0:
-        return 0.0
+def _to_monthly(amount: float, days: float | None) -> float | None:
+    """Extrapola a 30 días, o `None` si no hay base sobre la que extrapolar.
+
+    `None` y no cero: cero se lee como «no cuesta nada», que es justo lo contrario de
+    lo que queremos decir. Quien reciba `None` tiene que enseñar lo observado.
+    """
+    if days is None or days <= 0:
+        return None
     return amount / days * DAYS_PER_MONTH
 
 
-def _observed_days(summary: WindowSummary, window: Window) -> float:
+def _projection_base(summary: WindowSummary, window: Window) -> float | None:
+    """Los días sobre los que se puede proyectar, o `None` si no dan para tanto.
+
+    Un solo sitio decide si se proyecta, y devuelve la MISMA base para el gasto y para
+    el ahorro. Que las dos cifras salgan de bases distintas ya nos mordió una vez
+    (D-058): la barra de reparto del inicio comparaba un total multiplicado por 720 con
+    un ahorro multiplicado por 4,3.
+    """
+    dias = observed_days(summary, window)
+    return dias if dias >= MIN_DAYS_FOR_PROJECTION else None
+
+
+def observed_days(summary: WindowSummary, window: Window) -> float:
     """Días de datos reales, no los que pide el selector.
 
     Un proyecto que empezó a enviar trazas hace dos horas no tiene siete días de datos
     aunque el rango diga «7 días». Proyectar un mes desde esa ventana infla la cifra
-    sola, así que se proyecta sobre lo observado y se avisa cuando es poco.
+    sola, así que se proyecta sobre lo observado —y sólo cuando lo observado da para
+    tanto (D-073)—.
 
     **Lo usa todo el motor, no sólo el héroe.** Si el gasto total se proyectase sobre lo
     observado y el ahorro sobre los días del selector, las dos cifras no serían
     comparables y la barra de reparto del inicio mentiría: con una hora de datos en una
     ventana de siete días, el total se multiplicaría por 720 y el ahorro por 4,3.
+
+    Ya no hay suelo de una hora. Existía para que dividir no explotase, y de paso
+    convertía «llevas diez segundos de datos» en «llevas una hora», que es una ventana
+    que nadie ha observado. Ahora la división está protegida por la puerta de la
+    proyección, así que este número puede decir la verdad y ser cero.
     """
     if not summary.first_seen or not summary.last_seen:
         return 0.0
     span = (summary.last_seen - summary.first_seen).total_seconds() / 86_400
-    return max(min(span, float(window.days)), 1 / 24)
+    return max(min(span, float(window.days)), 0.0)
 
 
 def _scope_label(affected: int, total: int) -> str:
@@ -215,13 +268,92 @@ def _seconds(ms: float) -> str:
     return f"{ms / 1000:.1f} s"
 
 
+def span_label(days: float) -> str:
+    """Una duración en palabras: «12 minutos», «1 hora», «5,2 horas», «2,5 días»."""
+    if days >= 1:
+        if abs(days - 1) < 0.05:
+            return "1 día"
+        return f"{_decimal(days)} días"
+    horas = days * 24
+    if horas >= 1.5:
+        return f"{_decimal(horas)} horas"
+    if horas >= 0.95:
+        return "1 hora"
+    minutos = round(horas * 60)
+    if minutos <= 0:
+        return "menos de un minuto"
+    return "1 minuto" if minutos == 1 else f"{minutos} minutos"
+
+
+def _decimal(value: float) -> str:
+    """Un decimal, coma española, y sin el «,0» que sobra en «7,0 días»."""
+    return f"{value:.1f}".removesuffix(".0").replace(".", ",")
+
+
+def window_label(days: float) -> str:
+    """La misma duración, como ventana: «la última hora», «los últimos 2,5 días».
+
+    Una cifra de dinero sin la ventana que la respalda no quiere decir nada, y es
+    exactamente lo que hacía la proyección mensual sobre una hora de datos. Vive aquí
+    porque lo usan la API, las alertas y —traducido a TypeScript— la interfaz.
+    """
+    texto = span_label(days)
+    if texto == "menos de un minuto":
+        return texto
+    if texto == "1 hora":
+        return "la última hora"
+    if texto == "1 día":
+        return "el último día"
+    if texto == "1 minuto":
+        return "el último minuto"
+    if texto.endswith("horas"):
+        return f"las últimas {texto}"
+    return f"los últimos {texto}"
+
+
+def _floor_flags(unknown: int, assumed: int) -> dict[str, Any]:
+    """Marcas de «esta cifra es un suelo», compartidas por las tres reglas.
+
+    Un paso cuyo modelo no está en la tabla aporta cero al dinero del hallazgo, y uno
+    cobrado a tarifa asumida puede haber costado más de lo que decimos: en los dos
+    casos la cifra se queda corta. Se marcan aquí, en un solo sitio, porque quien la
+    afirma —la pantalla o una alerta a Slack— tiene que poder saberlo sin recalcular.
+    """
+    return {
+        "unknown_cost_spans": unknown,
+        "assumed_rate_spans": assumed,
+        "cost_is_floor": bool(unknown or assumed),
+    }
+
+
+def _projection_sentence(finding: Finding) -> str:
+    """La frase que explica la proyección… o la que explica por qué no la hay.
+
+    Antes esta frase se escribía siempre, incluso cuando la cifra mensual salía de una
+    hora de datos. Decir «extrapolado a 30 días» sin decir desde dónde es la mitad del
+    problema que arregla D-073.
+    """
+    if finding.monthly_saving_usd is None:
+        return (
+            f" No se proyecta a mes: el mínimo para proyectar es "
+            f"{span_label(MIN_DAYS_FOR_PROJECTION)} de datos, y de momento hay "
+            f"{span_label(finding.observed_days)}."
+        )
+    return (
+        f" La proyección mensual extrapola ese ritmo de "
+        f"{window_label(finding.observed_days)} a {DAYS_PER_MONTH} días."
+    )
+
+
 # ---------------------------------------------------------------------------------
 # Regla 1 — el mismo paso repetido dentro de una traza
 # ---------------------------------------------------------------------------------
 
 
-def _repetition_finding(group: RepeatedGroup, summary: WindowSummary, days: int) -> Finding:
-    monthly = _to_monthly(group.extra_cost_usd, days)
+def _repetition_finding(
+    group: RepeatedGroup, summary: WindowSummary, days: float, base: float | None
+) -> Finding:
+    monthly = _to_monthly(group.extra_cost_usd, base)
     cuesta = group.extra_cost_usd > 0
 
     if cuesta:
@@ -245,7 +377,9 @@ def _repetition_finding(group: RepeatedGroup, summary: WindowSummary, days: int)
         summary=resumen,
         window_waste_usd=group.extra_cost_usd,
         monthly_saving_usd=monthly,
+        observed_days=days,
         window_waste_ms=group.extra_duration_ms,
+        **_floor_flags(group.extra_unknown_cost_spans, group.extra_assumed_rate_spans),
         difficulty="easy",
         difficulty_label="Una línea en el prompt",
         scope_label=_scope_label(group.traces, summary.traces),
@@ -328,14 +462,19 @@ def _repetition_detail(
 
     if cuesta:
         detalle.savings_calculation = (
-            f"{group.extra_spans} pasos de más en {group.traces} trazas durante la ventana, "
-            f"que suman ${group.extra_cost_usd:.6f} de coste ya gastado. La proyección mensual "
-            f"extrapola ese ritmo a {DAYS_PER_MONTH} días. Sólo cuenta las ocurrencias "
+            f"{group.extra_spans} pasos de más en {group.traces} trazas durante "
+            f"{window_label(finding.observed_days)}, que suman ${group.extra_cost_usd:.6f} de "
+            f"coste ya gastado.{_projection_sentence(finding)} Sólo cuenta las ocurrencias "
             f"posteriores a la primera de cada traza; la primera es trabajo legítimo."
         )
         detalle.savings_note = (
-            "Es una estimación a partir de lo que ha pasado en la ventana analizada. Si tu "
-            "tráfico cambia, cambia."
+            "El dinero ya gastado está medido, no estimado: es la suma del coste de las "
+            "ocurrencias que sobran. Lo estimado es la proyección a un mes, que sale de "
+            "suponer que el ritmo se mantiene."
+            if finding.monthly_saving_usd is not None
+            else "El dinero ya gastado está medido, no estimado: es la suma del coste de "
+            "las ocurrencias que sobran. Lo que todavía no podemos decirte es a cuánto "
+            "va el mes."
         )
     else:
         detalle.savings_calculation = (
@@ -360,7 +499,7 @@ def _repetition_detail(
 
 
 def _expensive_model_finding(
-    usage: ModelUsage, summary: WindowSummary, days: int
+    usage: ModelUsage, summary: WindowSummary, days: float, base: float | None
 ) -> Finding | None:
     table = get_price_table()
     price = table.lookup(usage.model)
@@ -399,7 +538,9 @@ def _expensive_model_finding(
             f"trabajo costaría {veces_txt} menos."
         ),
         window_waste_usd=ahorro,
-        monthly_saving_usd=_to_monthly(ahorro, days),
+        monthly_saving_usd=_to_monthly(ahorro, base),
+        observed_days=days,
+        **_floor_flags(usage.unknown_cost_spans, usage.assumed_rate_spans),
         difficulty="easy",
         difficulty_label="Cambiar el nombre del modelo",
         scope_label=_scope_label(usage.traces, summary.traces),
@@ -464,10 +605,12 @@ def _expensive_model_detail(
     if price and cheaper:
         detalle.savings_calculation = (
             f"{_miles(usage.input_tokens)} tokens de entrada y {_miles(usage.output_tokens)} de "
-            f"salida en la ventana. Con {usage.model}: ${price.input}/1M entrada y "
-            f"${price.output}/1M salida. Con {price.alternative}: ${cheaper.input}/1M y "
+            f"salida en {window_label(finding.observed_days)}. Con {usage.model}: "
+            f"${price.input}/1M entrada y ${price.output}/1M salida. Con "
+            f"{price.alternative}: ${cheaper.input}/1M y "
             f"${cheaper.output}/1M. La diferencia sobre esos mismos tokens es "
-            f"${finding.window_waste_usd:.6f}, extrapolada a {DAYS_PER_MONTH} días."
+            f"${finding.window_waste_usd:.6f} en {window_label(finding.observed_days)}."
+            f"{_projection_sentence(finding)}"
         )
     detalle.savings_note = (
         "El ahorro es aritmética sobre los tokens que ya has gastado. Lo que no podemos "
@@ -550,7 +693,9 @@ def _cache_arithmetic(usage: ModelUsage) -> tuple[int, int, float] | None:
     return lecturas, escrituras, ahorro
 
 
-def _fixed_context_finding(usage: ModelUsage, summary: WindowSummary, days: int) -> Finding | None:
+def _fixed_context_finding(
+    usage: ModelUsage, summary: WindowSummary, days: float, base: float | None
+) -> Finding | None:
     if usage.calls < MIN_CALLS_FOR_CONTEXT_RULE:
         return None
     if usage.min_input_tokens < MIN_FIXED_INPUT_TOKENS:
@@ -577,7 +722,9 @@ def _fixed_context_finding(usage: ModelUsage, summary: WindowSummary, days: int)
             f"catálogo que no cambian. Pagas por enviarlos {usage.calls} veces."
         ),
         window_waste_usd=ahorro,
-        monthly_saving_usd=_to_monthly(ahorro, days),
+        monthly_saving_usd=_to_monthly(ahorro, base),
+        observed_days=days,
+        **_floor_flags(usage.unknown_cost_spans, usage.assumed_rate_spans),
         difficulty="mid",
         difficulty_label="Un rato de trabajo",
         scope_label=_scope_label(usage.traces, summary.traces),
@@ -661,8 +808,8 @@ def _fixed_context_detail(
             f"{usage.calls - max(usage.traces, 1)} llamadas que ya encontrarían la caché "
             f"caliente = {_miles(lecturas)} tokens que pasarían de ${price.input}/1M a "
             f"${price.cached_input}/1M.{escritura_txt} Neto: "
-            f"${finding.window_waste_usd:.6f} en la ventana, extrapolado a "
-            f"{DAYS_PER_MONTH} días."
+            f"${finding.window_waste_usd:.6f} en {window_label(finding.observed_days)}."
+            f"{_projection_sentence(finding)}"
         )
     if encadenado:
         detalle.savings_calculation += (
@@ -747,12 +894,13 @@ def detect(store: Any, project_id: str, window: Window) -> list[Finding]:
 
     # Los mismos días sobre los que se proyecta el gasto total: si no, el ahorro y el
     # coste del héroe estarían en escalas distintas y su cociente no querría decir nada.
-    dias = _observed_days(summary, window)
+    dias = observed_days(summary, window)
+    base = _projection_base(summary, window)
     findings: list[Finding] = []
 
     grupos = store.repeated_groups(project_id, window, min_repeats=MIN_REPEATS)
     for group in grupos:
-        findings.append(_repetition_finding(group, summary, dias))
+        findings.append(_repetition_finding(group, summary, dias, base))
 
     # Las reglas no pueden solaparse: si una llamada al modelo se repite, la regla de
     # repetición ya cuenta el 100% de las copias sobrantes. Contarlas otra vez en la
@@ -765,16 +913,19 @@ def detect(store: Any, project_id: str, window: Window) -> list[Finding]:
         if neto.calls >= MIN_CALLS_FOR_MODEL_RULE and (
             neto.avg_output_tokens <= MAX_OUTPUT_TOKENS_FOR_CHEAP_TASK
         ):
-            hallazgo = _expensive_model_finding(neto, summary, dias)
+            hallazgo = _expensive_model_finding(neto, summary, dias, base)
             if hallazgo is not None:
                 findings.append(hallazgo)
-        contexto = _fixed_context_finding(neto, summary, dias)
+        contexto = _fixed_context_finding(neto, summary, dias, base)
         if contexto is not None:
             findings.append(contexto)
 
     # Primero lo que más dinero devuelve; los que sólo cuestan tiempo, al final,
-    # ordenados por el tiempo que recuperan.
-    findings.sort(key=lambda f: (f.monthly_saving_usd, f.window_waste_ms), reverse=True)
+    # ordenados por el tiempo que recuperan. Se ordena por el dinero YA GASTADO y no
+    # por el proyectado: los dos dan el mismo orden —la proyección multiplica a todos
+    # por lo mismo—, pero el gasto observado existe siempre, también cuando no hay
+    # días para proyectar y `monthly_saving_usd` es `None`.
+    findings.sort(key=lambda f: (f.window_waste_usd, f.window_waste_ms), reverse=True)
     return findings
 
 
@@ -784,10 +935,20 @@ def overview(store: Any, project_id: str, window: Window) -> Overview:
     findings = detect(store, project_id, window)
 
     # Se proyecta sobre los días que de verdad hay datos, no sobre los que pide el
-    # selector: extrapolar 30 días desde una ventana vacía infla la cifra sola.
-    observados = _observed_days(summary, window)
-    mensual = _to_monthly(summary.total_cost_usd, observados)
-    evitable = min(sum(f.monthly_saving_usd for f in findings), mensual)
+    # selector; y por debajo de un día no se proyecta en absoluto (D-073).
+    observados = observed_days(summary, window)
+    base = _projection_base(summary, window)
+
+    # Lo observado existe siempre. Es lo que se enseña cuando no se puede proyectar, y
+    # el suelo del que sale la proyección cuando sí.
+    evitable_ventana = min(
+        sum(f.window_waste_usd for f in findings), summary.total_cost_usd
+    )
+    mensual = _to_monthly(summary.total_cost_usd, base)
+    evitable = _to_monthly(evitable_ventana, base)
+    ratio = (
+        evitable_ventana / summary.total_cost_usd if summary.total_cost_usd > 0 else 0.0
+    )
 
     return Overview(
         project_id=project_id,
@@ -796,13 +957,21 @@ def overview(store: Any, project_id: str, window: Window) -> Overview:
         models_without_price=summary.models_without_price,
         assumed_rate_spans=summary.assumed_rate_spans,
         window_cache_saving_usd=summary.cache_saving_usd,
-        observed_days=round(observados, 2),
-        thin_projection=observados < MIN_DAYS_FOR_PROJECTION,
-        savings_needs_caution=bool(mensual > 0 and evitable / mensual > CAUTION_SAVINGS_RATIO),
+        # Sin redondear: lo redondea quien lo pinta (`span_label`), y con dos
+        # decimales de día —14 minutos— la ventana de un proyecto recién instalado se
+        # deformaba justo donde más importa.
+        observed_days=observados,
+        projected=base is not None,
+        avoidable_ratio=ratio,
+        savings_needs_caution=ratio > CAUTION_SAVINGS_RATIO,
         window_cost_usd=summary.total_cost_usd,
+        window_avoidable_usd=evitable_ventana,
+        window_necessary_usd=max(summary.total_cost_usd - evitable_ventana, 0.0),
         monthly_cost_usd=mensual,
         monthly_avoidable_usd=evitable,
-        monthly_necessary_usd=max(mensual - evitable, 0.0),
+        monthly_necessary_usd=(
+            None if mensual is None or evitable is None else max(mensual - evitable, 0.0)
+        ),
         traces=summary.traces,
         spans=summary.spans,
         llm_calls=summary.llm_calls,
@@ -824,13 +993,14 @@ def detail(store: Any, project_id: str, window: Window, finding_id: str) -> Find
     """
     kind, _, key = finding_id.partition(":")
     summary = store.summarize_window(project_id, window)
-    dias = _observed_days(summary, window)
+    dias = observed_days(summary, window)
+    base = _projection_base(summary, window)
 
     if kind == "repeticion":
         for group in store.repeated_groups(project_id, window, min_repeats=MIN_REPEATS):
             if group.step_key != key:
                 continue
-            finding = _repetition_finding(group, summary, dias)
+            finding = _repetition_finding(group, summary, dias, base)
             evidencia = store.sample_repetition(project_id, window, group.dedup_hash)
             return _repetition_detail(finding, group, evidencia, store.repeated_groups_sql)
         return None
@@ -845,10 +1015,10 @@ def detail(store: Any, project_id: str, window: Window, finding_id: str) -> Find
                 continue
             uso = _without_duplicates(bruto, duplicados)
             if kind == "modelo_caro":
-                finding = _expensive_model_finding(uso, summary, dias)
+                finding = _expensive_model_finding(uso, summary, dias, base)
                 consulta = store.model_usage_sql
                 return _expensive_model_detail(finding, uso, consulta) if finding else None
-            finding = _fixed_context_finding(uso, summary, dias)
+            finding = _fixed_context_finding(uso, summary, dias, base)
             return _fixed_context_detail(finding, uso, store.model_usage_sql) if finding else None
         return None
 

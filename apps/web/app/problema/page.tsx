@@ -6,7 +6,7 @@ import { Suspense } from "react";
 import { StaticTree } from "@/components/StaticTree";
 import { BackendDown, NotFound, TableSkeleton } from "@/components/states";
 import { getFinding, getTrace, listProjects, parseDays } from "@/lib/api";
-import { duration, money, oneLine } from "@/lib/format";
+import { duration, money, oneLine, spanLabel, windowLabel } from "@/lib/format";
 import type { FindingDetail, Span } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
 
@@ -64,7 +64,7 @@ function Contenido() {
         Volver
       </Link>
 
-      <Head finding={finding} days={days} />
+      <Head finding={finding} />
 
       <section className="block">
         <h2>Qué está pasando</h2>
@@ -125,10 +125,31 @@ function Contenido() {
         <h2>Cuánto te ahorras</h2>
         {finding.costs_money ? (
           <p>
-            Al ritmo de este rango, arreglarlo te deja de costar{" "}
-            <strong>{money(finding.monthly_saving_usd, finding.currency)} al mes</strong>. En
-            lo que llevas del rango ya se han ido{" "}
-            <strong>{money(finding.window_waste_usd, finding.currency)}</strong>.
+            En {windowLabel(finding.observed_days)} ya se han ido{" "}
+            <strong>{money(finding.window_waste_usd, finding.currency)}</strong> por aquí.
+            {finding.monthly_saving_usd !== null ? (
+              <>
+                {" "}
+                A ese ritmo, arreglarlo te deja de costar{" "}
+                <strong>
+                  {money(finding.monthly_saving_usd, finding.currency)} al mes
+                </strong>
+                .
+              </>
+            ) : (
+              <>
+                {" "}
+                Todavía no proyectamos el mes: con {spanLabel(finding.observed_days)} de
+                datos, multiplicar hasta 30 días daría una cifra que no se sostiene.
+              </>
+            )}
+            {finding.cost_is_floor && (
+              <>
+                {" "}
+                Y es un <strong>suelo</strong>: hay pasos aquí dentro cuyo coste no
+                podemos confirmar, así que la cifra real puede ser mayor, nunca menor.
+              </>
+            )}
           </p>
         ) : (
           <p>
@@ -164,7 +185,15 @@ function nameOf(finding: FindingDetail): string {
   return finding.tech.find((t) => t.label === "paso")?.value ?? "";
 }
 
-function Head({ finding, days }: { finding: FindingDetail; days: number }) {
+/**
+ * La cabecera con las cifras.
+ *
+ * El periodo es el **observado**, no el que pide el selector: con dos horas de datos
+ * en un rango de siete días, decir «ya gastados en 7 días» es falso, y era lo que
+ * decía antes (D-073).
+ */
+function Head({ finding }: { finding: FindingDetail }) {
+  const ventana = spanLabel(finding.observed_days);
   return (
     <div className="d-head">
       <h1>{finding.title}</h1>
@@ -174,19 +203,24 @@ function Head({ finding, days }: { finding: FindingDetail; days: number }) {
       <div className="d-cost">
         {finding.costs_money ? (
           <>
+            {finding.monthly_saving_usd !== null && (
+              <div>
+                <b className="num">{money(finding.monthly_saving_usd, finding.currency)}</b>
+                <span>al mes si no cambia nada</span>
+              </div>
+            )}
             <div>
-              <b className="num">{money(finding.monthly_saving_usd, finding.currency)}</b>
-              <span>al mes si no cambia nada</span>
-            </div>
-            <div>
-              <b className="num">{money(finding.window_waste_usd, finding.currency)}</b>
-              <span>ya gastados en {days === 1 ? "24 horas" : `${days} días`}</span>
+              <b className="num">
+                {finding.cost_is_floor ? "≥ " : ""}
+                {money(finding.window_waste_usd, finding.currency)}
+              </b>
+              <span>ya gastados en {ventana}</span>
             </div>
           </>
         ) : (
           <div>
             <b className="num neutral">{duration(finding.window_waste_ms)}</b>
-            <span>de espera evitable en {days === 1 ? "24 horas" : `${days} días`}</span>
+            <span>de espera evitable en {ventana}</span>
           </div>
         )}
         {finding.scope_label && (

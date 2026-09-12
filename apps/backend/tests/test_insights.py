@@ -102,8 +102,12 @@ def test_un_bucle_de_herramientas_no_inventa_dinero(store, window, proyecto_con_
     bucle = next(f for f in findings if f.kind == "repeticion")
 
     # Repetir una herramienta no gasta tokens: el ahorro en dinero tiene que ser cero.
-    assert bucle.monthly_saving_usd == 0
+    assert bucle.window_waste_usd == 0
     assert bucle.costs_money is False
+    # La proyección de cero sigue siendo cero, y sin base para proyectar es `None`
+    # (D-073). Lo que no puede pasar en ninguno de los dos casos es que aparezca
+    # dinero donde no lo hay.
+    assert bucle.monthly_saving_usd in (None, 0.0)
     # Y lo que sí se pierde, tiempo, se cuenta: 3 repeticiones de más x 5 trazas x 150 ms.
     assert bucle.window_waste_ms == pytest.approx(3 * 5 * 150, rel=0.01)
     assert "gasta tokens de más" in bucle.summary
@@ -112,9 +116,17 @@ def test_un_bucle_de_herramientas_no_inventa_dinero(store, window, proyecto_con_
 def test_el_heroe_no_promete_ahorrar_mas_de_lo_que_se_gasta(
     store, window, proyecto_con_bucle_de_tool
 ):
+    """La promesa no puede pasar del gasto, se proyecte o no.
+
+    Se comprueba sobre lo observado, que existe siempre, y además sobre la proyección
+    cuando la hay: son las dos formas de enseñar la misma barra de reparto (D-073).
+    """
     resumen = insights.overview(store, proyecto_con_bucle_de_tool, window)
-    assert resumen.monthly_avoidable_usd <= resumen.monthly_cost_usd
-    assert resumen.monthly_necessary_usd >= 0
+    assert resumen.window_avoidable_usd <= resumen.window_cost_usd
+    assert resumen.window_necessary_usd >= 0
+    if resumen.projected:
+        assert resumen.monthly_avoidable_usd <= resumen.monthly_cost_usd
+        assert resumen.monthly_necessary_usd >= 0
 
 
 # ---------------------------------------------------------------------------------
@@ -171,10 +183,82 @@ def test_las_reglas_no_cuentan_dos_veces_el_mismo_ahorro(store, window, proyecto
     # mucho puede ahorrar lo que cuestan esas diez, nunca lo que cuestan las treinta.
     assert modelo.window_waste_usd < 0.01
 
-    # Y la suma sigue sin pasarse del gasto real.
-    total = sum(f.monthly_saving_usd for f in findings)
+    # Y la suma sigue sin pasarse del gasto real. Se comprueba sobre el dinero ya
+    # gastado, que es donde vive de verdad el invariante: existe con cualquier cantidad
+    # de datos, mientras que la proyección puede no existir (D-073).
+    total = sum(f.window_waste_usd for f in findings)
+    assert total == pytest.approx(resumen.window_avoidable_usd, rel=0.001)
+    assert resumen.window_avoidable_usd <= resumen.window_cost_usd
+
+
+@pytest.fixture(scope="module")
+def proyecto_con_reintentos_repartido(store: ClickHouseStore):
+    """Los mismos reintentos, pero repartidos en tres días de calendario.
+
+    Mismo dinero, misma patología: lo único que cambia es que ahora **sí** hay base
+    para proyectar. Sirve para comprobar que el descuento del solape sigue en pie por
+    el otro camino, el que se activa cuando el proyecto lleva días enviando.
+    """
+    project = f"test-caro-largo-{uuid.uuid4().hex[:8]}"
+    inicio = datetime.now(timezone.utc) - timedelta(days=3)
+    spans: list[Span] = []
+    for t in range(10):
+        trace = uuid.uuid4().hex
+        momento = inicio + timedelta(hours=t * 7)
+        raiz = _span(project, trace, f"c{t:03d}".ljust(16, "0"), "agente", "agent", 0)
+        raiz.start_time = momento
+        raiz.end_time = momento + timedelta(milliseconds=200)
+        spans.append(raiz)
+        for i in range(3):
+            s = _span(
+                project,
+                trace,
+                f"d{t:03d}{i}".ljust(16, "0"),
+                "clasificar",
+                "llm",
+                0,
+                parent=raiz.span_id,
+                dedup_hash="hash-clasificar",
+            )
+            s.start_time = momento + timedelta(seconds=i)
+            s.end_time = s.start_time + timedelta(milliseconds=200)
+            s.llm = _llm("gpt-4o", 200, 10, 0.001)
+            spans.append(s)
+    store.insert_spans(spans)
+    yield project
+    store.delete_project(project)
+
+
+def test_el_descuento_del_solape_aguanta_tambien_al_proyectar(
+    store, window, proyecto_con_reintentos_repartido
+):
+    """La batería del doble conteo, ahora por el camino de la proyección (D-064, D-073).
+
+    Con datos suficientes las cifras mensuales existen, y el invariante tiene que
+    cumplirse también ahí: la proyección multiplica a todos por lo mismo, así que si
+    la suma de ahorros cuadraba en la ventana tiene que cuadrar en el mes. Si algún día
+    alguien proyecta un hallazgo con una base distinta de la del héroe, esto lo caza.
+    """
+    resumen = insights.overview(store, proyecto_con_reintentos_repartido, window)
+    assert resumen.projected is True, "el escenario existe para probar la proyección"
+
+    total = sum(f.monthly_saving_usd for f in resumen.findings)
     assert total == pytest.approx(resumen.monthly_avoidable_usd, rel=0.001)
     assert resumen.monthly_avoidable_usd <= resumen.monthly_cost_usd
+
+    # Y la proporción evitable es la misma se mire donde se mire: es la comprobación
+    # de que gasto y ahorro han salido de la misma base.
+    assert resumen.monthly_avoidable_usd / resumen.monthly_cost_usd == pytest.approx(
+        resumen.window_avoidable_usd / resumen.window_cost_usd, rel=1e-9
+    )
+
+    # El reparto entre las dos reglas no cambia por proyectar: cada hallazgo mensual
+    # es su propio gasto observado extrapolado con los mismos días.
+    for hallazgo in resumen.findings:
+        if hallazgo.costs_money:
+            assert hallazgo.monthly_saving_usd == pytest.approx(
+                hallazgo.window_waste_usd / resumen.observed_days * 30, rel=1e-6
+            )
 
 
 def test_la_ficha_dice_lo_mismo_que_la_tarjeta(store, window, proyecto_con_reintentos):
@@ -183,7 +267,8 @@ def test_la_ficha_dice_lo_mismo_que_la_tarjeta(store, window, proyecto_con_reint
     for finding in findings:
         detalle = insights.detail(store, proyecto_con_reintentos, window, finding.id)
         assert detalle is not None, finding.id
-        assert detalle.monthly_saving_usd == pytest.approx(finding.monthly_saving_usd)
+        assert detalle.monthly_saving_usd == finding.monthly_saving_usd
+        assert detalle.window_waste_usd == pytest.approx(finding.window_waste_usd)
         assert detalle.title == finding.title
         # La consulta que se enseña es la que se ejecuta, no una copia.
         assert detalle.detection_query.startswith("SELECT")

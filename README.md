@@ -21,9 +21,10 @@ parte y los cimientos de las otras dos.
 | 1.6 | Lista de trazas + vista de árbol | ✅ |
 | 1.7 | Modo local `laplace ui` con SQLite | ✅ |
 | 2 | Detección de derroche y **panel de ahorro** | ✅ |
-| 2.b | Alertas (Slack) cuando se supera un umbral | pendiente |
+| 2.b | Alertas a Slack cuando se supera un umbral | ✅ |
+| 4.a | **Panel** por unidad de trabajo, picos atribuidos, modo en vivo | ✅ |
 | 3 | **Diagnóstico automático** con modelo | pendiente |
-| 4+ | Evaluación, gestión de prompts, dashboards | pendiente |
+| 4.b+ | Evaluación y gestión de prompts | pendiente |
 
 Las fases 2 y 3 son el producto, no extras: son lo que separa a Laplace de un visor de
 trazas.
@@ -37,6 +38,8 @@ JSON. El modo es global y se recuerda.
 
 - **Diagnóstico** (`/`) — cuánto te cuesta el agente, cuánto puedes dejar de pagar, y
   las cosas que arreglar ordenadas por dinero recuperable.
+- **Panel** (`/panel`) — si el gasto sube porque hay más trabajo o porque el trabajo se
+  ha encarecido, dicho con palabras, y los tramos que se salen de lo normal con su causa.
 - **Problema** (`/problemas/…`) — qué pasa, por qué, cómo se ha detectado, cómo se
   arregla y cuánto te ahorras, con el cálculo detrás.
 - **Trazas** (`/trazas`) — exploración libre: filtros, búsqueda y orden por coste.
@@ -54,11 +57,79 @@ Tres reglas deterministas, sin modelo de por medio
 | Modelo caro | Un paso con salida media corta que usa un modelo con alternativa más barata | Diferencia de tarifa sobre los tokens reales |
 | Contexto fijo | Un prompt con un suelo grande de tokens que se reenvía sin caché | Diferencia entre tarifa normal y de caché, menos lo que cuesta escribirla |
 
-Cuatro cosas que **no** hace, a propósito: no inventa dinero donde no lo hay (un bucle de
+Cinco cosas que **no** hace, a propósito: no inventa dinero donde no lo hay (un bucle de
 herramientas no gasta tokens, así que enseña el tiempo perdido y lo dice), no cuenta dos
 veces el mismo ahorro cuando dos reglas se solapan, no afirma que un modelo más barato
-acertará igual (eso exige evaluaciones, que todavía no existen), y no presenta como
-completo un total al que le faltan pasos cuyo modelo no tiene tarifa conocida.
+acertará igual (eso exige evaluaciones, que todavía no existen), no presenta como
+completo un total al que le faltan pasos cuyo modelo no tiene tarifa conocida, y **no
+proyecta un mes desde una hora de datos**: por debajo de un día observado enseña lo
+gastado de verdad con su ventana, y dice cuánto falta para la previsión (D-073).
+
+## Avisar cuando algo se dispara
+
+Alertas a Slack cuando un hallazgo supera su umbral, **apagadas por defecto** y con las
+mismas variables en la nube y en `laplace ui`:
+
+```bash
+export LAPLACE_ALERTS_ENABLED=true
+export LAPLACE_ALERTS_SLACK_WEBHOOK="https://hooks.slack.com/services/…"
+export LAPLACE_ALERTS_BASE_URL="http://localhost:3000"   # para el enlace a la ficha
+```
+
+El mensaje lleva el hallazgo, el dinero y un enlace directo a su ficha. Lo que más
+trabajo cuesta aquí es **no ser ruidoso**, porque una alerta que se repite se ignora y
+después se ignoran todas:
+
+- **Un mensaje por proyecto**, con todo lo que vence junto. Nunca uno por hallazgo.
+- **Periodo de calma por hallazgo** (24 h por defecto): tras avisar no se vuelve a avisar
+  de lo mismo, aunque el problema siga ahí y aunque haya empeorado.
+- **Umbral, silencio y reglas silenciadas por proyecto**, en un JSON que se versiona
+  (`LAPLACE_ALERTS_CONFIG_PATH`):
+
+  ```json
+  {
+    "defaults": {"min_usd": 1.0, "quiet_hours": 24},
+    "projects": {
+      "cobros":  {"min_usd": 0.5, "quiet_hours": 6},
+      "juguete": {"muted": true},
+      "soporte": {"muted_kinds": ["repeticion"]}
+    }
+  }
+  ```
+
+- El umbral se mide en **dinero ya gastado**, no proyectado: así un proyecto recién
+  instalado también puede avisar.
+- Si el coste de un hallazgo no es fiable —modelo sin tarifa, o metro de facturación sin
+  confirmar— la alerta dice «al menos 5,00 $» y explica por qué. Nunca afirma una cifra
+  que el motor de precios sabe incompleta.
+
+`GET /api/alerts` enseña la configuración en vigor y qué saltaría ahora mismo, sin mandar
+nada.
+
+## Vigilar sin convertirse en un Grafana peor
+
+La pestaña **Panel** existe por dos ideas, y sin ellas no valdría la pena:
+
+**Coste por unidad de trabajo, no totales.** Si los tokens suben un 40 % pero hay un 40 %
+más de ejecuciones, no pasa nada; si suben con las mismas ejecuciones, hay degradación.
+Las métricas protagonistas son todas por ejecución —coste, tokens, pasos, duración— y los
+totales van debajo, como contexto. Y la lectura se dice en una frase, no se deduce de dos
+líneas:
+
+> **Subida sin más ejecuciones: revisar.**
+> El gasto sube un 232 %, las ejecuciones se mantienen y el coste de cada una sube un
+> 232 %. El mismo trabajo está costando más que antes, así que esto no lo explica la
+> demanda.
+
+**Atribución de picos.** Un tramo cuyo coste *por ejecución* se dispara —no su gasto: una
+hora punta no es una anomalía— se investiga y se dice qué cambió alrededor: un modelo que
+aparece por primera vez en las trazas, una herramienta nueva, un paso que se lleva el
+sobrecoste. Con enlace directo a las trazas de ese tramo. **Si no se puede atribuir con
+datos reales, dice «No identificamos la causa»**; nunca insinúa una correlación.
+
+El explorador tiene además **modo en vivo**: las trazas nuevas se van añadiendo según
+llegan, con indicador y botón de pausa. Es polling cada cinco segundos contra la misma
+API de lectura, no WebSockets (D-079).
 
 ## Los precios
 
@@ -242,6 +313,13 @@ Hay dos niveles:
   solo** si no hay ClickHouse escuchando (`docker compose up -d clickhouse` para
   activarlo). Cubre lo que las pruebas en memoria no pueden ver: filtros, agregaciones,
   paginación e idempotencia al reescribir un span.
+
+`test_alerts.py` y `test_panel.py` corren siempre y no tocan la red: el notificador de
+Slack se sustituye por uno que apunta lo que le mandan, y la lógica del panel —el
+veredicto, la detección de picos y la atribución— es pura y se prueba sin almacén. La
+mayoría de los casos de alertas comprueban **silencios**, y los del panel comprueban que
+**no se dice de más**: ni una variación contra un periodo vacío, ni una causa que no esté
+en las trazas.
 
 ## Licencia
 

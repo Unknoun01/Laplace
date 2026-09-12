@@ -6,8 +6,8 @@ punto 7) entrará por esta misma interfaz sin tocar la API ni el frontend (D-015
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timedelta
 from typing import Any, Protocol, runtime_checkable
 
 from laplace.schema import Span, TraceSummary
@@ -117,6 +117,11 @@ class RepeatedGroup:
     extra_spans: int = 0
     extra_cost_usd: float = 0.0
     extra_duration_ms: float = 0.0
+    #: De las ocurrencias sobrantes, cuántas tienen el coste incompleto (modelo sin
+    #: tarifa) o cobrado a tarifa asumida. Mientras alguna de las dos no sea cero, el
+    #: dinero del hallazgo es un suelo y hay que decirlo antes de afirmar la cifra.
+    extra_unknown_cost_spans: int = 0
+    extra_assumed_rate_spans: int = 0
     #: Tokens de las ocurrencias sobrantes. Sirven para que la regla del modelo caro
     #: no vuelva a contar lo que ya cuenta la regla de repetición.
     extra_input_tokens: int = 0
@@ -148,11 +153,61 @@ class ModelUsage:
     #: Lo que la cache ya ha ahorrado en este (paso, modelo).
     cache_saving_usd: float = 0.0
     cost_usd: float = 0.0
+    #: Llamadas con el coste incompleto o cobrado a tarifa asumida. Igual que en
+    #: `RepeatedGroup`: mientras no sean cero, la cifra del hallazgo es un suelo.
+    unknown_cost_spans: int = 0
+    assumed_rate_spans: int = 0
     avg_output_tokens: float = 0.0
     avg_input_tokens: float = 0.0
     #: Suelo de tokens de entrada: aproxima la parte fija del prompt que se reenvía.
     min_input_tokens: int = 0
     sample_trace_id: str = ""
+
+
+@dataclass
+class Bucket:
+    """Un tramo del panel, agregado **por ejecución y no por span**.
+
+    Es la unidad que hace que el panel diga algo: los totales de un tramo suben cuando
+    hay más trabajo, y eso no es una noticia. Lo que importa es lo que cuesta cada
+    ejecución, y para eso hay que agrupar antes por traza. Por eso `duration_ms_sum` es
+    suma de duraciones de traza —de principio a fin de la ejecución— y no de spans, que
+    se solapan entre sí y sumarían un número sin significado.
+    """
+
+    start: datetime
+    traces: int = 0
+    spans: int = 0
+    llm_calls: int = 0
+    error_traces: int = 0
+    cost_usd: float = 0.0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    duration_ms_sum: float = 0.0
+
+
+@dataclass
+class StepFacts:
+    """Lo que un paso hizo y costó en un tramo."""
+
+    cost_usd: float = 0.0
+    calls: int = 0
+
+
+@dataclass
+class WindowFacts:
+    """Qué se vio en un tramo: modelos, herramientas, pasos y volumen.
+
+    Es la materia prima de la atribución de picos. Se pide dos veces —dentro del pico y
+    en lo que va antes— y la causa sale de la diferencia. Nada de correlaciones: o el
+    modelo aparece por primera vez en las trazas del pico, o no se dice nada.
+    """
+
+    traces: int = 0
+    cost_usd: float = 0.0
+    models: set[str] = field(default_factory=set)
+    tools: set[str] = field(default_factory=set)
+    steps: dict[str, StepFacts] = field(default_factory=dict)
 
 
 @dataclass
@@ -187,6 +242,32 @@ def disambiguate(filas: list[Any]) -> list[Any]:
         if fila.name in repetidas and pista and pista != fila.name:
             fila.name = f"{fila.name} — «{pista}»"
     return filas
+
+
+def bucket_count(window: Window, bucket_minutes: int) -> int:
+    """Cuántos tramos caben en la ventana. Al menos uno."""
+    minutos = (window.until - window.since).total_seconds() / 60
+    return max(int(minutos // bucket_minutes) + 1, 1)
+
+
+def densify(
+    filas: list[tuple[int, Bucket]], window: Window, bucket_minutes: int
+) -> list[Bucket]:
+    """Rellena los tramos vacíos y les pone su instante de inicio.
+
+    Vive aquí y no en un almacén concreto porque un hueco es información —una hora sin
+    ejecuciones es una hora sin ejecuciones— y las dos series tienen que tener la misma
+    forma. Si un almacén devolviera sólo los tramos con datos y el otro todos, la misma
+    gráfica se leería distinta según dónde estén las filas.
+    """
+    total = bucket_count(window, bucket_minutes)
+    por_indice = {i: b for i, b in filas if 0 <= i < total}
+    salida: list[Bucket] = []
+    for i in range(total):
+        inicio = window.since + timedelta(minutes=bucket_minutes * i)
+        bucket = por_indice.get(i)
+        salida.append(replace(bucket, start=inicio) if bucket else Bucket(start=inicio))
+    return salida
 
 
 @runtime_checkable
@@ -244,6 +325,16 @@ class SpanStore(Protocol):
         self, project_id: str, window: Window, dedup_hash: str, limit: int = 40
     ) -> list[Span]:
         """Las ocurrencias repetidas de una traza concreta, como evidencia."""
+
+    def timeseries(
+        self, project_id: str, window: Window, bucket_minutes: int
+    ) -> list[Bucket]:
+        """La ventana troceada en tramos, agregada por ejecución (panel, Fase 4)."""
+
+    def window_facts(
+        self, project_id: str, since: datetime, until: datetime
+    ) -> WindowFacts:
+        """Modelos, herramientas y pasos vistos en un tramo. Atribuye los picos."""
 
     def health(self) -> bool:
         """True si el almacén responde."""

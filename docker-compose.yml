@@ -56,6 +56,14 @@ services:
       LAPLACE_CLICKHOUSE_DATABASE: laplace
       LAPLACE_POSTGRES_DSN: postgresql://laplace:laplace@postgres:5432/laplace
       LAPLACE_CORS_ORIGINS: http://localhost:3000
+      # Alertas a Slack. Apagadas hasta que haya un webhook: nada que mande mensajes
+      # fuera se enciende solo. Son las mismas variables que usa `laplace ui` (D-075).
+      LAPLACE_ALERTS_ENABLED: "${LAPLACE_ALERTS_ENABLED:-false}"
+      LAPLACE_ALERTS_SLACK_WEBHOOK: "${LAPLACE_ALERTS_SLACK_WEBHOOK:-}"
+      LAPLACE_ALERTS_BASE_URL: "${LAPLACE_ALERTS_BASE_URL:-http://localhost:3000}"
+      LAPLACE_ALERTS_MIN_USD: "${LAPLACE_ALERTS_MIN_USD:-1.0}"
+      LAPLACE_ALERTS_QUIET_HOURS: "${LAPLACE_ALERTS_QUIET_HOURS:-24}"
+      LAPLACE_ALERTS_CONFIG_PATH: "${LAPLACE_ALERTS_CONFIG_PATH:-}"
     ports:
       - "8000:8000"
       # Alias en el puerto OTLP/HTTP estándar: cualquier exportador OpenTelemetry

@@ -14,6 +14,8 @@ from starlette.concurrency import run_in_threadpool
 from .ingest.otlp import decode_request, parse_spans
 from .insights import FindingDetail, Overview, overview
 from .insights import detail as finding_detail
+from .panel import Panel
+from .panel import build as build_panel
 from .pricing import get_price_table, reload_price_table
 from .storage.base import TraceFilter, Window, decode_cursor
 from .tree import build_tree, summarize
@@ -214,6 +216,72 @@ async def list_projects(request: Request) -> dict[str, Any]:
             for s in stats
         ]
     }
+
+
+@router.get("/api/panel", response_model=Panel)
+async def get_panel(
+    request: Request,
+    project_id: str,
+    days: int = Query(7, ge=1, le=90),
+) -> Panel:
+    """El panel: coste por unidad de trabajo, la lectura en palabras y los picos.
+
+    Todo lo que devuelve es de la ventana pedida: aquí no se proyecta nada. La
+    comparación es contra el periodo inmediatamente anterior de la misma duración, y
+    cuando ese periodo no tiene ejecuciones las métricas vienen a `None` con su motivo
+    en lugar de a cero (D-073, D-077).
+    """
+    return await run_in_threadpool(build_panel, _store(request), project_id, _window(days))
+
+
+@router.get("/api/alerts")
+async def alerts_status(
+    request: Request, project_id: str | None = None
+) -> dict[str, Any]:
+    """Qué alertas están configuradas y cuáles saltarían ahora mismo.
+
+    Sólo lee: **no manda nada**. Existe porque la pregunta de quien acaba de configurar
+    un webhook es «¿esto va a avisarme?», y la única respuesta honesta antes de que
+    salte la primera alerta es enseñarle la decisión que se tomaría.
+    """
+    runner = getattr(request.app.state, "alerts", None)
+    if runner is None:
+        return {
+            "enabled": False,
+            "detail": (
+                "Las alertas están apagadas. Enciéndelas con LAPLACE_ALERTS_ENABLED=true "
+                "y LAPLACE_ALERTS_SLACK_WEBHOOK con tu webhook entrante de Slack."
+            ),
+            "projects": [],
+        }
+
+    proyectos = (
+        [project_id]
+        if project_id
+        else [p.project_id for p in await run_in_threadpool(_store(request).list_projects)]
+    )
+
+    salida = []
+    for pid in proyectos:
+        ajustes = runner.config_for(pid)
+        decision = await run_in_threadpool(runner.evaluate, pid, dry_run=True)
+        salida.append(
+            {
+                "project_id": pid,
+                # El webhook NUNCA sale por la API: es un secreto, y esta ruta no está
+                # autenticada. Sólo se dice si hay uno puesto.
+                "webhook_configured": bool(ajustes.webhook_url),
+                "muted": ajustes.muted,
+                "muted_kinds": sorted(ajustes.muted_kinds),
+                "min_usd": ajustes.min_usd,
+                "quiet_hours": ajustes.quiet_hours,
+                "window_days": ajustes.window_days,
+                "would_alert": [f.id for f in decision.due],
+                "in_quiet_period": [f.id for f in decision.silenced],
+                "reason": decision.reason,
+            }
+        )
+    return {"enabled": True, "projects": salida}
 
 
 @router.get("/api/pricing/models")

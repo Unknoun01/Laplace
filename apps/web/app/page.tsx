@@ -6,7 +6,7 @@ import { Suspense } from "react";
 import { BigMoney, FindingCard, GapBar, Readout } from "@/components/pieces";
 import { BackendDown, Cargando, NoProject, NoTracesYet, NothingToFix } from "@/components/states";
 import { getOverview, listProjects, parseDays } from "@/lib/api";
-import { duration, money, number, percent, tokens } from "@/lib/format";
+import { duration, money, number, percent, spanLabel, tokens, windowLabel } from "@/lib/format";
 import type { Overview } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
 
@@ -38,25 +38,34 @@ function Contenido() {
   if (overview.spans === 0) return <NoTracesYet project={project} />;
 
   const query = `?project=${encodeURIComponent(project)}&days=${days}`;
-  const ahorra = overview.monthly_avoidable_usd > 0;
-  const proporcion =
-    overview.monthly_cost_usd > 0
-      ? overview.monthly_avoidable_usd / overview.monthly_cost_usd
-      : 0;
+  const ventana = windowLabel(overview.observed_days);
+
+  // Proyectar o no proyectar cambia las DOS cifras a la vez, nunca una sola: gasto y
+  // ahorro salen siempre de la misma base (D-058, D-073).
+  const total = overview.projected ? overview.monthly_cost_usd! : overview.window_cost_usd;
+  const necesario = overview.projected
+    ? overview.monthly_necessary_usd!
+    : overview.window_necessary_usd;
+  const evitable = overview.projected
+    ? overview.monthly_avoidable_usd!
+    : overview.window_avoidable_usd;
+  const ahorra = evitable > 0;
 
   return (
     <main className="reading">
       <section className="hero">
         <h1>
-          Tu agente «{project}», al ritmo de{" "}
-          {days === 1 ? "las últimas 24 horas" : `estos ${days} días`}
+          Tu agente «{project}»,{" "}
+          {overview.projected
+            ? `al ritmo de ${ventana}`
+            : `en ${spanLabel(overview.observed_days)} de datos`}
         </h1>
 
         <div className="pair">
           <BigMoney
-            amount={overview.monthly_cost_usd}
+            amount={total}
             currency={overview.currency}
-            label="te costará este mes"
+            label={overview.projected ? "te costará este mes" : "te ha costado hasta ahora"}
           />
           {ahorra && (
             <>
@@ -64,7 +73,7 @@ function Contenido() {
                 →
               </div>
               <BigMoney
-                amount={overview.monthly_necessary_usd}
+                amount={necesario}
                 currency={overview.currency}
                 label="si arreglas lo de abajo"
                 good
@@ -75,13 +84,13 @@ function Contenido() {
 
         {ahorra && (
           <GapBar
-            necessary={overview.monthly_necessary_usd}
-            avoidable={overview.monthly_avoidable_usd}
+            necessary={necesario}
+            avoidable={evitable}
             currency={overview.currency}
           />
         )}
 
-        <Caveats overview={overview} proporcion={proporcion} />
+        <Caveats overview={overview} ventana={ventana} />
 
         <Readout
           items={[
@@ -95,12 +104,7 @@ function Contenido() {
               money(overview.window_cache_saving_usd, overview.currency),
               "Ya ahorrado por la caché",
             ],
-            [
-              overview.observed_days < 1
-                ? `${(overview.observed_days * 24).toFixed(1)} h`
-                : `${overview.observed_days.toFixed(1)} d`,
-              "Datos observados",
-            ],
+            [spanLabel(overview.observed_days), "Datos observados"],
           ]}
         />
       </section>
@@ -124,7 +128,12 @@ function Contenido() {
               ? "Una cosa que arreglar"
               : `${overview.findings.length} cosas que arreglar`}
           </h2>
-          <p className="lead">De la que más dinero te devuelve a la que menos.</p>
+          <p className="lead">
+            De la que más dinero te devuelve a la que menos.{" "}
+            {overview.projected
+              ? `Las cifras son la proyección a 30 días de ${ventana}.`
+              : `Las cifras son dinero ya gastado en ${ventana}.`}
+          </p>
           {overview.findings.map((finding) => (
             <FindingCard
               key={finding.id}
@@ -133,10 +142,19 @@ function Contenido() {
             />
           ))}
           <p className="disclaimer">
-            Los importes son una estimación a partir de lo que ha pasado en el rango que
-            estás mirando, proyectado a 30 días. Si tu tráfico cambia, cambian. El coste
-            está en {overview.currency} porque es la moneda en la que facturan los
-            proveedores.
+            {overview.projected ? (
+              <>
+                Los importes son una estimación a partir de {ventana} de datos, proyectada
+                a 30 días. Si tu tráfico cambia, cambian.
+              </>
+            ) : (
+              <>
+                Los importes son dinero <strong>ya gastado</strong> en {ventana}, no una
+                proyección: no hay datos suficientes para estimar el mes.
+              </>
+            )}{" "}
+            El coste está en {overview.currency} porque es la moneda en la que facturan
+            los proveedores.
           </p>
         </section>
       )}
@@ -151,7 +169,7 @@ function Contenido() {
  * el gasto, o cuando la proyección sale de unas horas de datos, se dice aquí mismo en
  * lugar de presentarlo como una promesa.
  */
-function Caveats({ overview, proporcion }: { overview: Overview; proporcion: number }) {
+function Caveats({ overview, ventana }: { overview: Overview; ventana: string }) {
   const avisos: React.ReactNode[] = [];
 
   if (overview.unknown_cost_spans > 0) {
@@ -176,19 +194,30 @@ function Caveats({ overview, proporcion }: { overview: Overview; proporcion: num
       </>,
     );
   }
-  if (overview.thin_projection) {
+  if (overview.projected) {
     avisos.push(
       <>
-        La proyección mensual sale de <strong>menos de 24 horas</strong> de datos (
-        {overview.observed_days.toFixed(2)} días). Con tan poco, un día raro deforma el mes
-        entero: tómala como un orden de magnitud, no como una previsión.
+        La cifra del mes se proyecta desde <strong>{ventana}</strong> de datos, que es lo
+        que llevas enviando, no el rango que pide el selector. Gasto y ahorro salen de la
+        misma base: si cambia una, cambia la otra.
+      </>,
+    );
+  } else {
+    avisos.push(
+      <>
+        <strong>Todavía no proyectamos el mes.</strong> Con {ventana} de datos, multiplicar
+        para llegar a 30 días da una cifra que no se sostiene: un pico de diez minutos se
+        convertiría en cientos de dólares. Lo que ves es dinero ya gastado, medido. En
+        cuanto tengas {spanLabel(overview.min_days_for_projection)} de datos aparece aquí
+        la previsión mensual.
       </>,
     );
   }
   if (overview.savings_needs_caution) {
     avisos.push(
       <>
-        El ahorro estimado es el <strong>{Math.round(proporcion * 100)} %</strong> de lo que
+        El ahorro estimado es el{" "}
+        <strong>{Math.round(overview.avoidable_ratio * 100)} %</strong> de lo que
         gastas. Es mucho: suele pasar en agentes pequeños o recién estrenados, donde unos
         pocos pasos dominan la factura. Antes de darlo por bueno, mira el desglose de cada
         problema.
