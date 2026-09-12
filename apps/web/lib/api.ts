@@ -1,8 +1,18 @@
 import type {
+  Annotation,
+  AnnotationVerdict,
+  Comparison,
+  Dataset,
+  DatasetItem,
+  Diff,
   FindingDetail,
+  JudgeStatus,
   Overview,
   Panel,
   ProjectStats,
+  PromptCard,
+  PromptsView,
+  RunSummary,
   Trace,
   TraceListPage,
 } from "./types";
@@ -21,6 +31,44 @@ import type {
 const API_URL =
   typeof window === "undefined" ? (process.env.LAPLACE_API_URL ?? "http://localhost:8000") : "";
 
+/**
+ * La clave de API, si esta instalación pide una.
+ *
+ * Vive en `localStorage` y no en una cookie por una razón concreta: en modo local no
+ * hay clave ninguna y la interfaz es la misma, así que meter sesiones y cookies en el
+ * camino habría convertido `laplace ui` —un proceso de Python en un portátil— en algo
+ * con login. Lo que hay es más humilde y suficiente: si el backend contesta 401, la
+ * pantalla pide la clave y se guarda en el navegador de quien la escribió (D-097).
+ */
+const CLAVE = "laplace.api_key";
+
+export function getApiKey(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.localStorage.getItem(CLAVE) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function setApiKey(valor: string): void {
+  try {
+    if (valor) window.localStorage.setItem(CLAVE, valor.trim());
+    else window.localStorage.removeItem(CLAVE);
+  } catch {
+    /* navegador con almacenamiento bloqueado: la clave dura lo que la pestaña */
+  }
+}
+
+/** Cabeceras de una petición. La clave va donde dice el estándar, nunca en la URL. */
+function cabeceras(extra?: Record<string, string>): Record<string, string> {
+  const clave = getApiKey();
+  return {
+    ...(extra ?? {}),
+    ...(clave ? { Authorization: `Bearer ${clave}` } : {}),
+  };
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -38,9 +86,18 @@ async function get<T>(path: string, params?: Params): Promise<T> {
     if (value !== undefined && value !== "") url.searchParams.set(key, String(value));
   }
 
-  const response = await fetch(url, { cache: "no-store" });
+  const response = await fetch(url, { cache: "no-store", headers: cabeceras() });
   if (!response.ok) {
-    throw new ApiError(`${response.status} en ${path}`, response.status);
+    // El detalle del backend explica el 401 y el 403 («esta clave no tiene acceso a ese
+    // proyecto»), que es justo lo que hay que leer para arreglarlo.
+    let detail = `${response.status} en ${path}`;
+    try {
+      const cuerpo = await response.json();
+      if (cuerpo?.detail) detail = String(cuerpo.detail);
+    } catch {
+      /* la respuesta no era JSON */
+    }
+    throw new ApiError(detail, response.status);
   }
   return (await response.json()) as T;
 }
@@ -135,4 +192,178 @@ export async function backendReachable(): Promise<boolean> {
 /** Inicio de la ventana activa, en ISO, para filtrar la lista de trazas. */
 export function windowStart(days: number): string {
   return new Date(Date.now() - days * 86_400_000).toISOString();
+}
+
+// ---------------------------------------------------------------------------------
+// Evaluaciones (Fase 5)
+// ---------------------------------------------------------------------------------
+
+async function send<T>(path: string, method: string, body?: unknown): Promise<T> {
+  const url = new URL(path, API_URL || window.location.origin);
+  const response = await fetch(url, {
+    method,
+    headers: cabeceras(body === undefined ? {} : { "Content-Type": "application/json" }),
+    body: body === undefined ? undefined : JSON.stringify(body),
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    // El detalle del backend es el que explica el problema («no hay base de metadatos»,
+    // «ese filtro no selecciona ninguna traza»). Tragarlo dejaría un «500» pelado.
+    let detail = `${response.status} en ${path}`;
+    try {
+      const cuerpo = await response.json();
+      if (cuerpo?.detail) detail = String(cuerpo.detail);
+    } catch {
+      /* la respuesta no era JSON: se queda el mensaje genérico */
+    }
+    throw new ApiError(detail, response.status);
+  }
+  return (await response.json()) as T;
+}
+
+/** Marca una traza. SIEMPRE crea una anotación humana: el juez tiene su propia ruta. */
+export function annotate(input: {
+  project_id: string;
+  trace_id: string;
+  verdict: AnnotationVerdict;
+  comment?: string;
+  author?: string;
+}): Promise<Annotation> {
+  return send<Annotation>("/api/annotations", "POST", input);
+}
+
+export function deleteAnnotation(id: string): Promise<{ deleted: boolean }> {
+  return send<{ deleted: boolean }>(`/api/annotations/${encodeURIComponent(id)}`, "DELETE");
+}
+
+export async function annotationsFor(traceIds: string[]): Promise<Record<string, Annotation[]>> {
+  if (traceIds.length === 0) return {};
+  const data = await get<{ annotations: Record<string, Annotation[]> }>("/api/annotations", {
+    trace_ids: traceIds.join(","),
+  });
+  return data.annotations;
+}
+
+export function judgeStatus(): Promise<JudgeStatus> {
+  return get<JudgeStatus>("/api/judge");
+}
+
+export interface JudgeResult {
+  judged: number;
+  failed: { trace_id: string; error: string }[];
+  cost_usd: number;
+  cost_unknown: boolean;
+  model: string;
+  prompt_version: string;
+}
+
+/** Pasa el juez por unas trazas o por una tirada entera. Devuelve lo que ha costado. */
+export function runJudge(input: {
+  project_id: string;
+  trace_ids?: string[];
+  run_id?: string;
+}): Promise<JudgeResult> {
+  return send<JudgeResult>("/api/judge", "POST", input);
+}
+
+export function judgePrompt(projectId: string, traceId: string): Promise<{ system: string; user: string }> {
+  return get<{ system: string; user: string }>("/api/judge/prompt", {
+    project_id: projectId,
+    trace_id: traceId,
+  });
+}
+
+export async function listDatasets(projectId: string): Promise<Dataset[]> {
+  const data = await get<{ datasets: Dataset[] }>("/api/datasets", { project_id: projectId });
+  return data.datasets;
+}
+
+export function getDataset(id: string): Promise<{ dataset: Dataset; items: DatasetItem[] }> {
+  return get<{ dataset: Dataset; items: DatasetItem[] }>(`/api/datasets/${encodeURIComponent(id)}`);
+}
+
+/** Crea un conjunto a partir de un filtro del explorador: tráfico real, no inventado. */
+export function createDataset(input: {
+  project_id: string;
+  name: string;
+  description?: string;
+  filter: Record<string, string | undefined>;
+  limit?: number;
+}): Promise<Dataset> {
+  return send<Dataset>("/api/datasets", "POST", input);
+}
+
+export function deleteDataset(id: string): Promise<{ deleted: boolean }> {
+  return send<{ deleted: boolean }>(`/api/datasets/${encodeURIComponent(id)}`, "DELETE");
+}
+
+export async function listRuns(projectId: string, datasetId?: string): Promise<RunSummary[]> {
+  const data = await get<{ runs: RunSummary[] }>("/api/runs", {
+    project_id: projectId,
+    dataset_id: datasetId,
+  });
+  return data.runs;
+}
+
+/** A vs B. Las dos tiradas tienen que ser del mismo conjunto; el backend lo exige. */
+export function compareRuns(projectId: string, a: string, b: string): Promise<Comparison> {
+  return get<Comparison>("/api/experiments/compare", { project_id: projectId, a, b });
+}
+
+// ---------------------------------------------------------------------------------
+// Prompts (Fase 6)
+// ---------------------------------------------------------------------------------
+
+export function getPrompts(projectId: string, days: number): Promise<PromptsView> {
+  return get<PromptsView>("/api/prompts", { project_id: projectId, days });
+}
+
+/** La ficha de un prompt: igual que la tarjeta de la lista, pero con los textos. */
+export function getPrompt(id: string, projectId: string, days: number): Promise<PromptCard> {
+  return get<PromptCard>(`/api/prompts/${encodeURIComponent(id)}`, {
+    project_id: projectId,
+    days,
+  });
+}
+
+export function promptDiff(id: string, a: number, b: number): Promise<Diff> {
+  return get<Diff>(`/api/prompts/${encodeURIComponent(id)}/diff`, { a, b });
+}
+
+export function createPrompt(input: {
+  project_id: string;
+  name: string;
+  description?: string;
+  text: string;
+  notes?: string;
+}): Promise<PromptCard> {
+  return send<PromptCard>("/api/prompts", "POST", input);
+}
+
+/** Guarda una versión. Por defecto **no** la despliega: son dos gestos distintos. */
+export function addPromptVersion(
+  id: string,
+  input: { project_id: string; text: string; notes?: string; deploy?: boolean },
+): Promise<{ version: number }> {
+  return send<{ version: number }>(
+    `/api/prompts/${encodeURIComponent(id)}/versions`,
+    "POST",
+    input,
+  );
+}
+
+/** Pone una versión en producción. Volver a una anterior es el rollback de un clic. */
+export function setProduction(
+  id: string,
+  input: { project_id: string; version: number; note?: string },
+): Promise<{ detail: string }> {
+  return send<{ detail: string }>(
+    `/api/prompts/${encodeURIComponent(id)}/production`,
+    "POST",
+    input,
+  );
+}
+
+export function deletePrompt(id: string): Promise<{ deleted: boolean }> {
+  return send<{ deleted: boolean }>(`/api/prompts/${encodeURIComponent(id)}`, "DELETE");
 }

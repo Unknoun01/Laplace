@@ -103,6 +103,16 @@ LAPLACE_BILLING_TIER = "laplace.billing.tier"
 #: `regional` cuando la petición pide residencia de datos, que lleva recargo.
 LAPLACE_BILLING_REGION = "laplace.billing.region"
 
+#: Prompt gestionado con el que se hizo esta llamada, y su versión. Los pone el SDK
+#: cuando el prompt se ha pedido con `laplace.get_prompt(...)` **y su texto aparece de
+#: verdad en los mensajes enviados**. Nunca se deducen: si el texto no está, no se
+#: escribe nada, porque una versión mal atribuida contamina las métricas de todas.
+LAPLACE_PROMPT_NAME = "laplace.prompt.name"
+#: Número de versión. `0` significa que se sirvió el texto de reserva porque Laplace no
+#: respondió: es tráfico real que no corresponde a ninguna versión guardada, y eso se
+#: dice en vez de atribuírselo a la que estuviera en producción.
+LAPLACE_PROMPT_VERSION = "laplace.prompt.version"
+
 LAPLACE_TOOL_ARGUMENTS = "laplace.tool.arguments"
 LAPLACE_TOOL_OUTPUT = "laplace.tool.output"
 

@@ -23,6 +23,8 @@ from typing import Any, Literal
 from laplace.schema import Span
 from pydantic import BaseModel, Field
 
+from .coverage import Coverage
+from .coverage import build as build_coverage
 from .pricing import get_price_table
 from .storage.base import ModelUsage, RepeatedGroup, Window, WindowSummary
 
@@ -185,6 +187,11 @@ class Overview(BaseModel):
     savings_needs_caution: bool = False
 
     findings: list[Finding] = Field(default_factory=list)
+
+    #: Cuánto de este proyecto entendemos. Va en el Overview y no en una pantalla
+    #: aparte a propósito: si la cobertura es baja, hay que enterarse **antes** de leer
+    #: la cifra de ahorro, no después de ir a buscarla (D-096).
+    coverage: Coverage | None = None
 
 
 # ---------------------------------------------------------------------------------
@@ -929,10 +936,20 @@ def detect(store: Any, project_id: str, window: Window) -> list[Finding]:
     return findings
 
 
-def overview(store: Any, project_id: str, window: Window) -> Overview:
-    """El héroe del inicio: coste actual, coste evitable y métricas."""
+def overview(
+    store: Any, project_id: str, window: Window, *, has_managed_prompts: bool = False
+) -> Overview:
+    """El héroe del inicio: coste actual, coste evitable y métricas.
+
+    Y, delante de todo eso, cuánto de este proyecto entendemos: un ahorro calculado
+    sobre la mitad de las llamadas no es medio ahorro, es un número que no se puede
+    leer sin saber que es la mitad (D-096).
+    """
     summary = store.summarize_window(project_id, window)
     findings = detect(store, project_id, window)
+    cobertura = build_coverage(
+        store.coverage(project_id, window), has_managed_prompts=has_managed_prompts
+    )
 
     # Se proyecta sobre los días que de verdad hay datos, no sobre los que pide el
     # selector; y por debajo de un día no se proyecta en absoluto (D-073).
@@ -982,6 +999,7 @@ def overview(store: Any, project_id: str, window: Window) -> Overview:
         p95_duration_ms=summary.p95_duration_ms,
         cost_per_trace_usd=(summary.total_cost_usd / summary.traces) if summary.traces else 0.0,
         findings=findings,
+        coverage=cobertura,
     )
 
 

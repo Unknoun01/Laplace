@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { StaticTree } from "@/components/StaticTree";
-import { BackendDown, NotFound, TableSkeleton } from "@/components/states";
+import { BackendDown, NeedsKey, NotFound, NotYours, TableSkeleton } from "@/components/states";
 import { getFinding, getTrace, listProjects, parseDays } from "@/lib/api";
 import { duration, money, oneLine, spanLabel, windowLabel } from "@/lib/format";
 import type { FindingDetail, Span } from "@/lib/types";
@@ -32,6 +32,8 @@ function Contenido() {
 
   if (estado.fase === "cargando") return <TableSkeleton />;
   if (estado.fase === "sin-backend") return <BackendDown />;
+  if (estado.fase === "sin-clave") return <NeedsKey mensaje={estado.error.message} />;
+  if (estado.fase === "sin-permiso") return <NotYours mensaje={estado.error.message} />;
   if (estado.fase === "error") return <BackendDown mensaje={estado.error.message} />;
 
   const { project, finding, trace } = estado.datos;

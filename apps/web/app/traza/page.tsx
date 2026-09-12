@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { TraceTree } from "@/components/TraceTree";
-import { BackendDown, NotFound, TableSkeleton } from "@/components/states";
-import { getTrace, parseDays } from "@/lib/api";
+import { Verdicts } from "@/components/Verdicts";
+import { BackendDown, NeedsKey, NotFound, NotYours, TableSkeleton } from "@/components/states";
+import { getTrace, judgePrompt, judgeStatus, parseDays, runJudge } from "@/lib/api";
 import { duration, money, number, timestamp } from "@/lib/format";
 import { allNodes } from "@/lib/tree";
-import type { Trace, TraceSummary } from "@/lib/types";
+import type { Annotation, JudgeStatus, Trace, TraceSummary } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
 
 /**
@@ -26,6 +27,8 @@ function Contenido() {
 
   if (estado.fase === "cargando") return <TableSkeleton />;
   if (estado.fase === "sin-backend") return <BackendDown />;
+  if (estado.fase === "sin-clave") return <NeedsKey mensaje={estado.error.message} />;
+  if (estado.fase === "sin-permiso") return <NotYours mensaje={estado.error.message} />;
   if (estado.fase === "error") return <BackendDown mensaje={estado.error.message} />;
 
   const trace = estado.datos;
@@ -63,6 +66,8 @@ function Contenido() {
 
       <Head summary={trace.summary} />
 
+      <Anotar project={project} trace={trace} />
+
       {(findingId || trace.diagnosis) && (
         <div
           style={{
@@ -96,6 +101,102 @@ function Contenido() {
         <ExportarJSON trace={trace} />
       </div>
     </main>
+  );
+}
+
+/**
+ * Marcar la ejecución, aquí mismo.
+ *
+ * Se anota donde se está mirando: quien acaba de leer el árbol y ha visto que el agente
+ * se inventó la tarifa tiene el botón delante, no en otra pantalla. El veredicto del
+ * juez, si lo hay, se enseña al lado pero **nunca en el mismo control**: son dos cosas
+ * distintas y confundirlas es lo único que esta pestaña no se puede permitir (D-083).
+ */
+function Anotar({ project, trace }: { project: string; trace: Trace }) {
+  const [anotaciones, setAnotaciones] = useState<Annotation[]>(trace.annotations);
+  const [juez, setJuez] = useState<JudgeStatus | null>(null);
+  const [prompt, setPrompt] = useState<{ system: string; user: string } | null>(null);
+  const [juzgando, setJuzgando] = useState(false);
+  const [aviso, setAviso] = useState("");
+
+  useEffect(() => {
+    setAnotaciones(trace.annotations);
+  }, [trace.annotations]);
+
+  useEffect(() => {
+    judgeStatus()
+      .then(setJuez)
+      .catch(() => setJuez(null));
+  }, []);
+
+  const traceId = trace.summary.trace_id;
+
+  return (
+    <section className="anotar">
+      <div className="anotar-top">
+        <span className="alabel">¿Esta ejecución está bien?</span>
+        <Verdicts
+          projectId={project}
+          traceId={traceId}
+          annotations={anotaciones}
+          onChange={setAnotaciones}
+        />
+      </div>
+
+      {juez?.enabled && (
+        <div className="actions" style={{ marginTop: 10 }}>
+          <button
+            type="button"
+            className="btn"
+            disabled={juzgando}
+            onClick={async () => {
+              setJuzgando(true);
+              setAviso("");
+              try {
+                const resultado = await runJudge({
+                  project_id: project,
+                  trace_ids: [traceId],
+                });
+                const actualizada = await getTrace(traceId, project);
+                setAnotaciones(actualizada?.annotations ?? anotaciones);
+                setAviso(
+                  resultado.cost_unknown
+                    ? `Juzgada con ${resultado.model}. Su coste no lo sabemos: ese modelo no está en la tabla de precios.`
+                    : `Juzgada con ${resultado.model}. Ha costado ${money(resultado.cost_usd)}.`,
+                );
+              } catch (e) {
+                setAviso(e instanceof Error ? e.message : "el juez no ha podido opinar");
+              } finally {
+                setJuzgando(false);
+              }
+            }}
+          >
+            {juzgando ? "Juzgando…" : `Que opine ${juez.model}`}
+          </button>
+          <button
+            type="button"
+            className="btn pro"
+            onClick={async () =>
+              setPrompt(prompt ? null : await judgePrompt(project, traceId))
+            }
+          >
+            {prompt ? "Ocultar el prompt del juez" : "Ver el prompt del juez"}
+          </button>
+        </div>
+      )}
+
+      {aviso && <p className="jcost">{aviso}</p>}
+
+      {/* Modo avanzado: el texto exacto que se le manda. Un veredicto que no se puede
+          auditar no se puede discutir, y el primer «este fail está mal» llega el día
+          uno (D-067 aplicado al juez). */}
+      {prompt && (
+        <div className="pro">
+          <pre className="wrapless">{prompt.system}</pre>
+          <pre className="wrapless">{prompt.user}</pre>
+        </div>
+      )}
+    </section>
   );
 }
 

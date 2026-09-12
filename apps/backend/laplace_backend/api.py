@@ -11,6 +11,7 @@ from laplace.schema import Trace, TraceListPage
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceResponse
 from starlette.concurrency import run_in_threadpool
 
+from .auth import identity_of
 from .ingest.otlp import decode_request, parse_spans
 from .insights import FindingDetail, Overview, overview
 from .insights import detail as finding_detail
@@ -60,6 +61,23 @@ async def ingest_traces(request: Request) -> Response:
         raise HTTPException(status_code=400, detail="petición OTLP ilegible") from exc
 
     spans = parse_spans(decoded)
+
+    # La clave ata el proyecto. Los spans traen el suyo dentro del protobuf —lo pone
+    # `laplace.init(project=...)`— así que aquí es donde se comprueba que coincide. Se
+    # rechaza el lote entero en vez de reetiquetarlo: reetiquetar escondería una
+    # configuración mal puesta y el usuario descubriría dentro de un mes que su tráfico
+    # lleva semanas en el proyecto de otro (D-097).
+    identidad = identity_of(request)
+    ajenos = sorted({s.project_id for s in spans if not identidad.allows(s.project_id)})
+    if ajenos:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"esta clave no puede escribir en {', '.join(ajenos)}. Comprueba el "
+                f"`project` de laplace.init(): tiene que ser el del proyecto de la clave."
+            ),
+        )
+
     if spans:
         store = _store(request)
         try:
@@ -108,6 +126,10 @@ async def list_traces(
     min_cost_usd: float | None = Query(None, ge=0),
 ) -> TraceListPage:
     """Lista de trazas del proyecto y rango activos."""
+    # Sin proyecto en la petición, una clave de un proyecto vería la lista entera de la
+    # instalación. El middleware comprueba el `project_id` que venga; el que no venga lo
+    # pone aquí la identidad.
+    project_id = identity_of(request).scope(project_id)
     before, before_trace_id = decode_cursor(cursor)
     filters = TraceFilter(
         project_id=project_id,
@@ -143,16 +165,24 @@ async def list_traces(
 async def get_trace(
     request: Request, trace_id: str, project_id: str | None = None
 ) -> Trace:
-    """Árbol completo de una traza, con coste por nodo y por subárbol."""
-    spans = await run_in_threadpool(_store(request).get_trace_spans, trace_id, project_id)
+    """Árbol completo de una traza, con coste por nodo y por subárbol.
+
+    El `project_id` es opcional en la URL, así que aquí es donde una clave de un
+    proyecto podría acabar leyendo la traza de otro: sin acotar, la consulta busca ese
+    id en toda la instalación. `scope()` fija el proyecto de la clave cuando la petición
+    no lo dice (D-097).
+    """
+    alcance = identity_of(request).scope(project_id)
+    spans = await run_in_threadpool(_store(request).get_trace_spans, trace_id, alcance)
     if not spans:
         raise HTTPException(status_code=404, detail="traza no encontrada")
 
     metadata = _metadata(request)
     return Trace(
-        summary=summarize(spans, trace_id, project_id or spans[0].project_id),
+        summary=summarize(spans, trace_id, alcance or spans[0].project_id),
         roots=build_tree(spans),
-        # Huecos reservados: hoy devuelven None y [] (contrato §7).
+        # El diagnóstico sigue siendo hueco de la Fase 3; las anotaciones ya no lo
+        # son: las llena la pestaña de Evaluaciones, y vienen con su fuente puesta.
         diagnosis=await run_in_threadpool(metadata.get_diagnosis, trace_id),
         annotations=await run_in_threadpool(metadata.list_annotations, trace_id),
     )
@@ -176,7 +206,13 @@ async def get_overview(
     days: int = Query(7, ge=1, le=90),
 ) -> Overview:
     """Cuánto cuesta el agente, cuánto sobra y qué hay que arreglar."""
-    return await run_in_threadpool(overview, _store(request), project_id, _window(days))
+    # Si el proyecto no gestiona prompts, que no haya versiones en las trazas no es un
+    # defecto suyo: es que no usa esa parte. La señal se enseña igual pero no pinta de
+    # rojo ni cuenta para el veredicto, y eso hay que saberlo aquí (D-096).
+    gestiona = bool(await run_in_threadpool(_metadata(request).list_prompts, project_id))
+    return await run_in_threadpool(
+        overview, _store(request), project_id, _window(days), has_managed_prompts=gestiona
+    )
 
 
 @router.get("/api/findings/{finding_id:path}", response_model=FindingDetail)
@@ -202,8 +238,19 @@ async def get_finding(
 
 @router.get("/api/projects")
 async def list_projects(request: Request) -> dict[str, Any]:
-    """Proyectos con datos, con su volumen y coste acumulado."""
-    stats = await run_in_threadpool(_store(request).list_projects)
+    """Proyectos con datos, con su volumen y coste acumulado.
+
+    Filtrada por la identidad: con una clave de un proyecto, esta lista es de un
+    proyecto. Sin este filtro, el selector de la barra superior sería un directorio de
+    los clientes de la instalación —nombres, volumen y gasto— para cualquiera con una
+    clave cualquiera.
+    """
+    identidad = identity_of(request)
+    stats = [
+        s
+        for s in await run_in_threadpool(_store(request).list_projects)
+        if identidad.allows(s.project_id)
+    ]
     return {
         "projects": [
             {

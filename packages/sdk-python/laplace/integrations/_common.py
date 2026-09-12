@@ -95,6 +95,39 @@ def record_request(
     if body is not None:
         set_attr(span, semconv.GEN_AI_INPUT_MESSAGES, body)
 
+    record_prompt(span, messages)
+
+
+def record_prompt(span: OtelSpan, messages: Any) -> None:
+    """Marca la llamada con el prompt gestionado que la produjo, si lo hubo.
+
+    Se comprueba que el texto de la versión **esté** en los mensajes enviados. No se
+    deduce del último `get_prompt()`: un agente que pide un prompt y llama al modelo con
+    otro texto le colgaría tráfico ajeno a esa versión, y las métricas de la pestaña de
+    Prompts son justamente por versión (D-090).
+
+    Va aquí, en el único sitio por el que pasan las dos integraciones, y no en cada una:
+    un proveedor que se marcase y otro que no daría una pestaña que miente según con qué
+    modelo hables.
+    """
+    try:
+        from ..prompts import attribution_for
+
+        atribucion = attribution_for(messages)
+    except Exception:  # noqa: BLE001 - nunca romper la llamada del usuario
+        logger.debug("laplace: no se pudo atribuir el prompt", exc_info=True)
+        return
+    if atribucion is None:
+        return
+    nombre, version = atribucion
+    set_attr(span, semconv.LAPLACE_PROMPT_NAME, nombre)
+    # La versión se escribe siempre que haya nombre, cero incluido: el cero es «se
+    # sirvió el texto de reserva», que es un dato, no la ausencia de uno.
+    try:
+        span.set_attribute(semconv.LAPLACE_PROMPT_VERSION, int(version))
+    except Exception:  # noqa: BLE001
+        logger.debug("laplace: no se pudo fijar la versión del prompt", exc_info=True)
+
 
 def record_usage(
     span: OtelSpan,

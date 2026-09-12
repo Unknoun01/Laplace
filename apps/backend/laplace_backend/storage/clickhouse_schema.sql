@@ -97,6 +97,11 @@ CREATE TABLE IF NOT EXISTS spans
     step_label          String,
     step_hint           String,
 
+    -- Prompt gestionado que produjo la llamada, y su version. Vacio para quien no haya
+    -- adoptado la gestion de prompts, que es el caso por defecto (D-090).
+    prompt_name         LowCardinality(String),
+    prompt_version      UInt32,
+
     events              String,
     attributes          String,
 
@@ -147,3 +152,9 @@ ALTER TABLE spans ADD COLUMN IF NOT EXISTS billing_region LowCardinality(String)
 ALTER TABLE spans ADD COLUMN IF NOT EXISTS step_key String DEFAULT '';
 ALTER TABLE spans ADD COLUMN IF NOT EXISTS step_label String DEFAULT '';
 ALTER TABLE spans ADD COLUMN IF NOT EXISTS step_hint String DEFAULT '';
+
+-- Instalaciones anteriores a la gestion de prompts (D-090). La version va en la traza
+-- porque las metricas de la pestana son POR VERSION: sin la columna habria que
+-- deducirlas del texto, que es justo lo que no se puede hacer sin mentir.
+ALTER TABLE spans ADD COLUMN IF NOT EXISTS prompt_name LowCardinality(String) DEFAULT '';
+ALTER TABLE spans ADD COLUMN IF NOT EXISTS prompt_version UInt32 DEFAULT 0;

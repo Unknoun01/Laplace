@@ -11,14 +11,27 @@ import clickhouse_connect
 from laplace.schema import Span
 
 from ..config import Settings
-from ._rows import COLUMNS, row_to_span, row_to_summary, span_to_row
+from ._rows import (
+    COLUMNS,
+    coverage_from_rows,
+    row_to_observed_prompt,
+    row_to_prompt_usage,
+    row_to_span,
+    row_to_summary,
+    row_to_trace_cost,
+    span_to_row,
+)
 from ._rows import utc as _utc
 from .base import (
     Bucket,
+    CoverageFacts,
     ModelUsage,
+    ObservedPrompt,
     ProjectStats,
+    PromptUsage,
     RepeatedGroup,
     StepFacts,
+    TraceCost,
     TraceFilter,
     TracePage,
     Window,
@@ -669,6 +682,11 @@ class ClickHouseStore:
                 GROUP BY paso""",
             parameters=params,
         ).result_rows
+        prompts = self._client.query(
+            f"""SELECT DISTINCT concat(prompt_name, '@', toString(prompt_version))
+                FROM spans FINAL WHERE {WINDOW_WHERE} AND prompt_name != ''""",
+            parameters=params,
+        ).result_rows
         fila = cabecera[0] if cabecera else (0, 0.0)
         return WindowFacts(
             traces=int(fila[0] or 0),
@@ -680,7 +698,166 @@ class ClickHouseStore:
                 for r in pasos
                 if r[0]
             },
+            prompts={r[0] for r in prompts if r[0]},
         )
+
+    def costs_for_traces(
+        self, project_id: str, trace_ids: list[str]
+    ) -> dict[str, TraceCost]:
+        if not trace_ids:
+            return {}
+        params = {"project_id": project_id, "ids": list(trace_ids)}
+        filas = _named(
+            self._client.query(
+                """
+                SELECT
+                    trace_id,
+                    sum(cost_total_usd)   AS coste,
+                    sum(input_tokens)     AS tok_in,
+                    sum(output_tokens)    AS tok_out,
+                    count()               AS pasos,
+                    max(status = 'error') AS fallo,
+                    countIf(cost_unknown = 1)      AS sin_tarifa,
+                    countIf(cost_rate_assumed = 1) AS asumida,
+                    dateDiff('millisecond', min(start_time), max(end_time)) AS duracion
+                FROM spans FINAL
+                WHERE project_id = %(project_id)s AND trace_id IN %(ids)s
+                GROUP BY trace_id
+                """,
+                parameters=params,
+            )
+        )
+        return {r["trace_id"]: row_to_trace_cost(r) for r in filas}
+
+    # -- prompts (Fase 6) --------------------------------------------------------------
+
+    def prompt_usage(self, project_id: str, window: Window) -> list[PromptUsage]:
+        """Coste y volumen por versión de prompt gestionado.
+
+        `uniqExact` y no `count()` en el denominador: lo que se enseña es coste **por
+        ejecución**, igual que en el panel, y un prompt llamado dos veces por ejecución
+        no cuesta el doble por ejecución.
+        """
+        filas = _named(
+            self._client.query(
+                f"""
+                SELECT
+                    prompt_name                    AS nombre,
+                    prompt_version                 AS version,
+                    uniqExact(trace_id)            AS trazas,
+                    count()                        AS llamadas,
+                    sum(cost_total_usd)            AS coste,
+                    sum(input_tokens)              AS tok_in,
+                    sum(output_tokens)             AS tok_out,
+                    sum(duration_ms)               AS duracion,
+                    countIf(cost_unknown = 1)      AS sin_tarifa,
+                    countIf(cost_rate_assumed = 1) AS asumida,
+                    min(start_time)                AS primero,
+                    max(start_time)                AS ultimo
+                FROM spans FINAL
+                WHERE {WINDOW_WHERE} AND prompt_name != ''
+                GROUP BY prompt_name, prompt_version
+                ORDER BY nombre, version DESC
+                """,
+                parameters=self._window_params(project_id, window),
+            )
+        )
+        return [row_to_prompt_usage(f) for f in filas]
+
+    def prompt_versions_by_trace(
+        self, project_id: str, trace_ids: list[str]
+    ) -> dict[str, list[tuple[str, int]]]:
+        if not trace_ids:
+            return {}
+        filas = _named(
+            self._client.query(
+                """
+                SELECT DISTINCT trace_id, prompt_name AS nombre, prompt_version AS version
+                FROM spans FINAL
+                WHERE project_id = %(project_id)s AND trace_id IN %(ids)s
+                  AND prompt_name != ''
+                """,
+                parameters={"project_id": project_id, "ids": list(trace_ids)},
+            )
+        )
+        salida: dict[str, list[tuple[str, int]]] = {}
+        for f in filas:
+            salida.setdefault(f["trace_id"], []).append((f["nombre"], int(f["version"])))
+        return salida
+
+    def observed_prompts(self, project_id: str, window: Window) -> list[ObservedPrompt]:
+        """Juegos de instrucciones vistos en las trazas, para quien no gestiona prompts.
+
+        El alias del `GROUP BY` no puede llamarse `step_key`: taparía la columna, que es
+        el mismo tropiezo que ya documenta `MODEL_USAGE_SQL`.
+        """
+        filas = _named(
+            self._client.query(
+                f"""
+                SELECT
+                    step_key                                        AS clave,
+                    -- `max` y no `any`: `any` escoge una fila cualquiera, así que dos
+                    -- almacenes con los mismos spans pueden devolver representantes
+                    -- distintos y la misma pantalla leerse distinto en local y en la
+                    -- nube. Lo destapó el test de paridad de esta consulta.
+                    max(if(step_label != '', step_label, name))     AS paso,
+                    max(step_hint)         AS pista,
+                    uniqExact(trace_id)    AS trazas,
+                    count()                AS llamadas,
+                    sum(cost_total_usd)    AS coste,
+                    sum(input_tokens)      AS tok_in,
+                    sum(output_tokens)     AS tok_out,
+                    min(start_time)        AS primero,
+                    max(start_time)        AS ultimo
+                FROM spans FINAL
+                WHERE {WINDOW_WHERE} AND span_type = 'llm' AND step_key != ''
+                GROUP BY step_key
+                ORDER BY coste DESC
+                """,
+                parameters=self._window_params(project_id, window),
+            )
+        )
+        return [row_to_observed_prompt(f) for f in filas]
+
+    def coverage(self, project_id: str, window: Window) -> CoverageFacts:
+        """La misma cuenta que en local, con los mismos alias (D-066).
+
+        `countIf` en vez de `SUM(CASE WHEN …)`: dice lo mismo y es lo idiomático aquí.
+        Lo que no puede cambiar son las condiciones ni los nombres de las columnas de
+        salida, que son el contrato entre los dos almacenes.
+        """
+        params = self._window_params(project_id, window)
+        filas = _named(
+            self._client.query(
+                f"""
+                SELECT
+                    count() AS llamadas,
+                    countIf(step_hint != '' OR step_label != name) AS identificadas,
+                    countIf(cost_unknown = 0)                      AS con_tarifa,
+                    countIf(usage_estimated = 0
+                            AND (input_tokens > 0 OR output_tokens > 0)) AS con_tokens,
+                    countIf(prompt_name != '')                     AS con_prompt
+                FROM spans FINAL
+                WHERE {WINDOW_WHERE} AND span_type = 'llm'
+                """,
+                parameters=params,
+            )
+        )
+        pasos = _named(
+            self._client.query(
+                f"""
+                SELECT
+                    if(step_label != '', step_label, name) AS paso,
+                    uniqExact(step_key)  AS identidades,
+                    uniqExact(trace_id)  AS trazas
+                FROM spans FINAL
+                WHERE {WINDOW_WHERE} AND span_type = 'llm'
+                GROUP BY paso
+                """,
+                parameters=params,
+            )
+        )
+        return coverage_from_rows(filas[0], pasos)
 
     def delete_project(self, project_id: str) -> None:
         """Borra todos los spans de un proyecto.

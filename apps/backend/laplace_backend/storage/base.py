@@ -208,6 +208,113 @@ class WindowFacts:
     models: set[str] = field(default_factory=set)
     tools: set[str] = field(default_factory=set)
     steps: dict[str, StepFacts] = field(default_factory=dict)
+    #: Versiones de prompt gestionado vistas en las trazas, como `nombre@versión`. Es
+    #: un hecho medido —esa versión aparece en estas trazas y no en las de antes—, no
+    #: la hora de un despliegue, que sólo sería una coincidencia temporal (D-092).
+    prompts: set[str] = field(default_factory=set)
+
+
+@dataclass
+class PromptUsage:
+    """Lo que una versión de prompt gestionado costó sobre el tráfico que la usó.
+
+    El coste es el de **las llamadas hechas con esa versión**, y el denominador, las
+    ejecuciones en las que aparece. Así «0,004 $ por ejecución» quiere decir lo que
+    cuesta este prompt cada vez que el agente trabaja, no lo que cuesta el agente
+    entero: una traza puede usar tres prompts y repartirlo entre los tres sería
+    inventarse un reparto.
+    """
+
+    name: str
+    version: int
+    traces: int = 0
+    calls: int = 0
+    cost_usd: float = 0.0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    duration_ms: float = 0.0
+    #: Las marcas de siempre: mientras no sean cero, el coste es un suelo.
+    unknown_cost_spans: int = 0
+    assumed_rate_spans: int = 0
+    first_seen: datetime | None = None
+    last_seen: datetime | None = None
+
+
+@dataclass
+class ObservedPrompt:
+    """Un juego de instrucciones visto en las trazas, sin gestión de prompts de por medio.
+
+    Es lo que sostiene la pestaña de Prompts para quien no ha adoptado nada: la
+    identidad de un paso ya incluye la huella de sus instrucciones (D-060), así que dos
+    `step_key` bajo la misma etiqueta son dos versiones del mismo prompt, con sus fechas
+    y su coste. No se puede enseñar el texto entero —sólo se guarda la pista—, pero sí
+    cuándo cambió y qué pasó con el coste, que es la mitad de la pregunta.
+    """
+
+    step_key: str
+    step_label: str
+    hint: str = ""
+    traces: int = 0
+    calls: int = 0
+    cost_usd: float = 0.0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    first_seen: datetime | None = None
+    last_seen: datetime | None = None
+
+
+@dataclass
+class CoverageFacts:
+    """Cuántas de las llamadas de un proyecto entiende Laplace, y cuántas no.
+
+    Es la respuesta a la pregunta que ninguna otra pantalla contesta: **¿el silencio de
+    Laplace significa que tu agente está sano, o que no lo entendemos?** Cuando la
+    identidad de un paso se parte o los tokens no llegan, el producto no falla: se
+    calla, y «no estás tirando dinero» se lee como una buena noticia.
+
+    Todo son cuentas sobre las llamadas a modelos de la ventana. Las proporciones y las
+    palabras las pone `coverage.py`; aquí sólo se cuenta.
+    """
+
+    llm_calls: int = 0
+    #: Llamadas cuyo paso se distingue de los demás: tienen sitio de llamada o huella de
+    #: instrucciones. Las que no, caen en el nombre del span —`chat gpt-4o` para todas—
+    #: y las reglas las mezclan en un solo montón (D-060).
+    identified_steps: int = 0
+    #: Llamadas cuyo modelo está en la tabla de precios. El resto cuestan «no lo
+    #: sabemos», y el total del proyecto está incompleto.
+    priced: int = 0
+    #: Llamadas con tokens del proveedor, no contados por nosotros ni ausentes.
+    measured_tokens: int = 0
+    #: Llamadas marcadas con una versión de prompt gestionado. Cero es lo normal para
+    #: quien no ha adoptado la gestión, y por eso no se lee como un defecto.
+    with_prompt_version: int = 0
+    #: Pasos distintos vistos, y cuántos de ellos se parten en más identidades que
+    #: ejecuciones. Es la forma concreta que toma la fragilidad: un prompt de sistema
+    #: con una fecha dentro genera una huella por llamada.
+    steps: int = 0
+    split_steps: list[str] = field(default_factory=list)
+
+
+@dataclass
+class TraceCost:
+    """Lo que costó una traza concreta, para comparar dos tiradas de evaluación.
+
+    Existe porque la comparación A vs B necesita el coste de unas decenas de trazas
+    sueltas identificadas por su id, que no es ninguna de las formas en las que el
+    almacén ya sabe agregar: ni una ventana, ni un paso, ni un tramo.
+    """
+
+    trace_id: str
+    cost_usd: float = 0.0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    duration_ms: float = 0.0
+    spans: int = 0
+    error: bool = False
+    #: Las mismas marcas de siempre: mientras no sean cero, el coste es un suelo.
+    unknown_cost_spans: int = 0
+    assumed_rate_spans: int = 0
 
 
 @dataclass
@@ -335,6 +442,30 @@ class SpanStore(Protocol):
         self, project_id: str, since: datetime, until: datetime
     ) -> WindowFacts:
         """Modelos, herramientas y pasos vistos en un tramo. Atribuye los picos."""
+
+    def costs_for_traces(
+        self, project_id: str, trace_ids: list[str]
+    ) -> dict[str, TraceCost]:
+        """Coste, tokens y duración de unas trazas concretas (evaluación, Fase 5)."""
+
+    def prompt_usage(self, project_id: str, window: Window) -> list[PromptUsage]:
+        """Coste y volumen por versión de prompt gestionado (Fase 6)."""
+
+    def prompt_versions_by_trace(
+        self, project_id: str, trace_ids: list[str]
+    ) -> dict[str, list[tuple[str, int]]]:
+        """Qué versiones de prompt usó cada una de esas trazas.
+
+        Se pide por trazas y no por versión porque lo que hay que cruzar son las trazas
+        **anotadas**, que son unas decenas, y no todo el tráfico de la versión, que
+        pueden ser millones. El acierto de una versión sale de ahí.
+        """
+
+    def observed_prompts(self, project_id: str, window: Window) -> list[ObservedPrompt]:
+        """Juegos de instrucciones vistos en las trazas, sin gestión de prompts."""
+
+    def coverage(self, project_id: str, window: Window) -> CoverageFacts:
+        """Cuántas llamadas de la ventana entiende Laplace, y cuántas no."""
 
     def health(self) -> bool:
         """True si el almacén responde."""

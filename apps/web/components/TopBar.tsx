@@ -77,13 +77,18 @@ export function TopBar() {
         <Link href={`/panel${query}`} aria-current={pathname === "/panel" ? "page" : undefined}>
           Panel
         </Link>
-        {/* Huecos de fases posteriores: la navegación ya les guarda el sitio. */}
-        <span className="soon" title="Llegará en una fase posterior">
+        <Link
+          href={`/evaluaciones${query}`}
+          aria-current={pathname === "/evaluaciones" ? "page" : undefined}
+        >
           Evaluaciones
-        </span>
-        <span className="soon" title="Llegará en una fase posterior">
+        </Link>
+        <Link
+          href={`/prompts${query}`}
+          aria-current={pathname === "/prompts" ? "page" : undefined}
+        >
           Prompts
-        </span>
+        </Link>
       </nav>
 
       <div className="pick">

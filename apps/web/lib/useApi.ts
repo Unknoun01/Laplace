@@ -16,6 +16,10 @@ export type Estado<T> =
   | { fase: "cargando" }
   | { fase: "listo"; datos: T }
   | { fase: "sin-backend" }
+  /** La instalación pide clave y no la hay, o no vale. */
+  | { fase: "sin-clave"; error: ApiError }
+  /** Hay clave, pero no para lo que se está pidiendo. */
+  | { fase: "sin-permiso"; error: ApiError }
   | { fase: "error"; error: Error };
 
 export function useApi<T>(cargar: () => Promise<T>, deps: unknown[]): Estado<T> {
@@ -32,8 +36,12 @@ export function useApi<T>(cargar: () => Promise<T>, deps: unknown[]): Estado<T> 
         if (!vigente) return;
         // Distinguir «no hay backend» de «el backend ha dicho que no» es la diferencia
         // entre una pantalla que ayuda y una que sólo dice que algo ha fallado.
-        const caido = !(error instanceof ApiError);
-        setEstado(caido ? { fase: "sin-backend" } : { fase: "error", error });
+        if (!(error instanceof ApiError)) return setEstado({ fase: "sin-backend" });
+        // 401 y 403 no son «el backend ha fallado»: son «te falta una clave» y «esa
+        // clave no es de este proyecto», y cada una tiene su pantalla y su salida.
+        if (error.status === 401) return setEstado({ fase: "sin-clave", error });
+        if (error.status === 403) return setEstado({ fase: "sin-permiso", error });
+        setEstado({ fase: "error", error });
       });
     return () => {
       vigente = false;

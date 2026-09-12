@@ -818,3 +818,382 @@ microsegundo que ClickHouse, que cuenta con `dateDiff('millisecond')`, no tiene.
 mide una espera en microsegundos, y redondeando, las dos series son idénticas y el test
 de paridad del panel puede comparar exacto en vez de con una tolerancia que taparía una
 divergencia de verdad.
+
+## 2026-09-12 — Evaluaciones (§5)
+
+### D-083 — El veredicto de persona y el de máquina no se mezclan, y la separación es estructural
+Era la condición firme del encargo, y la forma de cumplirla no es una etiqueta bien
+pintada: es que **no exista la fila que los mezcla**.
+
+* El coste del juez vive en un bloque `judge` **dentro** de la anotación, y la
+  traducción de fila a modelo lo arma sólo si la fuente es de máquina. Una anotación
+  humana escribe `NULL` en las seis columnas del juez y, si alguna llegase con valor,
+  se ignora: ante una contradicción se cree a la etiqueta de la fuente.
+* **La ruta de anotar no tiene campo `source`.** Sólo crea veredictos humanos. El de
+  máquina entra por `/api/judge` y por ninguna otra puerta, así que ni un cliente
+  equivocado ni un `curl` a mano pueden colar un veredicto de modelo disfrazado de
+  persona.
+* **El acierto se calcula por separado para cada fuente y nunca se promedia.** La
+  comparación A vs B devuelve dos bloques y la pantalla pinta dos bloques. Si un juez
+  optimista y unas personas exigentes se promediaran, el número resultante no querría
+  decir nada y taparía justo lo que hay que mirar.
+* Cuando las dos fuentes se contradicen **se dice en la pantalla**. No es un fallo: es
+  el dato más interesante que puede dar esta pestaña, porque significa que el prompt del
+  juez y la cabeza de quien anota no entienden igual «bien». Un empate no cuenta como
+  contradicción: «no lo sé» no es «lo contrario».
+* En la interfaz, el punto del juez va hueco y el de la persona relleno, y el chip del
+  juez lleva siempre la palabra «juez» delante.
+
+**Descartado:** un campo `source` en la ruta de anotar con validación (la validación se
+olvida; la ausencia del campo no); un acierto «combinado» con el humano como desempate
+(es un promedio con otro nombre); guardar el coste del juez en una tabla aparte (se
+puede unir mal, y un veredicto sin su coste al lado es medio veredicto).
+
+### D-084 — El almacén de metadatos pasa a tener dos implementaciones de verdad
+Hasta ahora, en modo local `build_metadata_store` devolvía el almacén nulo. Se podía:
+los huecos de las fases 3 y 4 devolvían vacío y nadie lo notaba. Con las evaluaciones
+deja de poderse, porque **anotar es el gesto más básico de la pestaña** y un modo local
+que no pudiera anotar sería exactamente la versión recortada que este proyecto lleva
+evitando desde D-015.
+
+Así que lo mutable va donde ya va lo mutable de cada modo: **SQLite en local —el mismo
+fichero que guarda los spans— y Postgres en la nube**. La traducción de fila a modelo se
+comparte entre los dos (D-066 otra vez), y hay un test que siembra lo mismo por los dos
+caminos y exige que se lea igual.
+
+El nulo sigue existiendo, pero sólo para lo que de verdad es opcional: si en la nube se
+cae Postgres, la ingesta y la lectura de trazas siguen en pie. Y **escribir sobre el
+nulo levanta un error explícito que la API traduce a un 503**, en vez de devolver un 200
+que haría que alguien anotase veinte trazas y las perdiese todas sin enterarse.
+
+### D-085 — Los casos salen de tráfico real, y se puede ver de dónde
+Un conjunto se crea desde un filtro del explorador y se materializa con las trazas que
+ese filtro selecciona: cada caso guarda el `trace_id` del que salió, su entrada y lo que
+el agente respondió entonces. No hay forma de escribir un caso a mano, y es a propósito:
+un conjunto inventado no dice nada sobre el agente de nadie.
+
+El campo se llama `expected` pero **significa «lo que había», no «lo que está bien»**, y
+así está escrito en el contrato y en la pantalla. Certificarlo es trabajo de quien anota.
+
+El filtro con el que se formó se guarda y se enseña en modo avanzado, por el mismo
+motivo que la consulta de un hallazgo (D-067): un conjunto del que no se sabe cómo se
+formó no se puede discutir.
+
+### D-086 — Laplace no ejecuta el agente de nadie: la tirada la corre el SDK
+La comparación A vs B necesita que alguien pase el conjunto por las dos versiones. Ese
+alguien **no es el backend**. `laplace.run_dataset(conjunto, fn, variant=…)` corre en el
+proceso del usuario, con sus claves, sus dependencias y su red; las trazas llegan por la
+ingesta normal y lo que se registra aparte es el parte de qué caso produjo qué traza.
+
+Un backend que ejecutase código ajeno necesitaría un sandbox, las credenciales del
+usuario y una copia de su entorno: tres problemas grandes que no hace falta resolver
+para responder a «¿la versión nueva acierta igual y cuesta menos?».
+
+Consecuencias buenas: el runner no necesita saber nada del agente salvo que es un
+callable; las trazas de una evaluación son trazas normales y se ven en el explorador
+como cualquier otra; y la asociación caso→traza es **exacta**, no inferida de un
+atributo que alguien podría escribir mal.
+
+Dos detalles que no son opcionales: un caso que lanza excepción **se registra como
+fallado y no se descarta** —descartarlo haría que una versión que revienta la mitad de
+las veces saliera con el mismo acierto que una que funciona—, y el `flush()` va **antes**
+de registrar la tirada, porque si el parte llegara primero la comparación buscaría costes
+de trazas que aún no existen y daría cero, que se lee como «gratis».
+
+### D-087 — Ningún porcentaje de acierto sin su guarda, y ningún ganador sin margen
+La cuarta cara del mismo error: el 468 $/mes desde una hora de datos, el 193.100 %
+contra un periodo vacío, y ahora un «94 %» sacado de cuatro casos. Dos guardas:
+
+1. **Por debajo de `MIN_CASES_FOR_RATE` (10 casos con veredicto) no se enseña un
+   porcentaje.** Se enseñan los casos en bruto —«3 de 4»— y se dice que no bastan. El
+   `value` es `None`, nunca cero: cero significaría «no acierta ninguno».
+2. **Por encima, el porcentaje va con su margen**, calculado con el intervalo de Wilson
+   al 95 %. El intervalo normal de toda la vida se sale del rango justo en los dos casos
+   que más aparecen en un conjunto pequeño: diez de diez da «entre el 100 % y el 100 %»
+   y nueve de diez, «entre el 71 % y el 109 %».
+
+Y la que de verdad importa: **en A vs B no se declara un ganador si los márgenes se
+solapan**. La respuesta es «no se distinguen con estos casos», y el detalle dice que
+hacen falta más casos anotados, no otra lectura de éstos. Declarar ganador sobre una
+diferencia que cabe dentro del margen es literalmente cómo se despliega una regresión
+creyendo que es una mejora.
+
+**El coste no lleva margen, y eso es deliberado.** El acierto es una muestra; el coste
+de una tirada es la factura de lo que se ejecutó, medida paso a paso. Ponerle una barra
+de error sería fingir una incertidumbre que no tiene. La pantalla lo dice con esas
+palabras, porque la asimetría se nota y sin explicación parecería un descuido.
+
+Dos reglas más sobre qué cuenta como fallo: un caso que **revienta** cuenta como fallo
+aunque nadie lo haya anotado, y un caso **sin anotar** no cuenta como fallo —contarlo
+convertiría «no lo he mirado» en «está mal», y el acierto bajaría al añadir casos—.
+
+### D-088 — Lo que cuesta juzgar es coste real, se mide igual y se enseña aparte
+Si no registráramos lo que gasta nuestro propio juez, sabríamos menos de nuestro gasto
+que del del usuario, que sería un chiste malo en un producto que se vende como «te digo
+lo que cuesta tu agente».
+
+El coste del juez se calcula con **la misma tabla de precios** con la que medimos el
+gasto ajeno, se guarda dentro de la anotación y se enseña en tres sitios: pegado al chip
+del veredicto, en la ficha de la tirada y en la comparación. Si el modelo del juez no
+está en la tabla, su coste es «no lo sabemos» y no cero (D-043 otra vez).
+
+**Va siempre separado del coste del agente.** Sumarlos haría que la versión que alguien
+decidió mirar con más cuidado pareciese más cara de ejecutar, que es justo al revés de
+lo que pasó.
+
+El juez está **apagado por defecto** y tiene un tope de trazas por tanda: un juez suelto
+sobre diez mil trazas es una factura sorpresa, y este producto existe para que no haya
+facturas sorpresa. Su prompt se puede ver en modo avanzado, tal cual se manda, y lleva
+versión: dos veredictos emitidos con prompts distintos no son comparables y sin la
+versión no habría forma de saberlo tres semanas después.
+
+Una decisión pequeña que evita un error grande: si el juez devuelve algo que no es el
+JSON pedido, el veredicto es `unknown`, **no `fail`**. «No he entendido al juez» y «el
+agente lo hizo mal» son cosas distintas, y confundirlas metería en el acierto del usuario
+un fallo que es nuestro.
+
+### D-089 — Qué añade Avanzado en Evaluaciones
+La pregunta de siempre, porque si la respuesta fuera «nada» la pantalla estaría
+incompleta. En esta pestaña, el modo avanzado añade:
+
+* **Los márgenes de cada acierto** y de dónde salen: «entre el 79 % y el 98 % (Wilson,
+  95 %)». En modo diagnóstico se lee el porcentaje; en avanzado, su incertidumbre.
+* **El prompt exacto del juez**, sistema y usuario, tal cual se manda. Un veredicto que
+  no se puede auditar no se puede discutir, y el primer «este fail está mal» llega el
+  día uno.
+* **El coste del juez por veredicto**, con su modelo, su versión de prompt y sus tokens.
+* **El filtro con el que se materializó cada conjunto**, y los identificadores de las
+  tiradas, del conjunto y de las trazas.
+* En la tabla de tiradas, la columna de **lo que costó juzgar** cada una.
+
+## 2026-09-12 — Prompts (§6)
+
+### D-090 — La versión de un prompt se escribe en la traza, y sólo si se ha comprobado
+Todo lo que hace que esta pestaña valga la pena depende de una sola cosa: que se sepa
+**qué versión produjo cada llamada**. Sin eso, «v8 cuesta 0,004 $ por ejecución» habría
+que estimarlo, y una métrica estimada sobre un texto que alguien pudo cambiar a mano no
+es una métrica, es una corazonada con decimales.
+
+Así que la versión viaja en el span (`laplace.prompt.name` / `laplace.prompt.version`,
+columnas `prompt_name` / `prompt_version`) y la escribe el SDK. Lo que no es obvio es
+**cuándo** la escribe: sólo si el texto de esa versión **aparece de verdad** en los
+mensajes que se han enviado. La alternativa cómoda era fiarse del último `get_prompt()`
+del contexto, y es exactamente la que produce el error silencioso: un agente que pide el
+prompt y luego llama al modelo con otro texto —porque lo reescribe, lo concatena o lo
+sustituye— le colgaría a esa versión tráfico que no es suyo, y como todas las cifras de
+la pestaña son por versión, nadie lo notaría jamás.
+
+La comprobación es una búsqueda de subcadena con espacios normalizados, en el único
+punto por el que pasan las dos integraciones (`record_request`). Cuesta microsegundos
+sobre una llamada de red de cientos de milisegundos.
+
+**Descartado:** deducirlo del último `get_prompt()` (atribuye tráfico ajeno); hash del
+prompt de sistema en vez del número de versión (obliga a buscar el hash en una tabla
+para decir «v8», y no distingue dos versiones con el mismo texto); pedirle al usuario
+que marque la llamada a mano (se olvida, y lo que se olvida no se mide).
+
+### D-091 — Servir prompts mete a Laplace en el camino caliente, y eso hay que pagarlo
+D-086 dice que Laplace no ejecuta el agente de nadie. Servir prompts es la misma
+frontera cruzada en la otra dirección: no ejecutamos nada, pero si el agente nos pide el
+texto antes de llamar al modelo, **un Laplace caído es una incidencia en producción de
+otra empresa**. Un observatorio que pueda tumbar lo observado no vale, así que el SDK se
+diseña para que eso no ocurra nunca, en este orden:
+
+1. **Caché con caducidad de un minuto.** No hay una petición por llamada, y un rollback
+   tarda como mucho ese minuto en llegar a un proceso ya arrancado. Se dice en la
+   respuesta del despliegue, porque un rollback del que no se sabe cuándo hace efecto no
+   tranquiliza a nadie.
+2. **Si el backend no responde, se sirve la copia guardada aunque esté vencida**, con un
+   aviso por el log. Un prompt de hace cinco minutos es infinitamente mejor que una
+   excepción en mitad de la petición de un usuario final.
+3. **Si no hay copia, el `fallback=` del código**, registrado como versión 0.
+4. **Si no hay ni eso, un error explícito** que dice que pases `fallback=`. No hay quinta
+   opción: devolver un prompt vacío haría que el agente llamase al modelo sin
+   instrucciones, que cuesta dinero y no lo dice nadie.
+
+El tercer punto tiene una consecuencia que no es cosmética: **la reserva se cuenta como
+reserva, no como la versión de producción**. Ese tráfico es real y no salió de ninguna
+versión guardada; sumarlo a producción falsearía justo la cifra que se está mirando, y
+además taparía el dato interesante —que Laplace estuvo caído para ese agente—, que la
+pestaña dice con todas las letras cuando pasa.
+
+**Descartado:** un cliente de prompts sin caché (una petición por llamada del agente);
+fallar cuando el backend no responde (convierte nuestra caída en la suya); servir un
+texto vacío como último recurso (una factura sin instrucciones).
+
+### D-092 — Un pico se atribuye a un prompt por las trazas, nunca por la hora del despliegue
+El hueco de la causa `version_prompt` llevaba reservado desde que se escribió la
+atribución de picos (D-078). Cerrarlo tenía una forma obvia y mala: cruzar el historial
+de despliegues con la hora del pico. «Desplegaste la v8 a las 14:02 y el pico empieza a
+las 14:00» se lee como una causa y es una coincidencia temporal; con un equipo que
+despliega tres veces al día, acabaría señalando un despliegue en casi todos los picos.
+Es literalmente la correlación insinuada que el panel existe para no contar.
+
+Lo que se usa es la **versión que aparece en las trazas del tramo y no aparecía en las
+de antes**, que es el mismo tipo de hecho que «un modelo nuevo» o «una herramienta
+nueva»: medido, comprobable y con un enlace a las trazas que lo sostienen. El historial
+de despliegues sigue guardándose, pero para contar la historia en la pestaña de Prompts
+—«la v7 estuvo puesta de martes a jueves»—, no para atribuir.
+
+La causa del prompt se nombra **antes** que las demás. De todo lo que puede cambiar
+alrededor de un pico, es lo más accionable (hay un botón para deshacerlo) y lo más
+frecuente: un modelo nuevo se despliega una vez al trimestre y un prompt se toca los
+martes.
+
+### D-093 — Sin adoptar la gestión de prompts, la pestaña enseña lo que dicen las trazas
+Una pestaña que sólo funciona después de mover todos tus prompts a otro sitio es una
+pestaña que casi nadie llega a ver. Y lo que hace falta para no dejarla en blanco ya
+estaba hecho: **la identidad de un paso incluye la huella de sus instrucciones** (D-060),
+así que dos `step_key` distintos bajo la misma etiqueta son dos juegos de instrucciones
+del mismo paso. Eso da, sin que el usuario haga nada: cuántas versiones ha tenido cada
+paso, desde cuándo y hasta cuándo corrió cada una, y lo que costó por ejecución.
+
+No da el texto completo —sólo se guarda la pista de 80 caracteres— ni el diff ni el
+rollback, y la pantalla lo dice en vez de disimularlo: es menos de lo que da adoptar la
+gestión, pero es real y es del usuario que está mirando.
+
+Con una guarda que importa tanto como el dato. La fragilidad conocida de la identidad de
+paso es que **un prompt con datos variables dentro genera una huella por llamada**. Sin
+protección, esta pantalla enseñaría doscientas «versiones» de un paso que tiene una. Por
+encima de ocho variantes se deja de listarlas y se dice lo que de verdad está pasando:
+que ese prompt lleva una fecha o un nombre dentro, que eso es una plantilla y no un
+histórico, y que sacándolo a variables Laplace podrá medirlo por versión.
+
+### D-094 — En una comparación A vs B, con qué prompt corrió cada lado sale de las trazas
+La conexión con Evaluaciones podría haberse hecho con la etiqueta de la tirada: el
+usuario escribe `variant="prompt-v3"` y ya está. No sirve, por el motivo de siempre: esa
+etiqueta la teclea una persona con prisa y se queda vieja a la segunda tirada. Lo que se
+enseña es la lista de versiones que **usaron las trazas de esa tirada**, leída de los
+propios spans. Si no coincide con lo que pone en `variant`, la que miente es la etiqueta.
+
+Cuesta una consulta más por comparación —la misma que ya se hace para los costes, con
+los mismos identificadores— y contesta a la primera pregunta que se hace cuando una
+comparación sale rara: «espera, ¿con qué prompt corrió esto?».
+
+### D-095 — Qué añade Avanzado en Prompts
+La pregunta de siempre, porque si la respuesta fuera «nada» la pantalla estaría
+incompleta. En esta pestaña, el modo avanzado añade:
+
+* **El margen de cada acierto** debajo del porcentaje: «69–99 % (Wilson)». En modo
+  diagnóstico se lee la cifra; en avanzado, su incertidumbre. Es exactamente lo mismo
+  que en Evaluaciones, y a propósito: dos pantallas que dicen lo mismo se parecen.
+* **Los tokens por ejecución** de cada versión, que es donde se ve *por qué* una versión
+  cuesta más: casi siempre porque manda más contexto, no porque el modelo suba.
+* **La numeración de líneas del diff**, a los dos lados.
+* **El historial de despliegues completo**: cuándo, quién y con qué nota, con las vueltas
+  atrás marcadas como tales. Y el aviso de que ese historial cuenta la historia pero no
+  atribuye picos (D-092), que es el sitio natural para explicar esa distinción.
+* **La huella (`step_key`) de cada juego de instrucciones** observado en las trazas, y
+  los identificadores del prompt y de sus versiones.
+* Las **fechas exactas** de creación de cada versión, en vez de sólo el último uso.
+
+## 2026-09-12 — Cobertura, autenticación y proveedores de verdad
+
+### D-096 — La cobertura va delante del dinero, no en Avanzado
+El peor fallo que puede tener este producto es **indistinguible del éxito**: cuando la
+identidad de un paso se parte, las reglas se callan por falta de llamadas, la pantalla
+dice «no estás tirando dinero ahora mismo» y eso se lee como una buena noticia. Lo que
+de verdad ha pasado es que no entendemos el agente.
+
+Cuatro señales sobre las llamadas a modelos de la ventana: cuántas tienen **paso que se
+distingue**, **tarifa conocida**, **tokens del proveedor** y **versión de prompt**. Tres
+decisiones dentro:
+
+* **Sitio.** Si alguna está baja, el bloque va **encima del héroe**, antes de cualquier
+  cifra de ahorro. Si van bien, no desaparece: se queda en una línea plegable. Que el
+  usuario sepa que esto se mide —y que hoy sale bien— es la mitad de lo que hará creíble
+  el aviso el día que salga mal.
+* **Palabras y arreglo, no un porcentaje.** «61 %» no acciona nada. «Cuatro de cada diez
+  llamadas se nos escapan; decora tus funciones con `@observe`» sí. Cada señal lleva qué
+  significa para las cifras de abajo y qué hacer para subirla.
+* **Manda la peor, no la media.** Tres señales perfectas y la de los pasos por los suelos
+  dan una media tranquilizadora y un diagnóstico que no vale nada.
+
+Y la que hizo falta añadir al verla funcionando: **un paso partido no baja ninguno de los
+cuatro porcentajes**. Cada una de sus llamadas tiene identidad; lo que pasa es que tiene
+una distinta, así que el paso no se agrupa y las reglas no lo ven. Si no se subiera el
+nivel por eso, la pantalla diría «entendemos el 100 % de tus llamadas» mientras el paso
+más caro del agente es invisible para el motor. Ahora se nombra el paso y se explica que
+sus instrucciones llevan datos variables dentro.
+
+Dos detalles de honestidad: no gestionar prompts **no cuenta como defecto** —esa señal se
+marca «no lo usas» y no pinta de rojo—, y `NothingToFix` deja de ser verde cuando la
+cobertura es baja: «No hemos encontrado nada que arreglar, pero no hemos podido mirarlo
+todo».
+
+**Descartado:** una pestaña propia de diagnóstico del SDK (nadie la abriría antes de leer
+la cifra de ahorro, que es justo cuando hace falta); una nota en modo avanzado (el que
+tiene el problema es casi siempre el que no sabe que existe el modo avanzado); una
+columna nueva en `spans` para marcar la identidad débil (mentiría sobre los spans ya
+ingeridos; la firma del caso débil —`step_hint` vacío y `step_label` igual al nombre— ya
+está guardada y se reconoce sin migrar nada).
+
+### D-097 — La autenticación deniega por defecto, y el modo local es una exención escrita
+La instalación de nube era «quien llegue a la URL lee y escribe todo», incluidos los
+prompts y las respuestas en crudo de los usuarios finales de un cliente. Lo que cierra
+eso no es un decorador por endpoint: es un **middleware que deniega por defecto** todo lo
+que cuelga de `/api` y `/v1/traces` salvo una lista blanca de una entrada (`/health`).
+Una ruta nueva **nace protegida**; abrirla exige escribirlo en la lista y se ve en el
+diff. Mismo criterio estructural que D-083: la regla no se cumple porque alguien se
+acuerde, sino porque el camino contrario no existe.
+
+El middleware hace tres cosas: autenticar, comprobar el `project_id` que venga en la URL
+y comprobar el que venga **en el cuerpo JSON**. El tercero es el que evita el agujero
+clásico —proteger las lecturas, que son las obvias, y dejar abierta la escritura que
+alguien añadió el martes—, y se puede hacer porque Starlette envuelve la petición en un
+`_CachedRequest` pensado justo para esto.
+
+Cuatro decisiones más:
+
+* **La clave ata el proyecto.** Los spans traen el suyo dentro del protobuf; si no es el
+  de la clave, se rechaza el lote entero con el motivo. Reetiquetarlos escondería una
+  configuración mal puesta y el usuario descubriría dentro de un mes que su tráfico lleva
+  semanas en el proyecto de otro.
+* **Si no podemos verificar, denegamos.** El resto del producto se degrada cuando
+  Postgres no responde; la autenticación no. El almacén nulo **levanta** en vez de
+  devolver «esa clave no existe», porque lo cierto es «no lo sé» y eso es un 503, no un
+  401 que mandaría al usuario a buscar el problema en su clave.
+* **El modo local no pide clave a propósito**, y es una exención escrita
+  (`auth_required = "auto"` → `sqlite` no, `clickhouse` sí), se dice por el log al
+  arrancar y hay un test que la fija. Un despliegue de nube con la autenticación
+  desactivada a mano deja un aviso en mayúsculas en cada arranque.
+* **Las claves se crean por CLI, no por endpoint.** Un endpoint que emite credenciales
+  necesita a su vez una credencial que lo proteja, y esa primera tiene que salir de una
+  clave maestra en el entorno —un segundo camino de validación, un segundo sitio donde
+  equivocarse—. `docker compose exec backend python -m laplace_backend.keys create` no
+  añade ninguna ruta que pueda repartir poderes.
+
+La clave se guarda **sólo como SHA-256**, y no con bcrypt: el secreto lo generamos
+nosotros con 256 bits de entropía, así que no hay diccionario que probar y el coste de
+derivación no compra nada a cambio de una dependencia en el camino de cada petición.
+
+Lo que **no** es esto, y conviene decirlo: no hay cuentas, ni login, ni organizaciones,
+ni roles. Hay claves por proyecto —y una comodín para el operador— guardadas por el
+navegador de quien las escribe. Es el mínimo que hacía falta para que los datos de un
+cliente no los lea otro; el sistema de identidades de verdad sigue pendiente (D-010).
+
+### D-098 — Las integraciones se prueban contra los SDK reales, con el transporte falso
+Las pruebas de OpenAI y Anthropic usaban dobles escritos a mano: objetos con la forma que
+**nosotros creíamos** que tenían las respuestas. Eso deja fuera toda una clase de fallos,
+y justo la más cara, porque instrumentar es lo primero que toca un usuario: que el parche
+no llegue a la clase que el cliente usa de verdad, que un campo se renombre y lo leamos
+como `None`, que el iterador de streaming cambie de forma.
+
+Ahora los clientes son los reales, con su parseo, sus modelos Pydantic y su lector de
+SSE; lo único falso es el transporte HTTP, que devuelve cuerpos con la forma documentada.
+No hace falta clave, no se gasta dinero y se recorre todo el camino salvo la red. Los dos
+SDK pasan a ser dependencias de desarrollo: si no estuvieran instalados, el fichero se
+saltaría solo y volveríamos a probar contra dobles nuestros, que es como no probar.
+
+Las pruebas **contra la API real** existen aparte, apagadas salvo con
+`LAPLACE_LIVE_TESTS=1` y clave en el entorno, con tope de tokens por llamada. Sólo ellas
+pueden comprobar lo que ninguna otra puede: que los números que guardamos son los que el
+proveedor dice que ha cobrado.
+
+Tres cosas que se descubrieron al hacerlo: `anthropic` ya no usa `httpx` sino `httpx2`
+—un cliente HTTP propio pasado a mano falla con un `TypeError`—; el parche sigue
+llegando bien a `openai` 3.x y `anthropic` 1.x; y `PromptTokensDetails` de OpenAI ha
+ganado un campo `cache_write_tokens` que **no leemos** y para el que no tenemos tarifa
+verificada. Eso último queda anotado y no arreglado a medias: inventarse un precio sería
+exactamente lo que este producto no hace.
+

@@ -30,13 +30,27 @@ from typing import Any
 
 from laplace.schema import Span
 
-from ._rows import COLUMNS, row_to_span, row_to_summary, span_to_row, utc
+from ._rows import (
+    COLUMNS,
+    coverage_from_rows,
+    row_to_observed_prompt,
+    row_to_prompt_usage,
+    row_to_span,
+    row_to_summary,
+    row_to_trace_cost,
+    span_to_row,
+    utc,
+)
 from .base import (
     Bucket,
+    CoverageFacts,
     ModelUsage,
+    ObservedPrompt,
     ProjectStats,
+    PromptUsage,
     RepeatedGroup,
     StepFacts,
+    TraceCost,
     TraceFilter,
     TracePage,
     Window,
@@ -122,6 +136,11 @@ CREATE TABLE IF NOT EXISTS spans (
     step_label            TEXT NOT NULL DEFAULT '',
     step_hint             TEXT NOT NULL DEFAULT '',
 
+    -- Prompt gestionado que produjo la llamada, y su versión. Vacío para quien no
+    -- haya adoptado la gestión de prompts, que es el caso por defecto (D-090).
+    prompt_name           TEXT NOT NULL DEFAULT '',
+    prompt_version        INTEGER NOT NULL DEFAULT 0,
+
     events                TEXT NOT NULL DEFAULT '',
     attributes            TEXT NOT NULL DEFAULT '',
 
@@ -135,6 +154,25 @@ CREATE INDEX IF NOT EXISTS idx_spans_ventana ON spans (project_id, start_time);
 CREATE INDEX IF NOT EXISTS idx_spans_dedup   ON spans (project_id, dedup_hash);
 CREATE INDEX IF NOT EXISTS idx_spans_paso    ON spans (project_id, step_key);
 """
+
+#: Columnas añadidas después de que existieran bases en marcha. `CREATE TABLE IF NOT
+#: EXISTS` no toca una tabla que ya está, así que un fichero de hace dos semanas se
+#: quedaría sin ellas y la primera consulta fallaría con «no such column». ClickHouse
+#: tiene su `ALTER TABLE ADD COLUMN IF NOT EXISTS` al final de su .sql; esto es lo
+#: mismo para el modo local, que es el que le pasa a un usuario de verdad al actualizar.
+COLUMNAS_TARDIAS = (
+    ("prompt_name", "TEXT NOT NULL DEFAULT ''"),
+    ("prompt_version", "INTEGER NOT NULL DEFAULT 0"),
+)
+
+#: Índices sobre columnas tardías. Van aquí y **no** en `SCHEMA` por un motivo que costó
+#: un test: en una base creada antes que esas columnas, el `CREATE INDEX` del script se
+#: ejecuta antes que el `ALTER TABLE` y falla con «no such column». Creándolos después
+#: de añadir las columnas, el orden es correcto en los dos casos.
+INDICES_TARDIOS = (
+    "CREATE INDEX IF NOT EXISTS idx_spans_prompt "
+    "ON spans (project_id, prompt_name, prompt_version)",
+)
 
 WINDOW_WHERE = "project_id = :project_id AND start_time >= :since AND start_time <= :until"
 
@@ -350,10 +388,27 @@ class SQLiteStore:
     # -- escritura -------------------------------------------------------------------
 
     def migrate(self) -> None:
-        """Crea el esquema si no existe. Idempotente."""
+        """Crea el esquema si no existe, y pone al día una base ya creada. Idempotente."""
         self._conn.executescript(SCHEMA)
+        self._poner_al_dia()
         self._conn.commit()
         logger.info("sqlite listo en %s", self._path)
+
+    def _poner_al_dia(self) -> None:
+        """Las columnas que no existían cuando se creó el fichero.
+
+        Sin esto, actualizar Laplace con un `~/.laplace/laplace.db` de antes deja la
+        interfaz con un «no such column» que el usuario no puede arreglar sin borrar sus
+        trazas. Un producto que se instala con `pip install -U` tiene que sobrevivir a
+        su propia actualización.
+        """
+        existentes = {f["name"] for f in self._query("PRAGMA table_info(spans)")}
+        for nombre, tipo in COLUMNAS_TARDIAS:
+            if nombre not in existentes:
+                self._conn.execute(f"ALTER TABLE spans ADD COLUMN {nombre} {tipo}")
+                logger.info("sqlite: columna %s añadida a spans", nombre)
+        for sql in INDICES_TARDIOS:
+            self._conn.execute(sql)
 
     def insert_spans(self, spans: list[Span]) -> int:
         if not spans:
@@ -745,6 +800,11 @@ class SQLiteStore:
                 GROUP BY paso""",
             params,
         )
+        prompts = self._query(
+            f"""SELECT DISTINCT prompt_name || '@' || prompt_version AS v FROM spans
+                WHERE {WINDOW_WHERE} AND prompt_name != ''""",
+            params,
+        )
         r = cabecera[0] if cabecera else {}
         return WindowFacts(
             traces=int(r.get("trazas") or 0),
@@ -758,7 +818,159 @@ class SQLiteStore:
                 for f in pasos
                 if f["paso"]
             },
+            prompts={f["v"] for f in prompts if f["v"]},
         )
+
+    def costs_for_traces(
+        self, project_id: str, trace_ids: list[str]
+    ) -> dict[str, TraceCost]:
+        if not trace_ids:
+            return {}
+        marcas = ", ".join(f":t{i}" for i in range(len(trace_ids)))
+        params: dict[str, Any] = {f"t{i}": t for i, t in enumerate(trace_ids)}
+        params["project_id"] = project_id
+        filas = self._query(
+            f"""
+            SELECT
+                trace_id,
+                SUM(cost_total_usd)   AS coste,
+                SUM(input_tokens)     AS tok_in,
+                SUM(output_tokens)    AS tok_out,
+                COUNT(*)              AS pasos,
+                MAX(status = 'error') AS fallo,
+                SUM(cost_unknown = 1)      AS sin_tarifa,
+                SUM(cost_rate_assumed = 1) AS asumida,
+                CAST(ROUND((julianday(MAX(end_time)) - julianday(MIN(start_time)))
+                     * 86400000) AS INTEGER) AS duracion
+            FROM spans
+            WHERE project_id = :project_id AND trace_id IN ({marcas})
+            GROUP BY trace_id
+            """,
+            params,
+        )
+        return {r["trace_id"]: row_to_trace_cost(r) for r in filas}
+
+    # -- prompts (Fase 6) --------------------------------------------------------------
+
+    def prompt_usage(self, project_id: str, window: Window) -> list[PromptUsage]:
+        """Coste y volumen por versión de prompt gestionado.
+
+        El denominador es `COUNT(DISTINCT trace_id)` y no el número de llamadas: lo que
+        se enseña es coste **por ejecución**, igual que en el panel, porque un prompt
+        que se llame dos veces por ejecución no es el doble de caro por ejecución.
+        """
+        filas = self._query(
+            f"""
+            SELECT
+                prompt_name                AS nombre,
+                prompt_version             AS version,
+                COUNT(DISTINCT trace_id)   AS trazas,
+                COUNT(*)                   AS llamadas,
+                SUM(cost_total_usd)        AS coste,
+                SUM(input_tokens)          AS tok_in,
+                SUM(output_tokens)         AS tok_out,
+                SUM(duration_ms)           AS duracion,
+                SUM(cost_unknown = 1)      AS sin_tarifa,
+                SUM(cost_rate_assumed = 1) AS asumida,
+                MIN(start_time)            AS primero,
+                MAX(start_time)            AS ultimo
+            FROM spans
+            WHERE {WINDOW_WHERE} AND prompt_name != ''
+            GROUP BY prompt_name, prompt_version
+            ORDER BY prompt_name, prompt_version DESC
+            """,
+            self._window_params(project_id, window),
+        )
+        return [row_to_prompt_usage(f) for f in filas]
+
+    def prompt_versions_by_trace(
+        self, project_id: str, trace_ids: list[str]
+    ) -> dict[str, list[tuple[str, int]]]:
+        if not trace_ids:
+            return {}
+        marcas = ", ".join(f":t{i}" for i in range(len(trace_ids)))
+        params: dict[str, Any] = {f"t{i}": t for i, t in enumerate(trace_ids)}
+        params["project_id"] = project_id
+        filas = self._query(
+            f"""
+            SELECT DISTINCT trace_id, prompt_name AS nombre, prompt_version AS version
+            FROM spans
+            WHERE project_id = :project_id AND trace_id IN ({marcas}) AND prompt_name != ''
+            """,
+            params,
+        )
+        salida: dict[str, list[tuple[str, int]]] = {}
+        for f in filas:
+            salida.setdefault(f["trace_id"], []).append((f["nombre"], int(f["version"])))
+        return salida
+
+    def observed_prompts(self, project_id: str, window: Window) -> list[ObservedPrompt]:
+        """Juegos de instrucciones vistos en las trazas, para quien no gestiona prompts.
+
+        Se agrupa por `step_key`, que ya incluye la huella del prompt de sistema: dos
+        claves bajo la misma etiqueta son dos versiones del mismo paso (D-060). Sólo
+        spans de LLM: un `tool` no tiene instrucciones que versionar.
+        """
+        filas = self._query(
+            f"""
+            SELECT
+                step_key                                             AS clave,
+                MAX(CASE WHEN step_label != '' THEN step_label ELSE name END) AS paso,
+                MAX(step_hint)            AS pista,
+                COUNT(DISTINCT trace_id)  AS trazas,
+                COUNT(*)                  AS llamadas,
+                SUM(cost_total_usd)       AS coste,
+                SUM(input_tokens)         AS tok_in,
+                SUM(output_tokens)        AS tok_out,
+                MIN(start_time)           AS primero,
+                MAX(start_time)           AS ultimo
+            FROM spans
+            WHERE {WINDOW_WHERE} AND span_type = 'llm' AND step_key != ''
+            GROUP BY step_key
+            ORDER BY coste DESC
+            """,
+            self._window_params(project_id, window),
+        )
+        return [row_to_observed_prompt(f) for f in filas]
+
+    def coverage(self, project_id: str, window: Window) -> CoverageFacts:
+        """Una sola consulta de cuentas sobre las llamadas a modelos de la ventana.
+
+        La identidad «fuerte» se reconoce por lo que ya está guardado: cuando
+        `step_identity` no encuentra ni sitio de llamada ni instrucciones, cae al nombre
+        del span y deja la pista vacía y la etiqueta igual al nombre. Esa pareja es la
+        firma exacta del caso débil, así que no hace falta una columna nueva para
+        contarlo (y una columna nueva mentiría sobre los spans ya ingeridos).
+        """
+        params = self._window_params(project_id, window)
+        fila = self._query(
+            f"""
+            SELECT
+                COUNT(*) AS llamadas,
+                SUM(CASE WHEN step_hint != '' OR step_label != name THEN 1 ELSE 0 END)
+                                                   AS identificadas,
+                SUM(CASE WHEN cost_unknown = 0 THEN 1 ELSE 0 END) AS con_tarifa,
+                SUM(CASE WHEN usage_estimated = 0 AND (input_tokens > 0 OR output_tokens > 0)
+                         THEN 1 ELSE 0 END)        AS con_tokens,
+                SUM(CASE WHEN prompt_name != '' THEN 1 ELSE 0 END) AS con_prompt
+            FROM spans
+            WHERE {WINDOW_WHERE} AND span_type = 'llm'
+            """,
+            params,
+        )[0]
+        pasos = self._query(
+            f"""
+            SELECT
+                CASE WHEN step_label != '' THEN step_label ELSE name END AS paso,
+                COUNT(DISTINCT step_key)  AS identidades,
+                COUNT(DISTINCT trace_id)  AS trazas
+            FROM spans
+            WHERE {WINDOW_WHERE} AND span_type = 'llm'
+            GROUP BY paso
+            """,
+            params,
+        )
+        return coverage_from_rows(fila, pasos)
 
     def delete_project(self, project_id: str) -> None:
         self._conn.execute("DELETE FROM spans WHERE project_id = :p", {"p": project_id})

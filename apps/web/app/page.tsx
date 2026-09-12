@@ -4,10 +4,10 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { BigMoney, FindingCard, GapBar, Readout } from "@/components/pieces";
-import { BackendDown, Cargando, NoProject, NoTracesYet, NothingToFix } from "@/components/states";
+import { BackendDown, Cargando, NeedsKey, NoProject, NoTracesYet, NotYours, NothingToFix } from "@/components/states";
 import { getOverview, listProjects, parseDays } from "@/lib/api";
 import { duration, money, number, percent, spanLabel, tokens, windowLabel } from "@/lib/format";
-import type { Overview } from "@/lib/types";
+import type { Coverage, Overview } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
 
 /**
@@ -31,6 +31,8 @@ function Contenido() {
 
   if (estado.fase === "cargando") return <Cargando />;
   if (estado.fase === "sin-backend") return <BackendDown />;
+  if (estado.fase === "sin-clave") return <NeedsKey mensaje={estado.error.message} />;
+  if (estado.fase === "sin-permiso") return <NotYours mensaje={estado.error.message} />;
   if (estado.fase === "error") return <BackendDown mensaje={estado.error.message} />;
 
   const { project, overview } = estado.datos;
@@ -51,8 +53,15 @@ function Contenido() {
     : overview.window_avoidable_usd;
   const ahorra = evitable > 0;
 
+  const cobertura = overview.coverage;
+
   return (
     <main className="reading">
+      {/* Si no entendemos bien este proyecto, se dice ANTES que el dinero. Leer un
+          ahorro sin saber que está calculado sobre la mitad de las llamadas es peor
+          que no leerlo (D-096). */}
+      {cobertura?.prominent && <CoberturaBloque cobertura={cobertura} />}
+
       <section className="hero">
         <h1>
           Tu agente «{project}»,{" "}
@@ -92,6 +101,11 @@ function Contenido() {
 
         <Caveats overview={overview} ventana={ventana} />
 
+        {/* Cuando la cobertura es buena no desaparece: se queda en una línea. Que el
+            usuario sepa que esto se mide —y que hoy sale bien— es la mitad de lo que
+            hace creíble el aviso el día que salga mal. */}
+        {cobertura && !cobertura.prominent && <CoberturaLinea cobertura={cobertura} />}
+
         <Readout
           items={[
             [duration(overview.p95_duration_ms), "Latencia p95"],
@@ -110,7 +124,16 @@ function Contenido() {
       </section>
 
       {overview.findings.length === 0 ? (
-        <NothingToFix>
+        <NothingToFix
+          aviso={
+            cobertura?.prominent ? (
+              <>
+                <strong>{cobertura.headline}</strong> Con esa cobertura, «no hay nada que
+                arreglar» significa «no lo sabemos», no «está bien».
+              </>
+            ) : undefined
+          }
+        >
           <p style={{ marginTop: 14 }}>
             Llevas {money(overview.window_cost_usd, overview.currency)} gastados en{" "}
             {number(overview.traces)} ejecuciones.
@@ -159,6 +182,75 @@ function Contenido() {
         </section>
       )}
     </main>
+  );
+}
+
+/**
+ * El bloque de cobertura, cuando hay algo que avisar.
+ *
+ * Va antes del dinero y no en Avanzado. La regla del producto es que una cifra se
+ * enseña con lo que haga falta para leerla bien, y aquí lo que hace falta es saber
+ * sobre cuánto del agente está calculada.
+ */
+function CoberturaBloque({ cobertura }: { cobertura: Coverage }) {
+  return (
+    <section className={`cobertura ${cobertura.level}`}>
+      <h2>{cobertura.headline}</h2>
+      <p>{cobertura.detail}</p>
+      <Señales cobertura={cobertura} />
+    </section>
+  );
+}
+
+/** Una línea cuando todo va bien. Se puede desplegar para ver las cuatro señales. */
+function CoberturaLinea({ cobertura }: { cobertura: Coverage }) {
+  if (cobertura.level === "sin-base" && cobertura.llm_calls === 0) return null;
+  return (
+    <details className="cobertura-linea">
+      <summary>
+        <i className={`punto ${cobertura.level}`} aria-hidden /> {cobertura.headline}
+      </summary>
+      <p>{cobertura.detail}</p>
+      <Señales cobertura={cobertura} />
+    </details>
+  );
+}
+
+/**
+ * Las cuatro señales, cada una con su barra.
+ *
+ * Sin porcentaje cuando no hay llamadas suficientes: se dice por qué, igual que en
+ * todas las demás proporciones del producto (D-087).
+ */
+function Señales({ cobertura }: { cobertura: Coverage }) {
+  return (
+    <ul className="senales">
+      {cobertura.signals.map((s) => (
+        <li key={s.key} className={s.level}>
+          <div className="stop">
+            <span>{s.label}</span>
+            <b>
+              {s.level === "no-aplica"
+                ? "no lo usas"
+                : s.value === null
+                  ? "—"
+                  : /* espacio duro: «100 %» no puede partirse en dos líneas */
+                    `${(s.value * 100).toFixed(0)} %`}
+            </b>
+          </div>
+          <div className="sbar" role="img" aria-label={`${(s.value ?? 0) * 100} por ciento`}>
+            <i style={{ width: `${(s.value ?? 0) * 100}%` }} />
+          </div>
+          <small>
+            {s.value === null
+              ? s.unavailable
+              : `${number(s.counted)} de ${number(s.total)} llamadas`}
+          </small>
+          {/* El «qué hacer» sólo cuando hace falta: si la señal va bien, es ruido. */}
+          {(s.level === "malo" || s.level === "flojo") && <small className="fix">{s.fix}</small>}
+        </li>
+      ))}
+    </ul>
   );
 }
 

@@ -28,6 +28,13 @@ class Settings(BaseSettings):
     #: disponible, la ingesta y la lectura de trazas siguen funcionando.
     postgres_enabled: bool = True
 
+    # -- autenticación ----------------------------------------------------------------
+    #: `auto` decide por el modo: en la nube se exige credencial, en local no. Es una
+    #: exención **escrita**, no el efecto de que nadie compruebe nada: el modo local no
+    #: tiene cuentas por diseño (D-010) y se dice por el log al arrancar. `true` y
+    #: `false` fuerzan, y forzar `false` en la nube deja un aviso en cada arranque.
+    auth_required: str = "auto"
+
     cors_origins: str = "http://localhost:3000"
 
     #: Aplica las migraciones de ClickHouse y Postgres al arrancar. En un despliegue
@@ -55,6 +62,36 @@ class Settings(BaseSettings):
     alerts_min_usd: float = 1.0
     #: Horas de silencio por hallazgo tras avisar de él.
     alerts_quiet_hours: float = 24.0
+
+    # -- evaluaciones: LLM-as-judge (Fase 5) -----------------------------------------
+    #: Apagado por defecto. El veredicto de máquina es opcional: anotar a mano funciona
+    #: sin configurar nada, y correr un juez cuesta dinero de verdad.
+    evals_judge_enabled: bool = False
+    #: `anthropic` u `openai`. Decide la forma de la petición, no el proveedor de nadie.
+    evals_judge_system: str = "anthropic"
+    evals_judge_model: str = ""
+    evals_judge_api_key: str = ""
+    #: Para apuntar a una pasarela propia. Vacío = el endpoint oficial del proveedor.
+    evals_judge_base_url: str = ""
+    #: Tope de trazas que se pueden juzgar de una vez. Es un freno de mano: un juez
+    #: suelto sobre diez mil trazas es una factura sorpresa, y este producto existe
+    #: justamente para que no haya facturas sorpresa.
+    evals_judge_max_batch: int = 200
+
+    @property
+    def auth_enforced(self) -> bool:
+        """Si esta instalación exige credencial.
+
+        El valor por defecto lo decide el almacén y no una variable suelta: `sqlite` es
+        el modo local —un proceso en el portátil de quien escribe el agente, sin
+        cuentas—, y `clickhouse` es un despliegue con datos de más de uno.
+        """
+        elegido = self.auth_required.strip().lower()
+        if elegido in ("true", "1", "yes", "si", "sí"):
+            return True
+        if elegido in ("false", "0", "no"):
+            return False
+        return self.store != "sqlite"
 
     @property
     def cors_origin_list(self) -> list[str]:

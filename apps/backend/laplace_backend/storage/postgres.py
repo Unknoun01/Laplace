@@ -1,27 +1,87 @@
-"""Metadatos en Postgres: proyectos, claves y los huecos reservados.
+"""Metadatos en Postgres: proyectos, anotaciones, conjuntos de casos y tiradas.
 
 Las trazas viven en ClickHouse (inmutables, analíticas). Aquí vive lo mutable y
-relacional. Los lectores de `annotations` y `trace_diagnoses` ya existen y devuelven
-vacío: cuando lleguen las fases 3 y 4 sólo hay que escribir en ellas, la API de lectura
-y el frontend ya las contemplan.
+relacional. Hasta la Fase 5 casi todo esto devolvía vacío; ahora lo llena la pestaña de
+Evaluaciones. La contraparte local está en `metadata.py` y se comprueba que las dos
+dicen lo mismo, igual que con el almacén de trazas (D-084).
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Any
 
-from laplace.schema import Annotation, Diagnosis, Project
+from laplace.schema import (
+    Annotation,
+    Dataset,
+    DatasetItem,
+    Diagnosis,
+    EvalRun,
+    EvalRunItem,
+    Project,
+    Prompt,
+    PromptDeploy,
+    PromptVersion,
+)
 
 from ..config import Settings
+from .metadata import (
+    ANNOTATION_COLUMNS,
+    ANNOTATION_READ,
+    NullMetadataStore,
+    annotation_from_row,
+    annotation_values,
+    new_id,
+    prompt_deploy_from_row,
+    prompt_from_row,
+    prompt_version_from_row,
+)
 
 logger = logging.getLogger("laplace.storage.postgres")
 
 _SCHEMA = Path(__file__).with_name("postgres_schema.sql")
 
 
-class MetadataStore:
+class _Row:
+    """Acceso por nombre a una tupla de psycopg, para reutilizar las traducciones.
+
+    `psycopg` devuelve tuplas por defecto. En vez de cambiar el `row_factory` global
+    —que afectaría a consultas que ya funcionan— se envuelve la fila aquí: así
+    `annotation_from_row` es literalmente la misma función en los dos almacenes y no
+    puede haber una anotación que se lea distinto en local que en la nube.
+    """
+
+    __slots__ = ("_data",)
+
+    def __init__(self, columnas: list[str], fila: tuple) -> None:
+        self._data = dict(zip(columnas, fila, strict=False))
+
+    def __getitem__(self, key: str) -> Any:
+        return self._data[key]
+
+
+def _rows(columnas: str, filas: list[tuple]) -> list[_Row]:
+    nombres = [c.strip() for c in columnas.replace("\n", " ").split(",")]
+    return [_Row(nombres, f) for f in filas]
+
+
+#: Los nombres con los que `prompt_from_row` y compañía leen una fila. Son el mismo
+#: contrato que `ANNOTATION_READ`: la traducción de fila a modelo es literalmente la
+#: misma función en los dos almacenes, así que los alias tienen que coincidir (D-066).
+PROMPT_READ = (
+    "p.id, p.project_id, p.name, p.description, p.created_at, p.updated_at, "
+    "p.production_version"
+)
+_PROMPT_ALIASES = (
+    "id, project_id, name, description, created_at, updated_at, production_version, n"
+)
+_VERSION_ALIASES = "id, prompt_id, version, text, notes, author, created_at"
+_DEPLOY_ALIASES = "id, prompt_id, version, at, actor, note, rollback"
+
+
+class PostgresMetadataStore:
     """Acceso a Postgres. Una conexión por operación: se usa poco y así no hay estado."""
 
     def __init__(self, settings: Settings) -> None:
@@ -66,7 +126,7 @@ class MetadataStore:
                 (project_id, project_id),
             )
 
-    # -- huecos reservados ----------------------------------------------------------
+    # -- hueco reservado de la Fase 3 ------------------------------------------------
 
     def get_diagnosis(self, trace_id: str) -> Diagnosis | None:
         """Diagnóstico de la traza (Fase 3). Hoy siempre `None`."""
@@ -94,65 +154,445 @@ class MetadataStore:
             estimated_savings_usd=row[9],
         )
 
+    # -- anotaciones -----------------------------------------------------------------
+
     def list_annotations(self, trace_id: str) -> list[Annotation]:
-        """Anotaciones de la traza y de sus spans (Fase 4). Hoy siempre vacío."""
         with self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT id, trace_id, span_id, source, verdict, score, label, comment,
-                       author, created_at
-                FROM annotations WHERE trace_id = %s ORDER BY created_at
-                """,
+            filas = conn.execute(
+                f"SELECT {ANNOTATION_READ} FROM annotations WHERE trace_id = %s "
+                f"ORDER BY created_at",
                 (trace_id,),
             ).fetchall()
-        return [
-            Annotation(
-                id=r[0],
-                trace_id=r[1],
-                span_id=r[2],
-                source=r[3],
-                verdict=r[4],
-                score=r[5],
-                label=r[6],
-                comment=r[7],
-                author=r[8],
-                created_at=r[9],
+        return [annotation_from_row(r) for r in _rows(ANNOTATION_READ, filas)]
+
+    def annotations_for(self, trace_ids: list[str]) -> dict[str, list[Annotation]]:
+        if not trace_ids:
+            return {}
+        with self._connect() as conn:
+            filas = conn.execute(
+                f"SELECT {ANNOTATION_READ} FROM annotations "
+                f"WHERE trace_id = ANY(%s) ORDER BY created_at",
+                (list(trace_ids),),
+            ).fetchall()
+        salida: dict[str, list[Annotation]] = {}
+        for fila in _rows(ANNOTATION_READ, filas):
+            salida.setdefault(fila["trace_id"], []).append(annotation_from_row(fila))
+        return salida
+
+    def save_annotation(self, project_id: str, annotation: Annotation) -> Annotation:
+        marcas = ", ".join(["%s"] * 17)
+        with self._connect() as conn:
+            conn.execute(
+                f"""
+                INSERT INTO annotations ({ANNOTATION_COLUMNS}) VALUES ({marcas})
+                ON CONFLICT (trace_id, COALESCE(span_id, ''), source, COALESCE(author, ''))
+                DO UPDATE SET
+                    verdict = EXCLUDED.verdict, score = EXCLUDED.score,
+                    label = EXCLUDED.label, comment = EXCLUDED.comment,
+                    created_at = EXCLUDED.created_at,
+                    judge_model = EXCLUDED.judge_model,
+                    judge_input_tokens = EXCLUDED.judge_input_tokens,
+                    judge_output_tokens = EXCLUDED.judge_output_tokens,
+                    judge_cost_usd = EXCLUDED.judge_cost_usd,
+                    judge_cost_unknown = EXCLUDED.judge_cost_unknown,
+                    judge_prompt_version = EXCLUDED.judge_prompt_version
+                """,
+                annotation_values(project_id, annotation),
             )
-            for r in rows
+            fila = conn.execute(
+                f"SELECT {ANNOTATION_READ} FROM annotations "
+                f"WHERE trace_id = %s AND COALESCE(span_id, '') = %s AND source = %s "
+                f"AND COALESCE(author, '') = %s",
+                (
+                    annotation.trace_id,
+                    annotation.span_id or "",
+                    annotation.source,
+                    annotation.author or "",
+                ),
+            ).fetchone()
+        return annotation_from_row(_rows(ANNOTATION_READ, [fila])[0])
+
+    def delete_annotation(self, annotation_id: str) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute("DELETE FROM annotations WHERE id = %s", (annotation_id,))
+            return bool(cur.rowcount)
+
+    # -- conjuntos de casos ------------------------------------------------------------
+
+    def create_dataset(self, dataset: Dataset, items: list[DatasetItem]) -> Dataset:
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO datasets (id, project_id, name, description, created_at, "
+                "source_filter) VALUES (%s, %s, %s, %s, %s, %s)",
+                (
+                    dataset.id,
+                    dataset.project_id,
+                    dataset.name,
+                    dataset.description,
+                    dataset.created_at,
+                    json.dumps(dataset.source_filter, ensure_ascii=False),
+                ),
+            )
+            for item in items:
+                conn.execute(
+                    "INSERT INTO dataset_items (id, dataset_id, trace_id, span_id, "
+                    "input, expected, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                    (
+                        item.id,
+                        dataset.id,
+                        item.trace_id,
+                        item.span_id,
+                        json.dumps(item.input, ensure_ascii=False),
+                        json.dumps(item.expected, ensure_ascii=False),
+                        item.created_at,
+                    ),
+                )
+        return dataset.model_copy(update={"item_count": len(items)})
+
+    _DATASET_SQL = """
+        SELECT d.id, d.project_id, d.name, d.description, d.created_at,
+               d.source_filter, COUNT(i.id) AS n
+        FROM datasets d LEFT JOIN dataset_items i ON i.dataset_id = d.id
+    """
+
+    def list_datasets(self, project_id: str) -> list[Dataset]:
+        with self._connect() as conn:
+            filas = conn.execute(
+                self._DATASET_SQL
+                + " WHERE d.project_id = %s GROUP BY d.id ORDER BY d.created_at DESC",
+                (project_id,),
+            ).fetchall()
+        return [_dataset(f) for f in filas]
+
+    def get_dataset(self, dataset_id: str) -> Dataset | None:
+        with self._connect() as conn:
+            fila = conn.execute(
+                self._DATASET_SQL + " WHERE d.id = %s GROUP BY d.id", (dataset_id,)
+            ).fetchone()
+        return _dataset(fila) if fila else None
+
+    def list_dataset_items(self, dataset_id: str) -> list[DatasetItem]:
+        with self._connect() as conn:
+            filas = conn.execute(
+                "SELECT id, dataset_id, trace_id, span_id, input, expected, created_at "
+                "FROM dataset_items WHERE dataset_id = %s ORDER BY created_at, id",
+                (dataset_id,),
+            ).fetchall()
+        return [_item(f) for f in filas]
+
+    def delete_dataset(self, dataset_id: str) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute("DELETE FROM datasets WHERE id = %s", (dataset_id,))
+            return bool(cur.rowcount)
+
+    # -- tiradas -------------------------------------------------------------------------
+
+    def create_run(self, run: EvalRun) -> EvalRun:
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO eval_runs (id, project_id, dataset_id, variant, notes, "
+                "created_at) VALUES (%s, %s, %s, %s, %s, %s)",
+                (run.id, run.project_id, run.dataset_id, run.variant, run.notes, run.created_at),
+            )
+            for item in run.items:
+                conn.execute(
+                    "INSERT INTO eval_run_items (run_id, case_id, trace_id, failed, error) "
+                    "VALUES (%s, %s, %s, %s, %s) "
+                    "ON CONFLICT (run_id, case_id) DO UPDATE SET "
+                    "trace_id = EXCLUDED.trace_id, failed = EXCLUDED.failed, "
+                    "error = EXCLUDED.error",
+                    (run.id, item.case_id, item.trace_id, item.failed, item.error),
+                )
+        return run
+
+    def list_runs(self, project_id: str, dataset_id: str | None = None) -> list[EvalRun]:
+        sql = (
+            "SELECT id, project_id, dataset_id, variant, notes, created_at "
+            "FROM eval_runs WHERE project_id = %s"
+        )
+        params: list[Any] = [project_id]
+        if dataset_id:
+            sql += " AND dataset_id = %s"
+            params.append(dataset_id)
+        sql += " ORDER BY created_at DESC"
+        with self._connect() as conn:
+            filas = conn.execute(sql, tuple(params)).fetchall()
+            runs = [_run(f) for f in filas]
+            for corrida in runs:
+                corrida.items = self._items(conn, corrida.id)
+        return runs
+
+    def get_run(self, run_id: str) -> EvalRun | None:
+        with self._connect() as conn:
+            fila = conn.execute(
+                "SELECT id, project_id, dataset_id, variant, notes, created_at "
+                "FROM eval_runs WHERE id = %s",
+                (run_id,),
+            ).fetchone()
+            if fila is None:
+                return None
+            corrida = _run(fila)
+            corrida.items = self._items(conn, run_id)
+        return corrida
+
+    @staticmethod
+    def _items(conn: Any, run_id: str) -> list[EvalRunItem]:
+        filas = conn.execute(
+            "SELECT case_id, trace_id, failed, error FROM eval_run_items WHERE run_id = %s",
+            (run_id,),
+        ).fetchall()
+        return [
+            EvalRunItem(case_id=f[0], trace_id=f[1], failed=bool(f[2]), error=f[3] or "")
+            for f in filas
         ]
 
 
-class NullMetadataStore:
-    """Sustituto cuando Postgres no está disponible.
+    # -- anotaciones de un proyecto ----------------------------------------------------
 
-    La ingesta y la vista de trazas no pueden caerse porque falte la base de metadatos:
-    lo único que se pierde son los huecos reservados, que hoy están vacíos igualmente.
-    """
+    def annotations_since(self, project_id: str, since: Any) -> list[Annotation]:
+        """Las anotaciones del proyecto desde una fecha, para el acierto por versión."""
+        with self._connect() as conn:
+            filas = conn.execute(
+                f"SELECT {ANNOTATION_READ} FROM annotations "
+                f"WHERE project_id = %s AND created_at >= %s ORDER BY created_at",
+                (project_id, since),
+            ).fetchall()
+        return [annotation_from_row(r) for r in _rows(ANNOTATION_READ, filas)]
 
-    def migrate(self) -> None:
-        return None
+    # -- prompts gestionados -----------------------------------------------------------
 
-    def health(self) -> bool:
-        return False
+    def create_prompt(self, prompt: Prompt) -> Prompt:
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO prompts (id, project_id, name, description, created_at, "
+                "updated_at) VALUES (%s, %s, %s, %s, %s, %s)",
+                (
+                    prompt.id,
+                    prompt.project_id,
+                    prompt.name,
+                    prompt.description,
+                    prompt.created_at,
+                    prompt.created_at,
+                ),
+            )
+        return prompt
 
-    def list_projects(self) -> list[Project]:
-        return []
+    def list_prompts(self, project_id: str) -> list[Prompt]:
+        with self._connect() as conn:
+            filas = conn.execute(
+                f"SELECT {PROMPT_READ}, COUNT(v.id) AS n "
+                f"FROM prompts p LEFT JOIN prompt_versions v ON v.prompt_id = p.id "
+                f"WHERE p.project_id = %s GROUP BY p.id ORDER BY p.name",
+                (project_id,),
+            ).fetchall()
+        return [prompt_from_row(r) for r in _rows(_PROMPT_ALIASES, filas)]
 
-    def ensure_project(self, project_id: str) -> None:
-        return None
+    def get_prompt(self, prompt_id: str) -> Prompt | None:
+        with self._connect() as conn:
+            fila = conn.execute(
+                f"SELECT {PROMPT_READ}, COUNT(v.id) AS n "
+                f"FROM prompts p LEFT JOIN prompt_versions v ON v.prompt_id = p.id "
+                f"WHERE p.id = %s GROUP BY p.id",
+                (prompt_id,),
+            ).fetchone()
+        if fila is None:
+            return None
+        return prompt_from_row(_rows(_PROMPT_ALIASES, [fila])[0])
 
-    def get_diagnosis(self, trace_id: str) -> Diagnosis | None:
-        return None
+    def add_prompt_version(
+        self, prompt_id: str, text: str, *, notes: str = "", author: str = ""
+    ) -> PromptVersion:
+        """La siguiente versión, con el número calculado dentro de la escritura.
 
-    def list_annotations(self, trace_id: str) -> list[Annotation]:
-        return []
+        `INSERT ... SELECT MAX(version) + 1` en una sola sentencia, y no leer y luego
+        escribir: dos guardados a la vez escribirían la misma versión con textos
+        distintos, y a partir de ahí el tráfico de una versión sería de dos textos.
+        El índice único es la red debajo.
+        """
+        with self._connect() as conn:
+            fila = conn.execute(
+                "INSERT INTO prompt_versions (id, prompt_id, version, text, notes, author) "
+                "SELECT %s, %s, COALESCE(MAX(version), 0) + 1, %s, %s, %s "
+                "FROM prompt_versions WHERE prompt_id = %s "
+                "RETURNING id, prompt_id, version, text, notes, author, created_at",
+                (new_id("pv"), prompt_id, text, notes, author, prompt_id),
+            ).fetchone()
+            conn.execute(
+                "UPDATE prompts SET updated_at = now() WHERE id = %s", (prompt_id,)
+            )
+        return prompt_version_from_row(_rows(_VERSION_ALIASES, [fila])[0])
+
+    def list_prompt_versions(self, prompt_id: str) -> list[PromptVersion]:
+        with self._connect() as conn:
+            filas = conn.execute(
+                f"SELECT {_VERSION_ALIASES} FROM prompt_versions "
+                f"WHERE prompt_id = %s ORDER BY version DESC",
+                (prompt_id,),
+            ).fetchall()
+        return [prompt_version_from_row(r) for r in _rows(_VERSION_ALIASES, filas)]
+
+    def get_prompt_version(self, prompt_id: str, version: int) -> PromptVersion | None:
+        with self._connect() as conn:
+            fila = conn.execute(
+                f"SELECT {_VERSION_ALIASES} FROM prompt_versions "
+                f"WHERE prompt_id = %s AND version = %s",
+                (prompt_id, int(version)),
+            ).fetchone()
+        if fila is None:
+            return None
+        return prompt_version_from_row(_rows(_VERSION_ALIASES, [fila])[0])
+
+    def set_prompt_production(
+        self, prompt_id: str, version: int, *, actor: str = "", note: str = ""
+    ) -> PromptDeploy:
+        with self._connect() as conn:
+            previa = conn.execute(
+                "SELECT production_version FROM prompts WHERE id = %s FOR UPDATE",
+                (prompt_id,),
+            ).fetchone()
+            anterior = int(previa[0]) if previa and previa[0] else 0
+            fila = conn.execute(
+                "INSERT INTO prompt_deploys (id, prompt_id, version, actor, note, rollback) "
+                "VALUES (%s, %s, %s, %s, %s, %s) "
+                "RETURNING id, prompt_id, version, at, actor, note, rollback",
+                (
+                    new_id("dep"),
+                    prompt_id,
+                    int(version),
+                    actor,
+                    note,
+                    bool(anterior and version < anterior),
+                ),
+            ).fetchone()
+            conn.execute(
+                "UPDATE prompts SET production_version = %s, updated_at = now() WHERE id = %s",
+                (int(version), prompt_id),
+            )
+        return prompt_deploy_from_row(_rows(_DEPLOY_ALIASES, [fila])[0])
+
+    def list_prompt_deploys(self, prompt_id: str) -> list[PromptDeploy]:
+        with self._connect() as conn:
+            filas = conn.execute(
+                f"SELECT {_DEPLOY_ALIASES} FROM prompt_deploys "
+                f"WHERE prompt_id = %s ORDER BY at DESC",
+                (prompt_id,),
+            ).fetchall()
+        return [prompt_deploy_from_row(r) for r in _rows(_DEPLOY_ALIASES, filas)]
+
+    def delete_prompt(self, prompt_id: str) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute("DELETE FROM prompts WHERE id = %s", (prompt_id,))
+            return bool(cur.rowcount)
+
+    # -- claves de API -------------------------------------------------------------------
+
+    def api_key_by_hash(self, key_hash: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            fila = conn.execute(
+                "SELECT id, project_id, name, created_at, revoked_at FROM api_keys "
+                "WHERE key_hash = %s",
+                (key_hash,),
+            ).fetchone()
+        if fila is None:
+            return None
+        return {
+            "id": fila[0],
+            "project_id": fila[1],
+            "name": fila[2],
+            "created_at": fila[3],
+            "revoked_at": fila[4],
+        }
+
+    def create_api_key(self, key_id: str, project_id: str, key_hash: str, name: str) -> None:
+        with self._connect() as conn:
+            # El proyecto tiene que existir por la clave ajena de la tabla, y una clave
+            # para un proyecto que todavía no ha mandado nada es el caso normal: se crea
+            # la clave ANTES de instrumentar, no después.
+            conn.execute(
+                "INSERT INTO projects (id, name) VALUES (%s, %s) ON CONFLICT (id) DO NOTHING",
+                (project_id, project_id),
+            )
+            conn.execute(
+                "INSERT INTO api_keys (id, project_id, key_hash, name) "
+                "VALUES (%s, %s, %s, %s)",
+                (key_id, project_id, key_hash, name),
+            )
+
+    def list_api_keys(self, project_id: str | None = None) -> list[dict[str, Any]]:
+        sql = "SELECT id, project_id, name, created_at, revoked_at FROM api_keys"
+        params: tuple = ()
+        if project_id:
+            sql += " WHERE project_id = %s"
+            params = (project_id,)
+        with self._connect() as conn:
+            filas = conn.execute(sql + " ORDER BY created_at", params).fetchall()
+        return [
+            {"id": f[0], "project_id": f[1], "name": f[2], "created_at": f[3], "revoked_at": f[4]}
+            for f in filas
+        ]
+
+    def revoke_api_key(self, key_id: str) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE api_keys SET revoked_at = now() WHERE id = %s AND revoked_at IS NULL",
+                (key_id,),
+            )
+            return bool(cur.rowcount)
+
+
+def _dataset(f: tuple) -> Dataset:
+    bruto = f[5]
+    return Dataset(
+        id=f[0],
+        project_id=f[1],
+        name=f[2],
+        description=f[3] or "",
+        created_at=f[4],
+        source_filter=bruto if isinstance(bruto, dict) else json.loads(bruto or "{}"),
+        item_count=int(f[6] or 0),
+    )
+
+
+def _item(f: tuple) -> DatasetItem:
+    return DatasetItem(
+        id=f[0],
+        dataset_id=f[1],
+        trace_id=f[2] or "",
+        span_id=f[3],
+        input=f[4],
+        expected=f[5],
+        created_at=f[6],
+    )
+
+
+def _run(f: tuple) -> EvalRun:
+    return EvalRun(
+        id=f[0], project_id=f[1], dataset_id=f[2], variant=f[3], notes=f[4] or "", created_at=f[5]
+    )
 
 
 def build_metadata_store(settings: Settings) -> Any:
+    """El almacén de metadatos que toque, por el mismo criterio que el de trazas.
+
+    En local, el mismo fichero SQLite que guarda los spans: anotar es el gesto más
+    básico de la pestaña de Evaluaciones y un modo local que no pudiera anotar sería
+    una versión recortada (D-084). En la nube, Postgres. Si Postgres no responde, el
+    nulo: se pierden las anotaciones, no la ingesta ni la lectura de trazas.
+    """
+    if settings.store == "sqlite":
+        from .metadata import SQLiteMetadataStore
+
+        return SQLiteMetadataStore(settings.sqlite_path)
+
     if not settings.postgres_enabled:
         return NullMetadataStore()
-    store = MetadataStore(settings)
+    store = PostgresMetadataStore(settings)
     if not store.health():
         logger.warning("postgres no disponible; se sigue sin metadatos")
         return NullMetadataStore()
     return store
+
+
+#: Nombre anterior, que usaban el `main` y las pruebas antes de que hubiera dos
+#: implementaciones de verdad. Se mantiene para no romper importaciones.
+MetadataStore = PostgresMetadataStore

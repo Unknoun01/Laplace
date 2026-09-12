@@ -217,6 +217,16 @@ class Span(_Model):
     #: el mismo sitio. Vacío si no se capturan payloads.
     step_hint: str = ""
 
+    #: Prompt **gestionado** con el que se hizo esta llamada, si lo hubo. Lo escribe el
+    #: SDK sólo cuando el texto de esa versión aparece de verdad en los mensajes
+    #: enviados: es una comprobación, no una deducción. Vacío para todo el que no haya
+    #: adoptado la gestión de prompts, que es el caso por defecto (D-090).
+    prompt_name: str = ""
+    #: Versión usada. `0` con `prompt_name` puesto significa que se sirvió el texto de
+    #: reserva porque Laplace no respondió: tráfico real que no es de ninguna versión
+    #: guardada, y contarlo en la que estuviera en producción falsearía sus métricas.
+    prompt_version: int = 0
+
     events: list[SpanEvent] = Field(default_factory=list)
     attributes: dict[str, Any] = Field(default_factory=dict)
 
@@ -290,16 +300,35 @@ class TraceSummary(_Model):
 
 
 # ---------------------------------------------------------------------------------
-# Huecos reservados: evaluación (Fase 4) y diagnóstico (Fase 3)
+# Evaluación (Fase 5) y hueco reservado del diagnóstico (Fase 3)
 # ---------------------------------------------------------------------------------
 
 
-class Annotation(_Model):
-    """Veredicto humano o de LLM-as-judge sobre una traza o un span concreto.
+class JudgeRun(_Model):
+    """Lo que costó emitir un veredicto de máquina.
 
-    Reservado para la Fase 4. Existe ya en el contrato y en el esquema de Postgres
-    para no tener que migrar después.
+    Va **dentro** de la anotación y sólo lo lleva la de máquina: una anotación humana
+    no puede tener coste de juez porque el campo no existe para ella. La separación
+    entre veredicto de persona y de máquina es estructural, no una etiqueta que se
+    pueda olvidar de pintar (D-083).
+
+    El coste sale de la misma tabla de precios con la que medimos el gasto del usuario.
+    Si el modelo del juez no está en ella, `cost_unknown` es True y el coste es
+    «no lo sabemos», no cero: la misma regla que aplicamos a las trazas ajenas (D-043).
     """
+
+    model: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
+    cost_unknown: bool = False
+    #: Versión del prompt del juez. Dos veredictos de prompts distintos no son
+    #: comparables entre sí, y sin esto no habría forma de saberlo después.
+    prompt_version: str = ""
+
+
+class Annotation(_Model):
+    """Veredicto humano o de LLM-as-judge sobre una traza o un span concreto."""
 
     id: str
     trace_id: str
@@ -311,6 +340,126 @@ class Annotation(_Model):
     comment: str | None = None
     author: str | None = None
     created_at: datetime
+    #: Presente **sólo** cuando `source == "llm_judge"`. Ver `JudgeRun`.
+    judge: JudgeRun | None = None
+
+
+class DatasetItem(_Model):
+    """Un caso de un conjunto, sacado de una traza real.
+
+    `trace_id` no es decorativo: es la procedencia. Un conjunto de casos inventados no
+    dice nada sobre el agente de nadie, así que aquí todo caso viene de tráfico que
+    ocurrió de verdad y se puede abrir para ver de dónde salió (D-085).
+    """
+
+    id: str
+    dataset_id: str
+    trace_id: str
+    span_id: str | None = None
+    input: Any = None
+    #: Lo que respondió el agente cuando se capturó el caso. Es la referencia contra la
+    #: que se compara, no una verdad absoluta: se llama «esperado» porque es lo que
+    #: había, no porque alguien haya certificado que estaba bien.
+    expected: Any = None
+    created_at: datetime
+
+
+class Dataset(_Model):
+    """Una colección nombrada de casos reales."""
+
+    id: str
+    project_id: str
+    name: str
+    description: str = ""
+    created_at: datetime
+    item_count: int = 0
+    #: El filtro del explorador con el que se materializó, tal cual se ejecutó. Se
+    #: enseña en modo avanzado por el mismo motivo que la consulta de un hallazgo: un
+    #: conjunto del que no se sabe cómo se formó no se puede discutir (D-067).
+    source_filter: dict[str, Any] = Field(default_factory=dict)
+
+
+class EvalRunItem(_Model):
+    """Un caso ejecutado dentro de una tirada, y la traza que produjo."""
+
+    case_id: str
+    trace_id: str
+    #: `True` si la ejecución del agente reventó. Un caso que revienta cuenta como
+    #: fallo, no se descarta: descartarlo subiría el acierto por romperse más.
+    failed: bool = False
+    error: str = ""
+
+
+class EvalRun(_Model):
+    """Una pasada de un conjunto de casos por una versión del agente.
+
+    **Laplace no ejecuta el agente de nadie.** La tirada la corre el SDK dentro del
+    proceso del usuario, con sus claves y sus dependencias, y lo que llega aquí es el
+    parte de lo que pasó más las trazas por la vía normal (D-086).
+    """
+
+    id: str
+    project_id: str
+    dataset_id: str
+    #: Cómo llama el usuario a esta versión del agente: `main`, `prompt-v3`, `gpt-luna`.
+    variant: str
+    created_at: datetime
+    items: list[EvalRunItem] = Field(default_factory=list)
+    notes: str = ""
+
+
+class PromptVersion(_Model):
+    """Una versión del texto de un prompt. Inmutable: editar crea la siguiente.
+
+    Que sea inmutable no es purismo. Las métricas de una versión —lo que costó y lo que
+    acertó— se miden sobre el tráfico que la usó, y si el texto pudiera cambiar debajo,
+    esas cifras dejarían de querer decir nada sin que nadie se enterase.
+    """
+
+    id: str
+    prompt_id: str
+    #: Empieza en 1 y sube de uno en uno. Es lo que se escribe en la traza.
+    version: int
+    text: str
+    notes: str = ""
+    author: str = ""
+    created_at: datetime
+
+
+class PromptDeploy(_Model):
+    """Cuándo una versión pasó a ser la de producción, y quién lo hizo.
+
+    Se guarda para poder contar la historia («v7 estuvo en producción de martes a
+    jueves»), no para atribuir picos: para eso vale la versión que aparece en las
+    trazas, que es un hecho medido, y no la hora de un despliegue, que sólo es una
+    coincidencia temporal (D-092).
+    """
+
+    id: str
+    prompt_id: str
+    version: int
+    at: datetime
+    actor: str = ""
+    note: str = ""
+    #: True cuando se volvió a una versión anterior a la que ya estaba.
+    rollback: bool = False
+
+
+class Prompt(_Model):
+    """Un prompt con nombre propio, sacado del código.
+
+    `production_version` es lo que devuelve `laplace.get_prompt(nombre)` al SDK del
+    usuario. Puede ser `None`: un prompt recién creado no tiene por qué estar servido.
+    """
+
+    id: str
+    project_id: str
+    name: str
+    description: str = ""
+    created_at: datetime
+    updated_at: datetime | None = None
+    production_version: int | None = None
+    version_count: int = 0
 
 
 class Diagnosis(_Model):

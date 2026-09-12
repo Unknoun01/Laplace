@@ -23,8 +23,9 @@ parte y los cimientos de las otras dos.
 | 2 | Detección de derroche y **panel de ahorro** | ✅ |
 | 2.b | Alertas a Slack cuando se supera un umbral | ✅ |
 | 4.a | **Panel** por unidad de trabajo, picos atribuidos, modo en vivo | ✅ |
+| 5 | **Evaluaciones**: anotación, conjuntos de casos y A vs B | ✅ |
+| 6 | **Prompts**: versiones, diff, rollback y métricas por versión | ✅ |
 | 3 | **Diagnóstico automático** con modelo | pendiente |
-| 4.b+ | Evaluación y gestión de prompts | pendiente |
 
 Las fases 2 y 3 son el producto, no extras: son lo que separa a Laplace de un visor de
 trazas.
@@ -37,9 +38,14 @@ disparó cada alerta, los atributos de cada span, el árbol completo y la export
 JSON. El modo es global y se recuerda.
 
 - **Diagnóstico** (`/`) — cuánto te cuesta el agente, cuánto puedes dejar de pagar, y
-  las cosas que arreglar ordenadas por dinero recuperable.
+  las cosas que arreglar ordenadas por dinero recuperable. Encabezado, cuando hace falta,
+  por cuánto de tu agente entendemos: una cifra de ahorro sin eso no se puede leer.
 - **Panel** (`/panel`) — si el gasto sube porque hay más trabajo o porque el trabajo se
   ha encarecido, dicho con palabras, y los tramos que se salen de lo normal con su causa.
+- **Evaluaciones** (`/evaluaciones`) — si tu agente responde bien, y si la versión nueva
+  acierta igual y cuesta menos.
+- **Prompts** (`/prompts`) — qué versión está en producción, qué cambió entre una y otra,
+  y qué costó y qué acertó cada una sobre el tráfico que la usó.
 - **Problema** (`/problemas/…`) — qué pasa, por qué, cómo se ha detectado, cómo se
   arregla y cuánto te ahorras, con el cálculo detrás.
 - **Trazas** (`/trazas`) — exploración libre: filtros, búsqueda y orden por coste.
@@ -130,6 +136,143 @@ datos reales, dice «No identificamos la causa»**; nunca insinúa una correlaci
 El explorador tiene además **modo en vivo**: las trazas nuevas se van añadiendo según
 llegan, con indicador y botón de pausa. Es polling cada cinco segundos contra la misma
 API de lectura, no WebSockets (D-079).
+
+## Saber si responde bien, antes de desplegar
+
+Diagnóstico responde a «¿cuesta lo que debe?». La pestaña **Evaluaciones** responde a
+«¿responde bien?», y sobre todo a la pregunta que se hace antes de un despliegue:
+
+> **B acierta igual —hasta donde se puede saber— y cuesta un 90 % menos por caso.**
+> A acierta 87 % (26 de 30) y B, 90 % (27 de 30). Con estos casos, A está entre 70 % y
+> 95 %, y B entre 74 % y 97 %. Los dos márgenes se solapan, así que esa diferencia cabe
+> dentro del azar de la muestra. Para separarlas hacen falta más casos anotados, no otra
+> lectura de éstos.
+
+Tres piezas:
+
+**Anotar.** Marcas una ejecución como buena o mala, con comentario, desde la traza
+abierta o desde una fila del explorador. Opcionalmente un **LLM-as-judge** hace lo mismo
+automáticamente, respondiendo sólo a dos preguntas: ¿hizo lo que se le pedía?, ¿se
+inventó algo? El veredicto de las personas y el del modelo **nunca se mezclan**: se
+guardan aparte, se calculan aparte y se pintan en bloques distintos, y si se contradicen
+la pantalla lo dice. Y lo que cuesta correr el juez se mide con la misma tabla de precios
+que tu gasto y se enseña separado: sería un chiste saber menos de nuestra factura que de
+la tuya.
+
+**Conjuntos de casos.** Colecciones de trazas **reales**, creadas desde un filtro del
+explorador. No hay casos inventados: cada uno guarda de qué ejecución salió, y el
+conjunto guarda el filtro con el que se formó.
+
+**A vs B.** Dos tiradas del mismo conjunto, con acierto y coste a la vez. La tirada la
+lanza el SDK **en tu proceso** —Laplace no ejecuta tu agente (D-086)—:
+
+```python
+import laplace
+laplace.init(project="mi-agente", endpoint="http://127.0.0.1:8100")
+laplace.run_dataset("regresiones", mi_agente, variant="prompt-v3")
+```
+
+Hay un ejemplo completo en
+[`examples/evaluar_dos_versiones.py`](examples/evaluar_dos_versiones.py).
+
+Dos reglas que la pantalla no se salta. **Ningún porcentaje sin su guarda**: con menos de
+diez casos anotados se enseñan los casos en bruto («3 de 4») y se dice que no bastan, en
+vez de un «75 %» que no informa de nada. Y **si los márgenes se solapan no hay ganador**:
+la respuesta es «no se distinguen con estos casos», porque declarar una mejora sobre una
+diferencia que cabe dentro del azar es exactamente cómo se despliega una regresión. El
+coste, en cambio, va sin margen: no es una muestra, es la factura.
+
+## Los prompts, con lo que cuestan y lo que aciertan al lado
+
+Un gestor de prompts con diff y rollback lo tiene cualquiera. Lo que no tiene nadie más
+es poder leer esto y decidir con ello:
+
+> **v8** · $0.0039 por ejecución · 94 %
+> **v7** · $0.0071 por ejecución · 93 %
+>
+> v8 acierta igual —hasta donde se puede saber— y cuesta un 45 % menos por ejecución.
+
+Las dos cifras salen del tráfico real que usó cada versión, no de una estimación: el SDK
+sirve el prompt y **deja escrito en cada traza con qué versión se ejecutó**.
+
+```python
+import laplace
+laplace.init(project="mi-agente", endpoint="http://127.0.0.1:8100")
+
+sistema = laplace.get_prompt("atencion", fallback=SISTEMA_DEL_CODIGO)
+respuesta = cliente.messages.create(
+    model="claude-sonnet-4-5",
+    system=sistema.render(empresa="Vuelos Laplace"),
+    messages=[{"role": "user", "content": pregunta}],
+)
+```
+
+Hay un ejemplo completo en
+[`examples/prompt_gestionado.py`](examples/prompt_gestionado.py).
+
+**Laplace sigue sin ejecutar nada tuyo**: sólo sirve texto. Y como pedirlo pone a Laplace
+en el camino caliente de tu agente, el SDK está escrito para que un Laplace caído no sea
+tu problema: cachea un minuto, sirve la copia guardada aunque esté vencida, y si no la
+hay usa el `fallback=` que le pases. Ese tráfico de reserva se cuenta **aparte**, no como
+la versión de producción: sumarlo falsearía justo la cifra que estás mirando.
+
+Las mismas guardas que en Evaluaciones, porque son literalmente las mismas funciones: con
+menos de diez ejecuciones anotadas no hay porcentaje, y si dos versiones tienen los
+márgenes solapados no hay ganador.
+
+**Si no mueves tus prompts aquí, la pestaña no se queda en blanco.** La identidad de un
+paso ya incluye la huella de sus instrucciones, así que Laplace puede decirte qué pasos
+han cambiado de prompt, cuándo y qué costó cada juego de instrucciones, sin que hagas
+nada. Es menos —no hay texto completo, ni diff, ni rollback— y la pantalla lo dice.
+
+Un cambio de versión también es **una causa de pico** en el panel, pero sólo cuando lo
+dicen las trazas: una versión que aparece en el tramo caro y no aparecía antes. Nunca «el
+despliegue fue a las 14:02 y el pico empezó a las 14:00», que es una coincidencia y no
+una causa.
+
+## Antes de creerte una cifra: cuánto entendemos
+
+El peor fallo que puede tener un producto así es **indistinguible del éxito**. Si Laplace
+no reconoce los pasos de tu agente, las reglas no encuentran nada, la pantalla dice «no
+estás tirando dinero ahora mismo» y eso parece una buena noticia. No lo es: significa que
+no te entendemos.
+
+Por eso el inicio mide cuatro cosas y las dice **antes** que el dinero cuando alguna va
+mal: qué parte de tus llamadas tiene **paso que se distingue de los demás**, **tarifa
+conocida**, **tokens del proveedor** (no estimados por nosotros) y **versión de prompt**.
+Con todo en verde se queda en una línea; con algo en ámbar, se pone delante:
+
+> **Hay 1 paso cuyas instrucciones cambian en casi cada ejecución: «resumir». Sobre ellos
+> no podemos decirte nada.**
+> Cuando el prompt de un paso lleva datos variables dentro —una fecha, un nombre—, cada
+> llamada parece un paso distinto y las reglas no tienen dos llamadas que comparar: se
+> callan. No es que ese paso esté bien, es que no lo hemos mirado.
+
+Y cada señal dice qué hacer para subirla, no sólo que está baja. Cuando la cobertura es
+mala, «no hay nada que arreglar» deja de ser un mensaje verde y pasa a ser **«no hemos
+encontrado nada que arreglar, pero no hemos podido mirarlo todo»**.
+
+## Quién puede leer y quién puede escribir
+
+El **modo local no tiene cuentas por diseño**: es un proceso en tu portátil con tus
+trazas. La **instalación de nube exige clave de API** en todo lo que toca datos, y eso no
+depende de que cada endpoint se acuerde de comprobarlo: hay un middleware que deniega por
+defecto y una lista blanca de una sola entrada (`/health`). Una ruta nueva nace protegida.
+
+```bash
+docker compose exec backend python -m laplace_backend.keys create --project mi-agente
+docker compose exec backend python -m laplace_backend.keys create --project '*'   # el operador
+```
+
+La clave se enseña una vez: sólo se guarda su SHA-256. Va en `Authorization: Bearer` y
+nunca en la URL, porque lo que va en la URL acaba en los logs de cualquier proxy. Ata el
+proyecto en los dos sentidos: **con esa clave sólo se escriben spans de ese proyecto**
+—si llegan de otro se rechaza el lote y se dice, en vez de reetiquetarlo en silencio— y
+**sólo se leen sus trazas**, incluida la lista de proyectos, que si no sería un directorio
+de los clientes de la instalación.
+
+Lo que **no** es: no hay cuentas, ni login, ni organizaciones, ni roles. Es el mínimo para
+que los datos de un cliente no los lea otro. El sistema de identidades sigue pendiente.
 
 ## Los precios
 
@@ -272,7 +415,7 @@ laplace/
 ├── apps/
 │   ├── backend/        # ingesta OTLP + API de lectura (FastAPI)
 │   └── web/            # interfaz (Next.js)
-├── examples/           # agente de ejemplo instrumentado
+├── examples/           # agentes de ejemplo, evaluación y prompts gestionados
 ├── docs/               # contrato de traza
 ├── docker-compose.yml
 └── DECISIONS.md        # por qué está hecho así
@@ -304,22 +447,36 @@ ruff check packages/sdk-python apps/backend examples
 npm --prefix apps/web run typecheck
 ```
 
-Hay dos niveles:
+Hay tres niveles:
 
 - **Sin dependencias.** `test_ingest.py` recorre el camino real —SDK → spans OTel →
   protobuf OTLP → contrato— sin base de datos ni claves de API. Si el SDK y la ingesta
   se desincronizan, falla.
-- **Contra ClickHouse.** `test_clickhouse_store.py` ejecuta el SQL de verdad y **se salta
-  solo** si no hay ClickHouse escuchando (`docker compose up -d clickhouse` para
-  activarlo). Cubre lo que las pruebas en memoria no pueden ver: filtros, agregaciones,
-  paginación e idempotencia al reescribir un span.
+- **Contra ClickHouse y Postgres.** El SQL de la nube se ejecuta de verdad, y las
+  pruebas de paridad exigen que los dos almacenes digan **lo mismo** sobre los mismos
+  spans. Se saltan solas si no hay nada escuchando (`docker compose up -d clickhouse
+  postgres` para activarlas); conviene levantarlo, porque un alias mal puesto o un
+  `any()` donde el otro almacén pone un `MAX()` sólo se ven ejecutando la consulta.
+- **Contra los SDK reales de los proveedores.** `test_proveedores_reales.py` usa
+  `openai.OpenAI` y `anthropic.Anthropic` de verdad —su parseo, sus modelos, su lector de
+  SSE— con el transporte HTTP falseado. No necesita clave ni gasta dinero. Las que además
+  comprueban que nuestros números cuadran con lo que factura el proveedor se encienden
+  con `LAPLACE_LIVE_TESTS=1` y la clave en el entorno, y cuestan céntimos.
 
-`test_alerts.py` y `test_panel.py` corren siempre y no tocan la red: el notificador de
+`test_alerts.py`, `test_panel.py`, `test_evals.py` y `test_prompts.py` corren siempre y no
+tocan la red: el notificador de
 Slack se sustituye por uno que apunta lo que le mandan, y la lógica del panel —el
 veredicto, la detección de picos y la atribución— es pura y se prueba sin almacén. La
 mayoría de los casos de alertas comprueban **silencios**, y los del panel comprueban que
 **no se dice de más**: ni una variación contra un periodo vacío, ni una causa que no esté
-en las trazas.
+en las trazas, ni un porcentaje de acierto sacado de cuatro casos. Los de evaluación
+comprueban además que el veredicto de una persona y el de un modelo no puedan mezclarse
+ni siquiera a propósito, y los de prompts, que una versión sólo se lleve el tráfico que
+de verdad produjo —el de reserva aparte— y que un pico no se atribuya a un despliegue por
+la hora a la que se hizo. `test_auth.py` es casi todo **intentos de hacer lo que no se
+debe poder**: ingerir con la clave de otro proyecto, leer trazas ajenas, abrir una traza
+por su id sin decir el proyecto, llegar sin credencial. Y uno que no es un intento sino
+una red: recorre las rutas registradas y exige que ninguna nazca abierta.
 
 ## Licencia
 

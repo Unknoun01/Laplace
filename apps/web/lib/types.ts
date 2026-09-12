@@ -173,18 +173,23 @@ export interface Diagnosis {
   estimated_savings_usd: number | null;
 }
 
-/** Hueco reservado: se rellena en la Fase 4 (evaluación). */
+export type AnnotationSource = "human" | "llm_judge";
+export type AnnotationVerdict = "pass" | "fail" | "unknown";
+
+/** Veredicto sobre una traza. La fuente decide todo lo demás (D-083). */
 export interface Annotation {
   id: string;
   trace_id: string;
   span_id: string | null;
-  source: "human" | "llm_judge";
-  verdict: "pass" | "fail" | "unknown";
+  source: AnnotationSource;
+  verdict: AnnotationVerdict;
   score: number | null;
   label: string | null;
   comment: string | null;
   author: string | null;
   created_at: string;
+  /** Presente SÓLO cuando `source` es `llm_judge`. En una humana es `null`. */
+  judge: JudgeRun | null;
 }
 
 export interface Trace {
@@ -268,6 +273,40 @@ export interface FindingDetail extends Finding {
   evidence: Span[];
 }
 
+/**
+ * Cobertura: cuánto de tu agente entendemos (D-096).
+ *
+ * Existe por el peor fallo posible de este producto, que es indistinguible del éxito:
+ * cuando no entendemos las llamadas, las reglas se callan y «no estás tirando dinero»
+ * se lee como una buena noticia.
+ */
+export interface CoverageSignal {
+  key: "pasos" | "tarifa" | "tokens" | "prompts";
+  label: string;
+  /** `null` mientras no haya llamadas suficientes. Nunca cero por defecto. */
+  value: number | null;
+  counted: number;
+  total: number;
+  level: "sin-base" | "bien" | "flojo" | "malo" | "no-aplica";
+  /** Qué significa para las cifras de abajo que esta señal esté baja. */
+  consequence: string;
+  /** Qué hacer para subirla, en concreto. */
+  fix: string;
+  unavailable: string;
+}
+
+export interface Coverage {
+  llm_calls: number;
+  signals: CoverageSignal[];
+  level: "sin-base" | "bien" | "flojo" | "malo" | "no-aplica";
+  headline: string;
+  detail: string;
+  /** True cuando esto va **antes** que el dinero, no después. */
+  prominent: boolean;
+  /** Pasos cuya identidad se parte en casi tantas versiones como ejecuciones. */
+  split_steps: string[];
+}
+
 export interface Overview {
   project_id: string;
   days: number;
@@ -307,6 +346,8 @@ export interface Overview {
   /** El evitable pasa del umbral de cautela: presentarlo con reservas. */
   savings_needs_caution: boolean;
   findings: Finding[];
+  /** Cuánto de este proyecto entendemos. Va delante del dinero si es baja. */
+  coverage: Coverage | null;
 }
 
 // ---------------------------------------------------------------------------------
@@ -335,9 +376,22 @@ export interface Reading {
 }
 
 export interface SpikeCause {
-  kind: "modelo_nuevo" | "herramienta_nueva" | "paso_nuevo" | "paso_disparado" | "volumen";
+  /**
+   * `version_prompt` era el hueco reservado desde que se escribió la atribución. Entra
+   * por la misma puerta que las demás: una versión que aparece en las trazas del pico y
+   * no aparecía antes, nunca la hora de un despliegue (D-092).
+   */
+  kind:
+    | "version_prompt"
+    | "modelo_nuevo"
+    | "herramienta_nueva"
+    | "paso_nuevo"
+    | "paso_disparado"
+    | "volumen";
   text: string;
   evidence: string;
+  /** Adónde ir a mirar. Hoy sólo lo lleva la versión de prompt. */
+  link: Record<string, string>;
 }
 
 export interface Spike {
@@ -386,4 +440,267 @@ export interface Panel {
   buckets: PanelBucket[];
   spikes: Spike[];
   spikes_unavailable: string;
+}
+
+// ---------------------------------------------------------------------------------
+// Evaluación (Fase 5). Espejo de laplace/schema.py y de laplace_backend/evals.py.
+// ---------------------------------------------------------------------------------
+
+/**
+ * Lo que costó emitir un veredicto de máquina.
+ *
+ * Va DENTRO de la anotación y sólo lo lleva la de máquina: en una anotación humana
+ * este campo es `null` y no puede ser otra cosa. La separación entre persona y modelo
+ * es estructural, no una etiqueta que se pueda olvidar de pintar (D-083).
+ */
+export interface JudgeRun {
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  /** El modelo del juez no está en la tabla de precios: su coste es «no lo sabemos». */
+  cost_unknown: boolean;
+  prompt_version: string;
+}
+
+export interface DatasetItem {
+  id: string;
+  dataset_id: string;
+  /** La traza real de la que salió el caso. Sin esto sería un caso inventado. */
+  trace_id: string;
+  span_id: string | null;
+  input: unknown;
+  expected: unknown;
+  created_at: string;
+}
+
+export interface Dataset {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string;
+  created_at: string;
+  item_count: number;
+  /** El filtro del explorador con el que se materializó. Se enseña en avanzado. */
+  source_filter: Record<string, string>;
+}
+
+export interface EvalRunItem {
+  case_id: string;
+  trace_id: string;
+  /** La ejecución del agente reventó. Cuenta como fallo, no se descarta. */
+  failed: boolean;
+  error: string;
+}
+
+export interface EvalRun {
+  id: string;
+  project_id: string;
+  dataset_id: string;
+  variant: string;
+  created_at: string;
+  items: EvalRunItem[];
+  notes: string;
+}
+
+/** Una proporción de acierto con su guarda puesta (D-087). */
+export interface Rate {
+  source: AnnotationSource;
+  judged: number;
+  passed: number;
+  failed: number;
+  /** Casos sin veredicto de esta fuente. No cuentan como fallo. */
+  unjudged: number;
+  /** `null` mientras no haya casos suficientes. Nunca cero por defecto. */
+  value: number | null;
+  low: number | null;
+  high: number | null;
+  unavailable: string;
+}
+
+export interface VariantSide {
+  run_id: string;
+  variant: string;
+  cases: number;
+  crashed: number;
+  /** Una entrada por fuente. Nunca se funden en una sola cifra. */
+  rates: Rate[];
+  cost_usd: number;
+  cost_per_case_usd: number | null;
+  input_tokens: number;
+  output_tokens: number;
+  duration_ms_per_case: number | null;
+  cost_is_floor: boolean;
+  /** Lo que costó juzgar. Va aparte del coste del agente, a propósito. */
+  judge_cost_usd: number;
+  judge_cost_unknown: boolean;
+  /**
+   * Con qué versiones de prompt corrió este lado. Sale de las trazas y no de la
+   * etiqueta de la tirada: `variant` es lo que alguien tecleó, y se queda viejo (D-094).
+   */
+  prompt_versions: string[];
+}
+
+export type EvalVerdict = "sin-base" | "mejor" | "peor" | "empate";
+
+export interface SourceComparison {
+  source: AnnotationSource;
+  verdict: EvalVerdict;
+  headline: string;
+  detail: string;
+  a: Rate;
+  b: Rate;
+}
+
+export interface Comparison {
+  project_id: string;
+  dataset_id: string;
+  dataset_name: string;
+  cases: number;
+  a: VariantSide;
+  b: VariantSide;
+  by_source: SourceComparison[];
+  /** Personas y juez no dicen lo mismo. Es información, no un fallo. */
+  sources_disagree: boolean;
+  cost_change: number | null;
+  headline: string;
+  detail: string;
+}
+
+export interface RunSummary {
+  run_id: string;
+  variant: string;
+  dataset_id: string;
+  dataset_name: string;
+  created_at: string;
+  cases: number;
+  cost_usd: number;
+  judge_cost_usd: number;
+  rates: Rate[];
+  prompt_versions: string[];
+}
+
+export interface JudgeStatus {
+  enabled: boolean;
+  system: string;
+  model: string;
+  max_batch: number;
+  detail: string;
+}
+
+// ---------------------------------------------------------------------------------
+// Prompts (Fase 6). Espejo de laplace_backend/prompts.py.
+// ---------------------------------------------------------------------------------
+
+export interface PromptDeploy {
+  id: string;
+  prompt_id: string;
+  version: number;
+  at: string;
+  actor: string;
+  note: string;
+  /** Se volvió a una versión anterior a la que estaba. */
+  rollback: boolean;
+}
+
+/**
+ * Una versión con lo que costó y lo que acertó sobre el tráfico que la usó.
+ *
+ * `cost_per_execution_usd` es `null` —nunca cero— cuando no tuvo tráfico en el rango.
+ * Cero significaría «no cuesta nada», que es otra afirmación y normalmente falsa.
+ */
+export interface VersionMetrics {
+  version: number;
+  /** `v8`, o `reserva` para el tráfico que corrió con el texto del código. */
+  label: string;
+  created_at: string | null;
+  author: string;
+  notes: string;
+  in_production: boolean;
+  /** Sólo viaja en la ficha de un prompt, no en la lista. */
+  text: string;
+  traces: number;
+  calls: number;
+  cost_usd: number;
+  cost_per_execution_usd: number | null;
+  tokens_per_execution: number | null;
+  cost_unavailable: string;
+  cost_is_floor: boolean;
+  first_seen: string | null;
+  last_seen: string | null;
+  /** Una por fuente de veredicto. Nunca se funden (D-083). */
+  rates: Rate[];
+  headline: string;
+}
+
+export interface PromptComparison {
+  a_version: number;
+  b_version: number;
+  cost_change: number | null;
+  cost_unavailable: string;
+  by_source: SourceComparison[];
+  headline: string;
+  detail: string;
+}
+
+export interface PromptCard {
+  id: string;
+  name: string;
+  description: string;
+  created_at: string;
+  production_version: number | null;
+  version_count: number;
+  versions: VersionMetrics[];
+  deploys: PromptDeploy[];
+  comparison: PromptComparison | null;
+  comparison_unavailable: string;
+  /** Ejecuciones que corrieron con el texto de reserva porque Laplace no respondía. */
+  fallback_traces: number;
+}
+
+export interface ObservedVariant {
+  step_key: string;
+  hint: string;
+  traces: number;
+  calls: number;
+  cost_usd: number;
+  cost_per_execution_usd: number | null;
+  first_seen: string | null;
+  last_seen: string | null;
+  rates: Rate[];
+}
+
+/** Un paso y los juegos de instrucciones con los que se le ha visto en las trazas. */
+export interface ObservedStep {
+  label: string;
+  variants: ObservedVariant[];
+  traces: number;
+  /** Las instrucciones cambian casi por ejecución: son plantilla, no versiones. */
+  unstable: boolean;
+  note: string;
+}
+
+export interface PromptsView {
+  project_id: string;
+  days: number;
+  /** Hay prompts gestionados. Si no, la pestaña enseña lo inferido de las trazas. */
+  managed: boolean;
+  prompts: PromptCard[];
+  observed: ObservedStep[];
+  observed_unavailable: string;
+}
+
+export interface DiffLine {
+  op: "=" | "+" | "-";
+  text: string;
+  left: number | null;
+  right: number | null;
+}
+
+export interface Diff {
+  lines: DiffLine[];
+  added: number;
+  removed: number;
+  unchanged: number;
+  summary: string;
 }

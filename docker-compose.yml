@@ -56,6 +56,11 @@ services:
       LAPLACE_CLICKHOUSE_DATABASE: laplace
       LAPLACE_POSTGRES_DSN: postgresql://laplace:laplace@postgres:5432/laplace
       LAPLACE_CORS_ORIGINS: http://localhost:3000
+      # Autenticacion. En la nube se exige clave por defecto; esto solo existe para
+      # poder quitarla a sabiendas en una maquina de pruebas, y el log lo grita cuando
+      # esta desactivada (D-097). Las claves se crean con:
+      #   docker compose exec backend python -m laplace_backend.keys create --project X
+      LAPLACE_AUTH_REQUIRED: "${LAPLACE_AUTH_REQUIRED:-auto}"
       # Alertas a Slack. Apagadas hasta que haya un webhook: nada que mande mensajes
       # fuera se enciende solo. Son las mismas variables que usa `laplace ui` (D-075).
       LAPLACE_ALERTS_ENABLED: "${LAPLACE_ALERTS_ENABLED:-false}"
@@ -64,6 +69,12 @@ services:
       LAPLACE_ALERTS_MIN_USD: "${LAPLACE_ALERTS_MIN_USD:-1.0}"
       LAPLACE_ALERTS_QUIET_HOURS: "${LAPLACE_ALERTS_QUIET_HOURS:-24}"
       LAPLACE_ALERTS_CONFIG_PATH: "${LAPLACE_ALERTS_CONFIG_PATH:-}"
+      # LLM-as-judge de la pestana de Evaluaciones. Apagado hasta que haya una clave:
+      # el veredicto de maquina es opcional y cuesta dinero (D-088).
+      LAPLACE_EVALS_JUDGE_ENABLED: "${LAPLACE_EVALS_JUDGE_ENABLED:-false}"
+      LAPLACE_EVALS_JUDGE_SYSTEM: "${LAPLACE_EVALS_JUDGE_SYSTEM:-anthropic}"
+      LAPLACE_EVALS_JUDGE_MODEL: "${LAPLACE_EVALS_JUDGE_MODEL:-}"
+      LAPLACE_EVALS_JUDGE_API_KEY: "${LAPLACE_EVALS_JUDGE_API_KEY:-}"
     ports:
       - "8000:8000"
       # Alias en el puerto OTLP/HTTP estándar: cualquier exportador OpenTelemetry

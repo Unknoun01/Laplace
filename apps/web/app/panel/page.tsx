@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
-import { BackendDown, Cargando, NoProject, NoTracesYet } from "@/components/states";
+import { BackendDown, Cargando, NeedsKey, NoProject, NoTracesYet, NotYours } from "@/components/states";
 import { getPanel, listProjects, parseDays } from "@/lib/api";
 import { dayHour, duration, money, number, spanLabel, tokens } from "@/lib/format";
 import type { Metric, Panel, Spike } from "@/lib/types";
@@ -35,6 +35,8 @@ function Contenido() {
 
   if (estado.fase === "cargando") return <Cargando />;
   if (estado.fase === "sin-backend") return <BackendDown />;
+  if (estado.fase === "sin-clave") return <NeedsKey mensaje={estado.error.message} />;
+  if (estado.fase === "sin-permiso") return <NotYours mensaje={estado.error.message} />;
   if (estado.fase === "error") return <BackendDown mensaje={estado.error.message} />;
 
   const { project, panel } = estado.datos;
@@ -276,6 +278,16 @@ function SpikeCard({ spike, panel }: { spike: Spike; panel: Panel }) {
           {spike.causes.map((c) => (
             <li key={c.text}>
               {c.text}
+              {/* La versión de prompt es la única causa con pantalla propia: desde aquí
+                  se va a ver el diff y, si hace falta, a volver atrás. */}
+              {c.kind === "version_prompt" && (
+                <>
+                  {" "}
+                  <Link href={`/prompts?project=${encodeURIComponent(spike.traces_query.project_id ?? "")}&days=${panel.days}`}>
+                    ver ese prompt
+                  </Link>
+                </>
+              )}
               {c.evidence && <span className="pro"> {c.evidence}</span>}
             </li>
           ))}

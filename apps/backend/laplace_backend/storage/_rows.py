@@ -88,9 +88,18 @@ COLUMNS = (
     "step_key",
     "step_label",
     "step_hint",
+    "prompt_name",
+    "prompt_version",
     "events",
     "attributes",
 )
+
+
+#: Un paso está «partido» cuando sus identidades distintas se acercan al número de
+#: ejecuciones: una huella por llamada significa que el prompt lleva datos variables
+#: dentro. Con pocas ejecuciones no se puede afirmar, así que hay mínimo.
+SPLIT_RATIO = 0.8
+SPLIT_MIN_TRACES = 5
 
 
 def dumps(value: Any) -> str:
@@ -113,6 +122,96 @@ def loads(text: Any, fallback: Any) -> Any:
         return json.loads(text)
     except (ValueError, TypeError):
         return text
+
+
+def row_to_trace_cost(r: Any) -> Any:
+    """Fila a `TraceCost`. Vive aquí por el mismo motivo que `row_to_span`: la misma
+    fila tiene que convertirse igual venga de ClickHouse o de SQLite, y los alias de las
+    dos consultas son el contrato (D-066)."""
+    from .base import TraceCost
+
+    return TraceCost(
+        trace_id=r["trace_id"],
+        cost_usd=float(r["coste"] or 0.0),
+        input_tokens=int(r["tok_in"] or 0),
+        output_tokens=int(r["tok_out"] or 0),
+        duration_ms=float(r["duracion"] or 0.0),
+        spans=int(r["pasos"] or 0),
+        error=bool(r["fallo"]),
+        unknown_cost_spans=int(r["sin_tarifa"] or 0),
+        assumed_rate_spans=int(r["asumida"] or 0),
+    )
+
+
+def _instante(value: Any) -> datetime | None:
+    return utc(value) if value else None
+
+
+def row_to_prompt_usage(f: Any) -> Any:
+    """Fila a `PromptUsage`. Los alias de la consulta son el contrato entre los dos
+    almacenes, igual que en `row_to_span` (D-066)."""
+    from .base import PromptUsage
+
+    return PromptUsage(
+        name=f["nombre"],
+        version=int(f["version"] or 0),
+        traces=int(f["trazas"] or 0),
+        calls=int(f["llamadas"] or 0),
+        cost_usd=float(f["coste"] or 0.0),
+        input_tokens=int(f["tok_in"] or 0),
+        output_tokens=int(f["tok_out"] or 0),
+        duration_ms=float(f["duracion"] or 0.0),
+        unknown_cost_spans=int(f["sin_tarifa"] or 0),
+        assumed_rate_spans=int(f["asumida"] or 0),
+        first_seen=_instante(f["primero"]),
+        last_seen=_instante(f["ultimo"]),
+    )
+
+
+def row_to_observed_prompt(f: Any) -> Any:
+    """Fila a `ObservedPrompt`: un juego de instrucciones visto en las trazas."""
+    from .base import ObservedPrompt
+
+    return ObservedPrompt(
+        step_key=f["clave"],
+        step_label=f["paso"] or "",
+        hint=f["pista"] or "",
+        traces=int(f["trazas"] or 0),
+        calls=int(f["llamadas"] or 0),
+        cost_usd=float(f["coste"] or 0.0),
+        input_tokens=int(f["tok_in"] or 0),
+        output_tokens=int(f["tok_out"] or 0),
+        first_seen=_instante(f["primero"]),
+        last_seen=_instante(f["ultimo"]),
+    )
+
+
+def coverage_from_rows(fila: Any, pasos: Any) -> Any:
+    """Filas a `CoverageFacts`, igual para los dos almacenes (D-066).
+
+    Un paso se considera **partido** cuando tiene casi tantas identidades distintas como
+    ejecuciones: eso no son cincuenta versiones de un paso, es un prompt con una fecha
+    dentro. El umbral vive en `coverage.py`, que es quien lo explica en pantalla; aquí
+    sólo se aplica para no traer la lista entera de pasos a memoria.
+    """
+    from .base import CoverageFacts
+
+    partidos = [
+        p["paso"]
+        for p in pasos
+        if int(p["trazas"] or 0) >= SPLIT_MIN_TRACES
+        and int(p["identidades"] or 0) >= int(p["trazas"] or 0) * SPLIT_RATIO
+        and int(p["identidades"] or 0) > 1
+    ]
+    return CoverageFacts(
+        llm_calls=int(fila["llamadas"] or 0),
+        identified_steps=int(fila["identificadas"] or 0),
+        priced=int(fila["con_tarifa"] or 0),
+        measured_tokens=int(fila["con_tokens"] or 0),
+        with_prompt_version=int(fila["con_prompt"] or 0),
+        steps=len(pasos),
+        split_steps=sorted(partidos),
+    )
 
 
 def utc(value: Any) -> datetime:
@@ -217,6 +316,8 @@ def row_to_span(r: dict[str, Any]) -> Span:
         step_key=r["step_key"],
         step_label=r["step_label"],
         step_hint=r["step_hint"],
+        prompt_name=r["prompt_name"] or "",
+        prompt_version=int(r["prompt_version"] or 0),
         events=events,
         attributes=loads(r["attributes"], {}) or {},
     )
@@ -336,6 +437,8 @@ def span_to_row(span: Span) -> list[Any]:
         span.step_key,
         span.step_label,
         span.step_hint,
+        span.prompt_name,
+        int(span.prompt_version or 0),
         dumps([event.model_dump(mode="json") for event in span.events]),
         dumps(span.attributes),
     ]

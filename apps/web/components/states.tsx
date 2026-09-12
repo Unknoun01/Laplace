@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
+import { getApiKey, setApiKey } from "@/lib/api";
 
 /**
  * El endpoint al que apuntar el SDK: el origen desde el que se está sirviendo esta
@@ -81,16 +83,104 @@ export function NoTracesYet({ project }: { project: string }) {
   );
 }
 
-export function NothingToFix({ children }: { children?: React.ReactNode }) {
+/**
+ * «No hay nada que arreglar», que es la frase más peligrosa del producto.
+ *
+ * Sólo es una buena noticia si de verdad hemos podido mirar. Cuando la cobertura es
+ * baja, el mismo silencio significa «no te entendemos», así que el bloque deja de ser
+ * verde y lo dice: `aviso` llega desde el inicio con la lectura de la cobertura (D-096).
+ */
+export function NothingToFix({
+  children,
+  aviso,
+}: {
+  children?: React.ReactNode;
+  aviso?: React.ReactNode;
+}) {
   return (
-    <div className="state good">
-      <h2>No estás tirando dinero ahora mismo</h2>
+    <div className={`state ${aviso ? "warn" : "good"}`}>
+      <h2>
+        {aviso
+          ? "No hemos encontrado nada que arreglar, pero no hemos podido mirarlo todo"
+          : "No estás tirando dinero ahora mismo"}
+      </h2>
       <p>
         Hemos buscado llamadas repetidas, pasos que usan un modelo más caro del que
         necesitan y contexto que se reenvía sin hacer falta. No hay nada de eso en este
         rango.
       </p>
+      {aviso && <p className="whynot">{aviso}</p>}
       {children}
+    </div>
+  );
+}
+
+/**
+ * Esta instalación pide clave y no la tenemos (o la que hay no vale).
+ *
+ * No es un login: no hay cuentas todavía. Es la clave de API que crea el operador con
+ * `python -m laplace_backend.keys create`, guardada en este navegador. Se dice de dónde
+ * sale, porque un formulario que pide un secreto sin explicar cuál es lo que hace que
+ * la gente pegue el primero que encuentra.
+ */
+export function NeedsKey({ mensaje }: { mensaje?: string }) {
+  const [valor, setValor] = useState(getApiKey());
+  return (
+    <div className="state">
+      <h2>Esta instalación pide una clave</h2>
+      <p>
+        {mensaje && mensaje !== "credencial inválida"
+          ? mensaje
+          : "La clave va en cada petición y se guarda sólo en este navegador. Si no tienes una, la crea quien administra este Laplace:"}
+      </p>
+      <pre>python -m laplace_backend.keys create --project mi-agente</pre>
+      <div className="actions">
+        <input
+          className="field"
+          type="password"
+          value={valor}
+          placeholder="lp_…"
+          onChange={(e) => setValor(e.target.value)}
+          style={{ minWidth: 280 }}
+        />
+        <button
+          type="button"
+          className="btn primary"
+          onClick={() => {
+            setApiKey(valor);
+            window.location.reload();
+          }}
+        >
+          Guardar y entrar
+        </button>
+      </div>
+      <p className="disclaimer">
+        Se guarda en el almacenamiento de este navegador, no se manda a ningún sitio más
+        que a este Laplace, y va en la cabecera <code>Authorization</code> y nunca en la
+        URL —lo que va en la URL acaba en los logs de cualquier proxy por el que pase—.
+      </p>
+    </div>
+  );
+}
+
+/** Hay clave, pero no para este proyecto. */
+export function NotYours({ mensaje }: { mensaje?: string }) {
+  return (
+    <div className="state">
+      <h2>Tu clave no da acceso a este proyecto</h2>
+      <p>{mensaje || "Esta clave sirve para otro proyecto de esta instalación."}</p>
+      <div className="actions">
+        <button
+          type="button"
+          className="btn"
+          onClick={() => {
+            setApiKey("");
+            window.location.reload();
+          }}
+        >
+          Usar otra clave
+        </button>
+      </div>
     </div>
   );
 }

@@ -314,6 +314,8 @@ def _build_span(proto_span: Any, project_id: str, resource: dict[str, Any], pric
         semconv.LAPLACE_RETRIEVAL_DOCUMENTS,
         semconv.LAPLACE_BILLING_TIER,
         semconv.LAPLACE_BILLING_REGION,
+        semconv.LAPLACE_PROMPT_NAME,
+        semconv.LAPLACE_PROMPT_VERSION,
     }
 
     return Span(
@@ -341,6 +343,11 @@ def _build_span(proto_span: Any, project_id: str, resource: dict[str, Any], pric
         step_key=step_key,
         step_label=step_label,
         step_hint=step_hint,
+        # El SDK sólo escribe esto cuando ha comprobado que el texto de esa versión iba
+        # de verdad en los mensajes. Aquí se copia tal cual: la ingesta no deduce una
+        # versión que el emisor no haya afirmado (D-090).
+        prompt_name=str(attrs.get(semconv.LAPLACE_PROMPT_NAME) or ""),
+        prompt_version=_entero(attrs.get(semconv.LAPLACE_PROMPT_VERSION)),
         events=events,
         attributes={k: v for k, v in attrs.items() if k not in consumed},
     )
@@ -433,6 +440,14 @@ def _build_retrieval(attrs: dict[str, Any]) -> RetrievalAttributes:
         else None,
         documents=[d if isinstance(d, dict) else {"content": d} for d in documents],
     )
+
+
+def _entero(value: Any) -> int:
+    """Un entero, o cero. Una versión ilegible no puede tumbar la ingesta de un span."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _str_or_none(value: Any) -> str | None:

@@ -51,6 +51,8 @@ en el estándar vive bajo el prefijo `laplace.*`, nunca inventando nombres dentr
 | `laplace.user.id`    | string | Usuario final del agente (no el cliente Laplace). |
 | `laplace.tags`       | string | JSON array de strings.                            |
 | `laplace.metadata`   | string | JSON object libre.                                |
+| `laplace.prompt.name`    | string | Prompt gestionado que produjo la llamada (§9).  |
+| `laplace.prompt.version` | int    | Versión usada. `0` = texto de reserva (§9).     |
 
 A nivel de **recurso** (todos los spans del proceso): `laplace.project.id`, `service.name`,
 `service.version`, `telemetry.sdk.*`.
@@ -189,35 +191,117 @@ El `status` de la traza es `error` si `error_count > 0`, y `ok` en caso contrari
 
 ---
 
-## 7. Huecos reservados (Fases 3 y 4)
+## 7. Evaluación (Fase 5) y el hueco del diagnóstico (Fase 3)
 
-Existen **ya**, vacíos, para no migrar el esquema entero más adelante.
-
-### `trace_diagnoses` (Postgres) — Norte A
+### `trace_diagnoses` — Norte A, todavía vacío
 
 ```
 trace_id, project_id, created_at, model, cause, explanation, suggestion,
 categories[], confidence, estimated_savings_usd, raw
 ```
 
-Un diagnóstico por traza: causa detectada + sugerencia de arreglo.
+Un diagnóstico por traza: causa detectada + sugerencia de arreglo. Existe **ya**, vacío,
+para no migrar el esquema entero más adelante; se expone en `Trace.diagnosis` como
+`null`.
 
-### `annotations` (Postgres) — Fase 4
+### `annotations` — el veredicto sobre una ejecución
 
 ```
 id, trace_id, span_id?, source ('human' | 'llm_judge'), verdict ('pass'|'fail'|'unknown'),
-score?, label?, comment?, author?, created_at
+score?, label?, comment?, author?, created_at,
+judge_model?, judge_input_tokens?, judge_output_tokens?, judge_cost_usd?,
+judge_cost_unknown?, judge_prompt_version?
 ```
 
 Colgadas de una traza **o** de un span concreto: un veredicto sobre "el paso 3 alucinó"
-es tan necesario como uno sobre la ejecución entera.
+es tan necesario como uno sobre la ejecución entera. Se exponen en `Trace.annotations`.
 
-Ambas se exponen ya en el modelo `Trace` (`diagnosis`, `annotations`), devueltas como
-`null` y `[]` mientras no exista la capa que las rellena.
+Las seis columnas `judge_*` se agrupan en el modelo bajo `Annotation.judge`, y **sólo
+existen para `source = 'llm_judge'`**. En una anotación humana valen `NULL` y el modelo
+las devuelve como `null`: la separación entre el veredicto de una persona y el de una
+máquina es estructural, no una etiqueta que se pueda olvidar de pintar (D-083). El coste
+del juez se calcula con la misma tabla de precios que el gasto del usuario, y si su
+modelo no está en la tabla, `judge_cost_unknown` es `true` y el coste es «no lo sabemos»,
+no cero (D-088).
+
+Unicidad: `(trace_id, span_id, source, author)`. Volver a juzgar sustituye en vez de
+acumular; si no, correr el juez tres veces contaría tres veces en el acierto.
+
+### `datasets` / `dataset_items` — conjuntos de casos
+
+```
+datasets:      id, project_id, name, description, created_at, source_filter
+dataset_items: id, dataset_id, trace_id, span_id?, input, expected, created_at
+```
+
+Un conjunto se materializa desde un filtro del explorador, y `source_filter` guarda ese
+filtro tal cual se ejecutó. Cada caso conserva el `trace_id` del que salió: aquí no hay
+casos inventados (D-085).
+
+`expected` significa **«lo que había»**, no «lo que está bien»: es lo que el agente
+respondió cuando se capturó el caso. Certificarlo es trabajo de quien anota.
+
+### `eval_runs` / `eval_run_items` — tiradas
+
+```
+eval_runs:      id, project_id, dataset_id, variant, notes, created_at
+eval_run_items: run_id, case_id, trace_id, failed, error
+```
+
+Una tirada es una pasada del conjunto por una versión del agente. **Laplace no ejecuta el
+agente de nadie**: la corre el SDK en el proceso del usuario, las trazas entran por la
+ingesta normal y aquí llega el parte de qué caso produjo qué traza (D-086). Por eso la
+asociación caso→traza es exacta y no se infiere de ningún atributo del span.
+
+`failed` marca los casos en los que la ejecución reventó. Cuentan como fallo y no se
+descartan: descartarlos haría que una versión que revienta la mitad de las veces saliera
+con el mismo acierto que una que funciona.
 
 ---
 
-## 8. Compatibilidad
+## 8. Prompts gestionados (Fase 6)
+
+Un prompt puede vivir en Laplace en vez de en el código del usuario. Cuando es así, el
+SDK lo sirve (`laplace.get_prompt("nombre")`) y **deja escrito en la traza con qué
+versión se ejecutó cada llamada**. Ésa es toda la razón de que los prompts estén en el
+producto: sin la versión en la traza, no habría forma de decir lo que cuesta y lo que
+acierta cada una sin inventárselo.
+
+```
+prompts:          id, project_id, name, description, created_at, updated_at, production_version
+prompt_versions:  id, prompt_id, version, text, notes, author, created_at
+prompt_deploys:   id, prompt_id, version, at, actor, note, rollback
+```
+
+Y en cada span de LLM:
+
+```
+prompt_name     String   -- vacío para quien no gestiona prompts, que es el caso por defecto
+prompt_version  UInt32   -- 0 con nombre puesto = se sirvió el texto de reserva
+```
+
+Cuatro reglas del contrato, todas sobre no afirmar lo que no se ha medido:
+
+* **Las versiones son inmutables.** Editar crea la siguiente; nunca se reescribe una.
+  Si el texto pudiera cambiar debajo, las métricas medidas sobre el tráfico que lo usó
+  dejarían de querer decir nada sin que nadie se enterase.
+* **La versión se escribe sólo si se ha comprobado.** El SDK marca la llamada cuando el
+  texto de esa versión **aparece** en los mensajes enviados. No se deduce del último
+  `get_prompt()`: un agente que pide un prompt y llama al modelo con otro texto le
+  colgaría tráfico ajeno a esa versión (D-090).
+* **La versión `0` es el texto de reserva**, no la de producción. Es tráfico real que no
+  salió de ninguna versión guardada —Laplace no respondía y el SDK usó el `fallback=`
+  del código— y sumarlo a producción falsearía justo la cifra que se mira.
+* **La ingesta copia, no deduce.** Una versión ilegible se guarda como `0`, no se
+  adivina, y el span entra igual: una versión mal atribuida es peor que ninguna.
+
+Quien no adopte nada de esto no pierde la pestaña: la identidad de paso (§5) ya incluye
+la huella del prompt de sistema, así que dos `step_key` bajo la misma etiqueta son dos
+juegos de instrucciones del mismo paso, con sus fechas y su coste (D-093).
+
+---
+
+## 9. Compatibilidad
 
 Cualquier proceso instrumentado con OpenTelemetry estándar puede exportar a Laplace
 (`OTEL_EXPORTER_OTLP_ENDPOINT=http://...:4318`). Los spans sin atributos `gen_ai.*` se

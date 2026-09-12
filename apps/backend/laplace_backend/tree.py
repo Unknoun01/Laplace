@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
+from typing import Any
 
 from laplace.schema import Cost, Rollup, Span, TokenUsage, TraceSummary, TraceTreeNode
 
@@ -69,6 +70,34 @@ def _rollup(node: TraceTreeNode) -> Rollup:
         rollup.span_count += child.subtree.span_count
         rollup.error_count += child.subtree.error_count
     return rollup
+
+
+def trace_io(spans: list[Span]) -> tuple[Any, Any]:
+    """Qué se le pidió a la traza y qué respondió.
+
+    Lo usan las dos cosas que necesitan tratar una ejecución como un caso: materializar
+    un conjunto a partir del explorador y darle de comer al juez. Vive aquí y en un solo
+    sitio porque si las dos lo dedujeran por su cuenta, un conjunto podría guardar una
+    entrada y el juez juzgar otra distinta de la misma traza.
+
+    El criterio es el más simple que funciona con código real: la raíz, y si la raíz no
+    capturó payloads —porque quien instrumentó puso `capture_payloads=False` o decoró
+    sólo algunas funciones—, los mensajes de la primera y la última llamada al modelo.
+    """
+    if not spans:
+        return None, None
+    ordenados = sorted(spans, key=lambda s: (s.start_time, s.span_id))
+    raices = [s for s in ordenados if not s.parent_span_id] or ordenados
+    raiz = raices[0]
+
+    entrada = raiz.input
+    salida = raiz.output
+    llm = [s for s in ordenados if s.type == "llm" and s.llm]
+    if entrada is None and llm:
+        entrada = llm[0].llm.input_messages or None
+    if salida is None and llm:
+        salida = llm[-1].llm.output_messages or None
+    return entrada, salida
 
 
 def summarize(spans: list[Span], trace_id: str, project_id: str = "") -> TraceSummary:

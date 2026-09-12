@@ -111,11 +111,28 @@ class Reading(BaseModel):
 
 
 class SpikeCause(BaseModel):
-    """Una causa concreta, con lo que la respalda. Nunca una insinuación."""
+    """Una causa concreta, con lo que la respalda. Nunca una insinuación.
 
-    kind: Literal["modelo_nuevo", "herramienta_nueva", "paso_nuevo", "paso_disparado", "volumen"]
+    `version_prompt` era el hueco que la atribución tenía reservado desde que se
+    escribió, esperando a que existiera la pestaña de Prompts. Entra por la misma puerta
+    que las demás —algo que aparece en las trazas del pico y no aparecía antes— y no por
+    la hora de un despliegue, que sería precisamente la correlación insinuada que este
+    módulo existe para no contar (D-092).
+    """
+
+    kind: Literal[
+        "version_prompt",
+        "modelo_nuevo",
+        "herramienta_nueva",
+        "paso_nuevo",
+        "paso_disparado",
+        "volumen",
+    ]
     text: str
     evidence: str = ""
+    #: Adónde ir a mirar, cuando la causa tiene una pantalla propia. Hoy sólo la versión
+    #: de prompt la tiene: `{"prompt": "resumen", "version": "8"}`.
+    link: dict[str, str] = Field(default_factory=dict)
 
 
 class Spike(BaseModel):
@@ -485,12 +502,60 @@ def attribute(
 ) -> tuple[list[SpikeCause], str]:
     """Qué cambió alrededor del pico, **con datos o con nada**.
 
-    Cuatro señales, todas comprobables en las trazas y todas de la forma «esto aparece
+    Cinco señales, todas comprobables en las trazas y todas de la forma «esto aparece
     aquí y no aparecía antes». Ninguna es una correlación estadística: si no hay nada
     nuevo y ningún paso concentra el exceso, se dice que no se identifica la causa, que
     es una respuesta honesta y accionable —«ve a mirar estas trazas»— y no un relleno.
+
+    La quinta es la versión de prompt, y merece una nota porque es la que más se podía
+    haber hecho mal. La tentación era cruzar el historial de despliegues con la hora del
+    pico: «desplegaste v8 a las 14:02 y el pico empieza a las 14:00». Eso es una
+    coincidencia temporal, no una causa, y habría acabado señalando cualquier despliegue
+    que cayera cerca de cualquier pico. Lo que se usa es la versión que **aparece en las
+    trazas del tramo** y no aparecía en las de antes, que es un hecho medido igual que
+    un modelo nuevo. El historial de despliegues sirve para contar la historia en la
+    pestaña de Prompts, no para atribuir aquí (D-092).
     """
     causas: list[SpikeCause] = []
+
+    # El prompt va primero a propósito. De todo lo que puede cambiar alrededor de un
+    # pico, una versión de prompt nueva es lo más accionable —hay un botón para
+    # deshacerla— y lo más frecuente: un modelo nuevo se despliega una vez al trimestre
+    # y un prompt se toca los martes.
+    for etiqueta in sorted(dentro.prompts - antes.prompts):
+        nombre, _, version = etiqueta.rpartition("@")
+        if not nombre:
+            continue
+        if version == "0":
+            causas.append(
+                SpikeCause(
+                    kind="version_prompt",
+                    text=(
+                        f"Las trazas de este tramo corrieron con el texto de reserva de "
+                        f"«{nombre}», no con la versión de producción."
+                    ),
+                    evidence=(
+                        "Significa que el SDK no pudo pedirle el prompt a Laplace y usó "
+                        "el del código. No figura en ninguna traza anterior de la ventana."
+                    ),
+                    link={"prompt": nombre},
+                )
+            )
+            continue
+        causas.append(
+            SpikeCause(
+                kind="version_prompt",
+                text=(
+                    f"Las trazas de este tramo usan una versión de «{nombre}» que no "
+                    f"estaba antes: la v{version}."
+                ),
+                evidence=(
+                    "No figura en ninguna traza anterior de esta ventana. Lo dicen las "
+                    "propias trazas, no la hora de un despliegue."
+                ),
+                link={"prompt": nombre, "version": version},
+            )
+        )
 
     for modelo in sorted(dentro.models - antes.models):
         causas.append(
@@ -555,9 +620,9 @@ def attribute(
     if causas:
         return causas, ""
     return [], (
-        "No identificamos la causa. En este tramo no aparece ningún modelo ni ninguna "
-        "herramienta que no estuviera antes, y ningún paso concentra el sobrecoste. Las "
-        "trazas del tramo están un clic más abajo."
+        "No identificamos la causa. En este tramo no aparece ningún modelo, ninguna "
+        "herramienta ni ninguna versión de prompt que no estuviera antes, y ningún paso "
+        "concentra el sobrecoste. Las trazas del tramo están un clic más abajo."
     )
 
 

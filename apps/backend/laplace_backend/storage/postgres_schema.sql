@@ -61,8 +61,24 @@ CREATE TABLE IF NOT EXISTS annotations (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Lo que costo emitir un veredicto de maquina. NULL en toda anotacion humana: la
+-- separacion entre persona y modelo es estructural, no una etiqueta que se pueda
+-- olvidar de pintar (D-083). Y el coste del juez es coste real: si no se registra,
+-- sabriamos menos de nuestro propio gasto que del del usuario.
+ALTER TABLE annotations ADD COLUMN IF NOT EXISTS judge_model          TEXT;
+ALTER TABLE annotations ADD COLUMN IF NOT EXISTS judge_input_tokens   INTEGER;
+ALTER TABLE annotations ADD COLUMN IF NOT EXISTS judge_output_tokens  INTEGER;
+ALTER TABLE annotations ADD COLUMN IF NOT EXISTS judge_cost_usd       DOUBLE PRECISION;
+ALTER TABLE annotations ADD COLUMN IF NOT EXISTS judge_cost_unknown   BOOLEAN;
+ALTER TABLE annotations ADD COLUMN IF NOT EXISTS judge_prompt_version TEXT;
+
 CREATE INDEX IF NOT EXISTS annotations_trace_idx ON annotations (trace_id);
 CREATE INDEX IF NOT EXISTS annotations_project_idx ON annotations (project_id, created_at DESC);
+
+-- Un veredicto por (traza, span, fuente, autor): volver a juzgar sustituye en vez de
+-- acumular. Sin esto, correr el juez tres veces contaria tres veces en el acierto.
+CREATE UNIQUE INDEX IF NOT EXISTS annotations_unicas
+    ON annotations (trace_id, COALESCE(span_id, ''), source, COALESCE(author, ''));
 
 -- Datasets de regresión construidos a partir de trazas reales (Fase 4).
 CREATE TABLE IF NOT EXISTS datasets (
@@ -72,6 +88,10 @@ CREATE TABLE IF NOT EXISTS datasets (
     description TEXT NOT NULL DEFAULT '',
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- El filtro del explorador con el que se materializo, tal cual se ejecuto: un conjunto
+-- del que no se sabe como se formo no se puede discutir (D-067).
+ALTER TABLE datasets ADD COLUMN IF NOT EXISTS source_filter JSONB NOT NULL DEFAULT '{}';
 
 CREATE TABLE IF NOT EXISTS dataset_items (
     id           TEXT PRIMARY KEY,
@@ -85,6 +105,86 @@ CREATE TABLE IF NOT EXISTS dataset_items (
 );
 
 CREATE INDEX IF NOT EXISTS dataset_items_dataset_idx ON dataset_items (dataset_id);
+
+-- ---------------------------------------------------------------------------
+-- Tiradas de evaluacion (Fase 5).
+-- Laplace NO ejecuta el agente de nadie: la tirada la corre el SDK dentro del
+-- proceso del usuario y aqui llega el parte de lo que paso (D-086). Cada caso
+-- apunta a la traza que produjo, que entra por la via normal de ingesta.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS eval_runs (
+    id          TEXT PRIMARY KEY,
+    project_id  TEXT NOT NULL,
+    dataset_id  TEXT NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+    -- Como llama el usuario a esta version del agente: main, prompt-v3, gpt-luna.
+    variant     TEXT NOT NULL,
+    notes       TEXT NOT NULL DEFAULT '',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS eval_run_items (
+    run_id    TEXT NOT NULL REFERENCES eval_runs(id) ON DELETE CASCADE,
+    case_id   TEXT NOT NULL,
+    trace_id  TEXT NOT NULL,
+    -- Un caso que revienta cuenta como fallo, no se descarta: descartarlo subiria el
+    -- acierto por romperse mas.
+    failed    BOOLEAN NOT NULL DEFAULT FALSE,
+    error     TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (run_id, case_id)
+);
+
+CREATE INDEX IF NOT EXISTS eval_runs_project_idx ON eval_runs (project_id, created_at DESC);
+
+-- ---------------------------------------------------------------------------
+-- Prompts gestionados (Fase 6).
+-- El texto sale del codigo del usuario y vive aqui; la version que se uso en
+-- cada llamada vive en la traza. Eso es lo que permite que cada version lleve
+-- pegado lo que costo y lo que acerto sobre el trafico que la uso (D-090).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS prompts (
+    id                  TEXT PRIMARY KEY,
+    project_id          TEXT NOT NULL,
+    name                TEXT NOT NULL,
+    description         TEXT NOT NULL DEFAULT '',
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ,
+    -- La que sirve `laplace.get_prompt(nombre)`. NULL = ninguna, que es un estado
+    -- legitimo: un prompt recien creado no tiene por que estar servido.
+    production_version  INTEGER
+);
+
+-- Un nombre por proyecto: `get_prompt("resumen")` tiene que ser inequivoco.
+CREATE UNIQUE INDEX IF NOT EXISTS prompts_nombre ON prompts (project_id, name);
+
+-- Las versiones son INMUTABLES: editar crea la siguiente, nunca reescribe una. Si el
+-- texto pudiera cambiar debajo, las metricas medidas sobre el trafico que lo uso
+-- dejarian de querer decir nada sin que nadie se enterase.
+CREATE TABLE IF NOT EXISTS prompt_versions (
+    id          TEXT PRIMARY KEY,
+    prompt_id   TEXT NOT NULL REFERENCES prompts(id) ON DELETE CASCADE,
+    version     INTEGER NOT NULL,
+    text        TEXT NOT NULL,
+    notes       TEXT NOT NULL DEFAULT '',
+    author      TEXT NOT NULL DEFAULT '',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS prompt_versions_unicas
+    ON prompt_versions (prompt_id, version);
+
+-- Cuando cada version paso a produccion. Sirve para contar la historia, no para
+-- atribuir picos: eso lo hace la version que aparece en las trazas (D-092).
+CREATE TABLE IF NOT EXISTS prompt_deploys (
+    id          TEXT PRIMARY KEY,
+    prompt_id   TEXT NOT NULL REFERENCES prompts(id) ON DELETE CASCADE,
+    version     INTEGER NOT NULL,
+    at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    actor       TEXT NOT NULL DEFAULT '',
+    note        TEXT NOT NULL DEFAULT '',
+    rollback    BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+CREATE INDEX IF NOT EXISTS prompt_deploys_idx ON prompt_deploys (prompt_id, at DESC);
 
 -- ---------------------------------------------------------------------------
 -- Estado de las alertas (Fase 2, punto 3).
@@ -105,4 +205,11 @@ CREATE TABLE IF NOT EXISTS alert_state (
 
 INSERT INTO projects (id, name)
 VALUES ('default', 'default')
+ON CONFLICT (id) DO NOTHING;
+
+-- El proyecto comodin de las claves de instalacion. Existe como fila para que la clave
+-- ajena de api_keys se cumpla sin aflojarla: '*' no es un proyecto de verdad y no
+-- recibe spans, pero una clave puede apuntar a el para verlos todos.
+INSERT INTO projects (id, name)
+VALUES ('*', 'todos los proyectos')
 ON CONFLICT (id) DO NOTHING;

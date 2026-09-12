@@ -15,6 +15,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 from .api import router
+from .api_evals import router as evals_router
+from .api_prompts import router as prompts_router
+from .auth import AuthMiddleware
 from .config import Settings, get_settings
 from .storage.base import SpanStore
 
@@ -40,10 +43,13 @@ def build_store(settings: Settings) -> SpanStore:
 
 
 def build_metadata(settings: Settings):
-    """Postgres sólo guarda metadatos y los huecos de las Fases 3-4.
+    """Lo mutable —proyectos, anotaciones, conjuntos y tiradas— va donde toque.
 
-    En local no hay Postgres y no hace falta: se devuelve el almacén nulo, que es el
-    mismo que ya se usaba cuando Postgres no estaba disponible.
+    En local, el mismo fichero SQLite que guarda los spans; en la nube, Postgres. Antes
+    en local se devolvía el almacén nulo, porque los huecos de las fases 3 y 4 estaban
+    vacíos y no se notaba. Con las evaluaciones sí se nota: anotar una traza es el gesto
+    más básico de la pestaña, y un modo local que no pudiera anotar sería una versión
+    recortada del producto (D-084).
     """
     from .storage.postgres import build_metadata_store
 
@@ -92,7 +98,21 @@ async def lifespan(app: FastAPI):
         else f"{settings.clickhouse_host}:{settings.clickhouse_port}/{settings.clickhouse_database}"
     )
     logger.info("laplace backend listo — almacén=%s (%s)", settings.store, destino)
+    logger.info(
+        "metadatos (anotaciones, conjuntos, tiradas) en %s",
+        type(app.state.metadata).__name__,
+    )
+    _log_auth(settings)
     _log_ui_dir()
+
+    # El juez se construye siempre, encendido o no: la pestaña de Evaluaciones
+    # pregunta por su estado para decir si está disponible en vez de ofrecer un botón
+    # que no hace nada.
+    from .judge import JudgeConfig
+
+    app.state.judge = JudgeConfig.of(settings)
+    if app.state.judge.enabled:
+        logger.info("LLM-as-judge activo — modelo=%s", app.state.judge.model)
 
     app.state.alerts = build_alerts(settings, app.state.store)
     tarea = None
@@ -131,9 +151,46 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# El router va ANTES del comodín de la interfaz: FastAPI resuelve por orden de
+# Autenticación: deniega por defecto todo lo que cuelga de /api y /v1/traces salvo la
+# lista blanca de `auth.py`. Va como middleware y no como dependencia de cada ruta a
+# propósito: una ruta nueva nace protegida en vez de nacer abierta hasta que alguien se
+# acuerde de protegerla (D-097).
+app.add_middleware(
+    AuthMiddleware,
+    required=get_settings().auth_enforced,
+    metadata_getter=lambda: app.state.metadata,
+)
+
+# Los routers van ANTES del comodín de la interfaz: FastAPI resuelve por orden de
 # registro, y un `/{ruta:path}` declarado primero se comería `/api` y `/health`.
 app.include_router(router)
+app.include_router(evals_router)
+app.include_router(prompts_router)
+
+
+def _log_auth(settings: Settings) -> None:
+    """Deja escrito en qué modo arranca la instalación.
+
+    Un despliegue sin credencial tiene que doler de ver en el log, y el modo local tiene
+    que decir que no pide clave **a propósito**. La diferencia entre una exención escrita
+    y un descuido es exactamente ésta: que alguien lo lea el día que mueva el modo local
+    a una máquina con IP pública.
+    """
+    if settings.auth_enforced:
+        logger.info("autenticación activa: /api y /v1/traces exigen clave de API")
+        return
+    if settings.store == "sqlite":
+        logger.info(
+            "modo local sin cuentas (D-010): no se pide clave. Si expones esto fuera de "
+            "tu máquina, arranca con LAPLACE_AUTH_REQUIRED=true y crea claves con "
+            "`python -m laplace_backend.keys create --project <id>`"
+        )
+        return
+    logger.warning(
+        "AUTENTICACIÓN DESACTIVADA en un despliegue de nube: cualquiera que llegue a "
+        "esta URL puede leer y escribir todos los proyectos, incluidos los prompts y "
+        "las respuestas en crudo. Quita LAPLACE_AUTH_REQUIRED=false para cerrarlo."
+    )
 
 
 def _ui_candidates() -> list[Path]:

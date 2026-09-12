@@ -2,11 +2,19 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useState } from "react";
-import { BackendDown, NoProject, TableSkeleton } from "@/components/states";
-import { getOverview, listProjects, listTraces, parseDays, windowStart } from "@/lib/api";
+import { Suspense, useEffect, useState } from "react";
+import { VerdictDots, Verdicts } from "@/components/Verdicts";
+import { BackendDown, NeedsKey, NoProject, NotYours, TableSkeleton } from "@/components/states";
+import {
+  annotationsFor,
+  getOverview,
+  listProjects,
+  listTraces,
+  parseDays,
+  windowStart,
+} from "@/lib/api";
 import { duration, money, relative, timestamp, tokens } from "@/lib/format";
-import type { TraceListPage, TraceSummary } from "@/lib/types";
+import type { Annotation, TraceListPage, TraceSummary } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
 import { LIVE_INTERVAL_MS, type Live, useLive } from "@/lib/useLive";
 
@@ -69,6 +77,8 @@ function Contenido() {
 
   if (estado.fase === "cargando") return <TableSkeleton />;
   if (estado.fase === "sin-backend") return <BackendDown />;
+  if (estado.fase === "sin-clave") return <NeedsKey mensaje={estado.error.message} />;
+  if (estado.fase === "sin-permiso") return <NotYours mensaje={estado.error.message} />;
   if (estado.fase === "error") return <BackendDown mensaje={estado.error.message} />;
   if (estado.datos === null) return <NoProject />;
 
@@ -228,6 +238,21 @@ function Listado({
   const [enVivo, setEnVivo] = useState(false);
   const live = useLive(page.traces, recargar, puedeVivir && enVivo);
   const repeats = new Set(page.with_repeats);
+
+  // Los veredictos de la página, en una sola consulta. Se piden aparte de las trazas
+  // porque son mutables y las trazas no: mezclarlos obligaría a recargar la lista
+  // entera cada vez que alguien marca una fila.
+  const [anotaciones, setAnotaciones] = useState<Record<string, Annotation[]>>({});
+  const idsPagina = page.traces.map((t) => t.trace_id).join(",");
+  useEffect(() => {
+    let vigente = true;
+    annotationsFor(idsPagina.split(",").filter(Boolean))
+      .then((a) => vigente && setAnotaciones(a))
+      .catch(() => undefined);
+    return () => {
+      vigente = false;
+    };
+  }, [idsPagina]);
   const activo = puedeVivir && enVivo;
   // Al pausar se dejan de pedir trazas, pero las que ya han llegado **se quedan**:
   // borrarlas al pausar castigaría justo al que ha visto algo y quiere mirarlo con
@@ -271,6 +296,7 @@ function Listado({
             <th className="r">Coste</th>
             <th className="r hide-sm">Duración</th>
             <th className="r hide-sm">Cuándo</th>
+            <th className="r">¿Bien?</th>
           </tr>
         </thead>
         <tbody>
@@ -279,8 +305,13 @@ function Listado({
               key={trace.trace_id}
               trace={trace}
               context={context}
+              project={project}
               looping={repeats.has(trace.trace_id)}
               nueva={live.nuevas.has(trace.trace_id)}
+              annotations={anotaciones[trace.trace_id] ?? []}
+              onAnnotated={(nuevas) =>
+                setAnotaciones((previas) => ({ ...previas, [trace.trace_id]: nuevas }))
+              }
             />
           ))}
         </tbody>
@@ -324,13 +355,19 @@ function Latido({ live }: { live: Live }) {
 function Row({
   trace,
   context,
+  project,
   looping,
   nueva,
+  annotations,
+  onAnnotated,
 }: {
   trace: TraceSummary;
   context: string;
+  project: string;
   looping: boolean;
   nueva?: boolean;
+  annotations: Annotation[];
+  onAnnotated: (nuevas: Annotation[]) => void;
 }) {
   const failed = trace.status === "error";
   return (
@@ -377,6 +414,18 @@ function Row({
       <td className="r hide-sm">{duration(trace.duration_ms)}</td>
       <td className="r hide-sm" title={timestamp(trace.start_time)}>
         {relative(trace.start_time)}
+      </td>
+      {/* Anotar desde la lista: revisar veinte ejecuciones seguidas es el caso normal
+          de esta pestaña, y abrir y cerrar cada una lo haría insoportable. */}
+      <td className="r">
+        <VerdictDots annotations={annotations} />
+        <Verdicts
+          projectId={project}
+          traceId={trace.trace_id}
+          annotations={annotations}
+          onChange={onAnnotated}
+          compact
+        />
       </td>
     </tr>
   );
