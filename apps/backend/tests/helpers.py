@@ -23,3 +23,15 @@ def ingest():
 def otlp_body() -> bytes:
     """Lo mismo, pero sin traducir: el sobre protobuf tal cual viaja por la red."""
     return encode_spans(exporter.get_finished_spans()).SerializeToString()
+
+
+def span_llm():
+    """El único span de LLM que ha salido por la ingesta, ya en el contrato.
+
+    Aquí y no en cada fichero de pruebas porque tres tandas distintas lo necesitan
+    —transporte falso, servidor local y API real— y la condición de «exactamente uno»
+    es parte de lo que se comprueba: dos spans por una llamada es un fallo nuestro.
+    """
+    spans = [s for s in ingest() if s.type == "llm"]
+    assert len(spans) == 1, f"se esperaba un span de LLM y hay {len(spans)}"
+    return spans[0]

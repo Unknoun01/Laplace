@@ -447,7 +447,7 @@ ruff check packages/sdk-python apps/backend examples
 npm --prefix apps/web run typecheck
 ```
 
-Hay tres niveles:
+Hay cuatro niveles:
 
 - **Sin dependencias.** `test_ingest.py` recorre el camino real —SDK → spans OTel →
   protobuf OTLP → contrato— sin base de datos ni claves de API. Si el SDK y la ingesta
@@ -462,6 +462,18 @@ Hay tres niveles:
   SSE— con el transporte HTTP falseado. No necesita clave ni gasta dinero. Las que además
   comprueban que nuestros números cuadran con lo que factura el proveedor se encienden
   con `LAPLACE_LIVE_TESTS=1` y la clave en el entorno, y cuestan céntimos.
+- **Contra un modelo que corre en tu máquina.** `test_modelo_local.py` le pasa al cliente
+  real de OpenAI un `base_url` que apunta a Ollama y una clave ficticia, así que el SDK
+  publicado habla por HTTP con un modelo de verdad: coste cero y **nada falseado**, ni
+  siquiera el cuerpo de la respuesta. Se salta solo si no hay servidor local; cómo
+  prepararlo, en [`docs/tests-con-modelo-local.md`](docs/tests-con-modelo-local.md).
+  Lo que un modelo local no puede dar —tokens cacheados— vive aparte y marcado en
+  `test_modelo_local_simulado.py`.
+
+  **Ninguno de estos dos últimos niveles valida el modelo de coste contra facturación.**
+  Un modelo local no factura, no tiene caché y cuenta tokens con otro tokenizador. Que
+  salgan en verde significa que el camino funciona, no que las cifras sean las del
+  proveedor: eso sólo lo dicen las cuatro pruebas vivas que esperan una clave.
 
 `test_alerts.py`, `test_panel.py`, `test_evals.py` y `test_prompts.py` corren siempre y no
 tocan la red: el notificador de

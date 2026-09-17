@@ -1,6 +1,6 @@
 # Estado de Laplace
 
-Última actualización: 12 de septiembre de 2026.
+Última actualización: 17 de septiembre de 2026.
 
 ## Dónde está el producto
 
@@ -20,7 +20,10 @@ Encima del plan hay tres cosas que no estaban y que hacían falta antes de ense�
 nadie: **la cobertura** —cuánto del agente entendemos, dicho antes que cualquier cifra de
 ahorro—, **la autenticación** —la instalación de nube ya no es «quien llegue a la URL lee
 y escribe todo»— y **las integraciones probadas contra los SDK de verdad** de OpenAI y
-Anthropic, no contra dobles escritos por nosotros.
+Anthropic, no contra dobles escritos por nosotros. Eso último ha llegado ahora hasta donde
+puede llegar sin pagar: un modelo local sirviendo la API de OpenAI deja al SDK publicado
+hablando por HTTP con un modelo de verdad. **Lo que sigue esperando una clave es lo único
+que importa de verdad: que nuestras cifras sean las que factura el proveedor.**
 
 ## Hecho
 
@@ -97,6 +100,13 @@ Lo que sostiene esas casillas, en concreto:
   parseo, sus modelos y su lector de SSE; lo único falso es el transporte HTTP. Las que
   además comprueban que nuestros números cuadran con la factura del proveedor están
   escritas y esperan una clave (D-098).
+- **Y ahora también contra un modelo que corre en tu portátil**, sin falsear ni el
+  transporte: Ollama sirve la API de OpenAI, el cliente real recibe ese `base_url` y una
+  clave ficticia, y se recorre el camino entero con un servidor al otro lado. Cuesta cero
+  y se salta solo si no hay servidor (D-102). Pasadas el 17 de septiembre contra Ollama
+  0.34.1 con `qwen2.5:0.5b`: **16 de 16, ninguna saltada**, en menos de un minuto. **No valida el modelo de coste**: un modelo
+  local no factura, no tiene caché y cuenta tokens con otro tokenizador, y lo que no
+  puede dar —la caché— se simula en un fichero aparte y marcado (D-103, D-104).
 - **Ninguna consulta escoge «una fila cualquiera».** El patrón `any()` / `argMax` sin
   desempate / `ORDER BY` sin desempate apareció por cuarta vez y se cerró entero en los
   dos almacenes, con pruebas de paridad sobre tráfico **empatado a propósito** y dos
@@ -105,16 +115,18 @@ Lo que sostiene esas casillas, en concreto:
   Anthropic estaba completo; faltaba leer `prompt_tokens_details.cache_write_tokens`, así
   que esos tokens se cobraban a tarifa de entrada y **nuestro coste de OpenAI salía por
   debajo del real** (D-101).
-- **296 pruebas y ninguna saltada** con ClickHouse y Postgres levantados. Las de
-  prompts cubren las guardas compartidas con Evaluaciones y que un pico no se atribuya a
-  un despliegue por la hora; las de cobertura, que un paso partido no pase por sano; las
+- **316 pruebas.** Con ClickHouse, Postgres y un modelo local levantados sólo se saltan
+  las 4 que necesitan una clave de proveedor. Las de prompts cubren las guardas
+  compartidas con Evaluaciones y que un pico no se atribuya a un despliegue por la hora;
+  las de cobertura, que un paso partido no pase por sano; las
   de autenticación son casi todas **intentos de hacer lo que no se debe poder**; y las de
   paridad, que los dos almacenes elijan lo mismo cuando hay empate. **Cada tanda nueva se
-  ha verificado rompiendo el código a propósito**: catorce mutaciones en total —abrir una
-  ruta, dejar de mirar el cuerpo de una escritura, no acotar la traza por id, volver a
-  `any()`, quitar un desempate, dejar de leer los tokens de escritura de caché— y todas
-  ponen la suite en rojo. Las 4 que siguen saltándose son las que llaman a la API real de
-  los proveedores y necesitan una clave.
+  ha verificado rompiendo el código a propósito**: veintidós mutaciones en total —abrir
+  una ruta, dejar de mirar el cuerpo de una escritura, no acotar la traza por id, volver a
+  `any()`, quitar un desempate, dejar de leer los tokens de escritura de caché, marcar
+  todo como estimado, marcar nada, devolver coste cero para un modelo sin tarifa, tragarse
+  un error del servidor— y todas ponen la suite en rojo. Las 4 que siguen saltándose son
+  las que llaman a la API real de los proveedores y necesitan una clave.
 
 ## Qué queda
 
@@ -138,7 +150,46 @@ trazas con su coste. El modelo de coste por tramos, con sus suelos y sus «no lo
 Las tres reglas de derroche, con cuatro cicatrices de doble conteo y su test cada una. El
 panel. Evaluaciones. Prompts. Y ahora la cobertura, que es lo que hace que el silencio de
 todo lo anterior se pueda interpretar. Las integraciones de OpenAI y Anthropic ya no son
-un acto de fe: corren contra los clientes reales en cada `pytest`.
+un acto de fe: corren contra los clientes reales en cada `pytest`, y con un modelo local
+levantado corren además contra un servidor de verdad, por HTTP, sin falsear el cuerpo de
+la respuesta.
+
+### Lo que los tests contra modelo local NO verifican
+
+Está aquí y no en una nota al pie porque es lo que más fácil es malinterpretar. Si alguien
+lee «tests contra proveedor real en verde» y entiende «el modelo de coste está validado»,
+**ha entendido mal**, y la culpa sería de este documento.
+
+Lo que esas pruebas demuestran es que **el camino funciona**: el parche llega a la clase
+que el cliente usa, el cuerpo que devuelve un servidor ajeno se parsea, el SSE se lee
+troceado por la red, el span sale y la ingesta lo traduce. Todo eso estaba antes probado
+con el transporte falseado y ahora está probado con un servidor al otro lado.
+
+Lo que **no** demuestran, punto por punto:
+
+1. **Que los tokens que guardamos sean los que alguien cobró.** Un modelo local no
+   factura. No existe factura contra la que cuadrar nada. Lo único que se comprueba es
+   que el span dice lo mismo que *reportó el servidor*. La promesa del producto —«tus
+   números son los del proveedor»— sigue apoyada **sólo** en las 4 pruebas vivas que
+   esperan una clave, y hasta que se pongan, el modelo de coste está validado contra la
+   aritmética que escribimos nosotros y contra precios publicados, no contra una factura.
+2. **Nada del tramo de caché.** Un servidor local no sirve tokens desde caché ni los
+   reporta. `cached_tokens`, `cache_write_tokens` y el reparto 5 min / 1 h —el tramo más
+   delicado del cálculo y el que ya se equivocó una vez (D-101)— se ejercitan con
+   contadores **inventados por nosotros**, en `test_modelo_local_simulado.py`, que está
+   separado y marcado por eso mismo.
+3. **Ninguna cifra en dólares.** El tokenizador del modelo local es el suyo, con su
+   vocabulario: sus recuentos no se parecen a los de `o200k` ni a los de Anthropic. Por
+   eso ninguna de esas pruebas comprueba un importe, sólo de dónde sale cada número y
+   cómo queda marcado. La distancia no es pequeña: con «Di la palabra hola y nada más.»
+   el servidor contó 38 tokens de entrada y nuestra estimación, 15. Buena parte de esa
+   diferencia es la plantilla de chat de Qwen, que mete su propio prompt de sistema, así
+   que tampoco dice cuánto se desvía la estimación contra OpenAI. Lo que sí confirma es
+   que la marca de «estimado» no es decorativa.
+4. **Anthropic, por este camino, nada.** Ollama habla la API de OpenAI; no hay servidor
+   local que hable la de Anthropic. Escribir el traductor nosotros sería volver a probar
+   contra un doble propio, así que no se ha hecho. La integración de Anthropic se queda
+   con el transporte falso y con las pruebas vivas.
 
 **No aguanta todavía, por orden de riesgo:**
 
@@ -165,6 +216,9 @@ un acto de fe: corren contra los clientes reales en cada `pytest`.
    El `cache_write_tokens` de OpenAI que estaba anotado como incompleto ya está cerrado
    (D-101), pero el aviso de fondo sigue: un campo nuevo en la respuesta de un proveedor
    no falla, sólo se lee como `None`, y el coste sale por debajo sin que nadie se entere.
+   La comprobación de forma de `test_modelo_local_simulado.py` tapa media rendija —que un
+   campo nuestro esté mal escrito— pero no la otra: un campo que el proveedor añade y el
+   SDK todavía no declara no se ve desde aquí.
 
 **Lo más frágil sigue siendo la identidad de paso**, pero ya no es invisible: la cobertura
 la mide, la nombra y dice cómo arreglarla. Eso cambia la naturaleza del riesgo —de «el
@@ -178,6 +232,17 @@ que reverificarlo **cada 30 días**. Tres tests fallan solos: cuando una fuente 
 días, cuando vence una tarifa promocional, y cuando aparece en las trazas un modelo que
 no está en la tabla. No los silencies: cada uno significa que alguna cifra en pantalla ha
 dejado de ser cierta.
+
+**«Verde» no quiere decir lo mismo en cada tanda de pruebas, y hay que decir cuál.**
+Cuatro niveles con cuatro alcances distintos: sin red, contra los almacenes, contra los
+SDK con transporte falso, y contra un modelo local por HTTP. Ninguno de los cuatro puede
+decir que nuestras cifras son las del proveedor: eso sólo lo dicen las cuatro pruebas
+vivas, que no corren con un `pytest` a secas porque necesitan clave. La tentación
+concreta a la que no ceder es enseñar «tests contra proveedor real: 316 en verde» sin esa
+frase detrás; el aviso está escrito arriba y en la cabecera de los dos ficheros de
+pruebas, y si se quita de ahí, se queda sin decir en ningún sitio. Y una regla para la
+próxima simulación: lo simulado va en un fichero propio con «simulado» en el nombre, no
+como un caso más entre los reales.
 
 **El doble conteo es el fallo recurrente de este proyecto.** Ha aparecido por cuatro
 caminos distintos: dos reglas sobre los mismos tokens, dos reglas sobre el mismo paso, el

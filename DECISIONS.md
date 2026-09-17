@@ -1282,3 +1282,109 @@ Se arregló en los dos caminos —normal y streaming—, porque en un agente de 
 mayoría de las llamadas van en streaming y arreglarlo sólo en uno habría dejado el error
 justo donde más tráfico hay.
 
+
+## 2026-09-17 — Los proveedores, contra un modelo local
+
+### D-102 — Un modelo local para ejercitar el camino entero sin pagar nada
+Las integraciones ya se probaban contra los SDK reales, pero con el transporte HTTP
+falseado: el cuerpo de la respuesta lo escribíamos nosotros (D-098). Eso deja un último
+tramo sin tocar, y es un tramo con fallos propios: un cuerpo que llega comprimido, un SSE
+troceado como lo trocee el servidor y no como lo trocee un `bytes`, cabeceras, códigos de
+estado de verdad, un socket que se cierra a media respuesta.
+
+Ese tramo se puede recorrer gratis. Un servidor de modelos local expone la API de OpenAI;
+al cliente real se le pasa ese `base_url` y una clave ficticia, y el SDK publicado habla
+por HTTP con un modelo que genera texto. Coste cero, red real, cuerpo ajeno.
+
+**Ollama y no LM Studio**, por cuatro razones del mismo tipo —esto tiene que arrancar sin
+que nadie toque una ventana—: es un servicio y no una aplicación, se maneja entero por
+línea de comandos (así que los pasos se copian, se pegan y caben en un CI), carga el
+modelo cuando llega la petición en vez de exigir un paso previo que se olvida, y un
+modelo se pide por un nombre que es el mismo en cualquier máquina. Nada del código está
+atado a Ollama: `LAPLACE_LOCAL_BASE_URL` apunta a donde haga falta, y con LM Studio
+funciona igual cambiando el puerto.
+
+Tres decisiones de diseño que no son obvias:
+
+* **El modelo se descubre, no se escribe.** Las pruebas preguntan `GET /v1/models` y
+  eligen. Un nombre de modelo en el código de un test es exactamente lo que caducó en los
+  fixtures y en la demo (D-100), y aquí caducaría peor, porque dependería de qué se
+  descargó cada uno.
+* **Las capacidades se sondean, no se suponen.** Que el servidor mande `usage` al final
+  de un stream depende de su versión. Se comprueba con una generación de un token y, si no
+  lo manda, se salta **sólo** la prueba que lo necesita, con un motivo que dice qué
+  actualizar. Suponerlo por número de versión habría dejado una prueba midiendo otra cosa
+  sin avisar.
+* **Las comparaciones van contra el objeto que devuelve el SDK**, nunca contra números
+  escritos a mano: `span.llm.usage.output_tokens == respuesta.usage.completion_tokens`.
+  Así la prueba vale con cualquier modelo y cualquier longitud de respuesta, y si un campo
+  se renombra, nuestro lado se queda a `None` y muerde.
+
+Y una cosa que se valida por fin contra una respuesta que no hemos escrito nosotros: **un
+modelo sin tarifa no cuesta cero, cuesta «no lo sabemos»**. Un modelo local no está en la
+tabla de precios y nunca lo estará, así que pasa por el mismo camino que cualquier modelo
+nuevo de OpenAI el día que sale. Hasta ahora esa regla —la primera del motor de precios—
+sólo se había comprobado con cuerpos propios.
+
+### D-103 — Lo simulado, en un fichero aparte y con el alcance escrito en la cabecera
+Lo que un modelo local no puede dar es caché: no sirve tokens desde caché ni los reporta.
+Y la caché es el tramo más delicado del cálculo —dos proveedores con dos criterios
+distintos, escritura por encima de la entrada, reparto 5 min / 1 h— y el que ya se
+equivocó una vez en la dirección peligrosa (D-101). Hay que ejercitarlo, y para eso hay
+que falsear la respuesta.
+
+La decisión es **dónde vive eso**. Va en `test_modelo_local_simulado.py`, con «simulado»
+en el nombre del fichero y en el de cada prueba, y no como un caso más entre los reales.
+No es pulcritud: un fichero mezclado es exactamente cómo se acaba citando «el camino de
+la caché está probado contra un proveedor real» sin que sea verdad.
+
+La simulación aporta tres cosas que no estaban:
+
+* **Conformidad de forma contra los modelos de los propios SDK.** Los bloques de uso
+  simulados se validan contra `openai.types.CompletionUsage` y `anthropic.types.Usage`, y
+  se exige además que **cada clave que usamos sea un campo declarado** por ellos. Lo
+  segundo es lo que importa: los dos SDK llevan `extra="allow"`, así que un `cached_token`
+  en singular pasa la validación sin protestar, se lee como `None` en la integración y el
+  coste sale por debajo del real. Es el fallo de D-101 otra vez, y ahora hay un guardia.
+  Con su prueba de la prueba, porque una comprobación que puede pasar por vacía no es una
+  comprobación.
+* **Los mismos tokens por los dos proveedores.** Los dos bloques describen la *misma*
+  llamada contada como la cuenta cada uno, y se exige que el contrato los normalice a los
+  mismos números. D-050 se comprobaba lado a lado contra cifras escritas a mano; esto
+  compara los dos lados entre sí, que es donde se vería un error de criterio.
+* **Inyección sobre una llamada local de verdad.** Los contadores de caché se meten en la
+  respuesta del servidor local antes de que el SDK la parsee, así que el camino entero
+  —red, parseo, acumulación, span, ingesta, precios— corre con esos campos presentes. Se
+  inyecta en el transporte y no con un proxy aparte a propósito: así se lee en el código
+  que el bloque lo ponemos nosotros, en vez de esconderlo detrás de un salto de red que lo
+  hiciera parecer del servidor.
+
+**Y lo que no se ha hecho, a propósito: un adaptador que traduzca la API de Anthropic a
+la de Ollama.** Se puede escribir y tentaba, porque dejaría al cliente de `anthropic`
+hablando con un modelo local. Pero entonces la forma de la respuesta vuelve a ser la que
+*nosotros* creemos, que es exactamente el problema que D-098 vino a resolver. Anthropic
+se queda con el transporte falso y con las pruebas vivas, y eso queda escrito como hueco
+en lugar de taparse con algo que parece cobertura y no lo es.
+
+### D-104 — El alcance, escrito tres veces, porque es lo que se malinterpreta
+El riesgo de todo lo anterior no es técnico. Es que alguien lea «tests contra proveedor
+real en verde» y entienda «el modelo de coste está validado contra facturación». No lo
+está, y no puede estarlo por este camino:
+
+1. **Un modelo local no factura.** No hay factura contra la que cuadrar los tokens que
+   guardamos. Lo único que se comprueba es que el span dice lo mismo que *reportó el
+   servidor*.
+2. **No hay caché real** en ninguna parte, ni en las pruebas reales ni en las simuladas.
+3. **El tokenizador local cuenta distinto**, con su propio vocabulario, así que de ahí no
+   sale ninguna cifra en dólares que signifique nada. Por eso ninguna de esas pruebas
+   comprueba un importe: sólo de dónde sale cada número y cómo queda marcado.
+4. **Anthropic no se cubre** por este camino.
+
+Eso está escrito en tres sitios y los tres hacen falta: en `STATUS.md`, que es lo que se
+lee para saber dónde está el producto; en la cabecera de los dos ficheros de pruebas, que
+es lo que se lee cuando se van a citar; y en `docs/tests-con-modelo-local.md`, antes de
+los pasos de instalación, para que nadie monte el entorno creyendo que va a comprobar algo
+que no va a comprobar.
+
+Las pruebas que esperan una clave se han dejado **intactas y funcionando**. Son las únicas
+que pueden cerrar el agujero, y el día que haya claves siguen donde estaban.
