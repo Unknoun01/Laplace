@@ -278,7 +278,7 @@ class CoverageFacts:
 
     llm_calls: int = 0
     #: Llamadas cuyo paso se distingue de los demás: tienen sitio de llamada o huella de
-    #: instrucciones. Las que no, caen en el nombre del span —`chat gpt-4o` para todas—
+    #: instrucciones. Las que no, caen en el nombre del span —`chat gpt-5.6-luna` para
     #: y las reglas las mezclan en un solo montón (D-060).
     identified_steps: int = 0
     #: Llamadas cuyo modelo está en la tabla de precios. El resto cuestan «no lo

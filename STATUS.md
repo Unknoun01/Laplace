@@ -97,13 +97,24 @@ Lo que sostiene esas casillas, en concreto:
   parseo, sus modelos y su lector de SSE; lo único falso es el transporte HTTP. Las que
   además comprueban que nuestros números cuadran con la factura del proveedor están
   escritas y esperan una clave (D-098).
-- **280 pruebas y ninguna saltada** con ClickHouse y Postgres levantados. Las de
+- **Ninguna consulta escoge «una fila cualquiera».** El patrón `any()` / `argMax` sin
+  desempate / `ORDER BY` sin desempate apareció por cuarta vez y se cerró entero en los
+  dos almacenes, con pruebas de paridad sobre tráfico **empatado a propósito** y dos
+  guardias que leen el código para que no vuelva a entrar (D-099).
+- **Escribir en caché se cobra, y ahora también en OpenAI.** El motor ya lo aplicaba y
+  Anthropic estaba completo; faltaba leer `prompt_tokens_details.cache_write_tokens`, así
+  que esos tokens se cobraban a tarifa de entrada y **nuestro coste de OpenAI salía por
+  debajo del real** (D-101).
+- **296 pruebas y ninguna saltada** con ClickHouse y Postgres levantados. Las de
   prompts cubren las guardas compartidas con Evaluaciones y que un pico no se atribuya a
   un despliegue por la hora; las de cobertura, que un paso partido no pase por sano; las
-  de autenticación son casi todas **intentos de hacer lo que no se debe poder**, y las
-  tres mutaciones que se probaron —abrir una ruta, dejar de mirar el cuerpo, no acotar la
-  traza por id— ponen la suite en rojo. Las 4 que siguen saltándose son las que llaman a
-  la API real de los proveedores y necesitan una clave.
+  de autenticación son casi todas **intentos de hacer lo que no se debe poder**; y las de
+  paridad, que los dos almacenes elijan lo mismo cuando hay empate. **Cada tanda nueva se
+  ha verificado rompiendo el código a propósito**: catorce mutaciones en total —abrir una
+  ruta, dejar de mirar el cuerpo de una escritura, no acotar la traza por id, volver a
+  `any()`, quitar un desempate, dejar de leer los tokens de escritura de caché— y todas
+  ponen la suite en rojo. Las 4 que siguen saltándose son las que llaman a la API real de
+  los proveedores y necesitan una clave.
 
 ## Qué queda
 
@@ -151,9 +162,9 @@ un acto de fe: corren contra los clientes reales en cada `pytest`.
    Un cliente que pida que se vayan sus datos hoy se atiende a mano, y los prompts y
    respuestas en crudo se guardan sin caducidad.
 6. **Los precios caducan cada 30 días** y hay que reverificarlos. Tres tests lo avisan.
-   Y `PromptTokensDetails` de OpenAI ha ganado un `cache_write_tokens` que no leemos y
-   para el que no hay tarifa verificada: si OpenAI ha empezado a cobrar la escritura de
-   caché, nuestro coste de sus llamadas es un suelo más bajo de lo que creíamos.
+   El `cache_write_tokens` de OpenAI que estaba anotado como incompleto ya está cerrado
+   (D-101), pero el aviso de fondo sigue: un campo nuevo en la respuesta de un proveedor
+   no falla, sólo se lee como `None`, y el coste sale por debajo sin que nadie se entere.
 
 **Lo más frágil sigue siendo la identidad de paso**, pero ya no es invisible: la cobertura
 la mide, la nombra y dice cómo arreglarla. Eso cambia la naturaleza del riesgo —de «el
@@ -225,6 +236,22 @@ datos, 193.100 % contra un periodo vacío, y un «94 %» sacado de cuatro casos.
 proporción nueva que aparezca en el producto —tasa de error, cobertura, lo que sea—
 necesita pasar por `rate_for()` o por una guarda equivalente antes de pintarse. Y en
 cualquier comparación, la regla es que **si los márgenes se solapan no hay ganador**.
+
+**El determinismo de las consultas se rompe en silencio y en la nube.** `any()`,
+`argMax` sin desempate y `ORDER BY` sin desempate no rompen ninguna cifra: cambian qué
+fila se elige, y eso sólo se nota comparando dos pantallas. Ya apareció cuatro veces. Hay
+dos pruebas que leen el SQL y lo prohíben, y las de paridad siembran **empates a
+propósito** porque sobre datos normales pasarían por casualidad. Si alguien añade una
+consulta nueva a la nube, la regla es: `max()`/`min()` donde SQLite use `MAX()`/`MIN()`,
+tupla en la clave de todo `argMax`/`argMin`, y desempate explícito en todo `ORDER BY`.
+
+**Los nombres de modelo caducan igual que los precios, y en más sitios.** Ya se arregló
+una vez en la demo y habían sobrevivido en los tests, en el `README` y en la pestaña de
+Prompts. Al barrerlos hay que contar con que **mueven cifras**: las tarifas van escritas a
+mano en los valores esperados, así que cambiar un fixture de modelo obliga a recalcular a
+mano y a comprobar que los tests de doble conteo siguen mordiendo. Lo que no se toca son
+los modelos viejos de la tabla de precios ni las pruebas que comprueban que un nombre
+antiguo se resuelve: eso es la funcionalidad, no un resto.
 
 **La autenticación se rompe por la ruta nueva, no por la criptografía.** Todo lo que la
 sostiene es que el middleware deniega por defecto y que la lista blanca tiene una entrada.

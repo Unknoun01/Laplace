@@ -56,6 +56,19 @@ _SCHEMA = Path(__file__).with_name("clickhouse_schema.sql")
 
 WINDOW_WHERE = "project_id = %(project_id)s AND start_time >= %(since)s AND start_time <= %(until)s"
 
+#: Sobre el determinismo de estas consultas, que ya ha mordido una vez y por eso está
+#: escrito aquí arriba y no en un comentario suelto: **ninguna agregación de esta tabla
+#: puede escoger «una fila cualquiera»**. `any()` lo hace por definición, y `argMax(x, k)`
+#: y `argMin(x, k)` lo hacen cuando hay empate en `k`, que es el caso **normal** y no el
+#: raro: dos trazas que repiten un paso tres veces empatan en `n`, y dos spans lanzados
+#: en paralelo empatan en `start_time`.
+#:
+#: SQLite no tiene `any()`: usa `MAX()` y desempata por `span_id`. Así que aquí se usa
+#: `max()`/`min()` donde allí se usa `MAX()`/`MIN()`, y las claves de `argMax`/`argMin`
+#: llevan el desempate dentro de una tupla. No es cosmética: sin esto, el mismo proyecto
+#: con los mismos spans puede enseñar un paso de ejemplo distinto en local y en la nube,
+#: y eso afecta a las reglas de detección, que es el peor sitio posible (D-099).
+
 #: Un mismo paso, con la misma entrada, repetido dentro de una misma traza.
 #:
 #: Se detecta por entrada repetida (`dedup_hash`) pero se **reporta por paso**: un
@@ -66,10 +79,13 @@ REPEATED_GROUPS_SQL = f"""
 SELECT
     paso,
     modelo,
-    any(etiqueta)                    AS nombre,
-    any(pista)                       AS pista,
-    any(tipo)                        AS tipo,
-    argMax(dedup_hash, n)            AS hash_ejemplo,
+    max(etiqueta)                    AS nombre,
+    max(pista)                       AS pista,
+    max(tipo)                        AS tipo,
+    -- El desempate va DENTRO de la clave: con `argMax(x, n)` a secas, dos trazas que
+    -- repiten lo mismo el mismo número de veces —el caso normal— devuelven un ejemplo
+    -- cualquiera de las dos. SQLite desempata por el máximo del propio valor.
+    argMax(dedup_hash, (n, dedup_hash)) AS hash_ejemplo,
     uniqExact(trace_id)              AS trazas,
     sum(n)                           AS total_spans,
     sum(n - 1)                       AS extra_spans,
@@ -80,30 +96,30 @@ SELECT
     sum(sin_tarifa - sin_tarifa_primera) AS extra_sin_tarifa,
     sum(asumida - asumida_primera)       AS extra_asumida,
     max(n)                           AS max_por_traza,
-    argMax(trace_id, n)              AS traza_ejemplo
+    argMax(trace_id, (n, trace_id))  AS traza_ejemplo
 FROM (
     SELECT
         trace_id,
         dedup_hash,
-        any(if(step_label != '', step_label, name)) AS etiqueta,
-        any(step_hint)                     AS pista,
-        any(span_type)                     AS tipo,
-        any(request_model)                 AS modelo,
-        any(if(step_key != '', step_key, name)) AS paso,
+        max(if(step_label != '', step_label, name)) AS etiqueta,
+        max(step_hint)                     AS pista,
+        max(span_type)                     AS tipo,
+        max(request_model)                 AS modelo,
+        max(if(step_key != '', step_key, name)) AS paso,
         count()                            AS n,
         sum(cost_total_usd)                AS coste,
-        argMin(cost_total_usd, start_time) AS coste_primera,
+        argMin(cost_total_usd, (start_time, span_id)) AS coste_primera,
         sum(duration_ms)                   AS duracion,
-        argMin(duration_ms, start_time)    AS duracion_primera,
+        argMin(duration_ms, (start_time, span_id))    AS duracion_primera,
         sum(input_tokens)                  AS tok_in,
-        argMin(input_tokens, start_time)   AS tok_in_primera,
+        argMin(input_tokens, (start_time, span_id))   AS tok_in_primera,
         sum(output_tokens)                 AS tok_out,
-        argMin(output_tokens, start_time)  AS tok_out_primera,
+        argMin(output_tokens, (start_time, span_id))  AS tok_out_primera,
         -- Sólo de las ocurrencias sobrantes: son las únicas cuyo dinero reclamamos.
         sum(cost_unknown)                        AS sin_tarifa,
-        argMin(cost_unknown, start_time)         AS sin_tarifa_primera,
+        argMin(cost_unknown, (start_time, span_id))         AS sin_tarifa_primera,
         sum(cost_rate_assumed)                   AS asumida,
-        argMin(cost_rate_assumed, start_time)    AS asumida_primera
+        argMin(cost_rate_assumed, (start_time, span_id))    AS asumida_primera
     FROM spans FINAL
     WHERE {WINDOW_WHERE} AND dedup_hash != ''
     GROUP BY trace_id, dedup_hash
@@ -112,7 +128,7 @@ FROM (
 -- Por paso Y modelo: un paso que se ejecuta con dos modelos son dos problemas, con
 -- dinero distinto, y mezclarlos dejaría las repeticiones de uno sin descontar del otro.
 GROUP BY paso, modelo
-ORDER BY extra_coste DESC, extra_spans DESC
+ORDER BY extra_coste DESC, extra_spans DESC, paso, modelo
 LIMIT %(limit)s
 """
 
@@ -164,8 +180,8 @@ SELECT
     -- El alias NO puede llamarse `step_key`: taparía la columna y ClickHouse dejaría
     -- de encontrarla en el GROUP BY. Ya pasó una vez con `any(project_id) AS project_id`.
     if(step_key != '', step_key, name) AS paso_clave,
-    any(if(step_label != '', step_label, name)) AS paso,
-    any(step_hint)           AS pista,
+    max(if(step_label != '', step_label, name)) AS paso,
+    max(step_hint)           AS pista,
     request_model,
     count()                  AS llamadas,
     uniqExact(trace_id)      AS trazas,
@@ -180,12 +196,14 @@ SELECT
     avg(output_tokens)       AS media_salida,
     avg(input_tokens)        AS media_entrada,
     min(input_tokens)        AS min_entrada,
-    any(trace_id)            AS traza_ejemplo
+    -- `min` y no `any`: es lo que hace SQLite, y una traza de ejemplo que cambia entre
+    -- almacenes manda a dos personas a mirar ejecuciones distintas del mismo hallazgo.
+    min(trace_id)            AS traza_ejemplo
 FROM spans FINAL
 WHERE {WINDOW_WHERE} AND span_type = 'llm' AND request_model != ''
 GROUP BY if(step_key != '', step_key, name), request_model
 HAVING llamadas >= %(min_calls)s
-ORDER BY coste DESC
+ORDER BY coste DESC, paso_clave, request_model
 LIMIT %(limit)s
 """
 
@@ -274,10 +292,10 @@ class ClickHouseStore:
         sql = f"""
             SELECT
                 trace_id,
-                any(project_id)                                        AS trace_project_id,
+                max(project_id)                                        AS trace_project_id,
                 if(maxIf(name, parent_span_id = '') != '',
                    maxIf(name, parent_span_id = ''),
-                   argMin(name, start_time))                           AS root_name,
+                   argMin(name, (start_time, span_id)))                AS root_name,
                 min(start_time)                                        AS started,
                 max(end_time)                                          AS ended,
                 dateDiff('millisecond', min(start_time), max(end_time)) AS duration_ms,
@@ -390,7 +408,7 @@ class ClickHouseStore:
                 ORDER BY span_id, ingested_at DESC
                 LIMIT 1 BY span_id
             )
-            ORDER BY start_time
+            ORDER BY start_time, span_id
         """
         return [row_to_span(r) for r in _named(self._client.query(sql, parameters=params))]
 
@@ -403,7 +421,7 @@ class ClickHouseStore:
                    max(start_time)     AS last_seen
             FROM spans FINAL
             GROUP BY project_id
-            ORDER BY last_seen DESC
+            ORDER BY last_seen DESC, project_id
         """
         return [
             ProjectStats(
@@ -605,7 +623,7 @@ class ClickHouseStore:
             FROM spans FINAL
             WHERE {WINDOW_WHERE} AND dedup_hash = %(dedup_hash)s
             GROUP BY trace_id
-            ORDER BY n DESC
+            ORDER BY n DESC, trace_id
             LIMIT 1
         """
         rows = self._client.query(trace_sql, parameters=params).result_rows
@@ -622,7 +640,7 @@ class ClickHouseStore:
                 ORDER BY span_id, ingested_at DESC
                 LIMIT 1 BY span_id
             )
-            ORDER BY start_time
+            ORDER BY start_time, span_id
             LIMIT %(limit)s
         """
         return [row_to_span(r) for r in _named(self._client.query(sql, parameters=params))]
@@ -812,7 +830,7 @@ class ClickHouseStore:
                 FROM spans FINAL
                 WHERE {WINDOW_WHERE} AND span_type = 'llm' AND step_key != ''
                 GROUP BY step_key
-                ORDER BY coste DESC
+                ORDER BY coste DESC, clave
                 """,
                 parameters=self._window_params(project_id, window),
             )

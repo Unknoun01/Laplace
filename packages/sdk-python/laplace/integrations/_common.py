@@ -63,7 +63,7 @@ def enclosing_step() -> str | None:
 
 
 def span_name(operation: str, model: str | None) -> str:
-    """Convención GenAI: `<operación> <modelo>` (ej. `chat gpt-4o-mini`)."""
+    """Convención GenAI: `<operación> <modelo>` (ej. `chat gpt-5.6-luna`)."""
     return f"{operation} {model}" if model else operation
 
 

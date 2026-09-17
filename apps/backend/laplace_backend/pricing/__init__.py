@@ -58,7 +58,7 @@ _SNAPSHOT_SUFFIX = re.compile(r"^-(\d{8}|\d{4}-\d{2}-\d{2}|v\d+|latest|preview|b
 def _candidates(model: str) -> list[str]:
     """Formas del identificador con las que probar, de la más literal a la más pelada.
 
-    Los gateways adornan el nombre: `openai/gpt-4o`, `anthropic.claude-sonnet-5`,
+    Los gateways adornan el nombre: `openai/gpt-5.6-luna`, `anthropic.claude-sonnet-5`,
     `bedrock/anthropic.claude-sonnet-5-v1:0`. Se quitan esos adornos con cuidado de no
     partir un número de versión: en `gpt-5.1` el punto es parte del modelo, no un
     separador de proveedor, así que sólo se corta por `.` si lo que queda detrás no

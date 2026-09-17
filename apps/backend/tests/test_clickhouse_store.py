@@ -84,12 +84,12 @@ def _trace(project: str, trace: str, session: str, failed: bool) -> list[Span]:
     root = _span(project, trace, "1" * 16, None, "agente", "agent", 0, 500, session,
                  status="error" if failed else "ok")
 
-    llm = _span(project, trace, "2" * 16, root.span_id, "chat gpt-4o-mini", "llm",
+    llm = _span(project, trace, "2" * 16, root.span_id, "chat gpt-5.6-luna", "llm",
                 10, 200, session)
     llm.llm = LLMAttributes(
         system="openai",
-        request_model="gpt-4o-mini",
-        response_model="gpt-4o-mini",
+        request_model="gpt-5.6-luna",
+        response_model="gpt-5.6-luna",
         usage=TokenUsage(input_tokens=1000, output_tokens=500),
         cost=Cost(input_usd=0.00015, output_usd=0.0003, total_usd=0.00045),
         input_messages=[{"role": "user", "content": "hola"}],
@@ -201,7 +201,7 @@ def test_los_spans_vuelven_del_almacen_intactos(store, dataset):
 
     llm = next(s for s in spans if s.type == "llm")
     assert llm.llm is not None
-    assert llm.llm.request_model == "gpt-4o-mini"
+    assert llm.llm.request_model == "gpt-5.6-luna"
     assert llm.llm.usage.input_tokens == 1000
     assert llm.llm.usage.output_tokens == 500
     assert llm.llm.cost.total_usd == pytest.approx(0.00045)

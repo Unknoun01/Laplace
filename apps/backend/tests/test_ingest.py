@@ -37,32 +37,32 @@ def test_observe_produce_un_span_tipado_con_entrada_y_salida():
 
 def test_llm_span_guarda_tokens_separados_y_calcula_coste():
     mensajes = [{"role": "user", "content": "hola"}]
-    with manual.llm_span(model="gpt-4o-mini", system="openai", input_messages=mensajes,
+    with manual.llm_span(model="gpt-5.6-luna", system="openai", input_messages=mensajes,
                          temperature=0.5) as llm:
         llm.record_response(
             output_messages=[{"role": "assistant", "content": "qué tal"}],
             input_tokens=1000,
             output_tokens=500,
-            response_model="gpt-4o-mini-2024-07-18",
+            response_model="gpt-5.6-luna",
             finish_reasons=["stop"],
         )
 
     span = ingest()[0]
     assert span.type == "llm"
-    assert span.name == "chat gpt-4o-mini"
+    assert span.name == "chat gpt-5.6-luna"
     assert span.llm is not None
     # Entrada y salida por separado: sin esto no hay panel de ahorro.
     assert span.llm.usage.input_tokens == 1000
     assert span.llm.usage.output_tokens == 500
     # El modelo exacto, no una familia.
-    assert span.llm.request_model == "gpt-4o-mini"
-    assert span.llm.response_model == "gpt-4o-mini-2024-07-18"
+    assert span.llm.request_model == "gpt-5.6-luna"
+    assert span.llm.response_model == "gpt-5.6-luna"
     # Coste desglosado, resuelto por prefijo contra la tabla de precios.
     assert span.llm.cost.unknown is False
     # La tarifa aplicada queda anotada, para poder auditar el cálculo meses después.
-    assert span.llm.cost.rate.startswith("gpt-4o-mini @ ")
-    assert span.llm.cost.input_usd == pytest.approx(1000 * 0.15 / 1e6)
-    assert span.llm.cost.output_usd == pytest.approx(500 * 0.6 / 1e6)
+    assert span.llm.cost.rate.startswith("gpt-5.6-luna @ ")
+    assert span.llm.cost.input_usd == pytest.approx(1000 * 0.2 / 1e6)
+    assert span.llm.cost.output_usd == pytest.approx(500 * 1.2 / 1e6)
     assert span.llm.cost.total_usd == pytest.approx(
         span.llm.cost.input_usd + span.llm.cost.output_usd
     )
@@ -135,7 +135,7 @@ def test_una_excepcion_deja_el_span_en_error_con_el_evento():
 def test_el_arbol_anida_los_spans_y_acumula_el_coste_del_subarbol():
     @decorators.observe(type="chain")
     def paso():
-        with manual.llm_span(model="gpt-4o-mini", input_messages=[]) as llm:
+        with manual.llm_span(model="gpt-5.6-luna", input_messages=[]) as llm:
             llm.record_response(input_tokens=1_000_000, output_tokens=0)
 
     @decorators.observe(type="agent")
@@ -157,14 +157,14 @@ def test_el_arbol_anida_los_spans_y_acumula_el_coste_del_subarbol():
 
     # El nodo raíz no gasta nada por sí mismo, pero su subárbol sí.
     assert raiz.span.cost.total_usd == 0.0
-    assert raiz.subtree.cost_usd == pytest.approx(2 * 0.15)  # 2 x 1M tokens a 0,15 $/1M
+    assert raiz.subtree.cost_usd == pytest.approx(2 * 0.2)  # 2 x 1M tokens a 0,20 $/1M
     assert raiz.subtree.span_count == 5
 
     resumen = summarize(spans, spans[0].trace_id)
     assert resumen.span_count == 5
     assert resumen.llm_call_count == 2
     assert resumen.status == "ok"
-    assert resumen.cost.total_usd == pytest.approx(0.30)
+    assert resumen.cost.total_usd == pytest.approx(0.40)  # 2 x 1M a 0,20 $/1M
 
 
 def test_los_spans_huerfanos_se_cuelgan_de_la_raiz_en_vez_de_perderse():

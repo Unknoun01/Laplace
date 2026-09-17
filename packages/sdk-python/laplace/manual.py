@@ -73,7 +73,7 @@ def llm_span(
 ) -> Iterator[LLMSpanRecorder]:
     """Abre un span `llm` que se rellena a mano.
 
-        with laplace.llm_span(model="gpt-4o-mini", system="openai",
+        with laplace.llm_span(model="gpt-5.6-luna", system="openai",
                               input_messages=msgs, temperature=0) as llm:
             respuesta = mi_cliente(msgs)
             llm.record_response(output_messages=[respuesta],

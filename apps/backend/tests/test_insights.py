@@ -136,7 +136,7 @@ def test_el_heroe_no_promete_ahorrar_mas_de_lo_que_se_gasta(
 def proyecto_con_reintentos(store: ClickHouseStore):
     """Un paso caro que además se reintenta: las dos reglas se pisan si no se descuenta.
 
-    Diez ejecuciones. En cada una, `clasificar` llama a gpt-4o tres veces con el mismo
+    Diez ejecuciones. En cada una, `clasificar` llama a gpt-5.6-terra tres veces con el mismo
     prompt (200 tokens de entrada, 10 de salida, $0,001 cada llamada).
     """
     project = f"test-caro-{uuid.uuid4().hex[:8]}"
@@ -155,7 +155,7 @@ def proyecto_con_reintentos(store: ClickHouseStore):
                 parent=f"a{t:03d}".ljust(16, "0"),
                 dedup_hash="hash-clasificar",
             )
-            s.llm = _llm("gpt-4o", 200, 10, 0.001)
+            s.llm = _llm("gpt-5.6-terra", 200, 10, 0.001)
             spans.append(s)
     store.insert_spans(spans)
     yield project
@@ -222,7 +222,7 @@ def proyecto_con_reintentos_repartido(store: ClickHouseStore):
             )
             s.start_time = momento + timedelta(seconds=i)
             s.end_time = s.start_time + timedelta(milliseconds=200)
-            s.llm = _llm("gpt-4o", 200, 10, 0.001)
+            s.llm = _llm("gpt-5.6-terra", 200, 10, 0.001)
             spans.append(s)
     store.insert_spans(spans)
     yield project
@@ -489,12 +489,12 @@ def proyecto_un_paso_dos_entradas(store: ClickHouseStore):
                 span = _span(
                     project, trace, uuid.uuid4().hex[:16],
                     # El nombre que pone la auto-instrumentación: el mismo para todo.
-                    "chat gpt-4o", "llm", t * 10 + i,
+                    "chat gpt-5.6-terra", "llm", t * 10 + i,
                     dedup_hash=f"hash-{entrada}",
                     step_key="paso-extraer",
                     step_label="extraer_datos",
                 )
-                span.llm = _llm("gpt-4o", 100, 10, 0.001)
+                span.llm = _llm("gpt-5.6-terra", 100, 10, 0.001)
                 spans.append(span)
     store.insert_spans(spans)
     yield project
@@ -522,8 +522,8 @@ def test_varios_hashes_del_mismo_paso_se_descuentan_todos(
     # quedaba por debajo del gasto total: un tope holgado no habría notado nada.
     modelo = next(f for f in findings if f.kind == "modelo_caro")
     entrada, salida = 8 * 100, 8 * 10  # sólo las ocho llamadas legítimas
-    caro = (entrada * 2.5 + salida * 10.0) / 1e6
-    barato = (entrada * 0.15 + salida * 0.6) / 1e6
+    caro = (entrada * 2.0 + salida * 12.0) / 1e6
+    barato = (entrada * 0.2 + salida * 1.2) / 1e6
     assert modelo.window_waste_usd == pytest.approx(caro - barato, rel=1e-6)
 
     prometido = sum(f.window_waste_usd for f in findings)
@@ -620,7 +620,7 @@ def proyecto_sin_identidad_de_paso(store: ClickHouseStore):
                 project, trace, uuid.uuid4().hex[:16], "extraer", "llm", t * 10 + i,
                 dedup_hash="hash-legado",
             )
-            span.llm = _llm("gpt-4o", 100, 10, 0.001)
+            span.llm = _llm("gpt-5.6-terra", 100, 10, 0.001)
             spans.append(span)
     store.insert_spans(spans)
     yield project
@@ -646,8 +646,8 @@ def test_las_trazas_ya_guardadas_siguen_descontando_sus_repeticiones(
     # del gasto, así que un tope holgado dejaría pasar el doble conteo.
     modelo = next(f for f in findings if f.kind == "modelo_caro")
     entrada, salida = 8 * 100, 8 * 10  # una llamada legítima por ejecución
-    caro = (entrada * 2.5 + salida * 10.0) / 1e6
-    barato = (entrada * 0.15 + salida * 0.6) / 1e6
+    caro = (entrada * 2.0 + salida * 12.0) / 1e6
+    barato = (entrada * 0.2 + salida * 1.2) / 1e6
     assert modelo.window_waste_usd == pytest.approx(caro - barato, rel=1e-6)
 
 
@@ -715,15 +715,15 @@ def test_el_mapa_de_descuento_suma_los_grupos_que_caen_en_la_misma_clave():
     """
     grupos = [
         RepeatedGroup(
-            dedup_hash="a", name="extraer", span_type="llm", model="gpt-4o",
+            dedup_hash="a", name="extraer", span_type="llm", model="gpt-5.6-terra",
             step_key="paso-x", extra_spans=2, extra_input_tokens=100, extra_output_tokens=10,
         ),
         RepeatedGroup(
-            dedup_hash="b", name="extraer", span_type="llm", model="gpt-4o",
+            dedup_hash="b", name="extraer", span_type="llm", model="gpt-5.6-terra",
             step_key="paso-x", extra_spans=3, extra_input_tokens=200, extra_output_tokens=20,
         ),
     ]
-    assert insights._duplicate_tokens(grupos) == {("paso-x", "gpt-4o"): (300, 30, 5)}
+    assert insights._duplicate_tokens(grupos) == {("paso-x", "gpt-5.6-terra"): (300, 30, 5)}
 
 
 def test_el_mapa_de_descuento_ignora_lo_que_no_puede_cruzar():
@@ -731,7 +731,7 @@ def test_el_mapa_de_descuento_ignora_lo_que_no_puede_cruzar():
     grupos = [
         RepeatedGroup(dedup_hash="a", name="buscar", span_type="tool", model="",
                       step_key="paso-y", extra_spans=4, extra_input_tokens=0),
-        RepeatedGroup(dedup_hash="b", name="x", span_type="llm", model="gpt-4o",
+        RepeatedGroup(dedup_hash="b", name="x", span_type="llm", model="gpt-5.6-terra",
                       step_key="", extra_spans=2, extra_input_tokens=50),
     ]
     assert insights._duplicate_tokens(grupos) == {}

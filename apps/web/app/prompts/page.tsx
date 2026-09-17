@@ -570,7 +570,7 @@ laplace.init(project="${project}")
 
 sistema = laplace.get_prompt("resumen", fallback=SISTEMA_DEL_CODIGO)
 respuesta = cliente.messages.create(
-    model="claude-sonnet-4-5",
+    model="claude-haiku-4-5",
     system=sistema.render(idioma="es"),
     messages=[{"role": "user", "content": pregunta}],
 )`}</pre>

@@ -237,7 +237,7 @@ SELECT
     substr(MAX(printf('%012d', n) || trace_id), 13)        AS traza_ejemplo
 FROM por_traza
 GROUP BY paso, modelo
-ORDER BY extra_coste DESC, extra_spans DESC
+ORDER BY extra_coste DESC, extra_spans DESC, paso, modelo
 LIMIT :limit
 """
 
@@ -266,7 +266,7 @@ FROM spans
 WHERE {WINDOW_WHERE} AND span_type = 'llm' AND request_model != ''
 GROUP BY paso_clave, request_model
 HAVING llamadas >= :min_calls
-ORDER BY coste DESC
+ORDER BY coste DESC, paso_clave, request_model
 LIMIT :limit
 """
 
@@ -319,9 +319,12 @@ _TRACE_AGGREGATE = """
     MAX(project_id)                                    AS trace_project_id,
     COALESCE(
         MAX(CASE WHEN parent_span_id = '' THEN name END),
+        -- Con `ORDER BY s2.start_time` a secas, dos spans que empiezan en el mismo
+        -- instante dejan el nombre de la traza al azar del orden de lectura. El
+        -- desempate por `span_id` es el mismo que usa ClickHouse en su `argMin`.
         (SELECT s2.name FROM spans s2
           WHERE s2.trace_id = spans.trace_id
-          ORDER BY s2.start_time LIMIT 1)
+          ORDER BY s2.start_time, s2.span_id LIMIT 1)
     )                                                  AS root_name,
     MIN(start_time)                                    AS started,
     MAX(end_time)                                      AS ended,
@@ -529,7 +532,7 @@ class SQLiteStore:
             where += " AND project_id = :project_id"
             params["project_id"] = project_id
         columnas = ", ".join(COLUMNS)
-        sql = f"SELECT {columnas} FROM spans WHERE {where} ORDER BY start_time"
+        sql = f"SELECT {columnas} FROM spans WHERE {where} ORDER BY start_time, span_id"
         return [row_to_span(r) for r in self._query(sql, params)]
 
     def list_projects(self) -> list[ProjectStats]:
@@ -541,7 +544,7 @@ class SQLiteStore:
                    MAX(start_time)          AS last_seen
             FROM spans
             GROUP BY project_id
-            ORDER BY last_seen DESC
+            ORDER BY last_seen DESC, project_id
         """
         return [
             ProjectStats(
@@ -727,7 +730,7 @@ class SQLiteStore:
         trazas = self._query(
             f"""SELECT trace_id, COUNT(*) AS n FROM spans
                 WHERE {WINDOW_WHERE} AND dedup_hash = :dedup_hash
-                GROUP BY trace_id ORDER BY n DESC LIMIT 1""",
+                GROUP BY trace_id ORDER BY n DESC, trace_id LIMIT 1""",
             params,
         )
         if not trazas:
@@ -737,7 +740,7 @@ class SQLiteStore:
         sql = f"""
             SELECT {columnas} FROM spans
             WHERE trace_id = :trace_id AND dedup_hash = :dedup_hash
-            ORDER BY start_time LIMIT :limit
+            ORDER BY start_time, span_id LIMIT :limit
         """
         return [row_to_span(r) for r in self._query(sql, params)]
 
@@ -927,7 +930,7 @@ class SQLiteStore:
             FROM spans
             WHERE {WINDOW_WHERE} AND span_type = 'llm' AND step_key != ''
             GROUP BY step_key
-            ORDER BY coste DESC
+            ORDER BY coste DESC, clave
             """,
             self._window_params(project_id, window),
         )

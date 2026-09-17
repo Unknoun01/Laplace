@@ -367,6 +367,11 @@ def row_to_summary(r: dict[str, Any]) -> TraceSummary:
             unknown=sin_tarifa > 0,
             rate_assumed=asumidos > 0,
         ),
+        # El `sorted` es lo único que hace que los dos almacenes digan lo mismo aquí:
+        # ClickHouse junta los modelos con `groupArray`, que conserva el orden de
+        # inserción, y SQLite con `GROUP_CONCAT(DISTINCT …)`, que ordena por dentro. Sin
+        # esto, la misma traza enseña «zzz, aaa» en la nube y «aaa, zzz» en local. Tiene
+        # su prueba de paridad; no se quita (D-099).
         models=sorted(modelos or []),
         session_id=r["trace_session_id"] or None,
         user_id=r["trace_user_id"] or None,

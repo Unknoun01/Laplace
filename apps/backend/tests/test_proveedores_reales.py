@@ -38,8 +38,11 @@ import httpx2  # noqa: E402
 from laplace.integrations import anthropic as ai  # noqa: E402
 from laplace.integrations import openai as oi  # noqa: E402
 
-MODELO_OPENAI = "gpt-4o-mini"
-MODELO_ANTHROPIC = "claude-sonnet-4-5"
+#: Los baratos de la generación actual. Importan por dos motivos: las pruebas en vivo
+#: los llaman de verdad y hay que pagarlos, y un fixture con un modelo de hace dos
+#: generaciones envejece igual que envejeció la demo (D-100).
+MODELO_OPENAI = "gpt-5.6-luna"
+MODELO_ANTHROPIC = "claude-haiku-4-5"
 
 
 @pytest.fixture(autouse=True)
@@ -105,7 +108,7 @@ RESPUESTA_OPENAI = {
     "id": "chatcmpl-abc123",
     "object": "chat.completion",
     "created": 1770000000,
-    "model": "gpt-4o-mini-2024-07-18",
+    "model": "gpt-5.6-luna",
     "choices": [
         {
             "index": 0,
@@ -139,8 +142,9 @@ def test_openai_real_una_llamada_normal():
 
     span = _span_llm()
     assert span.llm.request_model == MODELO_OPENAI
-    # El modelo de la respuesta es el que factura, y no es el que se pidió.
-    assert span.llm.response_model == "gpt-4o-mini-2024-07-18"
+    # El modelo de la respuesta es el que factura, y no siempre es el que se pidió:
+    # hay una prueba propia para ese caso, más abajo.
+    assert span.llm.response_model == "gpt-5.6-luna"
     assert span.llm.usage.input_tokens == 1200
     assert span.llm.usage.output_tokens == 12
     assert span.llm.usage.cached_input_tokens == 1024
@@ -164,15 +168,43 @@ def test_openai_real_la_cache_no_se_cuenta_dos_veces():
     assert uso.uncached_input_tokens == 176
 
 
+def test_openai_real_un_modelo_viejo_sigue_teniendo_precio():
+    """Un usuario que siga en un modelo de hace dos generaciones tiene derecho a que su
+    coste salga bien, y a que el snapshot con fecha que devuelve el proveedor se resuelva
+    contra la tarifa del modelo base.
+
+    Es el único fixture de este fichero con un modelo viejo, y está a propósito: lo demás
+    usa la generación actual para no envejecer, pero esto **es** la funcionalidad.
+    """
+    cuerpo = json.loads(json.dumps(RESPUESTA_OPENAI))
+    cuerpo["model"] = "gpt-4o-mini-2024-07-18"
+    cuerpo["usage"] = {
+        "prompt_tokens": 1_000_000,
+        "completion_tokens": 0,
+        "total_tokens": 1_000_000,
+        "prompt_tokens_details": {"cached_tokens": 0},
+    }
+    cliente = _openai(_json_openai(cuerpo))
+    cliente.chat.completions.create(
+        model="gpt-4o-mini", messages=[{"role": "user", "content": "hola"}]
+    )
+
+    span = _span_llm()
+    assert span.llm.response_model == "gpt-4o-mini-2024-07-18"
+    assert span.llm.cost.unknown is False
+    assert span.llm.cost.rate.startswith("gpt-4o-mini @ ")
+    assert span.llm.cost.input_usd == pytest.approx(0.15)
+
+
 SSE_OPENAI = (
     'data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":1770000000,'
-    '"model":"gpt-4o-mini-2024-07-18","choices":[{"index":0,"delta":{"role":"assistant",'
+    '"model":"gpt-5.6-luna","choices":[{"index":0,"delta":{"role":"assistant",'
     '"content":"Una "},"finish_reason":null}]}\n\n'
     'data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":1770000000,'
-    '"model":"gpt-4o-mini-2024-07-18","choices":[{"index":0,"delta":{"content":"maleta '
+    '"model":"gpt-5.6-luna","choices":[{"index":0,"delta":{"content":"maleta '
     'de mano."},"finish_reason":"stop"}]}\n\n'
     'data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":1770000000,'
-    '"model":"gpt-4o-mini-2024-07-18","choices":[],"usage":{"prompt_tokens":1200,'
+    '"model":"gpt-5.6-luna","choices":[],"usage":{"prompt_tokens":1200,'
     '"completion_tokens":12,"total_tokens":1212,'
     '"prompt_tokens_details":{"cached_tokens":1024}}}\n\n'
     "data: [DONE]\n\n"
@@ -247,7 +279,7 @@ RESPUESTA_ANTHROPIC = {
     "id": "msg_abc123",
     "type": "message",
     "role": "assistant",
-    "model": "claude-sonnet-4-5",
+    "model": "claude-haiku-4-5",
     "content": [{"type": "text", "text": "Una maleta de mano."}],
     "stop_reason": "end_turn",
     "stop_sequence": None,
@@ -306,7 +338,7 @@ def test_anthropic_real_la_escritura_de_cache_se_cobra_aparte():
 
 SSE_ANTHROPIC = (
     'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_1",'
-    '"type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[],'
+    '"type":"message","role":"assistant","model":"claude-haiku-4-5","content":[],'
     # `input_tokens` de Anthropic NO incluye lo leído de caché: aquí son 176 nuevos y
     # 1024 de caché, que el contrato normaliza a 1200 de entrada facturable (D-050).
     '"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":176,'
@@ -358,6 +390,93 @@ def test_anthropic_real_un_error_del_proveedor_no_se_traga():
             model=MODELO_ANTHROPIC, max_tokens=64, messages=[{"role": "user", "content": "hola"}]
         )
     assert _span_llm().status == "error"
+
+
+def test_openai_real_la_escritura_de_cache_se_cobra_por_encima_de_la_entrada():
+    """OpenAI cobra escribir en caché a 1,25x la entrada desde la familia GPT-5.6, y
+    hasta que se leyó `prompt_tokens_details.cache_write_tokens` esos tokens caían en el
+    montón de entrada normal y se cobraban a tarifa entera.
+
+    El error iba en la dirección peligrosa: nuestro coste salía **por debajo** del real,
+    y lo que este producto promete es que una cifra suya nunca se queda corta sin decirlo.
+    """
+    cuerpo = json.loads(json.dumps(RESPUESTA_OPENAI))
+    # El coste sale del modelo de la RESPUESTA, que es el que factura, no del que se
+    # pidió. Cambiarlo aquí no es un detalle del test: si se dejara el del cuerpo de
+    # ejemplo, la cifra saldría con la tarifa de otro modelo y la prueba mediría otra cosa.
+    cuerpo["model"] = "gpt-5.6-luna"
+    cuerpo["usage"] = {
+        "prompt_tokens": 10_000,
+        "completion_tokens": 10,
+        "total_tokens": 10_010,
+        "prompt_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 8_000},
+        "completion_tokens_details": {"reasoning_tokens": 0},
+    }
+    cliente = _openai(_json_openai(cuerpo))
+    cliente.chat.completions.create(
+        model="gpt-5.6-luna", messages=[{"role": "user", "content": "hola"}]
+    )
+
+    span = _span_llm()
+    assert span.llm.usage.cache_write_tokens == 8_000
+    # 2.000 tokens a 0,20 $/M y 8.000 a 0,25 $/M, más la salida.
+    esperado = (2_000 * 0.2 + 8_000 * 0.25) / 1_000_000
+    assert span.llm.cost.input_usd == pytest.approx(esperado)
+    assert span.llm.cost.cache_write_usd == pytest.approx(8_000 * 0.25 / 1_000_000)
+    # Y lo que costaría si esos tokens fueran entrada normal es MENOS: ésa era la cifra
+    # que enseñábamos antes.
+    assert esperado > 10_000 * 0.2 / 1_000_000
+
+
+def test_openai_real_streaming_tambien_cuenta_la_escritura_de_cache():
+    """El mismo campo, por el otro camino. En un agente real la mayoría de las llamadas
+    van en streaming, así que arreglarlo sólo en el no-streaming habría dejado el error
+    justo donde más tráfico hay."""
+    sse = SSE_OPENAI.replace(
+        '"prompt_tokens_details":{"cached_tokens":1024}',
+        '"prompt_tokens_details":{"cached_tokens":1024,"cache_write_tokens":100}',
+    ).replace("gpt-4o-mini-2024-07-18", "gpt-5.6-luna")
+    cliente = _openai(_sse_openai(sse))
+    list(
+        cliente.chat.completions.create(
+            model="gpt-5.6-luna",
+            messages=[{"role": "user", "content": "hola"}],
+            stream=True,
+            stream_options={"include_usage": True},
+        )
+    )
+    uso = _span_llm().llm.usage
+    assert uso.cached_input_tokens == 1024
+    assert uso.cache_write_tokens == 100
+
+
+def test_anthropic_real_la_cache_de_una_hora_se_cobra_al_doble():
+    """Anthropic cobra 1,25x la caché de cinco minutos y 2x la de una hora. Las dos
+    llegan en `cache_creation`, y confundirlas cobraría de menos la cara."""
+    cuerpo = json.loads(json.dumps(RESPUESTA_ANTHROPIC))
+    cuerpo["usage"] = {
+        "input_tokens": 100,
+        "output_tokens": 10,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 3_000,
+        "cache_creation": {
+            "ephemeral_5m_input_tokens": 1_000,
+            "ephemeral_1h_input_tokens": 2_000,
+        },
+    }
+    cliente = _anthropic(_json_anthropic(cuerpo))
+    cliente.messages.create(
+        model="claude-haiku-4-5",
+        max_tokens=64,
+        messages=[{"role": "user", "content": "hola"}],
+    )
+
+    span = _span_llm()
+    assert span.llm.usage.cache_write_tokens == 1_000
+    assert span.llm.usage.cache_write_1h_tokens == 2_000
+    # claude-haiku-4-5: entrada 1,00 $/M, escritura 1,25 y escritura de 1 h 2,00.
+    esperado = (100 * 1.0 + 1_000 * 1.25 + 2_000 * 2.0) / 1_000_000
+    assert span.llm.cost.input_usd == pytest.approx(esperado)
 
 
 # ---------------------------------------------------------------------------------

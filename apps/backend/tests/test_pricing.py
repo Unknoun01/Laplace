@@ -364,3 +364,40 @@ def test_ningun_modelo_de_las_trazas_se_queda_sin_tarifa():
         "estos modelos aparecen en las trazas y no están en model_prices.json, así que "
         f"su coste es desconocido: {sorted(huerfanos)}"
     )
+
+def test_la_escritura_de_cache_lleva_su_recargo_en_los_dos_proveedores():
+    """Las cifras verificadas: OpenAI cobra la escritura a 1,25x la entrada desde la
+    familia GPT-5.6; Anthropic, 1,25x la de cinco minutos y 2x la de una hora.
+
+    Se comprueba sobre la tabla entera y no sobre un modelo suelto porque el fallo que
+    esto evita no es «este modelo está mal», es «alguien añadió un modelo nuevo y se
+    dejó el recargo», que sólo se ve mirándolos todos.
+    """
+    tabla = get_price_table()
+    for nombre, precio in tabla.models.items():
+        if precio.cache_write is None:
+            continue  # el proveedor no cobra aparte por escribir: va a tarifa de entrada
+        assert precio.cache_write == pytest.approx(precio.input * 1.25), nombre
+        if precio.cache_write_1h is not None:
+            assert precio.cache_write_1h == pytest.approx(precio.input * 2.0), nombre
+
+    # Y que la familia actual de cada proveedor lo tiene puesto de verdad, no que la
+    # comprobación de arriba pase por no haber ninguno.
+    assert tabla.models["gpt-5.6-luna"].cache_write is not None
+    assert tabla.models["claude-haiku-4-5"].cache_write_1h is not None
+
+
+def test_openai_tambien_cobra_la_escritura_de_cache():
+    """La contraparte de OpenAI del test de arriba, que sólo miraba Anthropic.
+
+    Cobra 1,25x la entrada desde la familia GPT-5.6. El motor ya sabía aplicarlo; lo que
+    faltaba —y por lo que nuestro coste de OpenAI salía por debajo del real— era que el
+    SDK leyera `prompt_tokens_details.cache_write_tokens` (D-101).
+    """
+    tabla = get_price_table()
+    con_escritura = tabla.compute(
+        "gpt-5.6-luna", input_tokens=10_000, output_tokens=0, cache_write_tokens=8_000
+    )
+    como_entrada = tabla.compute("gpt-5.6-luna", input_tokens=10_000, output_tokens=0)
+    assert con_escritura.cache_write_usd == pytest.approx(8_000 * 0.25 / 1_000_000)
+    assert con_escritura.input_usd > como_entrada.input_usd

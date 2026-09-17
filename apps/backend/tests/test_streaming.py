@@ -50,16 +50,16 @@ def chunks_openai(*, con_usage: bool) -> list[_Obj]:
     trozos = [
         obj(
             id="chatcmpl-1",
-            model="gpt-4o-mini",
+            model="gpt-5.6-luna",
             choices=[obj(delta=obj(content=parte), finish_reason=None)],
         )
         for parte in (TEXTO[:20], TEXTO[20:])
     ]
-    trozos.append(obj(id="chatcmpl-1", model="gpt-4o-mini",
+    trozos.append(obj(id="chatcmpl-1", model="gpt-5.6-luna",
                       choices=[obj(delta=obj(content=None), finish_reason="stop")]))
     if con_usage:
         # Sólo llega si la petición pidió stream_options={"include_usage": True}.
-        trozos.append(obj(id="chatcmpl-1", model="gpt-4o-mini", choices=[],
+        trozos.append(obj(id="chatcmpl-1", model="gpt-5.6-luna", choices=[],
                           usage=obj(prompt_tokens=120, completion_tokens=14)))
     return trozos
 
@@ -106,7 +106,7 @@ def _consumir(accumulator, trozos) -> None:
     """Abre un span, lo envuelve como haría la integración, y consume el stream."""
     from laplace._tracer import get_tracer
 
-    span = get_tracer().start_span("chat gpt-4o-mini", kind=SpanKind.CLIENT)
+    span = get_tracer().start_span("chat gpt-5.6-luna", kind=SpanKind.CLIENT)
     proxy = st.wrap(_StreamFalso(trozos), span, accumulator, is_async=False)
     for _ in proxy:
         pass
@@ -116,7 +116,7 @@ def _consumir(accumulator, trozos) -> None:
 
 
 def test_openai_en_streaming_acumula_tokens_y_texto_del_proveedor():
-    _consumir(_OpenAIStream({"model": "gpt-4o-mini", "messages": MENSAJES}),
+    _consumir(_OpenAIStream({"model": "gpt-5.6-luna", "messages": MENSAJES}),
               chunks_openai(con_usage=True))
 
     span = ingest()[0]
@@ -129,7 +129,7 @@ def test_openai_en_streaming_acumula_tokens_y_texto_del_proveedor():
     assert span.llm.finish_reasons == ["stop"]
     # Y el coste sale como en cualquier otra llamada.
     assert span.llm.cost.unknown is False
-    assert span.llm.cost.total_usd == pytest.approx((120 * 0.15 + 14 * 0.60) / 1e6)
+    assert span.llm.cost.total_usd == pytest.approx((120 * 0.2 + 14 * 1.2) / 1e6)
 
 
 def test_sin_include_usage_se_estima_y_se_marca_como_tal():
@@ -138,7 +138,7 @@ def test_sin_include_usage_se_estima_y_se_marca_como_tal():
     Inyectar `stream_options` cambiaría la forma del stream que recibe el usuario, y eso
     es justo lo que un SDK de observabilidad no puede permitirse. Se estima y se dice.
     """
-    _consumir(_OpenAIStream({"model": "gpt-4o-mini", "messages": MENSAJES}),
+    _consumir(_OpenAIStream({"model": "gpt-5.6-luna", "messages": MENSAJES}),
               chunks_openai(con_usage=False))
 
     span = ingest()[0]
@@ -165,7 +165,7 @@ def test_streaming_y_no_streaming_cuestan_lo_mismo():
     from laplace import manual
 
     # Sin streaming.
-    with manual.llm_span(model="gpt-4o-mini", system="openai", input_messages=MENSAJES) as llm:
+    with manual.llm_span(model="gpt-5.6-luna", system="openai", input_messages=MENSAJES) as llm:
         llm.record_response(
             output_messages=[{"role": "assistant", "content": TEXTO}],
             input_tokens=120,
@@ -175,7 +175,7 @@ def test_streaming_y_no_streaming_cuestan_lo_mismo():
 
     # En streaming, con el recuento del proveedor.
     exporter.clear()
-    _consumir(_OpenAIStream({"model": "gpt-4o-mini", "messages": MENSAJES}),
+    _consumir(_OpenAIStream({"model": "gpt-5.6-luna", "messages": MENSAJES}),
               chunks_openai(con_usage=True))
     con_stream = ingest()[0]
 
@@ -187,12 +187,12 @@ def test_streaming_y_no_streaming_cuestan_lo_mismo():
 
 def test_la_estimacion_se_queda_en_el_mismo_orden_de_magnitud():
     """No hace falta que clave el número, pero no puede irse por un factor de diez."""
-    _consumir(_OpenAIStream({"model": "gpt-4o-mini", "messages": MENSAJES}),
+    _consumir(_OpenAIStream({"model": "gpt-5.6-luna", "messages": MENSAJES}),
               chunks_openai(con_usage=False))
     estimado = ingest()[0]
 
     exporter.clear()
-    _consumir(_OpenAIStream({"model": "gpt-4o-mini", "messages": MENSAJES}),
+    _consumir(_OpenAIStream({"model": "gpt-5.6-luna", "messages": MENSAJES}),
               chunks_openai(con_usage=True))
     medido = ingest()[0]
 
@@ -210,7 +210,7 @@ def test_el_envoltorio_delega_lo_que_no_intercepta():
 
     original = _StreamFalso(chunks_openai(con_usage=True))
     span = get_tracer().start_span("chat", kind=SpanKind.CLIENT)
-    proxy = st.wrap(original, span, _OpenAIStream({"model": "gpt-4o-mini"}), is_async=False)
+    proxy = st.wrap(original, span, _OpenAIStream({"model": "gpt-5.6-luna"}), is_async=False)
 
     # Atributos propios del cliente que el código del usuario puede estar usando.
     assert proxy.response == "atributo propio del cliente"
@@ -229,7 +229,7 @@ def test_abandonar_el_stream_a_medias_cierra_el_span_igual():
     proxy = st.wrap(
         _StreamFalso(chunks_openai(con_usage=True)),
         span,
-        _OpenAIStream({"model": "gpt-4o-mini", "messages": MENSAJES}),
+        _OpenAIStream({"model": "gpt-5.6-luna", "messages": MENSAJES}),
         is_async=False,
     )
     iterador = iter(proxy)

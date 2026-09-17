@@ -201,7 +201,7 @@ laplace.init(project="mi-agente", endpoint="http://127.0.0.1:8100")
 
 sistema = laplace.get_prompt("atencion", fallback=SISTEMA_DEL_CODIGO)
 respuesta = cliente.messages.create(
-    model="claude-sonnet-4-5",
+    model="claude-haiku-4-5",
     system=sistema.render(empresa="Vuelos Laplace"),
     messages=[{"role": "user", "content": pregunta}],
 )

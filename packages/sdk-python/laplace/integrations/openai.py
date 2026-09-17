@@ -125,6 +125,14 @@ def _finish(span: OtelSpan, kwargs: dict[str, Any], response: Any) -> None:
             cached_input_tokens=c.getattr_path(
                 response, "usage.prompt_tokens_details.cached_tokens"
             ),
+            # Escribir en caché se cobra por encima de la entrada —1,25x desde la
+            # familia GPT-5.6— y hasta que se leyó este campo esos tokens caían en el
+            # montón de «entrada normal» y se cobraban a tarifa entera, lo que dejaba
+            # nuestro coste de OpenAI por DEBAJO del real. Es el tipo de error que este
+            # producto no puede permitirse en su dirección: un suelo que no era suelo.
+            cache_write_tokens=c.getattr_path(
+                response, "usage.prompt_tokens_details.cache_write_tokens"
+            ),
             reasoning_tokens=c.getattr_path(
                 response, "usage.completion_tokens_details.reasoning_tokens"
             ),
@@ -152,6 +160,7 @@ class _OpenAIStream:
         self._input: int | None = None
         self._output: int | None = None
         self._cached: int | None = None
+        self._cache_write: int | None = None
         self._tier = _tier(kwargs)
         self._fallback_input = st.estimate_messages_tokens(kwargs.get("messages"))
 
@@ -179,6 +188,9 @@ class _OpenAIStream:
             self._cached = c.getattr_path(
                 usage, "prompt_tokens_details.cached_tokens", self._cached
             )
+            self._cache_write = c.getattr_path(
+                usage, "prompt_tokens_details.cache_write_tokens", self._cache_write
+            )
 
     def finish(self, span: OtelSpan) -> None:
         st.record_stream_result(
@@ -192,6 +204,7 @@ class _OpenAIStream:
             input_tokens=self._input,
             output_tokens=self._output,
             cached_input_tokens=self._cached,
+            cache_write_tokens=self._cache_write,
             fallback_input_tokens=self._fallback_input,
             tier=self._tier,
         )

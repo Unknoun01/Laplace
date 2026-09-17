@@ -1197,3 +1197,88 @@ ganado un campo `cache_write_tokens` que **no leemos** y para el que no tenemos 
 verificada. Eso último queda anotado y no arreglado a medias: inventarse un precio sería
 exactamente lo que este producto no hace.
 
+## 2026-09-12 — Determinismo, escritura de caché y nombres de modelo
+
+### D-099 — Ninguna consulta escoge «una fila cualquiera», y hay un guardia que lo vigila
+El patrón apareció por cuarta vez, así que deja de tratarse caso por caso. `any()` en
+ClickHouse devuelve una fila arbitraria del grupo; `argMax(x, k)` devuelve una arbitraria
+**de las que empatan en `k`**; y un `ORDER BY` sin desempate deja el orden al plan de
+ejecución. Las tres cosas son la misma: una elección que el código no toma y que por eso
+puede salir distinta en local y en la nube.
+
+Lo grave no es que sea distinta, es **dónde** se nota. Ninguna de las tres rompe una
+cifra, así que ninguna aparece en las pruebas de paridad que comparan dinero: divergen en
+qué traza se enseña como ejemplo de un hallazgo, en qué orden salen dos problemas que
+cuestan lo mismo, en qué paso va primero en un árbol con llamadas paralelas. Todo eso son
+las reglas de detección, que es el peor sitio posible para que dos personas mirando la
+misma pantalla vean cosas distintas.
+
+Y los empates no son el caso raro: son **el** caso. Dos trazas que repiten un paso tres
+veces empatan en `n` siempre. Dos llamadas lanzadas en paralelo comparten `start_time`
+siempre. Por eso las pruebas de paridad nuevas siembran tráfico **empatado a propósito**:
+sobre datos normales habrían pasado por casualidad.
+
+Lo que se hizo, en los dos almacenes:
+
+* `any(x)` → `max(x)`, que es lo que ya hacía SQLite. Cuatro sitios: el resumen de traza,
+  las repeticiones (dos), y el uso por paso, donde además `any(trace_id)` pasa a
+  `min(trace_id)` porque es lo que hace su gemelo local.
+* `argMax(x, n)` → `argMax(x, (n, x))` y `argMin(x, start_time)` →
+  `argMin(x, (start_time, span_id))`. El desempate va **dentro** de la clave, y es el
+  mismo criterio del `ROW_NUMBER() OVER (ORDER BY start_time, span_id)` de SQLite.
+* Siete `ORDER BY` sin desempate, en los dos almacenes: el árbol de una traza, la
+  repetición de ejemplo, el orden de los hallazgos, los prompts observados y la lista de
+  proyectos.
+
+Y para que no haya una quinta vez, dos pruebas que leen el código: una prohíbe `any()` en
+el SQL de la nube y otra exige que todo `argMax`/`argMin` lleve tupla. Si algún día hace
+falta uno de verdad, que cueste escribir por qué y que se vea en el diff.
+
+**Una corrección sobre la marcha:** al comprobar que las pruebas muerden se vio que el
+orden de los modelos de una traza **no** divergía, porque el traductor común ya los
+ordenaba en la asignación. Se quitó el arreglo redundante y se dejó escrito allí por qué
+ese `sorted` no se puede quitar: ClickHouse los junta en orden de inserción —comprobado
+contra el ClickHouse de verdad: devuelve `['zzz', 'aaa']`— y SQLite ordena por dentro.
+
+### D-100 — Los nombres de modelo de los tests y los ejemplos también caducan
+Es el mismo problema que ya se arregló en la demo, sobreviviendo en los sitios donde
+nadie mira. Un fixture con `gpt-4o-mini` no engaña a ningún usuario, pero un ejemplo de
+la documentación sí, y el `README` y la pestaña de Prompts enseñaban `claude-sonnet-4-5`
+como si fuera lo que hay que usar hoy.
+
+Se barrió el repositorio entero. Quedan fuera **a propósito** tres cosas:
+
+* **La tabla de precios**, que tiene que seguir teniendo los modelos viejos: un usuario
+  que siga en uno de hace dos años tiene derecho a que su coste salga bien.
+* **Las pruebas que comprueban que un nombre viejo se resuelve** —`gpt-4o-mini-2024-07-18`
+  contra la tarifa de `gpt-4o-mini`, `openai/gpt-4o` con prefijo de gateway—, que no son
+  restos: son la funcionalidad. Se conserva además un caso con modelo viejo en las
+  pruebas contra el SDK real, y está señalado como deliberado para que nadie lo «limpie».
+* **Las entradas antiguas de este documento.** Son un registro fechado de lo que se
+  decidió entonces; reescribirlas sería falsificar el histórico.
+
+Cambiar el modelo de un fixture **mueve cifras**, porque las tarifas iban escritas a mano
+en el valor esperado. Se actualizaron a las del modelo nuevo —sin aflojar ninguna
+comprobación, que siguen siendo exactas— y se verificó rompiendo el motor a propósito que
+los tests de doble conteo siguen mordiendo igual de fuerte.
+
+### D-101 — Escribir en caché se cobra, también en OpenAI
+Quedaba anotado como incompleto y ya no lo está. OpenAI cobra la escritura de caché a
+**1,25x la tarifa de entrada** desde la familia GPT-5.6; Anthropic, **1,25x** la de cinco
+minutos y **2x** la de una hora.
+
+Lo interesante es dónde estaba el fallo. El motor de precios ya lo hacía bien: la tabla
+tiene `cache_write` y `cache_write_1h` por modelo, y `compute()` los aplica como un tramo
+más. **Anthropic estaba completo de punta a punta.** Lo que faltaba era una línea en la
+integración de OpenAI: no se leía `prompt_tokens_details.cache_write_tokens`, así que
+esos tokens caían en el montón de «entrada normal» y se cobraban a tarifa entera.
+
+El error iba en la dirección que este producto no se puede permitir: **nuestro coste de
+OpenAI salía por debajo del real**. Un suelo que no era suelo. Con 8.000 tokens escritos
+en caché sobre `gpt-5.6-luna`, la diferencia es de 0,0016 $ a 0,0020 $ por llamada: un
+25 % de más sobre esos tokens, todo el día, en cualquier agente que use caché.
+
+Se arregló en los dos caminos —normal y streaming—, porque en un agente de verdad la
+mayoría de las llamadas van en streaming y arreglarlo sólo en uno habría dejado el error
+justo donde más tráfico hay.
+
