@@ -16,9 +16,12 @@ SSE sobre un flujo troceado por la red, la creación del span, la ingesta y el c
 1. **Un modelo local no factura.** No hay ninguna factura contra la que cuadrar los
    tokens que Laplace guarda. Lo que se comprueba es que el span dice lo mismo que
    *reportó el servidor*, no que eso sea lo que alguien cobró.
-2. **No hay caché real.** Un servidor local no sirve tokens desde caché ni los reporta.
-   El tramo de caché —el más delicado del cálculo de coste— se ejercita con contadores
-   inventados, en un fichero aparte marcado como simulado.
+2. **La caché, sólo a medias.** Ollama reutiliza el prefijo del prompt y lo reporta como
+   `cached_tokens`, igual que OpenAI, así que la **lectura** de caché sí se prueba de
+   verdad. Pero no reporta **escrituras** en caché ni el reparto 5 min / 1 h de
+   Anthropic, y cachea con sus propias reglas, no con las de ningún proveedor. Esa otra
+   mitad se ejercita con contadores inventados, en un fichero aparte marcado como
+   simulado.
 3. **El tokenizador local cuenta distinto.** Su vocabulario no es el de OpenAI ni el de
    Anthropic, así que de estas pruebas no sale ninguna cifra en dólares que signifique
    nada. Ninguna de ellas comprueba un importe.
@@ -167,8 +170,10 @@ Lo que vas a ver:
   del servidor, streaming sin recuento (que tiene que salir **marcado como estimado**),
   stream abandonado a medias, cliente asíncrono, error del servidor y error de red. Y
   que un modelo sin tarifa **no cuesta cero, cuesta «no lo sabemos»**.
-- `test_modelo_local_simulado.py` — la caché, que es lo único que el modelo local no
-  puede darnos. Está separado y marcado a propósito. Cuatro de sus seis pruebas no
+- `test_modelo_local_simulado.py` — la mitad de la caché que el modelo local no puede
+  dar: escrituras, el reparto 5 min / 1 h y la forma de Anthropic. Está separado y
+  marcado a propósito (la **lectura** de caché sí es real y vive en el fichero de
+  arriba). Cuatro de sus seis pruebas no
   necesitan servidor: comprueban que la forma de nuestros bloques de uso simulados es la
   que declaran los modelos Pydantic **de los propios SDK** de OpenAI y Anthropic, y que la
   misma llamada da los mismos tokens por los dos proveedores.

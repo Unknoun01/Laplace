@@ -11,8 +11,10 @@ con criterios distintos —uno la mete dentro de `prompt_tokens`, el otro la dej
 `input_tokens`—, la escritura se cobra por encima de la entrada, y Anthropic además
 reparte la escritura entre cinco minutos y una hora a precios distintos (D-050, D-101).
 
-Un servidor local no sirve tokens desde caché ni los reporta, así que por ese camino
-esos campos no aparecen nunca. No hay forma de ejercitarlos sin falsear la respuesta.
+Un servidor local da **la mitad**: Ollama reporta lecturas de caché de prefijo en
+`cached_tokens`, y eso ya se prueba de verdad en `test_modelo_local.py`. Lo que no da
+nunca son escrituras (`cache_write_tokens`), el reparto 5 min / 1 h ni la forma de
+Anthropic. Eso no se puede ejercitar sin falsear la respuesta.
 
 ## Cómo se simula, y qué sigue siendo de verdad en cada parte
 
@@ -38,7 +40,8 @@ presentes. Se salta sin servidor local.
 
 ## QUÉ SIGUE SIN VERIFICAR, TAMBIÉN AQUÍ
 
-* **No hay caché real en ninguna parte de este fichero.** Los contadores son nuestros.
+* **No hay caché real en ninguna parte de este fichero.** Los contadores son nuestros
+  (la lectura de caché real vive en `test_modelo_local.py`, no aquí).
   Que el span los recoja bien no dice nada sobre si el proveedor los reporta así hoy.
 * **Ninguna cifra en dólares de aquí está validada contra una factura.** La aritmética
   del motor de precios se comprueba en `test_pricing.py` con tarifas escritas a mano;

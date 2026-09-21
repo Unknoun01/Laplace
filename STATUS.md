@@ -105,8 +105,9 @@ Lo que sostiene esas casillas, en concreto:
   clave ficticia, y se recorre el camino entero con un servidor al otro lado. Cuesta cero
   y se salta solo si no hay servidor (D-102). Pasadas el 17 de septiembre contra Ollama
   0.34.1 con `qwen2.5:0.5b`: **16 de 16, ninguna saltada**, en menos de un minuto. **No valida el modelo de coste**: un modelo
-  local no factura, no tiene caché y cuenta tokens con otro tokenizador, y lo que no
-  puede dar —la caché— se simula en un fichero aparte y marcado (D-103, D-104).
+  local no factura, su caché sólo reporta lecturas y con reglas propias, y cuenta
+  tokens con otro tokenizador; lo que no puede dar —escrituras en caché, la forma de
+  Anthropic— se simula en un fichero aparte y marcado (D-103, D-104, D-105).
 - **Ninguna consulta escoge «una fila cualquiera».** El patrón `any()` / `argMax` sin
   desempate / `ORDER BY` sin desempate apareció por cuarta vez y se cerró entero en los
   dos almacenes, con pruebas de paridad sobre tráfico **empatado a propósito** y dos
@@ -173,11 +174,13 @@ Lo que **no** demuestran, punto por punto:
    números son los del proveedor»— sigue apoyada **sólo** en las 4 pruebas vivas que
    esperan una clave, y hasta que se pongan, el modelo de coste está validado contra la
    aritmética que escribimos nosotros y contra precios publicados, no contra una factura.
-2. **Nada del tramo de caché.** Un servidor local no sirve tokens desde caché ni los
-   reporta. `cached_tokens`, `cache_write_tokens` y el reparto 5 min / 1 h —el tramo más
-   delicado del cálculo y el que ya se equivocó una vez (D-101)— se ejercitan con
-   contadores **inventados por nosotros**, en `test_modelo_local_simulado.py`, que está
-   separado y marcado por eso mismo.
+2. **Sólo la mitad del tramo de caché.** Ollama reutiliza el prefijo y lo reporta como
+   `cached_tokens`, con la forma de OpenAI: la **lectura** de caché se prueba de verdad.
+   Pero cachea cualquier prefijo repetido, no con las reglas de OpenAI (desde 1.024
+   tokens, en bloques), y no reporta nunca escrituras. `cache_write_tokens` y el reparto
+   5 min / 1 h —lo que ya se equivocó una vez (D-101)— siguen ejercitándose con
+   contadores **inventados por nosotros**, en `test_modelo_local_simulado.py`. Esto decía
+   antes «nada del tramo de caché», y era falso (D-105).
 3. **Ninguna cifra en dólares.** El tokenizador del modelo local es el suyo, con su
    vocabulario: sus recuentos no se parecen a los de `o200k` ni a los de Anthropic. Por
    eso ninguna de esas pruebas comprueba un importe, sólo de dónde sale cada número y

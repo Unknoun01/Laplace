@@ -31,11 +31,15 @@ un detalle:
    *reportó el servidor*, no que eso sea lo que alguien cobró. La promesa de este
    producto —«tus números son los del proveedor»— sólo la comprueban las pruebas vivas
    de `test_proveedores_reales.py`, y ésas siguen esperando una clave.
-2. **No hay caché real.** Ollama no sirve tokens desde caché ni los reporta, así que
-   `cached_tokens`, `cache_write_tokens` y el reparto 5 min / 1 h no se ejercitan por
-   este camino. Lo que sostiene el tramo más delicado del cálculo (D-050, D-101) sigue
-   probándose con transporte falso y con los fixtures simulados de
-   `test_modelo_local_simulado.py`, que están marcados como lo que son.
+2. **La caché es sólo de lectura, y con reglas que no son las de facturación.** Ollama
+   reutiliza el prefijo del prompt y lo reporta en `prompt_tokens_details.cached_tokens`,
+   con la forma de OpenAI, así que la **lectura** de caché sí se ejercita aquí de verdad
+   (`test_local_la_cache_de_prefijo_llega_al_span`). Pero no reporta **escrituras**
+   (`cache_write_tokens`) ni el reparto 5 min / 1 h, y cachea cualquier prefijo repetido,
+   no a partir de 1.024 tokens y en bloques como OpenAI. Esa otra mitad sigue probándose
+   con transporte falso y con los fixtures simulados de `test_modelo_local_simulado.py`,
+   que están marcados como lo que son. Hasta el 18 de septiembre esto decía «no hay caché
+   real»: era falso y lo destapó el agente de ejemplo (D-105).
 3. **El tokenizador local cuenta distinto.** El recuento que devuelve el servidor es el
    de su propio tokenizador sobre su propio vocabulario. No se parece al de `o200k` ni
    al de Anthropic, así que de aquí no se puede deducir ninguna cifra en dólares. Por
@@ -162,6 +166,44 @@ def test_local_el_cliente_asincrono_tambien_esta_instrumentado():
     span = span_llm()
     assert span.llm.usage.output_tokens == respuesta.usage.completion_tokens
     assert span.llm.usage.estimated is False
+
+
+@local.salta_sin_servidor
+def test_local_la_cache_de_prefijo_llega_al_span():
+    """La lectura de caché, de verdad: nada inventado, ni siquiera el contador.
+
+    Ollama reutiliza el prefijo de un prompt que ya ha visto y lo reporta en
+    `prompt_tokens_details.cached_tokens`, igual que OpenAI. Dos llamadas con el mismo
+    prompt de sistema largo: la segunda tiene que traer caché, y el span tiene que
+    guardarla **dentro** de la entrada, no sumada aparte (D-050). Es el campo por el que
+    ya nos equivocamos una vez en la dirección peligrosa.
+
+    Lo que esto NO prueba: escrituras en caché (Ollama no las reporta nunca) ni que la
+    caché de OpenAI siga estas reglas. La de Ollama cachea cualquier prefijo repetido;
+    la de OpenAI, a partir de 1.024 tokens y en bloques.
+    """
+    sistema = "Eres el asistente de una tienda. Condiciones de venta: " + "Cláusula. " * 400
+    mensajes = [
+        {"role": "system", "content": sistema},
+        {"role": "user", "content": "Di hola."},
+    ]
+    cliente = local.cliente()
+    cliente.chat.completions.create(model=local.modelo(), messages=mensajes, max_tokens=4)
+    exporter.clear()
+
+    respuesta = cliente.chat.completions.create(
+        model=local.modelo(), messages=mensajes, max_tokens=4
+    )
+    detalles = respuesta.usage.prompt_tokens_details
+    cacheados = getattr(detalles, "cached_tokens", None) if detalles else None
+    if not cacheados:
+        pytest.skip("tu servidor local no reporta `cached_tokens`: actualiza Ollama")
+
+    uso = span_llm().llm.usage
+    assert uso.cached_input_tokens == cacheados
+    assert uso.input_tokens == respuesta.usage.prompt_tokens, "la caché va dentro, no sumada"
+    assert uso.uncached_input_tokens == respuesta.usage.prompt_tokens - cacheados
+    assert uso.estimated is False
 
 
 # ---------------------------------------------------------------------------------

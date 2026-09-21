@@ -471,7 +471,8 @@ Hay cuatro niveles:
   `test_modelo_local_simulado.py`.
 
   **Ninguno de estos dos últimos niveles valida el modelo de coste contra facturación.**
-  Un modelo local no factura, no tiene caché y cuenta tokens con otro tokenizador. Que
+  Un modelo local no factura, su caché sólo reporta lecturas y con reglas propias, y
+  cuenta tokens con otro tokenizador. Que
   salgan en verde significa que el camino funciona, no que las cifras sean las del
   proveedor: eso sólo lo dicen las cuatro pruebas vivas que esperan una clave.
 

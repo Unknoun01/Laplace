@@ -1388,3 +1388,32 @@ que no va a comprobar.
 
 Las pruebas que esperan una clave se han dejado **intactas y funcionando**. Son las únicas
 que pueden cerrar el agujero, y el día que haya claves siguen donde estaban.
+
+## 2026-09-18 — Una corrección, y el agente mediocre
+
+### D-105 — Ollama sí tiene caché: corrige D-103 y D-104
+D-103 y D-104 dicen que un modelo local «no sirve tokens desde caché ni los reporta» y
+que «no hay caché real en ninguna parte». **Es falso**, y se escribió sin comprobarlo.
+Lo destapó la primera traza del agente de ejemplo, que llegó con `cached_input_tokens`
+distinto de cero. Contra Ollama 0.34.1, sin Laplace de por medio: dos llamadas con el
+mismo prompt de sistema largo reportan 3 y después 1.813 tokens de caché sobre 1.819, en
+`prompt_tokens_details.cached_tokens`, con la forma exacta de OpenAI y también en
+streaming.
+
+Lo cierto es más estrecho que las dos cosas: **hay lecturas de caché reales y no hay
+escrituras.** Ollama reutiliza el prefijo de la caché de claves y valores y lo dice;
+nunca reporta `cache_write_tokens` ni nada parecido al reparto 5 min / 1 h. Y cachea con
+sus reglas —cualquier prefijo repetido, incluso de tres tokens—, no con las de OpenAI,
+que empieza en 1.024 y va por bloques.
+
+Qué cambia: la lectura de caché pasa a probarse de verdad
+(`test_local_la_cache_de_prefijo_llega_al_span`), y el fichero simulado se queda con lo
+que de verdad no se puede obtener: escrituras, la duración de Anthropic y su forma. La
+separación entre simulado y real se mantiene; lo que estaba mal era dónde caía la línea.
+Las entradas D-103 y D-104 no se reescriben, porque son el registro de lo que se decidió
+entonces; los textos vivos —STATUS, la guía, el README y las cabeceras de las pruebas—
+sí se han corregido.
+
+La lección es la misma que la del resto de esta tanda, aplicada a nosotros: una
+afirmación sobre lo que *no* hace un sistema también hay que comprobarla, y es la que
+más fácil se escribe sin mirar.
