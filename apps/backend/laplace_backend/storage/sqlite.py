@@ -133,6 +133,7 @@ CREATE TABLE IF NOT EXISTS spans (
 
     dedup_hash            TEXT NOT NULL DEFAULT '',
     step_key              TEXT NOT NULL DEFAULT '',
+    step_site             TEXT NOT NULL DEFAULT '',
     step_label            TEXT NOT NULL DEFAULT '',
     step_hint             TEXT NOT NULL DEFAULT '',
 
@@ -161,6 +162,7 @@ CREATE INDEX IF NOT EXISTS idx_spans_paso    ON spans (project_id, step_key);
 #: tiene su `ALTER TABLE ADD COLUMN IF NOT EXISTS` al final de su .sql; esto es lo
 #: mismo para el modo local, que es el que le pasa a un usuario de verdad al actualizar.
 COLUMNAS_TARDIAS = (
+    ("step_site", "TEXT NOT NULL DEFAULT ''"),
     ("prompt_name", "TEXT NOT NULL DEFAULT ''"),
     ("prompt_version", "INTEGER NOT NULL DEFAULT 0"),
 )
@@ -796,7 +798,15 @@ class SQLiteStore:
         )
         pasos = self._query(
             f"""SELECT
-                    CASE WHEN step_label != '' THEN step_label ELSE name END AS paso,
+                    -- Por sitio de llamada, no por nombre: dos agentes con una función
+                    -- homónima se mezclaban y un pico de uno quedaba diluido en el otro
+                    -- (D-106). La etiqueta se guarda aparte porque es lo que se enseña.
+                    CASE
+                        WHEN step_site  != '' THEN step_site
+                        WHEN step_label != '' THEN step_label
+                        ELSE name
+                    END AS paso,
+                    MAX(CASE WHEN step_label != '' THEN step_label ELSE name END) AS etiqueta,
                     SUM(cost_total_usd) AS coste,
                     COUNT(*)            AS llamadas
                 FROM spans WHERE {WINDOW_WHERE}
@@ -816,7 +826,9 @@ class SQLiteStore:
             tools={f["v"] for f in herramientas if f["v"]},
             steps={
                 f["paso"]: StepFacts(
-                    cost_usd=float(f["coste"] or 0.0), calls=int(f["llamadas"])
+                    cost_usd=float(f["coste"] or 0.0),
+                    calls=int(f["llamadas"]),
+                    label=f["etiqueta"] or f["paso"],
                 )
                 for f in pasos
                 if f["paso"]
@@ -961,10 +973,20 @@ class SQLiteStore:
             """,
             params,
         )[0]
+        # Se agrupa por SITIO DE LLAMADA, no por nombre de función. Con el nombre, dos
+        # agentes que tengan una función homónima caían en el mismo grupo y sus
+        # poblaciones se mezclaban: el que llamaba bien compensaba al que llamaba mal y
+        # la señal se callaba justo cuando había algo roto (D-106). El `CASE` deja que
+        # las trazas anteriores al camino sigan agrupándose como antes.
         pasos = self._query(
             f"""
             SELECT
-                CASE WHEN step_label != '' THEN step_label ELSE name END AS paso,
+                CASE
+                    WHEN step_site  != '' THEN step_site
+                    WHEN step_label != '' THEN step_label
+                    ELSE name
+                END AS paso,
+                MAX(CASE WHEN step_label != '' THEN step_label ELSE name END) AS etiqueta,
                 COUNT(DISTINCT step_key)  AS identidades,
                 COUNT(DISTINCT trace_id)  AS trazas
             FROM spans

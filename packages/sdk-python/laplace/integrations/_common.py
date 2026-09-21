@@ -8,7 +8,7 @@ from typing import Any
 from opentelemetry import trace
 from opentelemetry.trace import Span as OtelSpan
 
-from .. import semconv
+from .. import _pasos, semconv
 from .._tracer import get_config
 from ..serialization import dumps
 
@@ -79,6 +79,9 @@ def record_request(
 ) -> None:
     set_attr(span, semconv.LAPLACE_SPAN_TYPE, semconv.SPAN_TYPE_LLM)
     set_attr(span, semconv.LAPLACE_STEP_PARENT, enclosing)
+    # El camino entero, no sólo el padre. Se lee de la pila de `@observe`, que este span
+    # todavía no ha tocado: abrir el span de LLM no apila nada (D-106).
+    set_attr(span, semconv.LAPLACE_STEP_SITE, _pasos.camino() or enclosing)
     set_attr(span, semconv.GEN_AI_SYSTEM, system)
     set_attr(span, semconv.GEN_AI_OPERATION_NAME, operation)
     set_attr(span, semconv.GEN_AI_REQUEST_MODEL, model)

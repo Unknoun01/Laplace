@@ -14,7 +14,7 @@ from opentelemetry import trace as otel_trace
 from opentelemetry.trace import Span as OtelSpan
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
-from . import semconv
+from . import _pasos, semconv
 from ._tracer import get_config, get_tracer
 from .serialization import dumps
 
@@ -153,7 +153,11 @@ def span(
             laplace.update_current_span(output=plan)
     """
     tracer = get_tracer()
-    with tracer.start_as_current_span(name, kind=SpanKind.INTERNAL) as otel_span:
+    # `_pasos.entrar` apila el nombre mientras dure el bloque: es lo que permite saber
+    # desde qué **camino** se llama al modelo, y no sólo desde qué función (D-106).
+    with tracer.start_as_current_span(name, kind=SpanKind.INTERNAL) as otel_span, _pasos.entrar(
+        name
+    ):
         _apply_common(
             otel_span,
             span_type=type,

@@ -592,13 +592,17 @@ def attribute(
             if parte < STEP_ATTRIBUTION_SHARE:
                 continue
             nuevo = nombre not in antes.steps
+            # `nombre` es el sitio de llamada («atender_ticket > redactar»), que es lo
+            # que agrupa bien; en pantalla va la etiqueta, que es lo que el usuario
+            # reconoce (D-106).
+            etiqueta = dentro.steps[nombre].label or nombre
             causas.append(
                 SpikeCause(
                     kind="paso_nuevo" if nuevo else "paso_disparado",
                     text=(
-                        f"Un paso nuevo, «{nombre}», se lleva {_share(parte)}."
+                        f"Un paso nuevo, «{etiqueta}», se lleva {_share(parte)}."
                         if nuevo
-                        else f"El paso «{nombre}» se lleva {_share(parte)}: cuesta más "
+                        else f"El paso «{etiqueta}» se lleva {_share(parte)}: cuesta más "
                         f"por ejecución que en el resto del rango."
                     ),
                     evidence=f"${de_mas:.6f} por encima de lo que costaba antes.",

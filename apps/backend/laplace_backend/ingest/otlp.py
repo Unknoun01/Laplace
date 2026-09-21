@@ -186,7 +186,7 @@ def _tool_names(raw: Any) -> list[str]:
 
 def step_identity(
     attrs: dict[str, Any], name: str, messages: list[dict[str, Any]], tools: Any
-) -> tuple[str, str, str]:
+) -> tuple[str, str, str, str]:
     """Identidad estable de un paso: `(clave, etiqueta, pista)`.
 
     Un paso es **una llamada al modelo hecha desde el mismo sitio y con las mismas
@@ -205,7 +205,14 @@ def step_identity(
     nombre del span, que es lo que había antes. No se inventa una identidad que no se
     puede sostener (D-060).
     """
-    sitio = str(attrs.get(semconv.LAPLACE_STEP_PARENT) or "").strip()
+    # El sitio es el CAMINO de pasos, no sólo el padre: `atender_ticket >
+    # resumir_para_crm`. Con el padre a secas, dos agentes que llamen igual a una
+    # función caían en el mismo sitio y sus poblaciones se mezclaban (D-106). Se cae al
+    # padre para las trazas que llegaron antes de que el SDK mandara el camino.
+    sitio = str(
+        attrs.get(semconv.LAPLACE_STEP_SITE) or attrs.get(semconv.LAPLACE_STEP_PARENT) or ""
+    ).strip()
+    padre = str(attrs.get(semconv.LAPLACE_STEP_PARENT) or "").strip()
     instrucciones = _system_text(messages)
     herramientas = _tool_names(tools)
 
@@ -216,12 +223,15 @@ def step_identity(
 
     if not sitio and not huella:
         # Sin ninguna de las dos señales, el nombre es todo lo que hay.
-        return hashlib.sha256(name.encode("utf-8")).hexdigest()[:16], name, ""
+        return hashlib.sha256(name.encode("utf-8")).hexdigest()[:16], name, "", ""
 
     clave = hashlib.sha256(f"{sitio}\x00{huella}".encode()).hexdigest()[:16]
     pista = " ".join(instrucciones.split())[:STEP_HINT_CHARS]
-    etiqueta = sitio or pista or name
-    return clave, etiqueta, pista
+    # La etiqueta sigue siendo el nombre a secas: es lo que se lee en pantalla, y
+    # «atender_ticket > resumir_para_crm» en un titular sería ruido. El camino va
+    # aparte, para agrupar.
+    etiqueta = padre or sitio or pista or name
+    return clave, etiqueta, pista, sitio
 
 
 # ---------------------------------------------------------------------------------
@@ -292,11 +302,11 @@ def _build_span(proto_span: Any, project_id: str, resource: dict[str, Any], pric
         dedup_model = None
 
     if llm is not None:
-        step_key, step_label, step_hint = step_identity(
+        step_key, step_label, step_hint, step_site = step_identity(
             attrs, name, llm.input_messages, attrs.get("laplace.request.tools")
         )
     else:
-        step_key = step_label = step_hint = ""
+        step_key = step_label = step_hint = step_site = ""
 
     consumed = {
         semconv.LAPLACE_SPAN_TYPE,
@@ -341,6 +351,7 @@ def _build_span(proto_span: Any, project_id: str, resource: dict[str, Any], pric
         metadata=_json_or(attrs.get(semconv.LAPLACE_METADATA), {}) or {},
         dedup_hash=dedup_hash(span_type, name, dedup_model, dedup_payload),
         step_key=step_key,
+        step_site=step_site,
         step_label=step_label,
         step_hint=step_hint,
         # El SDK sólo escribe esto cuando ha comprobado que el texto de esa versión iba

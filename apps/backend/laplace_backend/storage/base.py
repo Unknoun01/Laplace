@@ -188,10 +188,17 @@ class Bucket:
 
 @dataclass
 class StepFacts:
-    """Lo que un paso hizo y costó en un tramo."""
+    """Lo que un paso hizo y costó en un tramo.
+
+    La clave del diccionario que los contiene es el **sitio de llamada** —el camino de
+    pasos—, y `label` es cómo se llama en pantalla. Con el nombre como clave, dos
+    agentes con una función homónima compartían fila y el pico de uno se atribuía al
+    otro (D-106).
+    """
 
     cost_usd: float = 0.0
     calls: int = 0
+    label: str = ""
 
 
 @dataclass

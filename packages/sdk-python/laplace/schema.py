@@ -216,6 +216,10 @@ class Span(_Model):
     #: Trozo de las instrucciones fijas, para distinguir dos pasos que se llaman desde
     #: el mismo sitio. Vacío si no se capturan payloads.
     step_hint: str = ""
+    #: El camino de pasos desde el que se llamó: «atender_ticket > resumir_para_crm».
+    #: Es la mitad «desde dónde» de la identidad, y se guarda aparte porque agrupar por
+    #: el nombre de la función mezcla dos agentes que la llamen igual (D-106).
+    step_site: str = ""
 
     #: Prompt **gestionado** con el que se hizo esta llamada, si lo hubo. Lo escribe el
     #: SDK sólo cuando el texto de esa versión aparece de verdad en los mensajes

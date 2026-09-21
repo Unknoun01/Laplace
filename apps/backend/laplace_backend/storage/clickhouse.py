@@ -693,8 +693,11 @@ class ClickHouseStore:
                 WHERE {WINDOW_WHERE} AND span_type = 'tool'""",
             parameters=params,
         ).result_rows
+        # Por sitio de llamada, no por nombre: gemelo del de sqlite.py (D-106).
         pasos = self._client.query(
-            f"""SELECT if(step_label != '', step_label, name) AS paso,
+            f"""SELECT multiIf(step_site != '', step_site, step_label != '', step_label,
+                               name) AS paso,
+                       max(if(step_label != '', step_label, name)) AS etiqueta,
                        sum(cost_total_usd), count()
                 FROM spans FINAL WHERE {WINDOW_WHERE}
                 GROUP BY paso""",
@@ -712,7 +715,9 @@ class ClickHouseStore:
             models={r[0] for r in modelos if r[0]},
             tools={r[0] for r in herramientas if r[0]},
             steps={
-                r[0]: StepFacts(cost_usd=float(r[1] or 0.0), calls=int(r[2]))
+                r[0]: StepFacts(
+                    cost_usd=float(r[2] or 0.0), calls=int(r[3]), label=r[1] or r[0]
+                )
                 for r in pasos
                 if r[0]
             },
@@ -864,8 +869,11 @@ class ClickHouseStore:
         pasos = _named(
             self._client.query(
                 f"""
+                -- Por sitio de llamada y no por nombre: ver el comentario gemelo en
+                -- sqlite.py. Dos agentes con una función homónima se mezclaban (D-106).
                 SELECT
-                    if(step_label != '', step_label, name) AS paso,
+                    multiIf(step_site != '', step_site, step_label != '', step_label, name) AS paso,
+                    max(if(step_label != '', step_label, name)) AS etiqueta,
                     uniqExact(step_key)  AS identidades,
                     uniqExact(trace_id)  AS trazas
                 FROM spans FINAL

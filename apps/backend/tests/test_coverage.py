@@ -27,7 +27,10 @@ from laplace_backend import coverage as cov
 from laplace_backend.storage.base import CoverageFacts, Window
 from laplace_backend.storage.sqlite import SQLiteStore
 
-AHORA = datetime(2026, 9, 12, 12, 0, tzinfo=timezone.utc)
+#: Relativo a ahora y no una fecha fija. Con una fecha fija, el test que pasa por la
+#: API —que pide los últimos 7 días— se ponía en rojo solo al cabar una semana desde
+#: la fecha escrita, y el fallo no tenía nada que ver con lo que el test comprueba.
+AHORA = datetime.now(timezone.utc) - timedelta(minutes=30)
 
 
 def _facts(**cambios) -> CoverageFacts:
@@ -146,7 +149,7 @@ def test_gestionar_prompts_y_no_marcarlos_si_es_un_defecto():
 
 def _span(project: str, trace: str, *, hint: str, label: str, name: str,
           key: str, unknown: bool = False, estimated: bool = False,
-          prompt: str = "", version: int = 0, tokens: int = 500) -> Span:
+          prompt: str = "", version: int = 0, tokens: int = 500, site: str = "") -> Span:
     span = Span(
         span_id=uuid.uuid4().hex[:16],
         trace_id=trace,
@@ -160,6 +163,7 @@ def _span(project: str, trace: str, *, hint: str, label: str, name: str,
         step_key=key,
         step_label=label,
         step_hint=hint,
+        step_site=site,
         prompt_name=prompt,
         prompt_version=version,
     )
@@ -281,3 +285,74 @@ def test_el_inicio_trae_la_cobertura_delante(tmp_path, monkeypatch):
     # Y la señal de prompts no se lee como defecto: este proyecto no gestiona prompts.
     prompts = next(s for s in cobertura["signals"] if s["key"] == "prompts")
     assert prompts["level"] == "no-aplica"
+
+
+# ---------------------------------------------------------------------------------
+# Dos llamantes con el mismo nombre: el sano no puede tapar al roto
+# ---------------------------------------------------------------------------------
+
+
+def _dos_llamantes(store, project: str, *, con_camino: bool) -> None:
+    """Dos agentes con una función homónima: `resumir` en los dos.
+
+    En el agente A las instrucciones son fijas —una identidad para todas sus
+    ejecuciones—. En el B llevan la fecha dentro, así que cada ejecución estrena
+    identidad: el paso está partido y hay que decirlo.
+
+    `con_camino=False` reproduce lo que guardaban las trazas antes de D-106, cuando el
+    sitio era sólo el nombre de la función.
+    """
+    spans = []
+    for i in range(12):
+        spans.append(
+            _span(project, f"{project}-sano-{i}", hint="Resume el ticket.", label="resumir",
+                  name="chat gpt-5.6-luna", key="sano-una-sola",
+                  site="atender_bien > resumir" if con_camino else "")
+        )
+    for i in range(12):
+        spans.append(
+            _span(project, f"{project}-roto-{i}", hint=f"Hoy es 2026-09-21 12:00:{i:02d}.",
+                  label="resumir", name="chat gpt-5.6-luna", key=f"roto-{i}",
+                  site="atender_mal > resumir" if con_camino else "")
+        )
+    store.insert_spans(spans)
+
+
+def test_un_llamante_sano_no_puede_tapar_a_uno_roto_con_el_mismo_nombre(tmp_path):
+    """El fallo de D-106, con su prueba.
+
+    Dos agentes llaman a una función que en los dos se llama `resumir`. El de uno está
+    partido —una identidad por ejecución— y el del otro no. Agrupando por nombre, las 12
+    ejecuciones limpias diluyen a las 12 rotas: 13 identidades sobre 24 trazas es un 0,54
+    y no llega al umbral de 0,8, así que el producto se calla **justo cuando hay algo
+    roto**. Es la media que esconde el caso que importa, otra vez.
+
+    Agrupando por sitio de llamada, el roto se mide solo: 12 identidades sobre 12
+    ejecuciones, y salta.
+    """
+    store = SQLiteStore(tmp_path / "c.db")
+    store.migrate()
+    _dos_llamantes(store, "p", con_camino=True)
+
+    facts = store.coverage("p", _ventana())
+    assert facts.llm_calls == 24
+    assert facts.split_steps == ["resumir"], "el roto tiene que salir, aunque el otro esté sano"
+
+    cobertura = cov.build(facts)
+    assert cobertura.prominent is True
+    assert "«resumir»" in cobertura.headline
+
+
+def test_sin_camino_de_llamada_el_sano_tapaba_al_roto(tmp_path):
+    """La prueba de la prueba: con lo que guardaban las trazas antes de D-106, el mismo
+    tráfico no dispara. Si algún día alguien «simplifica» la agrupación y vuelve al
+    nombre, el test de arriba se pondría en rojo y éste seguiría en verde: los dos
+    juntos dicen qué cambió y por qué.
+    """
+    store = SQLiteStore(tmp_path / "c.db")
+    store.migrate()
+    _dos_llamantes(store, "p", con_camino=False)
+
+    facts = store.coverage("p", _ventana())
+    assert facts.llm_calls == 24
+    assert facts.split_steps == [], "sin camino, los dos llamantes caen en el mismo montón"
