@@ -62,108 +62,20 @@ Variables:
 from __future__ import annotations
 
 import argparse
-import os
+import contextlib
 import random
 import re
 import sys
 import time
 from datetime import datetime
 
-import httpx
+import _tienda as t
 import laplace
-import openai
 
-LAPLACE_ENDPOINT = os.getenv("LAPLACE_ENDPOINT", "http://127.0.0.1:8100")
-PROYECTO = os.getenv("LAPLACE_PROJECT", "agente-mediocre")
-OLLAMA = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
-PEQUENO = os.getenv("LAPLACE_MODELO_PEQUENO", "qwen2.5:0.5b")
-GRANDE = os.getenv("LAPLACE_MODELO_GRANDE", "qwen2.5:1.5b")
-
-#: Lo que ocupa cada modelo en disco, para decirlo antes de pedir que se descargue.
-TAMANOS = {"qwen2.5:0.5b": "~400 MB", "qwen2.5:1.5b": "~1 GB", "qwen2.5:3b": "~1,9 GB"}
-
+#: El mundo de la tienda —pedidos, stock, tickets, catálogo— y la llamada al modelo
+#: viven en `_tienda.py`, compartidos con `agente_sano_ollama.py`. Los dos agentes
+#: tienen que trabajar contra los mismos datos, o compararlos no diría nada.
 INTENTOS_ALMACEN = 6
-
-# ---------------------------------------------------------------------------------
-# El mundo del agente: una tienda pequeña. Esto es su «base de datos», no trazas.
-# ---------------------------------------------------------------------------------
-
-PEDIDOS = {
-    "PED-1042": {"cliente": "Marta", "sku": "MOCH-20", "estado": "enviado", "dias": 6},
-    "PED-1043": {"cliente": "Iker", "sku": "BOT-INOX", "estado": "en almacén", "dias": 2},
-    "PED-1051": {"cliente": "Lucía", "sku": "TIEN-2P", "estado": "entregado", "dias": 9},
-    "PED-1060": {"cliente": "Samuel", "sku": "SAC-0G", "estado": "en almacén", "dias": 1},
-    "PED-1077": {"cliente": "Nerea", "sku": "LINT-FR", "estado": "enviado", "dias": 4},
-    "PED-1089": {"cliente": "Pablo", "sku": "BAST-CARB", "estado": "devuelto", "dias": 15},
-}
-
-TICKETS = [
-    "Hola, mi pedido PED-1042 lleva 6 días y no llega. ¿Dónde está?",
-    "Buenas, quiero devolver la botella del pedido PED-1043, ha llegado abollada.",
-    "La tienda de campaña del PED-1051 tiene una varilla rota. ¿Me mandáis otra?",
-    "¿Podéis cambiar la dirección de envío del pedido PED-1060? Me mudo el lunes.",
-    "Hello, my order PED-1077 says shipped but tracking shows nothing. Help?",
-    "Devolví los bastones del PED-1089 hace dos semanas y no veo el reembolso.",
-    "Pedido PED-1043: ¿cuándo sale del almacén? Lo necesito para el viernes.",
-    "Bonjour, ma commande PED-1042 n'est toujours pas arrivée.",
-    "¿El saco del PED-1060 aguanta bajo cero? Si no, lo cancelo antes de que salga.",
-    "Me han cobrado dos veces el pedido PED-1077. Quiero que me devolváis uno.",
-]
-
-#: Política y catálogo que `redactar_respuesta` pega en cada llamada (P3). Se genera
-#: para no llenar este fichero de texto, pero es fijo: el mismo en cada ejecución.
-POLITICA = "\n".join(
-    [
-        "POLÍTICA DE ATENCIÓN AL CLIENTE — TIENDA DE MONTAÑA",
-        "1. Devoluciones: 30 días desde la entrega, producto sin usar y con etiqueta.",
-        "2. Reembolsos: se emiten en 5 a 10 días hábiles tras recibir la devolución.",
-        "3. Envíos: peninsular 48-72 h; islas 5-7 días; internacional 7-15 días.",
-        "4. Defectos de fábrica: sustitución sin coste durante 2 años de garantía.",
-        "5. Cambios de dirección: sólo mientras el pedido esté en almacén.",
-        "6. Cobros duplicados: se anulan en 72 h; nunca pedir datos de tarjeta.",
-        "7. Tono: cercano, breve, sin prometer fechas que no dependan de nosotros.",
-    ]
-    + [
-        f"Artículo {i:03d} ({cat}): {nombre}. Precio {10 + i * 3} €. Peso {100 + i * 17} g. "
-        f"Garantía 2 años. Disponible en tallas S, M y L cuando aplica. "
-        f"Instrucciones de cuidado: limpiar con agua tibia y secar a la sombra."
-        for i, (cat, nombre) in enumerate(
-            [
-                (c, f"{n} modelo {m}")
-                for c, n in [
-                    ("mochilas", "Mochila de travesía"),
-                    ("hidratación", "Botella térmica"),
-                    ("tiendas", "Tienda ligera"),
-                    ("sacos", "Saco de plumas"),
-                    ("iluminación", "Linterna frontal"),
-                    ("bastones", "Bastón telescópico"),
-                ]
-                for m in ("Alfa", "Beta", "Gamma", "Delta", "Épsilon", "Zeta")
-            ]
-        )
-    ]
-)
-
-STOCK = {"MOCH-20": 4, "BOT-INOX": 0, "TIEN-2P": 2, "SAC-0G": 7, "LINT-FR": 12, "BAST-CARB": 1}
-
-# ---------------------------------------------------------------------------------
-# El cliente real de OpenAI, apuntando a Ollama. Laplace lo instrumenta solo.
-# ---------------------------------------------------------------------------------
-
-cliente = openai.OpenAI(base_url=OLLAMA, api_key="ollama-no-mira-la-clave", max_retries=0)
-
-
-def _llamar(modelo: str, sistema: str, usuario: str, max_tokens: int) -> str:
-    respuesta = cliente.chat.completions.create(
-        model=modelo,
-        messages=[
-            {"role": "system", "content": sistema},
-            {"role": "user", "content": usuario},
-        ],
-        temperature=0,
-        max_tokens=max_tokens,
-    )
-    return (respuesta.choices[0].message.content or "").strip()
 
 
 # ---------------------------------------------------------------------------------
@@ -175,13 +87,13 @@ def _llamar(modelo: str, sistema: str, usuario: str, max_tokens: int) -> str:
 def consultar_pedido(pedido_id: str) -> dict:
     """P1 · Se llama tres veces por traza con el mismo id: nadie pasa el resultado."""
     time.sleep(0.15)  # una base de datos de verdad tampoco es instantánea
-    return PEDIDOS.get(pedido_id, {"error": "pedido no encontrado"})
+    return t.PEDIDOS.get(pedido_id, {"error": "pedido no encontrado"})
 
 
 @laplace.observe(type="tool")
 def consultar_stock(sku: str) -> int:
     time.sleep(0.1)
-    return STOCK.get(sku, 0)
+    return t.STOCK.get(sku, 0)
 
 
 @laplace.observe(type="tool")
@@ -200,8 +112,8 @@ def estado_almacen(pedido_id: str, intento: int) -> str:
 def clasificar_intencion(ticket: str) -> str:
     """P1 · Tres votos idénticos: temperatura 0, mismo prompt, misma respuesta."""
     votos = [
-        _llamar(
-            PEQUENO,
+        t.llamar(
+            t.PEQUENO,
             "Clasifica el mensaje del cliente en una sola palabra: "
             "envio, devolucion, defecto, cambio, cobro u otro.",
             ticket,
@@ -215,8 +127,8 @@ def clasificar_intencion(ticket: str) -> str:
 @laplace.observe(tags=["P2-modelo-caro"])
 def detectar_idioma(ticket: str) -> str:
     """P2 · El modelo grande para contestar «es», «en» o «fr»."""
-    return _llamar(
-        GRANDE,
+    return t.llamar(
+        t.GRANDE,
         "Di el idioma del texto con su código de dos letras. Sólo el código.",
         ticket,
         max_tokens=3,
@@ -225,8 +137,8 @@ def detectar_idioma(ticket: str) -> str:
 
 @laplace.observe()
 def extraer_pedido(ticket: str) -> dict:
-    texto = _llamar(
-        PEQUENO,
+    texto = t.llamar(
+        t.PEQUENO,
         "Extrae el número de pedido del mensaje. Responde sólo el número, como PED-1234.",
         ticket,
         max_tokens=8,
@@ -243,8 +155,8 @@ def esperar_confirmacion_almacen(pedido_id: str) -> bool:
         estado = estado_almacen(pedido_id, intento)
         if estado == "listo":  # el almacén dice «Listo para envío»: no casa nunca
             return True
-        _llamar(
-            PEQUENO,
+        t.llamar(
+            t.PEQUENO,
             "Eres el coordinador del almacén. Responde SEGUIR o PARAR.",
             f"Intento {intento + 1} de {INTENTOS_ALMACEN}. Estado del pedido {pedido_id}: "
             f"{estado}. ¿Seguimos esperando?",
@@ -257,9 +169,9 @@ def esperar_confirmacion_almacen(pedido_id: str) -> bool:
 def redactar_respuesta(ticket: str, pedido_id: str, intencion: str, idioma: str) -> str:
     """P3 · La política y el catálogo enteros, en cada llamada, sin caché."""
     pedido = consultar_pedido(pedido_id)  # P1, segunda vez
-    return _llamar(
-        GRANDE,
-        f"Eres el agente de soporte de una tienda de montaña.\n\n{POLITICA}\n\n"
+    return t.llamar(
+        t.GRANDE,
+        f"Eres el agente de soporte de una tienda de montaña.\n\n{t.POLITICA}\n\n"
         "Contesta al cliente en su idioma, en tres frases como mucho.",
         f"Idioma: {idioma}. Intención: {intencion}. Pedido: {pedido}.\n\nMensaje: {ticket}",
         max_tokens=120,
@@ -269,8 +181,8 @@ def redactar_respuesta(ticket: str, pedido_id: str, intencion: str, idioma: str)
 @laplace.observe()
 def revisar_respuesta(borrador: str, pedido_id: str) -> str:
     pedido = consultar_pedido(pedido_id)  # P1, tercera vez
-    return _llamar(
-        PEQUENO,
+    return t.llamar(
+        t.PEQUENO,
         "Revisa si la respuesta al cliente contradice los datos del pedido. "
         "Responde OK o describe el problema en una frase.",
         f"Pedido: {pedido}\n\nRespuesta: {borrador}",
@@ -282,8 +194,8 @@ def revisar_respuesta(borrador: str, pedido_id: str) -> str:
 def resumir_para_crm(ticket: str, numero: int) -> str:
     """P5 · La hora con segundos en las instrucciones: una identidad por ejecución."""
     ahora = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
-    return _llamar(
-        PEQUENO,
+    return t.llamar(
+        t.PEQUENO,
         f"Hoy es {ahora}. Estás archivando el ticket número {numero} en el CRM. "
         "Resume el problema del cliente en diez palabras.",
         ticket,
@@ -310,25 +222,18 @@ def atender_ticket(ticket: str, numero: int) -> str:
 # ---------------------------------------------------------------------------------
 
 
-def _comprobar_entorno() -> bool:
-    """Que Ollama y los dos modelos estén, sin descargar nada por nuestra cuenta."""
-    try:
-        disponibles = {m["id"] for m in httpx.get(f"{OLLAMA}/models", timeout=3).json()["data"]}
-    except Exception:  # noqa: BLE001
-        print(f"No hay Ollama escuchando en {OLLAMA}. Arráncalo (o instálalo) y repite.")
-        return False
-    faltan = [m for m in (PEQUENO, GRANDE) if m not in disponibles]
-    for modelo in faltan:
-        print(f"Falta el modelo {modelo} ({TAMANOS.get(modelo, 'tamaño desconocido')}):")
-        print(f"    ollama pull {modelo}")
-    if faltan:
-        return False
-    try:
-        httpx.get(f"{LAPLACE_ENDPOINT}/health", timeout=3).raise_for_status()
-    except Exception:  # noqa: BLE001
-        print(f"Aviso: Laplace no responde en {LAPLACE_ENDPOINT}. Las trazas se perderán.")
-        print("    Arráncalo antes con:  python -m laplace.cli ui")
-    return True
+def _salida_utf8() -> None:
+    """Windows escribe a una tubería en cp1252 y revienta con «→» o ««»».
+
+    Pasa sólo cuando la salida NO es una consola —redirigida a un fichero, o leída por
+    `demo_en_vivo.py`—, que es justo como se lanza esto. Un acento no puede tumbar un
+    agente de ejemplo.
+    """
+    for flujo in (sys.stdout, sys.stderr):
+        # Un flujo sin `reconfigure` (Python viejo, salida redirigida de forma rara) no
+        # es motivo para no arrancar.
+        with contextlib.suppress(Exception):
+            flujo.reconfigure(encoding="utf-8", errors="replace")
 
 
 def main() -> int:
@@ -337,13 +242,16 @@ def main() -> int:
     parser.add_argument("--ejecuciones", type=int, default=None, help="corta tras N tickets")
     parser.add_argument("--pausa", type=float, default=2.0, help="segundos entre tickets")
     args = parser.parse_args()
+    _salida_utf8()
 
-    if not _comprobar_entorno():
+    if not t.comprobar_entorno():
         return 1
 
-    laplace.init(project=PROYECTO, endpoint=LAPLACE_ENDPOINT, service_name="soporte-mediocre")
-    print(f"Proyecto «{PROYECTO}» → {LAPLACE_ENDPOINT}")
-    print(f"Modelos: pequeño {PEQUENO} · grande {GRANDE}")
+    laplace.init(
+        project=t.PROYECTO, endpoint=t.LAPLACE_ENDPOINT, service_name="soporte-mediocre"
+    )
+    print(f"[mediocre] proyecto «{t.PROYECTO}» → {t.LAPLACE_ENDPOINT}")
+    print(f"[mediocre] modelos: pequeño {t.PEQUENO} · grande {t.GRANDE}")
     limite = f"{args.ejecuciones} tickets" if args.ejecuciones else f"{args.minutos:g} minutos"
     print(f"Atendiendo tickets durante {limite}. Ctrl+C para parar.\n")
 
@@ -352,7 +260,7 @@ def main() -> int:
     try:
         while time.monotonic() < fin and (args.ejecuciones is None or numero < args.ejecuciones):
             numero += 1
-            ticket = random.choice(TICKETS)
+            ticket = random.choice(t.TICKETS)
             laplace.set_context(session_id=f"ticket-{numero}", user_id=ticket.split()[0])
             inicio = time.monotonic()
             try:
@@ -367,7 +275,7 @@ def main() -> int:
         print("\nParado a mano.")
 
     laplace.flush()
-    print(f"\nListo: {numero} tickets. Míralos en {LAPLACE_ENDPOINT}/?project={PROYECTO}")
+    print(f"\nListo: {numero} tickets. Míralos en {t.LAPLACE_ENDPOINT}/?project={t.PROYECTO}")
     return 0
 
 
