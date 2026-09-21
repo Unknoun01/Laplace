@@ -70,6 +70,15 @@ function Contenido() {
             : `en ${spanLabel(overview.observed_days)} de datos`}
         </h1>
 
+        {/* Sin una sola tarifa conocida no hay cifra que enseñar. Un «$0» grande con el
+            aviso debajo se lee como «no cuesta nada», que es lo contrario de lo que
+            decimos: el número se lee antes que el aviso (D-073, D-107). En su lugar va
+            el motivo, y debajo lo que sí está medido. */}
+        {overview.cost_unavailable ? (
+          <div className="pair">
+            <SinDinero motivo={overview.cost_unavailable} />
+          </div>
+        ) : (
         <div className="pair">
           <BigMoney
             amount={total}
@@ -90,8 +99,9 @@ function Contenido() {
             </>
           )}
         </div>
+        )}
 
-        {ahorra && (
+        {ahorra && !overview.cost_unavailable && (
           <GapBar
             necessary={necesario}
             avoidable={evitable}
@@ -339,5 +349,23 @@ export default function DiagnosticoPage() {
     <Suspense fallback={<Cargando />}>
       <Contenido />
     </Suspense>
+  );
+}
+
+
+/**
+ * Lo que va donde iría el dinero cuando no se puede calcular.
+ *
+ * No es un caso raro: le pasa a cualquiera que use modelos locales —un estudiante
+ * probando con Ollama— y a todo el mundo el día que sale un modelo nuevo y todavía no
+ * está en la tabla de precios. Lo que se enseña es el motivo, y el detalle de abajo
+ * sigue con tokens, trazas y latencia, que son datos medidos.
+ */
+function SinDinero({ motivo }: { motivo: string }) {
+  return (
+    <div className="nomoney">
+      <b>No podemos calcular el dinero</b>
+      <span>{motivo}</span>
+    </div>
   );
 }

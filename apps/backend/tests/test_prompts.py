@@ -36,7 +36,10 @@ from laplace_backend.storage.base import ObservedPrompt, PromptUsage, Window, Wi
 from laplace_backend.storage.metadata import SQLiteMetadataStore
 from laplace_backend.storage.sqlite import SQLiteStore
 
-AHORA = datetime(2026, 9, 12, 12, 0, tzinfo=timezone.utc)
+#: Relativo a ahora, no una fecha fija: los tests que piden la vista por la API usan
+#: una ventana de días desde hoy, así que una fecha escrita a mano los pone en rojo
+#: solos al cabo de una semana, por algo que no tiene que ver con lo que comprueban.
+AHORA = datetime.now(timezone.utc) - timedelta(minutes=30)
 
 
 # ---------------------------------------------------------------------------------

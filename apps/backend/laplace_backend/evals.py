@@ -159,6 +159,11 @@ class RunSummary(BaseModel):
     cases: int = 0
     cost_usd: float = 0.0
     judge_cost_usd: float = 0.0
+    #: Llamadas de esta tirada sin tarifa conocida. Con esto la pantalla sabe si el
+    #: coste de arriba es un total, un suelo o un cero que no significa nada: comparar
+    #: dos versiones por dinero con la mitad de las llamadas sin precio es comparar
+    #: cualquier cosa (D-107).
+    unknown_cost_spans: int = 0
     rates: list[Rate] = Field(default_factory=list)
     #: Con qué versiones de prompt corrió. Sale de las trazas (D-094).
     prompt_versions: list[str] = Field(default_factory=list)
@@ -516,6 +521,9 @@ def summarize_run(
         cases=lado.cases,
         cost_usd=lado.cost_usd,
         judge_cost_usd=lado.judge_cost_usd,
+        unknown_cost_spans=sum(
+            costs[i.trace_id].unknown_cost_spans for i in run.items if i.trace_id in costs
+        ),
         rates=lado.rates,
         prompt_versions=lado.prompt_versions,
     )

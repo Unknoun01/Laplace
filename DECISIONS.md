@@ -1417,3 +1417,113 @@ sí se han corregido.
 La lección es la misma que la del resto de esta tanda, aplicada a nosotros: una
 afirmación sobre lo que *no* hace un sistema también hay que comprobarla, y es la que
 más fácil se escribe sin mirar.
+
+## 2026-09-21 — Lo que el agente mediocre destapó
+
+Seis arreglos que salen de mirar el producto con tráfico real delante. Cinco de los seis
+son el mismo tipo de error: una cifra que se calla o que miente por redondeo conceptual,
+no por un fallo de programación.
+
+### D-106 — El sitio de un paso es el camino de llamada, no el nombre de la función
+La cobertura dejó de avisar de un paso partido en cuanto hubo dos agentes en el mismo
+proyecto. Uno metía la fecha con segundos en sus instrucciones —52 identidades en 52
+ejecuciones, ratio 1,00— y el otro no —1 en 53—. Como los pasos se agrupaban por el
+nombre de la función y los dos tenían una `resumir_para_crm`, el ratio conjunto salía
+0,50, por debajo del umbral de 0,80, y el producto se callaba.
+
+Bajar el umbral sólo habría movido el fallo de sitio. El problema era mezclar dos
+poblaciones bajo un mismo nombre. La mitad «desde dónde» de la identidad de un paso pasa
+a ser el **camino** de pasos abiertos —`atender_ticket > resumir_para_crm`—, que el SDK
+lleva en una pila de `ContextVar` y viaja en `laplace.step.site`. La etiqueta sigue
+siendo el nombre a secas, porque es lo que se lee en pantalla: el camino agrupa, no
+decora.
+
+Al auditar el resto del producto apareció un segundo sitio con el mismo fallo: la
+atribución de picos del Panel también agrupaba por nombre, así que el pico de un agente
+podía atribuirse al paso homónimo del otro. Mismo arreglo. Los demás agrupamientos
+—repeticiones, uso por modelo, prompts— ya iban por clave de paso.
+
+### D-107 — «No lo sabemos» no es «cero», y ahora hay un guardia que lo impide
+Tres pantallas distintas convertían un coste desconocido en un cero: el hallazgo de
+repetición decía «no gasta tokens de más» sobre 104 llamadas reales, el Panel enseñaba
+«Gasto total: 0 $» con el 100 % de las llamadas sin tarifa, y el inicio ponía un «$0»
+enorme con el aviso debajo —el patrón que D-073 prohibió para la proyección—.
+
+Tres parches habrían dejado abierta la cuarta puerta, así que se hizo un guardia, al
+estilo del que prohíbe `any()` en el SQL: un test recorre los modelos de la API y exige
+que **toda cifra en dólares venga acompañada** de algo que diga si se puede afirmar. Al
+escribirlo encontró tres sitios más que nadie había mirado: la serie del Panel, los picos
+y el resumen de Evaluaciones. Es decir, el fallo iba por la sexta vez, no por la tercera.
+
+La decisión de si hay dinero que afirmar vive ahora en un solo módulo, `dinero.py`, y la
+usan el inicio y el Panel. Cuando no hay ni una tarifa: el inicio enseña el motivo en vez
+del número —y debajo tokens, trazas y latencia, que sí están medidos—, las métricas de
+dinero del Panel valen `None` con su porqué, y no se enseñan picos, porque un pico se
+define por dinero.
+
+### D-108 — Las reglas de dinero tienen que funcionar sin tarifa
+Con modelos locales, dos de las tres reglas no podían disparar nunca: las dos necesitan
+la tabla de precios para calcular el ahorro. Eso deja sin producto a cualquiera que use
+Ollama, que es uno de los dos públicos de esto. Y el agente mediocre movía 8,2 veces más
+tokens que el sano sin que Laplace dijera una palabra.
+
+Las reglas pasan a detectar sobre lo que **siempre** se mide —tokens y tiempo— y el
+dinero aparece sólo cuando existe tarifa:
+
+* **Modelo caro para un paso corto**, sin tarifa: se mide en tiempo. «Este paso responde
+  4 tokens de media y usa el modelo que en tu propio tráfico tarda 4,6 veces más que
+  otro que ya usas». La alternativa sale del tráfico del usuario, no de una lista
+  nuestra: proponer un modelo que no ha probado sería inventar.
+* **Contexto fijo**: el desperdicio se expresa en tokens reenviados, y el dinero sólo se
+  añade si hay precio.
+* El orden de los hallazgos pasa a ser dinero → tokens → tiempo, porque sin tarifa el
+  primero no ordena nada.
+
+De paso, un fallo que sólo se ve con datos reales: el suelo de tokens de entrada de un
+paso se calculaba con `MIN(input_tokens)` sobre todas las llamadas, y una sola caída del
+proveedor —una llamada con 0 tokens— lo dejaba en cero y apagaba la regla del contexto
+fijo para ese paso en toda la ventana. Ahora el mínimo sólo mira llamadas que
+respondieron.
+
+**Una corrección sobre la marcha, con datos reales.** La primera versión comparaba
+**medias** de duración por llamada. En la tanda de verificación el portátil se suspendió
+a mitad, dejó dos spans de dos horas y nueve minutos, y la media de un paso inocente se
+disparó a 258 segundos por llamada: la regla lo señaló. Se cambió a **mediana**, que no
+se mueve por un valor extremo, y el falso positivo desapareció sobre los mismos datos.
+Es el tipo de fallo que no se ve con datos sembrados, porque nadie siembra un portátil
+que se duerme.
+
+Y un resultado honesto que conviene dejar escrito: con la mediana, el modelo grande
+tarda un 26 % más que el pequeño para una respuesta de dos tokens en esta máquina, por
+debajo del umbral de 1,8x. Así que sobre modelos locales esta regla **se calla**, y hace
+bien: sin tarifa, lo único que se podía afirmar era el tiempo, y el tiempo aquí apenas
+cambia. Con precios reales, la regla de siempre sigue funcionando igual.
+
+### D-109 — La regla de bucles, que era el diferenciador y no existía
+Lo que había era repetición **exacta**. Un bucle de verdad casi nunca repite exacto:
+lleva un contador de intentos, un número de página, una hora. El agente de ejemplo daba
+seis vueltas por ticket —312 llamadas al modelo en media hora, ninguna útil— y el
+producto no decía nada, porque para `dedup_hash` eran seis llamadas distintas.
+
+Un bucle atascado se define con dos señales, y hacen falta las dos:
+
+1. **Las entradas se parecen salvo en los números.** Un `loop_hash` nuevo, calculado
+   como el de deduplicación pero sustituyendo cada tirada de dígitos por `#`.
+2. **Las salidas casi no varían.** Muchas vueltas con una o dos salidas distintas es la
+   definición medible de «no avanza».
+
+La segunda no estaba en el diseño inicial y la impuso un contraejemplo que se escribió
+para probar la regla: un agente que procesa seis pedidos distintos hace seis llamadas que
+sólo se diferencian en un número, y eso es trabajo legítimo, no un bucle atascado. Por
+eso el hash de la salida **no** borra los números: ahí los números son el avance. El
+contraejemplo se queda como test.
+
+### D-110 — Tres textos que decían algo falso
+Salieron de leer la pantalla con datos reales, no de leer el código: una errata que
+duplicaba una palabra en el titular de cobertura; el consejo de «añade el precio de la
+página oficial» para modelos locales, que no tienen página ni precio ni nadie que cobre;
+y la señal de tokens del proveedor explicando como estimaciones lo que eran **llamadas
+que fallaron**, donde no hubo nada que estimar porque no hubo respuesta.
+
+El tercero es el que importa: una explicación que manda a mirar donde no es cuesta más
+que no explicar nada.

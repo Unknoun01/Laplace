@@ -44,6 +44,7 @@ from ._rows import (
 from .base import (
     Bucket,
     CoverageFacts,
+    LoopGroup,
     ModelUsage,
     ObservedPrompt,
     ProjectStats,
@@ -132,6 +133,8 @@ CREATE TABLE IF NOT EXISTS spans (
     metadata              TEXT NOT NULL DEFAULT '',
 
     dedup_hash            TEXT NOT NULL DEFAULT '',
+    loop_hash             TEXT NOT NULL DEFAULT '',
+    loop_out_hash         TEXT NOT NULL DEFAULT '',
     step_key              TEXT NOT NULL DEFAULT '',
     step_site             TEXT NOT NULL DEFAULT '',
     step_label            TEXT NOT NULL DEFAULT '',
@@ -163,6 +166,8 @@ CREATE INDEX IF NOT EXISTS idx_spans_paso    ON spans (project_id, step_key);
 #: mismo para el modo local, que es el que le pasa a un usuario de verdad al actualizar.
 COLUMNAS_TARDIAS = (
     ("step_site", "TEXT NOT NULL DEFAULT ''"),
+    ("loop_hash", "TEXT NOT NULL DEFAULT ''"),
+    ("loop_out_hash", "TEXT NOT NULL DEFAULT ''"),
     ("prompt_name", "TEXT NOT NULL DEFAULT ''"),
     ("prompt_version", "INTEGER NOT NULL DEFAULT 0"),
 )
@@ -243,12 +248,93 @@ ORDER BY extra_coste DESC, extra_spans DESC, paso, modelo
 LIMIT :limit
 """
 
+#: Mediana de duración por (paso, modelo). Va aparte de `MODEL_USAGE_SQL` porque
+#: SQLite no trae percentiles y hay que sacarla ordenando: se numeran las filas del
+#: grupo y se toma la de en medio (las dos de en medio si el grupo es par).
+MEDIAN_DURATION_SQL = f"""
+WITH ordenadas AS (
+    SELECT
+        CASE WHEN step_key != '' THEN step_key ELSE name END AS paso_clave,
+        request_model,
+        duration_ms,
+        ROW_NUMBER() OVER (
+            PARTITION BY CASE WHEN step_key != '' THEN step_key ELSE name END, request_model
+            ORDER BY duration_ms, span_id
+        ) AS fila,
+        COUNT(*) OVER (
+            PARTITION BY CASE WHEN step_key != '' THEN step_key ELSE name END, request_model
+        ) AS n
+    FROM spans
+    WHERE {WINDOW_WHERE} AND span_type = 'llm' AND request_model != '' AND status != 'error'
+)
+SELECT paso_clave, request_model, AVG(duration_ms) AS mediana
+FROM ordenadas
+WHERE fila IN ((n + 1) / 2, (n + 2) / 2)
+GROUP BY paso_clave, request_model
+"""
+
+#: Bucles: el mismo paso muchas veces en una traza, con entradas que sólo cambian en
+#: los números y pocas salidas distintas. Es la regla 4 (D-109). Se excluyen las
+#: repeticiones exactas —`distintas_entradas = 1`—, que ya cuenta la regla 1.
+LOOP_GROUPS_SQL = f"""
+WITH por_traza AS (
+    SELECT
+        trace_id,
+        loop_hash,
+        MAX(CASE WHEN step_label != '' THEN step_label ELSE name END) AS etiqueta,
+        MAX(step_hint)                     AS pista,
+        MAX(span_type)                     AS tipo,
+        MAX(request_model)                 AS modelo,
+        MAX(CASE WHEN step_key != '' THEN step_key ELSE name END) AS paso,
+        COUNT(*)                           AS n,
+        COUNT(DISTINCT dedup_hash)         AS entradas,
+        COUNT(DISTINCT loop_out_hash)      AS salidas,
+        SUM(cost_total_usd)                AS coste,
+        SUM(duration_ms)                   AS duracion,
+        SUM(input_tokens)                  AS tok_in,
+        SUM(output_tokens)                 AS tok_out,
+        SUM(cost_unknown)                  AS sin_tarifa,
+        MIN(cost_total_usd)                AS coste_primera,
+        MIN(duration_ms)                   AS duracion_primera,
+        MIN(input_tokens)                  AS tok_in_primera,
+        MIN(output_tokens)                 AS tok_out_primera
+    FROM spans
+    WHERE {WINDOW_WHERE} AND loop_hash != ''
+    GROUP BY trace_id, loop_hash
+    HAVING n >= :min_vueltas AND entradas > 1 AND salidas <= :max_salidas
+)
+SELECT
+    loop_hash                          AS hash_ejemplo,
+    MAX(etiqueta)                      AS nombre,
+    MAX(pista)                         AS pista,
+    MAX(tipo)                          AS tipo,
+    MAX(modelo)                        AS modelo,
+    MAX(paso)                          AS paso,
+    COUNT(DISTINCT trace_id)           AS trazas,
+    SUM(n)                             AS total_spans,
+    SUM(n - 1)                         AS extra_spans,
+    MAX(n)                             AS max_por_traza,
+    MAX(entradas)                      AS distintas_entradas,
+    MAX(salidas)                       AS distintas_salidas,
+    SUM(coste - coste_primera)         AS extra_coste,
+    SUM(duracion - duracion_primera)   AS extra_duracion,
+    SUM(tok_in - tok_in_primera)       AS extra_tok_in,
+    SUM(tok_out - tok_out_primera)     AS extra_tok_out,
+    SUM(sin_tarifa)                    AS extra_sin_tarifa,
+    MAX(trace_id)                      AS traza_ejemplo
+FROM por_traza
+GROUP BY loop_hash
+ORDER BY extra_spans DESC, loop_hash
+LIMIT :limit
+"""
+
 #: Uso por (paso, modelo): base de las reglas de modelo caro y de contexto fijo.
 MODEL_USAGE_SQL = f"""
 SELECT
     CASE WHEN step_key != '' THEN step_key ELSE name END AS paso_clave,
     MAX(CASE WHEN step_label != '' THEN step_label ELSE name END) AS paso,
     MAX(step_hint)                                  AS pista,
+    MAX(step_site)                                  AS sitio,
     request_model,
     COUNT(*)                                        AS llamadas,
     COUNT(DISTINCT trace_id)                        AS trazas,
@@ -262,7 +348,11 @@ SELECT
     SUM(cost_rate_assumed = 1)                      AS tarifa_asumida,
     AVG(output_tokens)                              AS media_salida,
     AVG(input_tokens)                               AS media_entrada,
-    MIN(input_tokens)                               AS min_entrada,
+    -- El mínimo, sólo de las llamadas que respondieron: una fallida trae 0 tokens y
+    -- hundía el suelo del contexto fijo (D-108). `NULLIF` las saca del MIN.
+    MIN(CASE WHEN status != 'error' AND input_tokens > 0 THEN input_tokens END)
+                                                    AS min_entrada,
+    SUM(duration_ms)                                AS duracion,
     MIN(trace_id)                                   AS traza_ejemplo
 FROM spans
 WHERE {WINDOW_WHERE} AND span_type = 'llm' AND request_model != ''
@@ -672,6 +762,36 @@ class SQLiteStore:
         ]
         return disambiguate(grupos)
 
+    def loop_groups(
+        self, project_id: str, window: Window, *, min_vueltas: int = 4,
+        max_salidas: int = 2, limit: int = 20,
+    ) -> list[LoopGroup]:
+        params = self._window_params(project_id, window)
+        params.update(min_vueltas=min_vueltas, max_salidas=max_salidas, limit=limit)
+        return [
+            LoopGroup(
+                loop_hash=r["hash_ejemplo"],
+                name=r["nombre"],
+                hint=r["pista"] or "",
+                span_type=r["tipo"],
+                model=r["modelo"] or "",
+                step_key=r["paso"] or "",
+                traces=int(r["trazas"]),
+                total_spans=int(r["total_spans"]),
+                extra_spans=int(r["extra_spans"]),
+                max_per_trace=int(r["max_por_traza"]),
+                distinct_inputs=int(r["distintas_entradas"]),
+                distinct_outputs=int(r["distintas_salidas"]),
+                extra_cost_usd=float(r["extra_coste"] or 0.0),
+                extra_duration_ms=float(r["extra_duracion"] or 0.0),
+                extra_input_tokens=int(r["extra_tok_in"] or 0),
+                extra_output_tokens=int(r["extra_tok_out"] or 0),
+                extra_unknown_cost_spans=int(r["extra_sin_tarifa"] or 0),
+                sample_trace_id=r["traza_ejemplo"],
+            )
+            for r in self._query(LOOP_GROUPS_SQL, params)
+        ]
+
     def model_usage(
         self, project_id: str, window: Window, *, min_calls: int = 5, limit: int = 50
     ) -> list[ModelUsage]:
@@ -683,6 +803,7 @@ class SQLiteStore:
                 key=r["paso_clave"],
                 name=r["paso"],
                 hint=r["pista"] or "",
+                site=r["sitio"] or "",
                 model=r["request_model"],
                 calls=int(r["llamadas"]),
                 traces=int(r["trazas"]),
@@ -696,11 +817,20 @@ class SQLiteStore:
                 assumed_rate_spans=int(r["tarifa_asumida"] or 0),
                 avg_output_tokens=float(r["media_salida"]),
                 avg_input_tokens=float(r["media_entrada"]),
-                min_input_tokens=int(r["min_entrada"]),
+                # `None` cuando todas las llamadas del paso fallaron: no hay suelo
+                # de entrada que afirmar, y cero diría otra cosa (D-108).
+                min_input_tokens=int(r["min_entrada"] or 0),
+                duration_ms=float(r["duracion"] or 0.0),
                 sample_trace_id=r["traza_ejemplo"],
             )
             for r in self._query(MODEL_USAGE_SQL, params)
         ]
+        medianas = {
+            (r["paso_clave"], r["request_model"]): float(r["mediana"] or 0.0)
+            for r in self._query(MEDIAN_DURATION_SQL, params)
+        }
+        for uso in usos:
+            uso.p50_duration_ms = medianas.get((uso.key, uso.model), 0.0)
         return disambiguate(usos)
 
     def traces_with_repeats(

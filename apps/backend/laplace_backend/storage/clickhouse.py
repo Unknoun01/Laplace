@@ -25,6 +25,7 @@ from ._rows import utc as _utc
 from .base import (
     Bucket,
     CoverageFacts,
+    LoopGroup,
     ModelUsage,
     ObservedPrompt,
     ProjectStats,
@@ -170,6 +171,59 @@ GROUP BY tramo
 ORDER BY tramo
 """
 
+#: Bucles: gemelo de `LOOP_GROUPS_SQL` de sqlite.py (D-109). Mismo criterio, mismos
+#: alias: el contrato entre los dos almacenes son los nombres de las columnas (D-066).
+LOOP_GROUPS_SQL = f"""
+SELECT
+    loop_hash                        AS hash_ejemplo,
+    max(etiqueta)                    AS nombre,
+    max(pista)                       AS pista,
+    max(tipo)                        AS tipo,
+    max(modelo)                      AS modelo,
+    max(paso)                        AS paso,
+    uniqExact(trace_id)              AS trazas,
+    sum(n)                           AS total_spans,
+    sum(n - 1)                       AS extra_spans,
+    max(n)                           AS max_por_traza,
+    max(entradas)                    AS distintas_entradas,
+    max(salidas)                     AS distintas_salidas,
+    sum(coste - coste_primera)       AS extra_coste,
+    sum(duracion - duracion_primera) AS extra_duracion,
+    sum(tok_in - tok_in_primera)     AS extra_tok_in,
+    sum(tok_out - tok_out_primera)   AS extra_tok_out,
+    sum(sin_tarifa)                  AS extra_sin_tarifa,
+    max(trace_id)                    AS traza_ejemplo
+FROM (
+    SELECT
+        trace_id,
+        loop_hash,
+        max(if(step_label != '', step_label, name)) AS etiqueta,
+        max(step_hint)                     AS pista,
+        max(span_type)                     AS tipo,
+        max(request_model)                 AS modelo,
+        max(if(step_key != '', step_key, name)) AS paso,
+        count()                            AS n,
+        uniqExact(dedup_hash)              AS entradas,
+        uniqExact(loop_out_hash)           AS salidas,
+        sum(cost_total_usd)                AS coste,
+        min(cost_total_usd)                AS coste_primera,
+        sum(duration_ms)                   AS duracion,
+        min(duration_ms)                   AS duracion_primera,
+        sum(input_tokens)                  AS tok_in,
+        min(input_tokens)                  AS tok_in_primera,
+        sum(output_tokens)                 AS tok_out,
+        min(output_tokens)                 AS tok_out_primera,
+        sum(cost_unknown)                  AS sin_tarifa
+    FROM spans FINAL
+    WHERE {WINDOW_WHERE} AND loop_hash != ''
+    GROUP BY trace_id, loop_hash
+    HAVING n >= %(min_vueltas)s AND entradas > 1 AND salidas <= %(max_salidas)s
+)
+GROUP BY loop_hash
+ORDER BY extra_spans DESC, loop_hash
+LIMIT %(limit)s
+"""
+
 #: Uso por (paso, modelo): base de las reglas de modelo caro y de contexto fijo.
 MODEL_USAGE_SQL = f"""
 SELECT
@@ -182,6 +236,7 @@ SELECT
     if(step_key != '', step_key, name) AS paso_clave,
     max(if(step_label != '', step_label, name)) AS paso,
     max(step_hint)           AS pista,
+    max(step_site)           AS sitio,
     request_model,
     count()                  AS llamadas,
     uniqExact(trace_id)      AS trazas,
@@ -195,7 +250,13 @@ SELECT
     countIf(cost_rate_assumed = 1) AS tarifa_asumida,
     avg(output_tokens)       AS media_salida,
     avg(input_tokens)        AS media_entrada,
-    min(input_tokens)        AS min_entrada,
+    -- Sólo de las llamadas que respondieron: gemelo del de sqlite.py (D-108).
+    minIf(input_tokens, status != 'error' AND input_tokens > 0) AS min_entrada,
+    sum(duration_ms)         AS duracion,
+    -- La MEDIANA por llamada, que es lo que se compara entre modelos: una media se la
+    -- lleva por delante un solo span anómalo (D-108). Las fallidas no cuentan: no
+    -- tardan lo que tarda el modelo, tardan lo que tarda un error.
+    quantileExactIf(0.5)(duration_ms, status != 'error') AS mediana,
     -- `min` y no `any`: es lo que hace SQLite, y una traza de ejemplo que cambia entre
     -- almacenes manda a dos personas a mirar ejecuciones distintas del mismo hallazgo.
     min(trace_id)            AS traza_ejemplo
@@ -551,6 +612,37 @@ class ClickHouseStore:
         # Mismo título para dos pasos distintos es peor que no enseñarlos.
         return disambiguate(grupos)
 
+    def loop_groups(
+        self, project_id: str, window: Window, *, min_vueltas: int = 4,
+        max_salidas: int = 2, limit: int = 20,
+    ) -> list[LoopGroup]:
+        """Gemelo del de sqlite.py: mismos umbrales, mismos alias (D-066, D-109)."""
+        params = self._window_params(project_id, window)
+        params.update(min_vueltas=min_vueltas, max_salidas=max_salidas, limit=limit)
+        return [
+            LoopGroup(
+                loop_hash=r["hash_ejemplo"],
+                name=r["nombre"],
+                hint=r["pista"] or "",
+                span_type=r["tipo"],
+                model=r["modelo"] or "",
+                step_key=r["paso"] or "",
+                traces=int(r["trazas"]),
+                total_spans=int(r["total_spans"]),
+                extra_spans=int(r["extra_spans"]),
+                max_per_trace=int(r["max_por_traza"]),
+                distinct_inputs=int(r["distintas_entradas"]),
+                distinct_outputs=int(r["distintas_salidas"]),
+                extra_cost_usd=float(r["extra_coste"] or 0.0),
+                extra_duration_ms=float(r["extra_duracion"] or 0.0),
+                extra_input_tokens=int(r["extra_tok_in"] or 0),
+                extra_output_tokens=int(r["extra_tok_out"] or 0),
+                extra_unknown_cost_spans=int(r["extra_sin_tarifa"] or 0),
+                sample_trace_id=r["traza_ejemplo"],
+            )
+            for r in _named(self._client.query(LOOP_GROUPS_SQL, parameters=params))
+        ]
+
     def model_usage(
         self, project_id: str, window: Window, *, min_calls: int = 5, limit: int = 50
     ) -> list[ModelUsage]:
@@ -576,7 +668,11 @@ class ClickHouseStore:
                 assumed_rate_spans=int(r["tarifa_asumida"] or 0),
                 avg_output_tokens=float(r["media_salida"]),
                 avg_input_tokens=float(r["media_entrada"]),
-                min_input_tokens=int(r["min_entrada"]),
+                # `None` cuando todas las llamadas del paso fallaron: no hay suelo
+                # de entrada que afirmar, y cero diría otra cosa (D-108).
+                min_input_tokens=int(r["min_entrada"] or 0),
+                duration_ms=float(r["duracion"] or 0.0),
+                p50_duration_ms=float(r["mediana"] or 0.0),
                 sample_trace_id=r["traza_ejemplo"],
             )
             for r in _named(self._client.query(sql, parameters=params))

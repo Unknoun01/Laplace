@@ -93,6 +93,8 @@ CREATE TABLE IF NOT EXISTS spans
 
     -- Identidad del PASO: mismo sitio de llamada y mismas instrucciones. Es por lo que
     -- agrupan las reglas 2 y 3. No es dedup_hash, que ademas exige la misma entrada.
+    loop_hash           String,
+    loop_out_hash       String,
     step_key            String,
     step_site           String,
     step_label          String,
@@ -158,6 +160,11 @@ ALTER TABLE spans ADD COLUMN IF NOT EXISTS step_hint String DEFAULT '';
 -- que lo envuelve, asi que dos agentes con una funcion homonima compartian sitio y
 -- sus poblaciones se mezclaban: el sano tapaba al roto. Ahora es el camino entero.
 ALTER TABLE spans ADD COLUMN IF NOT EXISTS step_site String DEFAULT '';
+
+-- Instalaciones anteriores a D-109, cuando la unica senal de repeticion era el
+-- hash exacto y un bucle con contador de intentos era invisible.
+ALTER TABLE spans ADD COLUMN IF NOT EXISTS loop_hash String DEFAULT '';
+ALTER TABLE spans ADD COLUMN IF NOT EXISTS loop_out_hash String DEFAULT '';
 
 -- Instalaciones anteriores a la gestion de prompts (D-090). La version va en la traza
 -- porque las metricas de la pestana son POR VERSION: sin la columna habria que

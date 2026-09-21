@@ -1,6 +1,6 @@
 # Estado de Laplace
 
-Última actualización: 17 de septiembre de 2026.
+Última actualización: 21 de septiembre de 2026.
 
 ## Dónde está el producto
 
@@ -108,6 +108,26 @@ Lo que sostiene esas casillas, en concreto:
   local no factura, su caché sólo reporta lecturas y con reglas propias, y cuenta
   tokens con otro tokenizador; lo que no puede dar —escrituras en caché, la forma de
   Anthropic— se simula en un fichero aparte y marcado (D-103, D-104, D-105).
+- **Un agente de ejemplo deliberadamente mediocre**, corriendo de verdad contra dos
+  modelos locales, con un agente sano al lado que hace el mismo trabajo bien escrito.
+  Existe para ver qué detecta Laplace con tráfico real y, sobre todo, **qué no**: de las
+  cinco patologías que lleva dentro, al principio se veían dos. Las otras tres, más seis
+  fallos del propio producto, salieron de mirar la pantalla con esos datos delante
+  (D-105 a D-110).
+- **La identidad de un paso es el camino de llamada**, no el nombre de la función. Con
+  el nombre, dos agentes con una función homónima mezclaban sus poblaciones y un
+  llamante sano tapaba a uno roto: la media escondiendo el caso que importa, por segunda
+  vez (D-106).
+- **«No lo sabemos» ya no puede llegar a pantalla como un cero.** Un guardia recorre los
+  modelos de la API y exige que toda cifra en dólares venga con algo que diga si se
+  puede afirmar; al escribirlo encontró tres sitios más de los tres que ya se conocían
+  (D-107).
+- **Las tres reglas de dinero funcionan sin tarifa**, expresadas en tokens y tiempo, que
+  se miden siempre. Antes, con modelos locales, dos de las tres no podían disparar nunca
+  y un agente que movía ocho veces más tokens no producía ni un hallazgo (D-108).
+- **Y hay una regla de bucles de verdad**, que era el diferenciador del producto desde el
+  principio y no existía: lo único que había era repetición exacta, y un bucle con
+  contador de intentos es invisible para eso (D-109).
 - **Ninguna consulta escoge «una fila cualquiera».** El patrón `any()` / `argMax` sin
   desempate / `ORDER BY` sin desempate apareció por cuarta vez y se cerró entero en los
   dos almacenes, con pruebas de paridad sobre tráfico **empatado a propósito** y dos
@@ -116,7 +136,7 @@ Lo que sostiene esas casillas, en concreto:
   Anthropic estaba completo; faltaba leer `prompt_tokens_details.cache_write_tokens`, así
   que esos tokens se cobraban a tarifa de entrada y **nuestro coste de OpenAI salía por
   debajo del real** (D-101).
-- **316 pruebas.** Con ClickHouse, Postgres y un modelo local levantados sólo se saltan
+- **329 pruebas.** Con ClickHouse, Postgres y un modelo local levantados sólo se saltan
   las 4 que necesitan una clave de proveedor. Las de prompts cubren las guardas
   compartidas con Evaluaciones y que un pico no se atribuya a un despliegue por la hora;
   las de cobertura, que un paso partido no pase por sano; las
@@ -154,6 +174,26 @@ todo lo anterior se pueda interpretar. Las integraciones de OpenAI y Anthropic y
 un acto de fe: corren contra los clientes reales en cada `pytest`, y con un modelo local
 levantado corren además contra un servidor de verdad, por HTTP, sin falsear el cuerpo de
 la respuesta.
+
+### Lo que sigue sin detectarse, y por qué
+
+Del agente de ejemplo, con los seis arreglos puestos, Laplace ve cuatro de las cinco
+patologías con tráfico real: las dos repeticiones, el bucle —por los dos caminos, modelo
+y herramienta— y el paso partido por la fecha.
+
+Las otras dos merecen una frase cada una, porque **callarse es la respuesta correcta** y
+conviene que quede escrito por qué:
+
+* **El modelo caro en un paso trivial.** Sin tarifa lo único que se puede afirmar es el
+  tiempo, y sobre esta máquina el modelo grande tarda un 26 % más que el pequeño para
+  responder dos tokens: por debajo del umbral de 1,8x. Con precios reales la regla de
+  siempre funciona igual; sin ellos, aquí no había nada que decir.
+* **El contexto fijo reenviado.** Ollama cachea el prefijo por su cuenta y sirve el
+  91 % de esos tokens desde caché, así que lo que se reenvía de verdad es poco y la
+  regla se calla. Contra OpenAI la caché también es automática por encima de 1.024
+  tokens, pero ahí las lecturas **sí se cobran** —entre un 10 % y un 50 % de la entrada
+  según el proveedor—, y eso es dinero que esta regla todavía no mira. Es el siguiente
+  paso de la regla 3, y está sin hacer.
 
 ### Lo que los tests contra modelo local NO verifican
 

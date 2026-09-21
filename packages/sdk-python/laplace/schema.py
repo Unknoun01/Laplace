@@ -220,6 +220,14 @@ class Span(_Model):
     #: Es la mitad «desde dónde» de la identidad, y se guarda aparte porque agrupar por
     #: el nombre de la función mezcla dos agentes que la llamen igual (D-106).
     step_site: str = ""
+    #: Hash de la llamada **ignorando los números**: dos vueltas de un bucle que sólo
+    #: se diferencian en el contador de intentos caen juntas. `dedup_hash` sólo ve
+    #: repeticiones exactas, y un bucle de verdad casi nunca lo es (D-109).
+    loop_hash: str = ""
+    #: Lo mismo para la salida, pero **sin** borrar los números: ahí los números son
+    #: el avance. Muchas vueltas con pocas salidas distintas es la definición medible
+    #: de «da vueltas sin llegar a ninguna parte».
+    loop_out_hash: str = ""
 
     #: Prompt **gestionado** con el que se hizo esta llamada, si lo hubo. Lo escribe el
     #: SDK sólo cuando el texto de esa versión aparece de verdad en los mensajes

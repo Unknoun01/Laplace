@@ -73,13 +73,18 @@ export function GapBar({
 export function FindingCard({ finding, href }: { finding: Finding; href: string }) {
   const flojo = !finding.costs_money;
   const proyecta = finding.monthly_saving_usd !== null;
+  // Sin tarifa no hay dinero que enseñar, pero sí tokens: son datos medidos. Enseñar
+  // «0 $» o sólo el tiempo diría que no gasta, y gasta (D-107).
+  const enTokens = flojo && finding.window_waste_tokens > 0;
 
   return (
     <Link href={href} className={`card${flojo ? " low" : ""}`}>
       <div className="card-top">
         <h3>{finding.title}</h3>
         <div className="price">
-          {flojo
+          {enTokens
+            ? tokens(finding.window_waste_tokens)
+            : flojo
             ? duration(finding.window_waste_ms)
             : `${finding.cost_is_floor ? "≥ " : ""}${money(
                 proyecta ? finding.monthly_saving_usd! : finding.window_waste_usd,
@@ -87,7 +92,15 @@ export function FindingCard({ finding, href }: { finding: Finding; href: string 
               )}`}
           {/* Sin proyección la cifra es dinero ya gastado. La ventana concreta la dice
               una vez la cabecera de la sección: repetirla en cada tarjeta es ruido. */}
-          <small>{flojo ? "de espera evitable" : proyecta ? "al mes" : "ya gastado"}</small>
+          <small>
+            {enTokens
+              ? "tokens de más"
+              : flojo
+              ? "de espera evitable"
+              : proyecta
+              ? "al mes"
+              : "ya gastado"}
+          </small>
         </div>
       </div>
       <p>{finding.summary}</p>
