@@ -1527,3 +1527,60 @@ que fallaron**, donde no hubo nada que estimar porque no hubo respuesta.
 
 El tercero es el que importa: una explicación que manda a mirar donde no es cuesta más
 que no explicar nada.
+
+## 2026-09-22 — La nube, ejecutada; y las medias que quedaban
+
+### D-111 — Leer de caché también se cobra, y la regla no lo miraba
+La regla del contexto fijo, ya rediseñada en D-108, seguía contestando media pregunta:
+cuánto del prefijo **no** se está cacheando. La otra mitad es que leer de caché no es
+gratis —OpenAI cobra la lectura entre el 10 % y el 50 % de la entrada según el modelo,
+Anthropic el 10 %—, así que un prefijo de tres mil tokens bien cacheado en diez mil
+llamadas sigue siendo una factura, y el producto se callaba porque «ya usa caché».
+
+Ahora el hallazgo sale también en ese caso, y dice otra cosa: no «actívala», que sería
+proponer lo que ya se hace, sino «la caché ya está haciendo su trabajo, pero leerla
+también se cobra: son X $, el N % de lo que gastas; eso no baja cacheando mejor, baja
+mandando menos». El umbral para hablar es que esas lecturas pesen al menos un 5 % del
+gasto del proyecto.
+
+Y una cuenta que hay que no equivocar: cuando la caché ya funciona, el dinero del
+hallazgo es **sólo** el de las lecturas. Apuntar además el ahorro de cachear sería
+prometer dinero por hacer lo que ya se hace.
+
+El test que decía «a quien ya usa la caché no se le recomienda activarla» se conserva con
+ese nombre y esa promesa —sigue comprobando que no se le propone cachear— y gana la
+comprobación nueva. Su cifra esperada se saca ahora del propio almacén y no de una cuenta
+a mano, para que no envejezca con el tamaño del fixture.
+
+### D-112 — Las medias que quedaban, y la nube ejecutada de verdad
+Cambiar a mediana la comparación de duraciones (D-108) dejaba una pregunta abierta: si
+hizo falta en una regla, probablemente hiciera falta en más. Auditado el motor entero,
+quedaba un caso: las dos reglas del modelo caro decidían con la **media** de tokens de
+salida. Una generación desbocada —un modelo que se pone a repetir hasta agotar
+`max_tokens`— mueve esa media igual que un span de dos horas movía la otra, y con ella la
+decisión. Las dos pasan a decidir por mediana; las medias se siguen enseñando, pero para
+leerlas, no para decidir.
+
+Queda uno a propósito y anotado: la duración por ejecución del Panel es una media, y
+sufriría lo mismo. Ahí la mediana exige percentiles por tramo sobre trazas, no sobre
+spans, y es un cambio de otra talla; el Panel además enseña esa cifra con su periodo al
+lado y no decide nada con ella.
+
+**Y lo que no puede repetirse:** esta tanda tocó el SQL de los dos almacenes —columna
+nueva, consulta de bucles, agrupación por camino— y se entregó con 55 pruebas saltadas
+porque ClickHouse no estaba levantado. Es la tercera vez, y las dos anteriores salieron
+fallos reales. Levantado, la suite pasa entera en 2 minutos y medio, no en trece: lo que
+tardaba eran los tiempos de espera de conexión contra un ClickHouse que no existía.
+
+Dos pruebas nuevas cierran ese agujero por donde se coló:
+
+* **La migración, sobre una base con datos dentro.** `CREATE TABLE IF NOT EXISTS` no toca
+  una tabla que ya existe, así que sobre una base vacía el `ALTER TABLE` no se ejercita
+  nunca y la prueba fácil pasa siempre. La nueva quita las tres columnas de esta tanda,
+  mete filas como las metía la versión anterior, pasa la migración por encima y exige tres
+  cosas: que el `ALTER` funcione con datos, que las filas viejas se sigan leyendo con las
+  columnas nuevas vacías, y que las consultas nuevas funcionen mezclando filas viejas y
+  nuevas. Comprobada quitando el `ALTER` del esquema: se pone en rojo.
+* **La paridad de la consulta de bucles**, con las dos trazas dando exactamente las mismas
+  vueltas, que es el tráfico empatado donde una elección arbitraria se separa (D-099). Y
+  la agrupación por camino, que también se escribió dos veces.

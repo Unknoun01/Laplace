@@ -136,8 +136,11 @@ Lo que sostiene esas casillas, en concreto:
   Anthropic estaba completo; faltaba leer `prompt_tokens_details.cache_write_tokens`, así
   que esos tokens se cobraban a tarifa de entrada y **nuestro coste de OpenAI salía por
   debajo del real** (D-101).
-- **329 pruebas.** Con ClickHouse, Postgres y un modelo local levantados sólo se saltan
-  las 4 que necesitan una clave de proveedor. Las de prompts cubren las guardas
+- **333 pruebas, 329 pasando y 4 saltadas** con ClickHouse y Postgres levantados: las 4
+  son las que necesitan una clave de proveedor. El camino de la nube se ejecuta, que es
+  lo que faltaba: una tanda que toca SQL de nube y se entrega con esas pruebas saltadas
+  está sin terminar (D-112). Con los almacenes en pie la suite tarda dos minutos y medio;
+  sin ellos tardaba trece, y todo ese tiempo eran esperas de conexión. Las de prompts cubren las guardas
   compartidas con Evaluaciones y que un pico no se atribuya a un despliegue por la hora;
   las de cobertura, que un paso partido no pase por sano; las
   de autenticación son casi todas **intentos de hacer lo que no se debe poder**; y las de

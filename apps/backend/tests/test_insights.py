@@ -391,7 +391,32 @@ def proyecto_con_cache(store: ClickHouseStore):
 
 
 def test_a_quien_ya_usa_la_cache_no_se_le_recomienda_activarla(store, window, proyecto_con_cache):
-    assert _contexto(store, proyecto_con_cache, window) is None
+    """La promesa de siempre, que no cambia: a quien ya cachea no se le dice que cachee.
+
+    Lo que sí cambió es la conclusión. Antes el hallazgo desaparecía, y con él
+    desaparecía un gasto real: **leer de caché se cobra** —un 10 % de la entrada en
+    Anthropic— y un prefijo de 20.000 tokens leído once veces sigue siendo una parte
+    gorda de la factura. Ahora el hallazgo sale, pero propone lo único que puede bajar
+    esa cifra: mandar menos contexto, no cachearlo mejor (D-111).
+    """
+    hallazgo = _contexto(store, proyecto_con_cache, window)
+    assert hallazgo is not None, "el prefijo fijo sigue costando dinero aunque esté cacheado"
+    texto = hallazgo.summary.lower()
+    assert "cachearlos ahorraría" not in texto, "no se le puede proponer lo que ya hace"
+    assert "leerla también se cobra" in texto
+    assert "mandando menos" in texto
+    # Y la cifra es exactamente lo que cuestan esas lecturas: los tokens servidos de
+    # caché que ve el almacén, a la tarifa de lectura de claude-sonnet-5 (0,20 $/1M).
+    # Se saca del propio almacén y no de una cuenta a mano, para que siga valiendo si
+    # alguien cambia el tamaño del fixture.
+    uso = next(
+        u
+        for u in store.model_usage(proyecto_con_cache, window, min_calls=1)
+        if u.cached_input_tokens
+    )
+    assert hallazgo.window_waste_usd == pytest.approx(
+        uso.cached_input_tokens * 0.2 / 1e6, rel=0.02
+    )
 
 
 def test_lo_que_la_cache_ya_ahorra_se_mide_y_llega_al_heroe(store, window, proyecto_con_cache):

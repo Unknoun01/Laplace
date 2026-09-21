@@ -35,6 +35,8 @@ FindingKind = Literal["repeticion", "modelo_caro", "contexto_fijo", "bucle"]
 Difficulty = Literal["easy", "mid", "hard"]
 
 DAYS_PER_MONTH = 30
+#: Tokens por unidad de tarifa. La tabla de precios da dólares por millón.
+_MILLION = 1_000_000.0
 
 #: Por encima de esta proporción del gasto, un ahorro deja de sonar creíble aunque los
 #: números salgan. La interfaz lo presenta con cautela y enseña el desglose completo.
@@ -671,7 +673,10 @@ def _modelo_caro_sin_tarifa(
 
     Lo que **no** se dice es cuánto dinero ahorraría, porque no se sabe.
     """
-    if usage.avg_output_tokens > MAX_SALIDA_TRIVIAL_SIN_TARIFA:
+    # La MEDIANA de salida, no la media: una generación desbocada mueve la media de un
+    # paso que normalmente contesta tres palabras, y esta regla decide con ese número.
+    salida = usage.p50_output_tokens or usage.avg_output_tokens
+    if salida > MAX_SALIDA_TRIVIAL_SIN_TARIFA:
         return None
     rapido = _modelo_mas_rapido(otros, excepto=usage.model)
     if rapido is None or not usage.p50_duration_ms:
@@ -687,7 +692,7 @@ def _modelo_caro_sin_tarifa(
         kind="modelo_caro",
         title=f"Un paso muy corto se lo lleva el modelo más lento: «{usage.name}»",
         summary=(
-            f"«{usage.name}» responde con {usage.avg_output_tokens:.0f} tokens de media y usa "
+            f"«{usage.name}» responde con {salida:.0f} tokens en una llamada normal y usa "
             f"{usage.model}, que en tu propio tráfico tarda {ms_actual / ms_rapido:.1f} veces "
             f"más por llamada que {nombre_rapido}, un modelo que ya usas. Cambiarlo te "
             f"ahorraría {_seconds(ahorro_ms)} en esta ventana. Cuánto dinero, no lo sabemos: "
@@ -858,7 +863,7 @@ def _cheaper_model_if_recommended(usage: ModelUsage) -> str | None:
     """
     if usage.calls < MIN_CALLS_FOR_MODEL_RULE:
         return None
-    if usage.avg_output_tokens > MAX_OUTPUT_TOKENS_FOR_CHEAP_TASK:
+    if (usage.p50_output_tokens or usage.avg_output_tokens) > MAX_OUTPUT_TOKENS_FOR_CHEAP_TASK:
         return None
     table = get_price_table()
     price = table.lookup(usage.model)
@@ -915,9 +920,28 @@ def _cache_arithmetic(usage: ModelUsage) -> tuple[int, int, float] | None:
     return lecturas, escrituras, ahorro
 
 
-#: Por debajo de esta parte del contexto fijo sin cachear, el paso ya está
-#: aprovechando la caché y no hay nada que decirle.
+#: Por debajo de esta parte del contexto fijo sin cachear, la caché ya se está llevando
+#: casi todo y no hay nada que proponer por ese lado.
 MIN_PARTE_SIN_CACHEAR = 0.35
+#: …pero leer de caché **también se cobra** —entre un 10 % y un 50 % de la entrada según
+#: el proveedor—, así que un prefijo fijo bien cacheado puede seguir siendo una parte
+#: gorda de la factura. Por encima de esta parte del gasto del proyecto, se dice, aunque
+#: la caché esté funcionando: lo que se propone entonces no es cachear, es acortar.
+MIN_PARTE_DEL_GASTO_EN_LECTURAS = 0.05
+
+
+def _coste_de_leer_cache(usage: ModelUsage) -> float:
+    """Lo que cuesta, en dinero medido, servir de caché el prefijo fijo del paso.
+
+    Leer de caché es más barato que la entrada normal, pero no es gratis: OpenAI cobra
+    la lectura al 10-50 % de la entrada según el modelo, y Anthropic al 10 %. Un prefijo
+    de tres mil tokens en diez mil llamadas sigue siendo una factura, y la regla del
+    contexto fijo no lo miraba: sólo hablaba de lo que **no** estaba cacheado (D-111).
+    """
+    price = get_price_table().lookup(usage.model)
+    if price is None or price.cached_input is None or not usage.cached_input_tokens:
+        return 0.0
+    return usage.cached_input_tokens * price.cached_input / _MILLION
 
 
 def _fixed_context_finding(
@@ -942,18 +966,29 @@ def _fixed_context_finding(
         return None
 
     reenviado = usage.min_input_tokens * usage.calls
+    if not reenviado:
+        return None
     sin_cachear = max(reenviado - usage.cached_input_tokens, 0)
-    if not reenviado or sin_cachear / reenviado < MIN_PARTE_SIN_CACHEAR:
-        return None  # la caché ya se está llevando casi todo
-
     parte = sin_cachear / reenviado
+
     cuentas = _cache_arithmetic(usage)
     ahorro = 0.0
     if cuentas is not None:
         _, _, ahorro = cuentas
         ahorro = max(ahorro, 0.0)
-    # El dinero es la parte que no se está cacheando, no el total reenviado.
+    # El dinero de cachear es el de la parte que NO se está cacheando.
     ahorro *= parte
+
+    # Y lo que cuesta lo que sí se cachea, que no es gratis: leer de caché se cobra.
+    # Es la mitad de la pregunta que faltaba, y la que manda contra OpenAI y Anthropic,
+    # donde la caché es automática o barata pero nunca libre (D-111).
+    coste_lecturas = _coste_de_leer_cache(usage)
+    pesan = (
+        summary.total_cost_usd > 0
+        and coste_lecturas / summary.total_cost_usd >= MIN_PARTE_DEL_GASTO_EN_LECTURAS
+    )
+    if parte < MIN_PARTE_SIN_CACHEAR and not pesan:
+        return None  # la caché se lo lleva casi todo y lo que cuesta leerla es menor
 
     de_cache = (
         f"De ellos, {_miles(usage.cached_input_tokens)} sí se sirven de caché; "
@@ -961,11 +996,30 @@ def _fixed_context_finding(
         if usage.cached_input_tokens
         else "Ninguno se está sirviendo de caché."
     )
-    precio = (
-        f" Cachearlos ahorraría {_money(ahorro)} en esta ventana."
-        if ahorro > 0
-        else " Cuánto dinero es, no lo sabemos: ese modelo no tiene tarifa conocida."
-    )
+    if parte < MIN_PARTE_SIN_CACHEAR:
+        # No se propone cachear, así que tampoco se apunta el ahorro de cachear: sería
+        # prometer dinero por hacer lo que ya se está haciendo.
+        ahorro = 0.0
+    if ahorro > 0:
+        precio = f" Cachearlos ahorraría {_money(ahorro)} en esta ventana."
+    elif coste_lecturas > 0:
+        # Aquí no se propone cachear —ya lo está— sino mandar menos.
+        parte_txt = (
+            f", el {coste_lecturas / summary.total_cost_usd:.0%} de lo que gastas"
+            if summary.total_cost_usd > 0
+            else ""
+        )
+        precio = (
+            f" La caché ya está haciendo su trabajo, pero **leerla también se cobra**: "
+            f"esas lecturas son {_money(coste_lecturas)}{parte_txt}. Eso no baja "
+            f"cacheando mejor; baja mandando menos."
+        )
+    else:
+        precio = " Cuánto dinero es, no lo sabemos: ese modelo no tiene tarifa conocida."
+
+    # El dinero del hallazgo es lo que de verdad se puede recuperar: lo que ahorraría
+    # cachear lo que no se cachea, más lo que cuestan las lecturas del prefijo fijo.
+    ahorro += coste_lecturas
 
     return Finding(
         id=f"contexto_fijo:{usage.key}:{usage.model}",
@@ -1182,7 +1236,8 @@ def detect(store: Any, project_id: str, window: Window) -> list[Finding]:
     for uso in usos:
         neto = _without_duplicates(uso, duplicados)
         if neto.calls >= MIN_CALLS_FOR_MODEL_RULE and (
-            neto.avg_output_tokens <= MAX_OUTPUT_TOKENS_FOR_CHEAP_TASK
+            (neto.p50_output_tokens or neto.avg_output_tokens)
+            <= MAX_OUTPUT_TOKENS_FOR_CHEAP_TASK
         ):
             hallazgo = _expensive_model_finding(neto, summary, dias, base, otros=usos)
             if hallazgo is not None:

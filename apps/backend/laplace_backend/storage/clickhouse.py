@@ -256,7 +256,8 @@ SELECT
     -- La MEDIANA por llamada, que es lo que se compara entre modelos: una media se la
     -- lleva por delante un solo span anómalo (D-108). Las fallidas no cuentan: no
     -- tardan lo que tarda el modelo, tardan lo que tarda un error.
-    quantileExactIf(0.5)(duration_ms, status != 'error') AS mediana,
+    quantileExactIf(0.5)(duration_ms, status != 'error')    AS mediana,
+    quantileExactIf(0.5)(output_tokens, status != 'error') AS mediana_salida,
     -- `min` y no `any`: es lo que hace SQLite, y una traza de ejemplo que cambia entre
     -- almacenes manda a dos personas a mirar ejecuciones distintas del mismo hallazgo.
     min(trace_id)            AS traza_ejemplo
@@ -673,6 +674,7 @@ class ClickHouseStore:
                 min_input_tokens=int(r["min_entrada"] or 0),
                 duration_ms=float(r["duracion"] or 0.0),
                 p50_duration_ms=float(r["mediana"] or 0.0),
+                p50_output_tokens=float(r["mediana_salida"] or 0.0),
                 sample_trace_id=r["traza_ejemplo"],
             )
             for r in _named(self._client.query(sql, parameters=params))

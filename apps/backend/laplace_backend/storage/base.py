@@ -208,6 +208,11 @@ class ModelUsage:
     #: pasó de verdad y señaló a un paso inocente. Una mediana no se mueve por un valor
     #: extremo, y lo que se compara entre modelos es justo eso, lo típico (D-108).
     p50_duration_ms: float = 0.0
+    #: Y la mediana de tokens de salida, por lo mismo: una generación desbocada —un
+    #: modelo que se pone a repetir hasta agotar `max_tokens`— mueve la media de un paso
+    #: que normalmente contesta tres palabras, y la regla del modelo caro decide con ese
+    #: número. Las medias siguen existiendo, pero para enseñarlas, no para decidir.
+    p50_output_tokens: float = 0.0
     sample_trace_id: str = ""
 
 

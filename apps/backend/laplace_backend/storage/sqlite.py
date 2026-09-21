@@ -248,7 +248,7 @@ ORDER BY extra_coste DESC, extra_spans DESC, paso, modelo
 LIMIT :limit
 """
 
-#: Mediana de duración por (paso, modelo). Va aparte de `MODEL_USAGE_SQL` porque
+#: Medianas por (paso, modelo): duración y tokens de salida. Va aparte de `MODEL_USAGE_SQL` porque
 #: SQLite no trae percentiles y hay que sacarla ordenando: se numeran las filas del
 #: grupo y se toma la de en medio (las dos de en medio si el grupo es par).
 MEDIAN_DURATION_SQL = f"""
@@ -257,6 +257,7 @@ WITH ordenadas AS (
         CASE WHEN step_key != '' THEN step_key ELSE name END AS paso_clave,
         request_model,
         duration_ms,
+        output_tokens,
         ROW_NUMBER() OVER (
             PARTITION BY CASE WHEN step_key != '' THEN step_key ELSE name END, request_model
             ORDER BY duration_ms, span_id
@@ -267,7 +268,11 @@ WITH ordenadas AS (
     FROM spans
     WHERE {WINDOW_WHERE} AND span_type = 'llm' AND request_model != '' AND status != 'error'
 )
-SELECT paso_clave, request_model, AVG(duration_ms) AS mediana
+SELECT
+    paso_clave,
+    request_model,
+    AVG(duration_ms)   AS mediana,
+    AVG(output_tokens) AS mediana_salida
 FROM ordenadas
 WHERE fila IN ((n + 1) / 2, (n + 2) / 2)
 GROUP BY paso_clave, request_model
@@ -826,11 +831,16 @@ class SQLiteStore:
             for r in self._query(MODEL_USAGE_SQL, params)
         ]
         medianas = {
-            (r["paso_clave"], r["request_model"]): float(r["mediana"] or 0.0)
+            (r["paso_clave"], r["request_model"]): (
+                float(r["mediana"] or 0.0),
+                float(r["mediana_salida"] or 0.0),
+            )
             for r in self._query(MEDIAN_DURATION_SQL, params)
         }
         for uso in usos:
-            uso.p50_duration_ms = medianas.get((uso.key, uso.model), 0.0)
+            uso.p50_duration_ms, uso.p50_output_tokens = medianas.get(
+                (uso.key, uso.model), (0.0, 0.0)
+            )
         return disambiguate(usos)
 
     def traces_with_repeats(
