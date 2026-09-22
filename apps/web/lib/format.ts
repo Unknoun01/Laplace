@@ -9,6 +9,19 @@
 
 const SYMBOLS: Record<string, string> = { USD: "$", EUR: "€" };
 
+/**
+ * Punto para los millares, coma para los decimales. Espejo exacto de
+ * `cifras.py` en el backend, y comprobado contra él en `test_cifras.py`.
+ *
+ * La copia existe porque esto corre en otro runtime (D-069). Lo que no puede pasar es
+ * que las dos diverjan: el resumen de un hallazgo lo redacta el backend y el importe de
+ * su tarjeta lo pinta esta función, y se leen **uno al lado del otro** en la misma
+ * tarjeta. Antes divergían, y en la cabecera de una traza convivían «120.255 / 108» y
+ * «$0.007181» y «12,8 pasos por ejecución»: tres lecturas del mismo carácter (D-120).
+ */
+export const SEPARADOR_DECIMAL = ",";
+const LOCALE = "es-ES";
+
 export function money(amount: number, currency = "USD"): string {
   const symbol = SYMBOLS[currency] ?? `${currency} `;
   const value = Math.abs(amount);
@@ -22,30 +35,46 @@ export function money(amount: number, currency = "USD"): string {
 }
 
 function round(value: number, decimals: number): string {
-  const fixed = value.toFixed(decimals);
-  return decimals > 2 ? fixed.replace(/0+$/, "").replace(/\.$/, "") : fixed;
+  const fixed = value.toLocaleString(LOCALE, {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+  if (decimals <= 2) return fixed;
+  // Los ceros de relleno a la derecha sobran; el separador decimal se queda sólo si
+  // detrás de él queda algo.
+  return fixed.replace(/0+$/, "").replace(new RegExp(`${SEPARADOR_DECIMAL}$`), "");
+}
+
+/**
+ * Un número crudo con los decimales que se pidan, para el volcado de atributos del
+ * modo avanzado. Va por aquí y no con `toFixed` porque `toFixed` escribe el punto
+ * decimal inglés pase lo que pase, y entonces el mismo panel enseña «1.234,567» en una
+ * fila y «1234.567» en la de al lado (D-120).
+ */
+export function exacto(value: number, decimals: number): string {
+  return value.toLocaleString(LOCALE, { maximumFractionDigits: decimals });
 }
 
 export function duration(ms: number): string {
   if (ms < 1) return "<1 ms";
   if (ms < 1000) return `${Math.round(ms)} ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(2)} s`;
+  if (ms < 60_000) return `${round(ms / 1000, 2)} s`;
   const minutes = Math.floor(ms / 60_000);
   return `${minutes} m ${Math.round((ms % 60_000) / 1000)} s`;
 }
 
 export function tokens(count: number): string {
   if (count < 1000) return String(count);
-  if (count < 1_000_000) return `${(count / 1000).toFixed(count < 10_000 ? 1 : 0)} k`;
-  return `${(count / 1_000_000).toFixed(1)} M`;
+  if (count < 1_000_000) return `${round(count / 1000, count < 10_000 ? 1 : 0)} k`;
+  return `${round(count / 1_000_000, 1)} M`;
 }
 
 export function number(value: number): string {
-  return new Intl.NumberFormat("es-ES").format(value);
+  return new Intl.NumberFormat(LOCALE).format(value);
 }
 
 export function percent(ratio: number): string {
-  return `${(ratio * 100).toFixed(1)} %`;
+  return `${round(ratio * 100, 1)} %`;
 }
 
 export function timestamp(iso: string): string {
@@ -131,6 +160,6 @@ export function windowLabel(days: number): string {
 }
 
 /** Un decimal, coma española, y sin el «,0» que sobra en «7,0 días». */
-function decimal(value: number): string {
-  return value.toFixed(1).replace(/\.0$/, "").replace(".", ",");
+export function decimal(value: number): string {
+  return round(value, 1).replace(new RegExp(`${SEPARADOR_DECIMAL}0$`), "");
 }

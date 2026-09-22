@@ -29,6 +29,7 @@ from typing import Literal
 from laplace.schema import Annotation, Prompt, PromptDeploy, PromptVersion
 from pydantic import BaseModel, Field
 
+from . import cifras
 from .evals import MATERIAL_COST_CHANGE, Rate, SourceComparison, compare_rates, rate_for
 from .panel import MIN_TRACES_FOR_COMPARISON
 from .pasos import hay_homonimos, nombre_de_paso
@@ -244,11 +245,8 @@ class PromptsView(BaseModel):
 
 
 def _money(x: float) -> str:
-    if x >= 1:
-        return f"${x:.2f}"
-    if x >= 0.01:
-        return f"${x:.4f}".rstrip("0")
-    return f"${x:.6f}".rstrip("0")
+    """El cuarto formateador de dinero que tenía este backend (D-120)."""
+    return cifras.dinero(x)
 
 
 def _pct(x: float) -> str:

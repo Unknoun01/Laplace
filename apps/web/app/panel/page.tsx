@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { BackendDown, Cargando, NeedsKey, NoProject, NoTracesYet, NotYours } from "@/components/states";
 import { getPanel, listProjects, parseDays } from "@/lib/api";
-import { dayHour, duration, money, number, spanLabel, tokens } from "@/lib/format";
+import { dayHour, decimal, duration, money, number, spanLabel, tokens } from "@/lib/format";
 import type { Metric, Panel, Spike } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
 
@@ -269,7 +269,7 @@ function SpikeCard({ spike, panel }: { spike: Spike; panel: Panel }) {
         En ese tramo cada ejecución costó{" "}
         <strong>{money(spike.cost_per_trace_usd, panel.currency)}</strong>, frente a los{" "}
         {money(spike.baseline_cost_per_trace_usd, panel.currency)} de costumbre:{" "}
-        <strong>{spike.times_baseline.toFixed(1)} veces más</strong> sobre{" "}
+        <strong>{decimal(spike.times_baseline)} veces más</strong> sobre{" "}
         {number(spike.traces)} {spike.traces === 1 ? "ejecución" : "ejecuciones"}.
       </p>
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { duration, money, number, pretty, tokens } from "@/lib/format";
+import { duration, exacto, money, number, pretty, tokens } from "@/lib/format";
 import { allNodes, barGeometry, flatten, timeWindow } from "@/lib/tree";
 import type { Span, Trace, TraceTreeNode } from "@/lib/types";
 
@@ -433,7 +433,7 @@ function Attributes({ span }: { span: Span }) {
     ["laplace.step.label", span.step_label],
     ["start_time", span.start_time],
     ["end_time", span.end_time],
-    ["duration_ms", span.duration_ms.toFixed(3)],
+    ["duration_ms", exacto(span.duration_ms, 3)],
   ];
   if (span.llm) {
     rows.push([

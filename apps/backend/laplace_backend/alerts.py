@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import quote
 
+from . import cifras
 from .config import Settings
 from .insights import Finding, Overview, span_label, window_label
 from .storage.base import Window
@@ -467,14 +468,14 @@ def decide(
 
 
 def money(amount: float) -> str:
-    """El mismo criterio de decimales que la interfaz, para que no se contradigan."""
-    if amount >= 100:
-        return f"${amount:,.0f}".replace(",", ".")
-    if amount >= 1:
-        return f"${amount:.2f}"
-    if amount >= 0.01:
-        return f"${amount:.4f}".rstrip("0")
-    return f"${amount:.6f}".rstrip("0")
+    """El mismo criterio de decimales que la interfaz, para que no se contradigan.
+
+    Esto era una **copia** del criterio, con su propio ladder de decimales, y el
+    docstring de arriba ya decía la intención que la copia no cumplía: se quedó con el
+    punto decimal inglés mientras la alerta escribía los millares en español, así que un
+    mismo mensaje de Slack podía llevar «$1.234» y «$5.00» (D-120).
+    """
+    return cifras.dinero(amount)
 
 
 def _amount_phrase(finding: Finding, ventana: str) -> str:

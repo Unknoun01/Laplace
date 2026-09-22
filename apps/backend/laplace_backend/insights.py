@@ -23,6 +23,7 @@ from typing import Any, Literal
 from laplace.schema import Span
 from pydantic import BaseModel, Field
 
+from . import cifras
 from .coverage import Coverage
 from .coverage import build as build_coverage
 from .dinero import motivo_sin_dinero
@@ -282,13 +283,8 @@ def _scope_label(affected: int, total: int) -> str:
 
 
 def _miles(n: float) -> str:
-    """12345 -> «12.345». Separador de millar español.
-
-    Existe porque el atajo anterior —formatear en inglés y luego hacer
-    `.replace(",", ".")` sobre la frase entera— también convertía en puntos las comas
-    del texto, y partía las oraciones por la mitad.
-    """
-    return f"{n:,.0f}".replace(",", ".")
+    """12345 -> «12.345». Alias de `cifras.miles`, que es quien sabe hacerlo."""
+    return cifras.miles(n)
 
 
 def _seconds(ms: float) -> str:
@@ -315,14 +311,13 @@ def span_label(days: float) -> str:
 
 
 def _money(value: float) -> str:
-    """Un importe pequeño escrito de forma legible. Los de un hallazgo suelen ser
-    céntimos, y `$0.00` se lee como cero cuando no lo es."""
-    return f"${value:.4f}" if value < 0.01 else f"${value:.2f}"
+    """Un importe, escrito por el único sitio que sabe escribir números (D-120)."""
+    return cifras.dinero(value)
 
 
 def _decimal(value: float) -> str:
     """Un decimal, coma española, y sin el «,0» que sobra en «7,0 días»."""
-    return f"{value:.1f}".removesuffix(".0").replace(".", ",")
+    return cifras.decimal(value)
 
 
 def window_label(days: float) -> str:
@@ -518,8 +513,9 @@ def _repetition_detail(
     if cuesta:
         detalle.savings_calculation = (
             f"{group.extra_spans} pasos de más en {group.traces} trazas durante "
-            f"{window_label(finding.observed_days)}, que suman ${group.extra_cost_usd:.6f} de "
-            f"coste ya gastado.{_projection_sentence(finding)} Sólo cuenta las ocurrencias "
+            f"{window_label(finding.observed_days)}, que suman "
+            f"{cifras.dinero_exacto(group.extra_cost_usd)} de coste ya gastado."
+            f"{_projection_sentence(finding)} Sólo cuenta las ocurrencias "
             f"posteriores a la primera de cada traza; la primera es trabajo legítimo."
         )
         detalle.savings_note = (
@@ -703,7 +699,8 @@ def _loop_detail(
     )
     if cuesta:
         detalle.savings_calculation = (
-            f"{vueltas}, que suman ${group.extra_cost_usd:.6f} de coste ya gastado."
+            f"{vueltas}, que suman {cifras.dinero_exacto(group.extra_cost_usd)} de coste "
+            f"ya gastado."
             f"{_projection_sentence(finding)} Sólo cuenta a partir de la segunda vuelta de "
             f"cada traza: la primera es trabajo legítimo."
         )
@@ -1094,8 +1091,8 @@ def _expensive_model_detail(
             f"${price.input}/1M entrada y ${price.output}/1M salida. Con "
             f"{price.alternative}: ${cheaper.input}/1M y "
             f"${cheaper.output}/1M. La diferencia sobre esos mismos tokens es "
-            f"${finding.window_waste_usd:.6f} en {window_label(finding.observed_days)}."
-            f"{_projection_sentence(finding)}"
+            f"{cifras.dinero_exacto(finding.window_waste_usd)} en "
+            f"{window_label(finding.observed_days)}.{_projection_sentence(finding)}"
         )
     detalle.savings_note = (
         "El ahorro es aritmética sobre los tokens que ya has gastado. Lo que no podemos "
@@ -1143,6 +1140,11 @@ def _cheaper_model_if_recommended(usage: ModelUsage) -> str | None:
         cached_input_tokens=usage.cached_input_tokens,
     )
     return price.alternative if actual.total_usd > alternativo.total_usd else None
+
+
+def _coste_de_escribir(price: Any, tokens: int) -> float:
+    """El sobreprecio de escribir esos tokens en caché, sobre la tarifa de entrada."""
+    return tokens * max(price.cache_write - price.input, 0.0) / _MILLION
 
 
 def _cache_arithmetic(usage: ModelUsage) -> tuple[int, int, float] | None:
@@ -1374,7 +1376,7 @@ def _fixed_context_detail(
         escritura_txt = (
             f" Menos {_miles(escrituras)} tokens de escritura de caché a "
             f"${price.cache_write}/1M (una por ejecución), que sobre la tarifa de entrada "
-            f"cuestan ${escrituras * max(price.cache_write - price.input, 0.0) / 1_000_000:.6f}."
+            f"cuestan {cifras.dinero_exacto(_coste_de_escribir(price, escrituras))}."
             if price.cache_write is not None
             else " Este proveedor no cobra aparte por escribir en caché."
         )
@@ -1383,8 +1385,8 @@ def _fixed_context_detail(
             f"{usage.calls - max(usage.traces, 1)} llamadas que ya encontrarían la caché "
             f"caliente = {_miles(lecturas)} tokens que pasarían de ${price.input}/1M a "
             f"${price.cached_input}/1M.{escritura_txt} Neto: "
-            f"${finding.window_waste_usd:.6f} en {window_label(finding.observed_days)}."
-            f"{_projection_sentence(finding)}"
+            f"{cifras.dinero_exacto(finding.window_waste_usd)} en "
+            f"{window_label(finding.observed_days)}.{_projection_sentence(finding)}"
         )
     if encadenado:
         detalle.savings_calculation += (
