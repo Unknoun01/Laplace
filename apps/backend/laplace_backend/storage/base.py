@@ -12,6 +12,8 @@ from typing import Any, Protocol, runtime_checkable
 
 from laplace.schema import Span, TraceSummary
 
+from ..pasos import nombre_de_paso
+
 
 @dataclass
 class TraceFilter:
@@ -110,6 +112,9 @@ class RepeatedGroup:
     #: Paso al que pertenece la repetición. Sin él, el descuento que impide contar dos
     #: veces el mismo ahorro no encuentra su pareja en `ModelUsage` (D-061).
     step_key: str = ""
+    #: Camino de llamada. Es lo que deja titular dos pasos homónimos sin que las dos
+    #: tarjetas del inicio se lean como un duplicado (D-115).
+    site: str = ""
     #: Trozo de las instrucciones, para distinguir dos pasos con el mismo título.
     hint: str = ""
     traces: int = 0
@@ -146,6 +151,8 @@ class LoopGroup:
     span_type: str
     model: str = ""
     step_key: str = ""
+    #: Camino de llamada, por lo mismo que en `RepeatedGroup` (D-115).
+    site: str = ""
     hint: str = ""
     traces: int = 0
     total_spans: int = 0
@@ -410,6 +417,10 @@ def disambiguate(filas: list[Any]) -> list[Any]:
     `responder_consulta`, que es lo que distingue a dos agentes con una función
     homónima— y, si no, el principio de sus instrucciones. El camino primero porque se
     lee: un título con sesenta caracteres de prompt dentro no lo lee nadie (D-106).
+
+    Cómo se escribe el nombre lo decide `pasos.nombre_de_paso`, que es el único sitio
+    del producto que lo sabe. Aquí se decide **cuándo** hace falta. Tenerlo en dos
+    sitios era el fallo que esto mismo arregla, un nivel más arriba (D-115).
     """
     repetidas = {f.name for f in filas if sum(1 for g in filas if g.name == f.name) > 1}
     if not repetidas:
@@ -417,13 +428,14 @@ def disambiguate(filas: list[Any]) -> list[Any]:
     for fila in filas:
         if fila.name not in repetidas:
             continue
-        camino = getattr(fila, "site", "")
-        # El camino sin el último tramo, que es el propio nombre del paso.
-        desde = camino.rsplit(" > ", 1)[0] if " > " in camino else ""
+        nombre = nombre_de_paso(fila.name, getattr(fila, "site", ""))
+        if nombre != fila.name:
+            fila.name = nombre
+            continue
+        # Sin camino —tráfico anterior a D-106, o un agente sin decorar— lo único que
+        # queda para separarlos es el principio de sus instrucciones.
         pista = getattr(fila, "hint", "")
-        if desde and desde != fila.name:
-            fila.name = f"{fila.name} (en {desde})"
-        elif pista and pista != fila.name:
+        if pista and pista != fila.name:
             fila.name = f"{fila.name} — «{pista}»"
     return filas
 

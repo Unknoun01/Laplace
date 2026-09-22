@@ -196,7 +196,7 @@ WITH numerados AS (
         cost_unknown, cost_rate_assumed,
         CASE WHEN step_key   != '' THEN step_key   ELSE name END AS paso,
         CASE WHEN step_label != '' THEN step_label ELSE name END AS etiqueta,
-        step_hint,
+        step_hint, step_site,
         ROW_NUMBER() OVER (
             PARTITION BY trace_id, dedup_hash ORDER BY start_time, span_id
         ) AS orden
@@ -210,6 +210,7 @@ por_traza AS (
         MAX(paso)          AS paso,
         MAX(etiqueta)      AS etiqueta,
         MAX(step_hint)     AS pista,
+        MAX(step_site)     AS sitio,
         MAX(span_type)     AS tipo,
         MAX(request_model) AS modelo,
         COUNT(*)           AS n,
@@ -229,6 +230,7 @@ SELECT
     modelo,
     MAX(etiqueta)                                          AS nombre,
     MAX(pista)                                             AS pista,
+    MAX(sitio)                                             AS sitio,
     MAX(tipo)                                              AS tipo,
     substr(MAX(printf('%012d', n) || dedup_hash), 13)      AS hash_ejemplo,
     COUNT(DISTINCT trace_id)                               AS trazas,
@@ -288,6 +290,7 @@ WITH por_traza AS (
         loop_hash,
         MAX(CASE WHEN step_label != '' THEN step_label ELSE name END) AS etiqueta,
         MAX(step_hint)                     AS pista,
+        MAX(step_site)                     AS sitio,
         MAX(span_type)                     AS tipo,
         MAX(request_model)                 AS modelo,
         MAX(CASE WHEN step_key != '' THEN step_key ELSE name END) AS paso,
@@ -312,6 +315,7 @@ SELECT
     loop_hash                          AS hash_ejemplo,
     MAX(etiqueta)                      AS nombre,
     MAX(pista)                         AS pista,
+    MAX(sitio)                         AS sitio,
     MAX(tipo)                          AS tipo,
     MAX(modelo)                        AS modelo,
     MAX(paso)                          AS paso,
@@ -755,6 +759,7 @@ class SQLiteStore:
                 span_type=r["tipo"],
                 model=r["modelo"] or "",
                 step_key=r["paso"] or "",
+                site=r["sitio"] or "",
                 traces=int(r["trazas"]),
                 total_spans=int(r["total_spans"]),
                 extra_spans=int(r["extra_spans"]),
@@ -777,7 +782,7 @@ class SQLiteStore:
     ) -> list[LoopGroup]:
         params = self._window_params(project_id, window)
         params.update(min_vueltas=min_vueltas, max_salidas=max_salidas, limit=limit)
-        return [
+        grupos = [
             LoopGroup(
                 loop_hash=r["hash_ejemplo"],
                 name=r["nombre"],
@@ -785,6 +790,7 @@ class SQLiteStore:
                 span_type=r["tipo"],
                 model=r["modelo"] or "",
                 step_key=r["paso"] or "",
+                site=r["sitio"] or "",
                 traces=int(r["trazas"]),
                 total_spans=int(r["total_spans"]),
                 extra_spans=int(r["extra_spans"]),
@@ -800,6 +806,9 @@ class SQLiteStore:
             )
             for r in self._query(LOOP_GROUPS_SQL, params)
         ]
+        # Los bucles nunca pasaron por aquí, y por eso el inicio enseñaba dos tarjetas
+        # con el título idéntico para dos llamantes distintos del mismo paso (D-115).
+        return disambiguate(grupos)
 
     def model_usage(
         self, project_id: str, window: Window, *, min_calls: int = 5, limit: int = 50

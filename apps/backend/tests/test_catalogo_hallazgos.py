@@ -263,3 +263,88 @@ def test_detail_reconoce_todos_los_tipos_de_hallazgo_que_existen():
         "reconstruir. Los que faltan: "
         f"{set(get_args(insights.FindingKind)) - insights.DETAILED_KINDS}"
     )
+
+
+# ---------------------------------------------------------------------------------
+# Dos hallazgos distintos no pueden leerse como el mismo
+# ---------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def almacen_con_dos_llamantes(tmp_path):
+    """La misma función, en bucle, llamada desde dos sitios distintos.
+
+    Es lo que el proyecto de demo enseñaba en el inicio: dos tarjetas con el título
+    «consultar_manual» da hasta 6 vueltas sin avanzar y cifras distintas. Son dos
+    hallazgos de verdad —D-106 los separó a propósito, y mezclarlos escondía el roto
+    detrás del sano— pero el título sólo llevaba el nombre de la función, así que en
+    pantalla se leían como un duplicado del producto.
+    """
+    from laplace_backend.ingest.otlp import loop_hash
+
+    store = SQLiteStore(tmp_path / "llamantes.db")
+    store.migrate()
+    spans: list[Span] = []
+    salida = [{"role": "assistant", "content": "SEGUIR"}]
+
+    for llamante in ("planificar", "revisar"):
+        for t in range(6):
+            for intento in range(5):
+                entrada = [{"role": "user", "content": f"Vuelta {intento} de 5."}]
+                spans.append(
+                    _span(
+                        f"{llamante}-{t}",
+                        paso="consultar_manual",
+                        # Claves distintas: es lo que hace la identidad por camino.
+                        clave=f"k-{llamante}-manual",
+                        entrada_tokens=90,
+                        salida_tokens=4,
+                        i=hash(llamante) % 50 + t * 30 + intento,
+                        dedup=f"{llamante}-{t}-{intento}",
+                        entrada_msgs=entrada,
+                        salida_msgs=salida,
+                        bucle=(
+                            loop_hash("llm", f"chat-{llamante}", entrada),
+                            loop_hash("llm", "chat", salida, ignorar_numeros=False),
+                        ),
+                    )
+                )
+                spans[-1].step_site = f"agente > {llamante} > consultar_manual"
+
+    store.insert_spans(spans)
+    return store
+
+
+def test_dos_pasos_homonimos_no_producen_dos_tarjetas_iguales(almacen_con_dos_llamantes):
+    """Si dos hallazgos distintos se titulan igual, el producto parece roto.
+
+    Y es peor que parecerlo: el usuario arregla uno, vuelve, ve el otro con el mismo
+    texto y concluye que no se ha enterado de su arreglo. El nombre de la función no
+    basta desde que la identidad de un paso es el camino de llamada (D-115).
+    """
+    hallazgos = insights.detect(almacen_con_dos_llamantes, "catalogo", _ventana())
+    bucles = [f for f in hallazgos if f.kind == "bucle"]
+    assert len(bucles) == 2, f"son dos bucles distintos, uno por llamante: {len(bucles)}"
+
+    titulos = [f.title for f in bucles]
+    assert len(set(titulos)) == 2, f"dos tarjetas con el mismo título: {titulos}"
+    assert any("planificar" in t for t in titulos), (
+        f"el título tiene que decir desde dónde se llama: {titulos}"
+    )
+    assert any("revisar" in t for t in titulos), (
+        f"el título tiene que decir desde dónde se llama: {titulos}"
+    )
+
+
+def test_la_ficha_se_titula_igual_que_la_tarjeta(almacen_con_dos_llamantes):
+    """Si la tarjeta y su ficha se titulan distinto, el usuario cree que se equivocó
+    de enlace. El desambiguado tiene que valer para los dos caminos, no sólo la lista.
+    """
+    ventana = _ventana()
+    store = almacen_con_dos_llamantes
+    for hallazgo in insights.detect(store, "catalogo", ventana):
+        ficha = insights.detail(store, "catalogo", ventana, hallazgo.id)
+        assert ficha is not None
+        assert ficha.title == hallazgo.title, (
+            f"la tarjeta dice {hallazgo.title!r} y su ficha {ficha.title!r}"
+        )

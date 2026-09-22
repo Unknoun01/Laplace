@@ -82,6 +82,7 @@ SELECT
     modelo,
     max(etiqueta)                    AS nombre,
     max(pista)                       AS pista,
+    max(sitio)                       AS sitio,
     max(tipo)                        AS tipo,
     -- El desempate va DENTRO de la clave: con `argMax(x, n)` a secas, dos trazas que
     -- repiten lo mismo el mismo número de veces —el caso normal— devuelven un ejemplo
@@ -104,6 +105,7 @@ FROM (
         dedup_hash,
         max(if(step_label != '', step_label, name)) AS etiqueta,
         max(step_hint)                     AS pista,
+        max(step_site)                     AS sitio,
         max(span_type)                     AS tipo,
         max(request_model)                 AS modelo,
         max(if(step_key != '', step_key, name)) AS paso,
@@ -178,6 +180,7 @@ SELECT
     loop_hash                        AS hash_ejemplo,
     max(etiqueta)                    AS nombre,
     max(pista)                       AS pista,
+    max(sitio)                       AS sitio,
     max(tipo)                        AS tipo,
     max(modelo)                      AS modelo,
     max(paso)                        AS paso,
@@ -199,6 +202,7 @@ FROM (
         loop_hash,
         max(if(step_label != '', step_label, name)) AS etiqueta,
         max(step_hint)                     AS pista,
+        max(step_site)                     AS sitio,
         max(span_type)                     AS tipo,
         max(request_model)                 AS modelo,
         max(if(step_key != '', step_key, name)) AS paso,
@@ -600,6 +604,7 @@ class ClickHouseStore:
                 span_type=r["tipo"],
                 model=r["modelo"] or "",
                 step_key=r["paso"] or "",
+                site=r["sitio"] or "",
                 traces=int(r["trazas"]),
                 total_spans=int(r["total_spans"]),
                 extra_spans=int(r["extra_spans"]),
@@ -624,7 +629,7 @@ class ClickHouseStore:
         """Gemelo del de sqlite.py: mismos umbrales, mismos alias (D-066, D-109)."""
         params = self._window_params(project_id, window)
         params.update(min_vueltas=min_vueltas, max_salidas=max_salidas, limit=limit)
-        return [
+        grupos = [
             LoopGroup(
                 loop_hash=r["hash_ejemplo"],
                 name=r["nombre"],
@@ -632,6 +637,7 @@ class ClickHouseStore:
                 span_type=r["tipo"],
                 model=r["modelo"] or "",
                 step_key=r["paso"] or "",
+                site=r["sitio"] or "",
                 traces=int(r["trazas"]),
                 total_spans=int(r["total_spans"]),
                 extra_spans=int(r["extra_spans"]),
@@ -647,6 +653,9 @@ class ClickHouseStore:
             )
             for r in _named(self._client.query(LOOP_GROUPS_SQL, parameters=params))
         ]
+        # El gemelo de sqlite: los bucles nunca pasaron por el desambiguado, así que dos
+        # llamantes del mismo paso daban dos tarjetas con el título idéntico (D-115).
+        return disambiguate(grupos)
 
     def model_usage(
         self, project_id: str, window: Window, *, min_calls: int = 5, limit: int = 50
