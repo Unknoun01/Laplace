@@ -495,29 +495,31 @@ function Detalle({
       {prompt.deploys.length > 0 && (
         <div className="pro">
           <h3 className="sub">Historial de despliegues</h3>
-          <table className="tbl">
-            <thead>
-              <tr>
-                <th>Cuándo</th>
-                <th>Versión</th>
-                <th>Quién</th>
-                <th>Nota</th>
-              </tr>
-            </thead>
-            <tbody>
-              {prompt.deploys.map((d) => (
-                <tr key={d.id}>
-                  <td>{timestamp(d.at)}</td>
-                  <td>
-                    v{d.version}
-                    {d.rollback && <span className="chip where mini">vuelta atrás</span>}
-                  </td>
-                  <td>{d.actor || "—"}</td>
-                  <td>{d.note || "—"}</td>
+          <div className="tbl-scroll">
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>Cuándo</th>
+                  <th>Versión</th>
+                  <th>Quién</th>
+                  <th>Nota</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {prompt.deploys.map((d) => (
+                  <tr key={d.id}>
+                    <td>{timestamp(d.at)}</td>
+                    <td>
+                      v{d.version}
+                      {d.rollback && <span className="chip where mini">vuelta atrás</span>}
+                    </td>
+                    <td>{d.actor || "—"}</td>
+                    <td>{d.note || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           <p className="disclaimer">
             Este historial cuenta la historia; <strong>no</strong> atribuye picos. Para eso
             el <Link href={`/panel${query}`}>panel</Link> usa la versión que aparece en las
@@ -645,33 +647,35 @@ function PasoObservado({ paso }: { paso: ObservedStep }) {
         <p className="unattributed">{paso.note}</p>
       ) : (
         <div className="ancha">
-        <table className="tbl">
-          <thead>
-            <tr>
-              <th>Instrucciones (principio)</th>
-              <th className="r">Por ejecución</th>
-              <th className="r">Ejecuciones</th>
-              <th className="r hide-sm">Desde</th>
-              <th className="r hide-sm">Hasta</th>
-            </tr>
-          </thead>
-          <tbody>
-            {paso.variants.map((v) => (
-              <tr key={v.step_key}>
-                <td>
-                  <span className="hint">{v.hint || "(sin instrucciones capturadas)"}</span>
-                  <div className="meta pro">{v.step_key}</div>
-                </td>
-                <td className="r money">
-                  {v.cost_per_execution_usd === null ? "—" : money(v.cost_per_execution_usd)}
-                </td>
-                <td className="r">{number(v.traces)}</td>
-                <td className="r hide-sm">{v.first_seen ? timestamp(v.first_seen) : "—"}</td>
-                <td className="r hide-sm">{v.last_seen ? timestamp(v.last_seen) : "—"}</td>
+        <div className="tbl-scroll">
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Instrucciones (principio)</th>
+                <th className="r">Por ejecución</th>
+                <th className="r">Ejecuciones</th>
+                <th className="r hide-sm">Desde</th>
+                <th className="r hide-sm">Hasta</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {paso.variants.map((v) => (
+                <tr key={v.step_key}>
+                  <td>
+                    <span className="hint">{v.hint || "(sin instrucciones capturadas)"}</span>
+                    <div className="meta pro">{v.step_key}</div>
+                  </td>
+                  <td className="r money">
+                    {v.cost_per_execution_usd === null ? "—" : money(v.cost_per_execution_usd)}
+                  </td>
+                  <td className="r">{number(v.traces)}</td>
+                  <td className="r hide-sm">{v.first_seen ? timestamp(v.first_seen) : "—"}</td>
+                  <td className="r hide-sm">{v.last_seen ? timestamp(v.last_seen) : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         </div>
       )}
     </article>

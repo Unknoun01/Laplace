@@ -513,48 +513,50 @@ function Conjuntos({
       {datasets.length === 0 ? (
         <p className="disclaimer">Todavía no hay ninguno.</p>
       ) : (
-        <table className="tbl">
-          <thead>
-            <tr>
-              <th>Conjunto</th>
-              <th className="r">Casos</th>
-              <th className="pro">Filtro de origen</th>
-              <th className="r hide-sm">Creado</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {datasets.map((d) => (
-              <tr key={d.id}>
-                <td>
-                  {d.name}
-                  <div className="meta pro">{d.id}</div>
-                </td>
-                <td className="r">{number(d.item_count)}</td>
-                <td className="pro" style={{ fontFamily: "var(--mono)", fontSize: 12 }}>
-                  {Object.entries(d.source_filter).length === 0
-                    ? "sin filtro (las más recientes)"
-                    : Object.entries(d.source_filter)
-                        .map(([k, v]) => `${k}=${v}`)
-                        .join(" · ")}
-                </td>
-                <td className="r hide-sm">{timestamp(d.created_at)}</td>
-                <td className="r">
-                  <button
-                    type="button"
-                    className="vbtn ghost"
-                    onClick={async () => {
-                      await deleteDataset(d.id);
-                      onChange();
-                    }}
-                  >
-                    Borrar
-                  </button>
-                </td>
+        <div className="tbl-scroll">
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Conjunto</th>
+                <th className="r">Casos</th>
+                <th className="pro">Filtro de origen</th>
+                <th className="r hide-sm">Creado</th>
+                <th />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {datasets.map((d) => (
+                <tr key={d.id}>
+                  <td>
+                    {d.name}
+                    <div className="meta pro">{d.id}</div>
+                  </td>
+                  <td className="r">{number(d.item_count)}</td>
+                  <td className="pro" style={{ fontFamily: "var(--mono)", fontSize: 12 }}>
+                    {Object.entries(d.source_filter).length === 0
+                      ? "sin filtro (las más recientes)"
+                      : Object.entries(d.source_filter)
+                          .map(([k, v]) => `${k}=${v}`)
+                          .join(" · ")}
+                  </td>
+                  <td className="r hide-sm">{timestamp(d.created_at)}</td>
+                  <td className="r">
+                    <button
+                      type="button"
+                      className="vbtn ghost"
+                      onClick={async () => {
+                        await deleteDataset(d.id);
+                        onChange();
+                      }}
+                    >
+                      Borrar
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   );
@@ -581,48 +583,50 @@ function Tiradas({
         Cada una es una pasada de un conjunto por una versión de tu agente. Las lanza el
         SDK en tu proceso; aquí sólo llega el parte y las trazas.
       </p>
-      <table className="tbl">
-        <thead>
-          <tr>
-            <th>Versión</th>
-            <th>Conjunto</th>
-            <th className="r">Casos</th>
-            <th className="r">Personas</th>
-            <th className="r">Juez</th>
-            <th className="r">Coste</th>
-            <th className="r pro">Juzgar costó</th>
-            <th className="r hide-sm">Cuándo</th>
-          </tr>
-        </thead>
-        <tbody>
-          {runs.map((r) => (
-            <tr key={r.run_id}>
-              <td>
-                {r.variant}
-                {/* La versión de prompt con la que corrió de verdad, por si `variant`
-                    se quedó viejo, que es lo que pasa la mitad de las veces. */}
-                {r.prompt_versions.length > 0 && (
-                  <div className="meta">{r.prompt_versions.join(" · ")}</div>
-                )}
-                <div className="meta pro">{r.run_id}</div>
-              </td>
-              <td>{r.dataset_name || r.dataset_id}</td>
-              <td className="r">{r.cases}</td>
-              <td className="r">
-                <Celda rate={r.rates.find((x) => x.source === "human")} />
-              </td>
-              <td className="r">
-                <Celda rate={r.rates.find((x) => x.source === "llm_judge")} />
-              </td>
-              <td className="r money">{money(r.cost_usd)}</td>
-              <td className="r money pro">
-                {r.judge_cost_usd > 0 ? money(r.judge_cost_usd) : "—"}
-              </td>
-              <td className="r hide-sm">{timestamp(r.created_at)}</td>
+      <div className="tbl-scroll">
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>Versión</th>
+              <th>Conjunto</th>
+              <th className="r">Casos</th>
+              <th className="r">Personas</th>
+              <th className="r">Juez</th>
+              <th className="r">Coste</th>
+              <th className="r pro">Juzgar costó</th>
+              <th className="r hide-sm">Cuándo</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {runs.map((r) => (
+              <tr key={r.run_id}>
+                <td>
+                  {r.variant}
+                  {/* La versión de prompt con la que corrió de verdad, por si `variant`
+                      se quedó viejo, que es lo que pasa la mitad de las veces. */}
+                  {r.prompt_versions.length > 0 && (
+                    <div className="meta">{r.prompt_versions.join(" · ")}</div>
+                  )}
+                  <div className="meta pro">{r.run_id}</div>
+                </td>
+                <td>{r.dataset_name || r.dataset_id}</td>
+                <td className="r">{r.cases}</td>
+                <td className="r">
+                  <Celda rate={r.rates.find((x) => x.source === "human")} />
+                </td>
+                <td className="r">
+                  <Celda rate={r.rates.find((x) => x.source === "llm_judge")} />
+                </td>
+                <td className="r money">{money(r.cost_usd)}</td>
+                <td className="r money pro">
+                  {r.judge_cost_usd > 0 ? money(r.judge_cost_usd) : "—"}
+                </td>
+                <td className="r hide-sm">{timestamp(r.created_at)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       <p className="disclaimer">
         ¿Sin tiradas de una versión nueva? Lánzala con{" "}
         <code>laplace.run_dataset(&quot;…&quot;, mi_agente, variant=&quot;…&quot;)</code> apuntando

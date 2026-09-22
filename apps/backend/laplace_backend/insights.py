@@ -1285,7 +1285,7 @@ def _fixed_context_finding(
         id=f"contexto_fijo:{usage.key}:{usage.model}",
         kind="contexto_fijo",
         title=(
-            f"Reenvías las mismas {_miles(usage.min_input_tokens)} palabras en cada llamada"
+            f"Reenvías los mismos {_miles(usage.min_input_tokens)} tokens en cada llamada"
         ),
         summary=(
             f"Todas las llamadas del paso «{usage.name}» empiezan con al menos "
@@ -1327,7 +1327,8 @@ def _fixed_context_detail(
 
     detalle.what_happens = (
         f"En las {usage.calls} llamadas del paso «{usage.name}», la más corta ya lleva "
-        f"{usage.min_input_tokens} tokens de entrada. Ese suelo es la parte que no cambia "
+        f"{_miles(usage.min_input_tokens)} tokens de entrada. Ese suelo es la parte que no "
+        f"cambia "
         f"nunca: las instrucciones y los ejemplos que van pegados a cada petición."
     )
     detalle.why = (

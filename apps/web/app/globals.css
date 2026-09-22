@@ -934,6 +934,20 @@ code {
   min-width: 200px;
 }
 
+/* Una tabla no cabe en 375 px por mucho que se escondan columnas: la última siempre
+   acaba empujando fuera y toda la página se desplaza en horizontal, que es la peor
+   forma de perder una columna porque el usuario no sabe que está ahí. La que se
+   desplaza es la tabla, dentro de su marco, y la página se queda quieta. */
+.tbl-scroll {
+  overflow-x: auto;
+  /* El marco pasa aquí para que el borde no se corte al desplazar. */
+  border: 1px solid var(--hair);
+  border-radius: var(--r);
+}
+.tbl-scroll .tbl {
+  border: 0;
+}
+
 .tbl {
   width: 100%;
   border-collapse: collapse;

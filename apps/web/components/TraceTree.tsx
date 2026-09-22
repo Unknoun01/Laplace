@@ -155,7 +155,14 @@ export function TraceTree({ trace }: { trace: Trace }) {
                   <i className={`kind ${failed ? "err" : span.type}`} aria-hidden />
                   <span className="node-name">
                     {span.name}
-                    {span.llm?.request_model && <small>{span.llm.request_model}</small>}
+                    {/* El nombre de un span de LLM ya es «chat <modelo>» por la
+                        convención GenAI de OTel, así que añadirlo aparte lo escribía dos
+                        veces en cada fila: «chat gpt-5.6-luna gpt-5.6-luna». Se enseña
+                        sólo cuando aporta algo, que es cuando el nombre no lo lleva
+                        —un span manual, o un agente que nombra sus pasos a mano. */}
+                    {span.llm?.request_model && !span.name.includes(span.llm.request_model) && (
+                      <small>{span.llm.request_model}</small>
+                    )}
                   </span>
                   {node.children.length > 0 && isCollapsed && (
                     <span className="badge quiet">+{node.subtree.span_count - 1}</span>

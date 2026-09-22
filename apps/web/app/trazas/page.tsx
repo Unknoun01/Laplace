@@ -284,38 +284,40 @@ function Listado({
         </button>
       </div>
 
-      <table className="tbl">
-        <thead>
-          <tr>
-            <th>Traza</th>
-            <th className="pro">Modelos</th>
-            <th className="r hide-sm">Pasos</th>
-            <th className="r hide-sm simple-only">Tokens</th>
-            <th className="r pro">Entrada</th>
-            <th className="r pro">Salida</th>
-            <th className="r">Coste</th>
-            <th className="r hide-sm">Duración</th>
-            <th className="r hide-sm">Cuándo</th>
-            <th className="r">¿Bien?</th>
-          </tr>
-        </thead>
-        <tbody>
-          {traces.map((trace) => (
-            <Row
-              key={trace.trace_id}
-              trace={trace}
-              context={context}
-              project={project}
-              looping={repeats.has(trace.trace_id)}
-              nueva={live.nuevas.has(trace.trace_id)}
-              annotations={anotaciones[trace.trace_id] ?? []}
-              onAnnotated={(nuevas) =>
-                setAnotaciones((previas) => ({ ...previas, [trace.trace_id]: nuevas }))
-              }
-            />
-          ))}
-        </tbody>
-      </table>
+      <div className="tbl-scroll">
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>Traza</th>
+              <th className="pro">Modelos</th>
+              <th className="r hide-sm">Pasos</th>
+              <th className="r hide-sm simple-only">Tokens</th>
+              <th className="r pro">Entrada</th>
+              <th className="r pro">Salida</th>
+              <th className="r">Coste</th>
+              <th className="r hide-sm">Duración</th>
+              <th className="r hide-sm">Cuándo</th>
+              <th className="r">¿Bien?</th>
+            </tr>
+          </thead>
+          <tbody>
+            {traces.map((trace) => (
+              <Row
+                key={trace.trace_id}
+                trace={trace}
+                context={context}
+                project={project}
+                looping={repeats.has(trace.trace_id)}
+                nueva={live.nuevas.has(trace.trace_id)}
+                annotations={anotaciones[trace.trace_id] ?? []}
+                onAnnotated={(nuevas) =>
+                  setAnotaciones((previas) => ({ ...previas, [trace.trace_id]: nuevas }))
+                }
+              />
+            ))}
+          </tbody>
+        </table>
+      </div>
 
       <div className="pager">
         <span style={{ color: "var(--ink-3)" }}>
