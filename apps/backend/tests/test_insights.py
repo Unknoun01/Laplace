@@ -760,3 +760,113 @@ def test_el_mapa_de_descuento_ignora_lo_que_no_puede_cruzar():
                       step_key="", extra_spans=2, extra_input_tokens=50),
     ]
     assert insights._duplicate_tokens(grupos) == {}
+
+
+# ---------------------------------------------------------------------------------
+# La quinta cara del doble conteo: el bucle contra el modelo caro
+# ---------------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def proyecto_con_bucle_y_modelo_caro(store: ClickHouseStore):
+    """Un paso que da vueltas Y usa un modelo con alternativa más barata.
+
+    Las dos reglas miran las mismas llamadas: la del bucle reclama las vueltas de más y
+    la del modelo caro reclama la diferencia de tarifa sobre TODOS los tokens del paso,
+    vueltas incluidas. El descuento que impide esto existe desde D-061, pero se
+    alimenta sólo de las repeticiones exactas: cuando la regla de bucles entró en D-109
+    nadie la enchufó, y es la quinta forma que encuentra este proyecto de contar dos
+    veces el mismo dinero.
+    """
+    from laplace_backend.ingest.otlp import loop_hash
+
+    project = f"test-bucle-caro-{uuid.uuid4().hex[:8]}"
+    spans: list[Span] = []
+    salida = [{"role": "assistant", "content": "SEGUIR"}]
+    for t in range(6):
+        trace = uuid.uuid4().hex
+        spans.append(_span(project, trace, f"a{t}".ljust(16, "0"), "agente", "agent", t * 60))
+        for i in range(5):
+            entrada = [{"role": "user", "content": f"Vuelta {i} de 5."}]
+            s = _span(
+                project,
+                trace,
+                f"b{t}{i}".ljust(16, "0"),
+                "chat gpt-5.6-terra",
+                "llm",
+                t * 60 + i,
+                parent=f"a{t}".ljust(16, "0"),
+                dedup_hash=f"entrada-{t}-{i}",
+                step_key="k-sondear",
+                step_label="sondear",
+                step_site="agente > sondear",
+                loop_hash=loop_hash("llm", "chat", entrada),
+                loop_out_hash=loop_hash("llm", "chat", salida, ignorar_numeros=False),
+            )
+            s.llm = _llm("gpt-5.6-terra", 400, 6, 0.0021)
+            s.llm.input_messages = entrada
+            s.llm.output_messages = salida
+            spans.append(s)
+    store.insert_spans(spans)
+    yield project
+    store.delete_project(project)
+
+
+def test_el_bucle_y_el_modelo_caro_no_reclaman_los_mismos_tokens(
+    store, window, proyecto_con_bucle_y_modelo_caro
+):
+    """La cifra exacta, no un tope contra el gasto.
+
+    `overview()` acota el evitable con `min(suma, gasto)`, así que un solape se
+    convierte en «puedes dejar de pagar el 100 %» y la pantalla lo enseña como una
+    buena noticia. Comprobar sólo `suma <= gasto` deja pasar el error mientras quepa
+    dentro, que es justo contra lo que avisa STATUS: aquí se comprueba que **el tope no
+    llega a morder**.
+    """
+    hallazgos = insights.detect(store, proyecto_con_bucle_y_modelo_caro, window)
+    tipos = {f.kind for f in hallazgos}
+    assert "bucle" in tipos, "sin bucle esta prueba no mira el solape"
+
+    resumen = store.summarize_window(proyecto_con_bucle_y_modelo_caro, window)
+    prometido = sum(f.window_waste_usd for f in hallazgos)
+    assert prometido <= resumen.total_cost_usd, (
+        f"se promete más ahorro ({prometido:.6f}) que gasto ({resumen.total_cost_usd:.6f}): "
+        "dos reglas están reclamando los mismos tokens"
+    )
+
+    vista = insights.overview(store, proyecto_con_bucle_y_modelo_caro, window)
+    assert vista.avoidable_ratio < 1.0, (
+        "el 100 % evitable sale del tope, no de los datos: el héroe promete que puedes "
+        "dejar de pagar tu agente entero"
+    )
+
+
+def test_las_vueltas_de_un_bucle_se_descuentan_del_uso_del_modelo(
+    store, window, proyecto_con_bucle_y_modelo_caro
+):
+    """Y el descuento es de tokens Y de llamadas, como el de la repetición.
+
+    Las llamadas importan por lo mismo que en D-061: la regla del contexto fijo cuenta
+    cuántas veces se reenvía el prompt, y prometer cachear llamadas que la otra regla ya
+    ha dado por eliminadas es prometer dos veces el mismo ahorro.
+    """
+    bucles = store.loop_groups(
+        proyecto_con_bucle_y_modelo_caro,
+        window,
+        min_vueltas=insights.MIN_VUELTAS_BUCLE,
+        max_salidas=insights.MAX_SALIDAS_BUCLE,
+    )
+    assert bucles, "la fixture tiene que producir un bucle"
+    duplicados = insights._duplicate_tokens(
+        store.repeated_groups(
+            proyecto_con_bucle_y_modelo_caro, window, min_repeats=insights.MIN_REPEATS
+        ),
+        bucles,
+    )
+    assert duplicados, "las vueltas de más tienen que entrar en el descuento"
+
+    usos = store.model_usage(proyecto_con_bucle_y_modelo_caro, window, min_calls=1)
+    uso = next(u for u in usos if u.key == "k-sondear")
+    neto = insights._without_duplicates(uso, duplicados)
+    assert neto.calls == uso.calls - bucles[0].extra_spans
+    assert neto.input_tokens == uso.input_tokens - bucles[0].extra_input_tokens

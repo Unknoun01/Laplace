@@ -1383,10 +1383,11 @@ def _fixed_context_detail(
 
 def _duplicate_tokens(
     groups: list[RepeatedGroup],
+    loops: list[LoopGroup] | None = None,
 ) -> dict[tuple[str, str], tuple[int, int, int]]:
-    """Lo que la regla de repetición ya reclama, por (paso, modelo).
+    """Lo que las reglas de repetición y de bucle ya reclaman, por (paso, modelo).
 
-    Dos cuidados que este mapa ha necesitado aprender por las malas:
+    Tres cuidados que este mapa ha necesitado aprender por las malas:
 
     1. **Se cruza por `step_key`, no por nombre.** Desde que las reglas agrupan por
        paso, cruzar por el nombre del span dejaría el descuento sin pareja y el ahorro
@@ -1394,9 +1395,19 @@ def _duplicate_tokens(
     2. **Se acumula, no se sobrescribe.** Un mismo paso genera un `dedup_hash` distinto
        por cada entrada repetida, así que varios grupos caen en la misma clave. El
        diccionario por comprensión que había antes se quedaba sólo con el último.
+    3. **Los bucles cuentan igual que las repeticiones.** La regla de bucles entró en
+       D-109 y nadie la enchufó aquí, así que la del modelo caro volvía a reclamar la
+       diferencia de tarifa sobre las vueltas que el bucle ya daba por eliminadas. En el
+       proyecto de demo eso prometía un 117 % de la factura, y el `min(suma, gasto)` de
+       `overview()` lo convertía en un «puedes dejar de pagarlo todo» que la pantalla
+       enseñaba como una buena noticia. Quinta cara del mismo fallo (D-117).
+
+    Un bucle y una repetición exacta del mismo paso no se pisan entre sí: la consulta de
+    bucles exige entradas distintas y la de repetición exige la misma. Por eso se suman
+    los dos sin miedo a descontar de más.
     """
     total: dict[tuple[str, str], tuple[int, int, int]] = {}
-    for group in groups:
+    for group in [*groups, *(loops or [])]:
         if group.span_type != "llm" or not group.model or not group.step_key:
             continue
         clave = (group.step_key, group.model)
@@ -1455,16 +1466,17 @@ def detect(store: Any, project_id: str, window: Window) -> list[Finding]:
 
     # Los bucles van aparte de las repeticiones exactas y no se solapan con ellas: la
     # consulta exige entradas distintas, que es justo lo que la regla 1 no mira.
-    for bucle in store.loop_groups(
+    bucles = store.loop_groups(
         project_id, window, min_vueltas=MIN_VUELTAS_BUCLE, max_salidas=MAX_SALIDAS_BUCLE
-    ):
+    )
+    for bucle in bucles:
         findings.append(_loop_finding(bucle, summary, dias, base))
 
     # Las reglas no pueden solaparse: si una llamada al modelo se repite, la regla de
     # repetición ya cuenta el 100% de las copias sobrantes. Contarlas otra vez en la
     # regla del modelo caro inflaría el ahorro total, que es el número que vendemos.
     # Se descuentan los tokens duplicados antes de evaluar el resto de reglas.
-    duplicados = _duplicate_tokens(grupos)
+    duplicados = _duplicate_tokens(grupos, bucles)
 
     usos = store.model_usage(project_id, window, min_calls=1)
     for uso in usos:
@@ -1598,7 +1610,10 @@ def _detalle_modelo(
     """Las reglas 2 y 3 comparten búsqueda: las dos cuelgan de un (paso, modelo)."""
     step_key, _, model = key.rpartition(":")
     duplicados = _duplicate_tokens(
-        store.repeated_groups(project_id, window, min_repeats=MIN_REPEATS)
+        store.repeated_groups(project_id, window, min_repeats=MIN_REPEATS),
+        store.loop_groups(
+            project_id, window, min_vueltas=MIN_VUELTAS_BUCLE, max_salidas=MAX_SALIDAS_BUCLE
+        ),
     )
     for bruto in store.model_usage(project_id, window, min_calls=1):
         if bruto.key != step_key or bruto.model != model:
