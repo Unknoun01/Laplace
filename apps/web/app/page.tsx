@@ -52,6 +52,11 @@ function Contenido() {
     ? overview.monthly_avoidable_usd!
     : overview.window_avoidable_usd;
   const ahorra = evitable > 0;
+  // Cuando el evitable se come casi todo el gasto, la pareja «X → Y» y la barra de
+  // reparto dejan de decir lo que parecen: una barra con un lado en cero no es una
+  // barra, y «puedes dejar de pagar tu agente entero» es la clase de cifra que hace
+  // que alguien cierre la pestaña. Se enseña el gasto y se explica lo que pasa.
+  const casiTodo = ahorra && total > 0 && evitable / total >= CASI_TODO_EVITABLE;
 
   const cobertura = overview.coverage;
 
@@ -85,7 +90,7 @@ function Contenido() {
             currency={overview.currency}
             label={overview.projected ? "te costará este mes" : "te ha costado hasta ahora"}
           />
-          {ahorra && (
+          {ahorra && !casiTodo && (
             <>
               <div className="arrow" aria-hidden>
                 →
@@ -101,7 +106,7 @@ function Contenido() {
         </div>
         )}
 
-        {ahorra && !overview.cost_unavailable && (
+        {ahorra && !overview.cost_unavailable && !casiTodo && (
           <GapBar
             necessary={necesario}
             avoidable={evitable}
@@ -109,7 +114,11 @@ function Contenido() {
           />
         )}
 
-        <Caveats overview={overview} ventana={ventana} />
+        {casiTodo && !overview.cost_unavailable && (
+          <CasiTodoEvitable overview={overview} total={total} evitable={evitable} />
+        )}
+
+        <Caveats overview={overview} ventana={ventana} casiTodo={casiTodo} />
 
         {/* Cuando la cobertura es buena no desaparece: se queda en una línea. Que el
             usuario sepa que esto se mide —y que hoy sale bien— es la mitad de lo que
@@ -196,6 +205,55 @@ function Contenido() {
 }
 
 /**
+ * Por encima de esta parte del gasto señalada como evitable, el héroe deja de
+ * enseñar la pareja «X → Y» y la barra de reparto.
+ *
+ * No es un umbral cosmético. Con el 93 % evitable, la barra queda con un lado
+ * invisible y la segunda cifra grande dice, en letra de 54 px, que puedes dejar de
+ * pagar casi todo tu agente. Nadie se lo cree, y con razón: lo que suele haber detrás
+ * es un agente pequeño donde dos o tres pasos son la factura entera. El aviso de
+ * `savings_needs_caution` ya salta antes (al 60 %), pero va debajo de la cifra, y aquí
+ * pasa lo mismo que con el «$0» de D-073: el número se lee antes que el aviso.
+ */
+const CASI_TODO_EVITABLE = 0.9;
+
+/**
+ * Lo que va donde iría la barra de reparto cuando el reparto no reparte nada.
+ *
+ * Dice la cifra —no la esconde, está medida— y dice por qué no se la presentamos como
+ * una promesa. Es la misma regla que el resto del producto: una cifra se enseña con lo
+ * que haga falta para leerla bien.
+ */
+function CasiTodoEvitable({
+  overview,
+  total,
+  evitable,
+}: {
+  overview: Overview;
+  total: number;
+  evitable: number;
+}) {
+  return (
+    <div className="casitodo">
+      <p>
+        <strong>Casi todo lo que gastas está señalado aquí abajo.</strong> De los{" "}
+        {money(total, overview.currency)}{" "}
+        {overview.projected ? "que costará el mes" : "de esta ventana"}, las reglas
+        consideran evitables {money(evitable, overview.currency)}: el{" "}
+        {Math.round((evitable / total) * 100)} %.
+      </p>
+      <p>
+        No te lo enseñamos como «puedes dejar de pagar tu agente», porque eso casi nunca
+        es lo que significa. Un reparto en el que un lado es cero no es un reparto: lo
+        que suele haber detrás es un agente pequeño o recién estrenado donde dos o tres
+        pasos son prácticamente toda la factura, y arreglarlos cambia esos pasos, no el
+        agente entero. Mira el desglose de cada problema antes de contar con esta cifra.
+      </p>
+    </div>
+  );
+}
+
+/**
  * El bloque de cobertura, cuando hay algo que avisar.
  *
  * Va antes del dinero y no en Avanzado. La regla del producto es que una cifra se
@@ -271,7 +329,15 @@ function Señales({ cobertura }: { cobertura: Coverage }) {
  * el gasto, o cuando la proyección sale de unas horas de datos, se dice aquí mismo en
  * lugar de presentarlo como una promesa.
  */
-function Caveats({ overview, ventana }: { overview: Overview; ventana: string }) {
+function Caveats({
+  overview,
+  ventana,
+  casiTodo,
+}: {
+  overview: Overview;
+  ventana: string;
+  casiTodo: boolean;
+}) {
   const avisos: React.ReactNode[] = [];
 
   if (overview.unknown_cost_spans > 0) {
@@ -315,7 +381,9 @@ function Caveats({ overview, ventana }: { overview: Overview; ventana: string })
       </>,
     );
   }
-  if (overview.savings_needs_caution) {
+  // Cuando el evitable es casi todo, esto ya lo dice el bloque de arriba con más
+  // detalle. Decirlo dos veces en la misma pantalla no lo hace más creíble.
+  if (overview.savings_needs_caution && !casiTodo) {
     avisos.push(
       <>
         El ahorro estimado es el{" "}

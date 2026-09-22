@@ -55,6 +55,28 @@ def nombre_de_paso(label: str, site: str = "", *, con_llamante: bool = True) -> 
     return f"{llamante} → {etiqueta}"
 
 
+#: Lo que se deja del prompt cuando hay que recurrir a él para separar dos pasos. El
+#: recorte no es estética: sin él, el título de un hallazgo era el nombre de la función
+#: más ochenta caracteres de prompt entre comillas dentro de otras comillas, y en la
+#: tarjeta del inicio ocupaba dos líneas de las tres que tiene (D-115).
+PISTA_EN_TITULO = 32
+
+
+def con_pista(label: str, hint: str) -> str:
+    """El último recurso: el paso más el principio de sus instrucciones, recortado.
+
+    Se usa cuando no hay camino de llamada con el que separar dos pasos homónimos, que
+    es el tráfico anterior a D-106 y el de quien no decora nada.
+    """
+    etiqueta = (label or "").strip()
+    pista = " ".join((hint or "").split())
+    if not pista or pista == etiqueta:
+        return etiqueta
+    if len(pista) > PISTA_EN_TITULO:
+        pista = pista[:PISTA_EN_TITULO].rstrip(" ,.;:") + "…"
+    return f"{etiqueta} — «{pista}»"
+
+
 def hay_homonimos(pasos: list[tuple[str, str]]) -> set[str]:
     """De esos `(label, site)`, qué etiquetas aparecen con más de un camino.
 

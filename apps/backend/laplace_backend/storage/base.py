@@ -12,7 +12,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from laplace.schema import Span, TraceSummary
 
-from ..pasos import nombre_de_paso
+from ..pasos import con_pista, nombre_de_paso
 
 
 @dataclass
@@ -433,10 +433,8 @@ def disambiguate(filas: list[Any]) -> list[Any]:
             fila.name = nombre
             continue
         # Sin camino —tráfico anterior a D-106, o un agente sin decorar— lo único que
-        # queda para separarlos es el principio de sus instrucciones.
-        pista = getattr(fila, "hint", "")
-        if pista and pista != fila.name:
-            fila.name = f"{fila.name} — «{pista}»"
+        # queda para separarlos es el principio de sus instrucciones, recortado.
+        fila.name = con_pista(fila.name, getattr(fila, "hint", ""))
     return filas
 
 

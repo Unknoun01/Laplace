@@ -265,6 +265,27 @@ body[data-mode="pro"] .simple-only {
   font-family: var(--mono);
 }
 
+/* El sustituto de la barra de reparto cuando el reparto no reparte: mismo sitio,
+   mismo peso visual, pero con palabras en vez de una barra con un lado invisible. */
+.casitodo {
+  margin-top: 24px;
+  border-left: 2px solid var(--amber);
+  padding: 2px 0 2px 14px;
+  display: grid;
+  gap: 8px;
+}
+.casitodo p {
+  margin: 0;
+  max-width: 76ch;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+.casitodo strong {
+  color: var(--ink-1);
+  font-weight: 600;
+}
+
 .readout {
   display: flex;
   margin-top: 24px;
