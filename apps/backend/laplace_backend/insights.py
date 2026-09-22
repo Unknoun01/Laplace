@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 from .coverage import Coverage
 from .coverage import build as build_coverage
 from .dinero import motivo_sin_dinero
+from .pasos import SEPARADOR as SEPARADOR_DE_CAMINO
 from .pricing import get_price_table
 from .storage.base import LoopGroup, ModelUsage, RepeatedGroup, Window, WindowSummary
 
@@ -1404,6 +1405,56 @@ def _fixed_context_detail(
 # ---------------------------------------------------------------------------------
 
 
+def _sin_envoltorios(loops: list[LoopGroup]) -> list[LoopGroup]:
+    """Un bucle visto desde dos alturas del árbol es un problema, no dos.
+
+    Un agente decorado envuelve cada paso en un span propio, así que seis vueltas
+    producen dos grupos: el del envoltorio —que no gasta tokens y sólo puede hablar de
+    tiempo— y el de la llamada al modelo de dentro, que sí tiene dinero. El inicio los
+    enseñaba como dos tarjetas, y después de D-115 con títulos distintos pero contando
+    lo mismo: de diez cosas que arreglar, cuatro eran dos.
+
+    **Que sean el mismo se sabe por los datos, no por el parecido.** El camino de
+    llamada del span de modelo termina en el paso que lo envuelve —eso lo escribe el
+    SDK, no lo deducimos— y además los dos tienen que cubrir las mismas trazas con las
+    mismas vueltas. Si cualquiera de las dos cosas falla, son bucles distintos y se
+    quedan los dos: ante la duda, enseñar de más, que es lo que ya hacíamos.
+
+    Se queda el de dentro porque es el que **puede ponerle precio**: «este bucle te
+    cuesta 0,60 $» acciona, y «te cuesta 2,4 s» acciona menos. Se pierden los pocos
+    milisegundos del envoltorio alrededor de la llamada, que es el lado bueno por el que
+    equivocarse (D-119).
+
+    Lo que esto **no** toca: un bucle de herramientas sin llamada al modelo dentro no
+    tiene quien lo sustituya, así que sigue saliendo con su tiempo, que es la promesa de
+    no inventar dinero donde no lo hay.
+    """
+    # Los pasos desde los que se llama a un modelo en bucle, con sus trazas y vueltas.
+    envueltos: dict[str, list[LoopGroup]] = {}
+    for grupo in loops:
+        if grupo.span_type != "llm" or not grupo.site:
+            continue
+        llamante = grupo.site.split(SEPARADOR_DE_CAMINO)[-1].strip()
+        if llamante:
+            envueltos.setdefault(llamante, []).append(grupo)
+
+    def es_envoltorio(grupo: LoopGroup) -> bool:
+        if grupo.span_type == "llm":
+            return False
+        # `step_key` de un span sin identidad de paso cae a su nombre, que es lo que
+        # escribe el SDK en el camino del hijo. Se compara con eso y no con `name`,
+        # que para entonces puede llevar ya el llamante pegado (D-115).
+        dentro = envueltos.get(grupo.step_key.strip())
+        if not dentro:
+            return False
+        return any(
+            hijo.traces == grupo.traces and hijo.extra_spans == grupo.extra_spans
+            for hijo in dentro
+        )
+
+    return [grupo for grupo in loops if not es_envoltorio(grupo)]
+
+
 def _duplicate_tokens(
     groups: list[RepeatedGroup],
     loops: list[LoopGroup] | None = None,
@@ -1489,8 +1540,10 @@ def detect(store: Any, project_id: str, window: Window) -> list[Finding]:
 
     # Los bucles van aparte de las repeticiones exactas y no se solapan con ellas: la
     # consulta exige entradas distintas, que es justo lo que la regla 1 no mira.
-    bucles = store.loop_groups(
-        project_id, window, min_vueltas=MIN_VUELTAS_BUCLE, max_salidas=MAX_SALIDAS_BUCLE
+    bucles = _sin_envoltorios(
+        store.loop_groups(
+            project_id, window, min_vueltas=MIN_VUELTAS_BUCLE, max_salidas=MAX_SALIDAS_BUCLE
+        )
     )
     for bucle in bucles:
         findings.append(_loop_finding(bucle, summary, dias, base))
@@ -1616,8 +1669,10 @@ def _detalle_repeticion(
 def _detalle_bucle(
     store: Any, project_id: str, window: Window, key: str, ctx: _Contexto
 ) -> FindingDetail | None:
-    for group in store.loop_groups(
-        project_id, window, min_vueltas=MIN_VUELTAS_BUCLE, max_salidas=MAX_SALIDAS_BUCLE
+    for group in _sin_envoltorios(
+        store.loop_groups(
+            project_id, window, min_vueltas=MIN_VUELTAS_BUCLE, max_salidas=MAX_SALIDAS_BUCLE
+        )
     ):
         if group.loop_hash != key:
             continue
@@ -1634,8 +1689,10 @@ def _detalle_modelo(
     step_key, _, model = key.rpartition(":")
     duplicados = _duplicate_tokens(
         store.repeated_groups(project_id, window, min_repeats=MIN_REPEATS),
-        store.loop_groups(
-            project_id, window, min_vueltas=MIN_VUELTAS_BUCLE, max_salidas=MAX_SALIDAS_BUCLE
+        _sin_envoltorios(
+            store.loop_groups(
+                project_id, window, min_vueltas=MIN_VUELTAS_BUCLE, max_salidas=MAX_SALIDAS_BUCLE
+            )
         ),
     )
     for bruto in store.model_usage(project_id, window, min_calls=1):
