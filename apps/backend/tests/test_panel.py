@@ -336,8 +336,13 @@ def window() -> Window:
     return Window(since=ahora - timedelta(days=3), until=ahora, days=3)
 
 
-def _proyecto_con_pico(store: SQLiteStore, project: str) -> datetime:
-    """Seis días de tráfico normal y una hora en la que alguien prueba un modelo caro."""
+def _proyecto_con_pico(store: SQLiteStore, project: str, *otros) -> datetime:
+    """Seis días de tráfico normal y una hora en la que alguien prueba un modelo caro.
+
+    Siembra en todos los almacenes que se le pasen, para que la prueba de paridad
+    use **estas** filas y no una copia suya: la copia inline se quedó sin el anclaje
+    al tramo de aquí abajo y fallaba una hora de cada seis (D-116).
+    """
     ahora = datetime.now(timezone.utc)
     spans: list[Span] = []
     for h in range(144):
@@ -364,7 +369,8 @@ def _proyecto_con_pico(store: SQLiteStore, project: str) -> datetime:
             tokens=20_000,
             paso="paso-experimento",
         )
-    store.insert_spans(spans)
+    for almacen in (store, *otros):
+        almacen.insert_spans(spans)
     return pico
 
 
@@ -503,28 +509,10 @@ def test_los_dos_almacenes_pintan_el_mismo_panel(store, clickhouse, window):
     esto se rompe, el mismo pico existe en la nube y no en local.
     """
     project = f"panel-paridad-{uuid.uuid4().hex[:8]}"
-    ahora = datetime.now(timezone.utc)
-    spans: list[Span] = []
-    for h in range(144):
-        spans += _traza(
-            project,
-            ahora - timedelta(hours=144 - h),
-            modelo="gpt-5.6-luna",
-            coste=0.00016,
-            tokens=500,
-            paso="paso-responder",
-        )
-    for i in range(6):
-        spans += _traza(
-            project,
-            ahora - timedelta(hours=10) + timedelta(minutes=i * 8),
-            modelo="gpt-5.6-terra",
-            coste=0.0496,
-            tokens=20_000,
-            paso="paso-experimento",
-        )
-    store.insert_spans(spans)
-    clickhouse.insert_spans(spans)
+    # Las mismas filas que el resto de pruebas del pico, no una copia: cuando esto era
+    # una copia, se quedó sin el anclaje al tramo y este test fallaba por la hora a la
+    # que se lanzara, no por el código (D-116).
+    _proyecto_con_pico(store, project, clickhouse)
     try:
         aqui = panel.build(store, project, window)
         alli = panel.build(clickhouse, project, window)
