@@ -22,6 +22,7 @@ from laplace.schema import Prompt, PromptVersion
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
+from .auth import identity_of
 from .prompts import (
     Diff,
     PromptCard,
@@ -53,6 +54,17 @@ def _guard(fn, *args, **kwargs):
         return fn(*args, **kwargs)
     except MetadataUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def _alcance(request: Request) -> str | None:
+    """El proyecto al que hay que acotar un acceso que va por id opaco.
+
+    `None` sólo para la clave de instalación, que ve todo. Para cualquier otra es su
+    proyecto, y entonces un id ajeno simplemente no existe: 404, sin decir si existe en
+    otro sitio. Es el patrón de lectura de D-097 aplicado también a la escritura, y al
+    id opaco que el middleware no puede ver (D-121).
+    """
+    return identity_of(request).scope(None)
 
 
 def _window(days: int) -> Window:
@@ -182,7 +194,7 @@ async def get_prompt(
 ) -> PromptCard:
     """La ficha de un prompt: versiones con su texto, historial y comparación."""
     meta = _meta(request)
-    prompt = await run_in_threadpool(meta.get_prompt, prompt_id)
+    prompt = await run_in_threadpool(meta.get_prompt, prompt_id, _alcance(request))
     if prompt is None:
         raise HTTPException(status_code=404, detail="ese prompt no existe")
 
@@ -283,7 +295,7 @@ class VersionIn(BaseModel):
 @router.post("/{prompt_id}/versions", response_model=PromptVersion)
 async def add_version(request: Request, prompt_id: str, body: VersionIn) -> PromptVersion:
     meta = _meta(request)
-    if await run_in_threadpool(meta.get_prompt, prompt_id) is None:
+    if await run_in_threadpool(meta.get_prompt, prompt_id, _alcance(request)) is None:
         raise HTTPException(status_code=404, detail="ese prompt no existe")
     version = await run_in_threadpool(
         _guard,
@@ -321,7 +333,7 @@ async def set_production(request: Request, prompt_id: str, body: DeployIn) -> di
     un rollback del que no se sabe cuándo hace efecto no tranquiliza a nadie.
     """
     meta = _meta(request)
-    prompt = await run_in_threadpool(meta.get_prompt, prompt_id)
+    prompt = await run_in_threadpool(meta.get_prompt, prompt_id, _alcance(request))
     if prompt is None:
         raise HTTPException(status_code=404, detail="ese prompt no existe")
     if await run_in_threadpool(meta.get_prompt_version, prompt_id, body.version) is None:
@@ -354,7 +366,9 @@ async def delete_prompt(request: Request, prompt_id: str) -> dict[str, bool]:
     Las trazas no se tocan: siguen diciendo con qué versión corrieron, aunque el texto
     ya no esté. Es información que ocurrió y no es nuestra para borrarla de ahí.
     """
-    borrado = await run_in_threadpool(_guard, _meta(request).delete_prompt, prompt_id)
+    borrado = await run_in_threadpool(
+        _guard, _meta(request).delete_prompt, prompt_id, _alcance(request)
+    )
     if not borrado:
         raise HTTPException(status_code=404, detail="ese prompt no existe")
     return {"deleted": True}

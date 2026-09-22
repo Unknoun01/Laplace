@@ -348,8 +348,25 @@ async def pricing_models() -> dict[str, Any]:
 
 
 @router.post("/api/pricing/reload")
-async def pricing_reload() -> dict[str, Any]:
-    """Recarga la tabla de precios sin reiniciar el proceso (D-006)."""
+async def pricing_reload(request: Request) -> dict[str, Any]:
+    """Recarga la tabla de precios sin reiniciar el proceso (D-006).
+
+    Pide clave de **instalación**, no de proyecto. Es la primera ruta del producto que
+    no lleva `project_id`, así que el middleware no tiene por dónde acotarla y hay que
+    acotarla aquí a mano —el punto ciego que D-097 dejó anotado por si aparecía—. Lo que
+    toca es la tabla de precios de todo el despliegue: con la clave de un proyecto se
+    podía cambiar la aritmética con la que se le factura a los demás (D-121).
+    """
+    identidad = identity_of(request)
+    if not identidad.sees_everything:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "recargar la tabla de precios afecta a todos los proyectos de esta "
+                "instalación, así que pide una clave de instalación y no la de un "
+                "proyecto"
+            ),
+        )
     table = await run_in_threadpool(reload_price_table)
     return {"models": len(table.models)}
 

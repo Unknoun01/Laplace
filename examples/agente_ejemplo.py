@@ -328,6 +328,35 @@ def responder_con_fallo(pregunta: str, usuario: str = "u-9") -> str:
 # ---------------------------------------------------------------------------------
 
 
+def _hay_alguien_escuchando(endpoint: str) -> bool:
+    """Si hay un Laplace vivo en ese endpoint, comprobado antes de gastar el rato.
+
+    Hace falta porque `laplace.flush()` **no** sirve para esto, aunque lo parezca:
+    devuelve si la cola de spans se drenó a tiempo, no si el otro lado los recibió. El
+    exportador de OpenTelemetry reintenta, se rinde y lo deja en un log, y el flush
+    contesta `True` igual. Ésa es la razón por la que este script imprimía «listo»
+    después de diez segundos de reintentos contra un puerto donde no había nada.
+    """
+    import urllib.error
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"{endpoint.rstrip('/')}/health", timeout=3) as r:
+            return 200 <= r.status < 300
+    except (urllib.error.URLError, OSError, ValueError):
+        return False
+
+
+def _interfaz(endpoint: str) -> str:
+    """Dónde mirar las trazas según por dónde se hayan mandado.
+
+    El modo local sirve la interfaz desde el mismo proceso que la ingesta; la
+    instalación con Docker la sirve aparte, en el 3000. Decir siempre el 3000 mandaba a
+    quien usa `laplace ui` a un puerto donde no hay nada.
+    """
+    return endpoint if endpoint.rstrip("/").endswith(":8100") else "http://localhost:3000"
+
+
 def main() -> int:
     endpoint = os.getenv("LAPLACE_ENDPOINT", "http://localhost:8000")
     laplace.init(
@@ -336,6 +365,17 @@ def main() -> int:
         service_name="agente-de-viajes",
         service_version="0.1.0",
     )
+    if not _hay_alguien_escuchando(endpoint):
+        print(
+            f"\nNo hay ningún Laplace escuchando en {endpoint}.\n"
+            "Arráncalo antes, y lanza esto apuntando al que uses:\n"
+            "  · instalación con Docker  ->  docker compose up   (puerto 8000)\n"
+            "  · modo local              ->  laplace ui          (puerto 8100)\n"
+            "     LAPLACE_ENDPOINT=http://127.0.0.1:8100 python examples/agente_ejemplo.py",
+            file=sys.stderr,
+        )
+        return 1
+
     print(f"enviando trazas a {endpoint}")
 
     preguntas = [
@@ -373,8 +413,22 @@ def main() -> int:
     except RuntimeError as exc:
         print(f"  [8] traza error — {exc}")
 
-    laplace.flush()
-    print("listo. Abre http://localhost:3000 para ver las trazas.")
+    # Esto sólo caza que la cola no se drenara a tiempo —un backend que se cae a mitad—,
+    # no que los spans llegaran: eso lo comprueba el sondeo de arriba. Se deja porque es
+    # gratis y porque las dos cosas fallan por motivos distintos.
+    if not laplace.flush():
+        print(
+            f"\nNO se han podido enviar las trazas a {endpoint}.\n"
+            "Comprueba que Laplace está escuchando ahí:\n"
+            "  · instalación con Docker  ->  docker compose up   (puerto 8000)\n"
+            "  · modo local              ->  laplace ui          (puerto 8100)\n"
+            "Y vuelve a lanzarlo apuntando al que uses:\n"
+            "  LAPLACE_ENDPOINT=http://127.0.0.1:8100 python examples/agente_ejemplo.py",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(f"listo. Abre {_interfaz(endpoint)} para ver las trazas.")
     return 0
 
 

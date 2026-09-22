@@ -415,3 +415,176 @@ def test_la_clave_se_puede_mandar_en_las_dos_cabeceras(cerrado):
 
     en_la_url = client.get("/api/projects", params={"api_key": claves["mio"]["clave"]})
     assert en_la_url.status_code == 401
+
+
+# ---------------------------------------------------------------------------------
+# La ruta que no lleva proyecto, que es el punto ciego que D-097 dejó anotado
+# ---------------------------------------------------------------------------------
+
+
+def test_la_clave_de_un_proyecto_no_recarga_los_precios_de_todos(cerrado):
+    """El middleware acota por el `project_id` que venga en la petición, así que una
+    ruta que no lleve ninguno se le escapa: hay que acotarla en la ruta a mano.
+
+    `POST /api/pricing/reload` era la primera —y única— que estaba en ese caso, y lo que
+    toca no es poca cosa: la tabla de precios con la que se calcula el gasto de **todos**
+    los proyectos de la instalación. Con la clave de un proyecto se podía cambiar la
+    aritmética con la que se le factura a los demás (D-121).
+    """
+    client, claves = cerrado
+    respuesta = client.post("/api/pricing/reload", headers=_cab(claves, "mio"))
+    assert respuesta.status_code == 403
+    assert "instalación" in respuesta.json()["detail"]
+
+
+def test_la_clave_de_instalacion_si_recarga_los_precios(cerrado):
+    """Y el operador, que es para quien existe esa ruta, sigue pudiendo."""
+    client, claves = cerrado
+    respuesta = client.post("/api/pricing/reload", headers=_cab(claves, auth.ALL_PROJECTS))
+    assert respuesta.status_code == 200
+    assert respuesta.json()["models"] > 0
+
+
+def test_leer_los_precios_lo_puede_hacer_cualquiera_con_clave(cerrado):
+    """Leer la tabla no es lo mismo que recargarla: son los precios públicos de los
+    proveedores, y la interfaz de cualquier proyecto los necesita para explicarse."""
+    client, claves = cerrado
+    respuesta = client.get("/api/pricing/models", headers=_cab(claves, "mio"))
+    assert respuesta.status_code == 200
+
+
+def test_ninguna_ruta_de_escritura_se_queda_sin_acotar():
+    """La red del punto ciego, para la siguiente ruta que no lleve proyecto.
+
+    `D-097` dejó escrito que el día que apareciera una escritura sin `project_id` ni en
+    el cuerpo ni en la URL, el middleware no tendría por dónde acotarla. Apareció, y
+    nadie se enteró hasta que se miró a mano. Esto recorre las rutas de escritura
+    registradas y exige que cada una tenga por dónde: o un `project_id` en su firma, o
+    una comprobación de identidad explícita en su código.
+    """
+    import inspect
+
+    from laplace_backend import api, api_evals, api_prompts
+
+    sin_acotar: list[str] = []
+    for modulo in (api, api_evals, api_prompts):
+        for ruta in modulo.router.routes:
+            if not set(getattr(ruta, "methods", set())) & {"POST", "PUT", "PATCH", "DELETE"}:
+                continue
+            firma = inspect.signature(ruta.endpoint)
+            fuente = inspect.getsource(ruta.endpoint)
+            # Las tres formas válidas de tener por dónde acotar: el proyecto viene en
+            # la petición, la ruta pide el alcance de la identidad, o comprueba a mano
+            # que quien llama es el operador de la instalación.
+            acotada = (
+                "project_id" in firma.parameters
+                or "project_id" in fuente
+                or "_alcance(request)" in fuente
+                or "sees_everything" in fuente
+            )
+            if not acotada:
+                sin_acotar.append(f"{modulo.__name__}.{ruta.endpoint.__name__} {ruta.path}")
+
+    assert sin_acotar == [], (
+        "estas rutas escriben o cambian algo y no tienen por dónde acotarse: ni llevan "
+        f"proyecto ni comprueban identidad. {sin_acotar}"
+    )
+
+
+def test_con_mi_clave_no_puedo_borrar_el_prompt_de_otro(cerrado):
+    """El punto ciego, demostrado en vez de razonado.
+
+    `DELETE /api/prompts/{id}` borra por identificador y el almacén no filtra por
+    proyecto, así que la clave de «mio» borraba el prompt de «ajeno» y su histórico
+    entero. No es leer datos de otro, que es lo que D-097 cerró: es **escribir** en los
+    de otro, que estaba un escalón por debajo del radar porque el middleware acota por
+    el `project_id` que venga en la petición y aquí no venía ninguno (D-121).
+    """
+    client, claves = cerrado
+    creado = client.post(
+        "/api/prompts",
+        json={"project_id": "ajeno", "name": "resumen", "text": "Eres breve."},
+        headers=_cab(claves, "ajeno"),
+    )
+    assert creado.status_code == 200, creado.text
+    prompt_id = creado.json()["id"]
+
+    intruso = client.delete(f"/api/prompts/{prompt_id}", headers=_cab(claves, "mio"))
+    # 404 y no 403, que es la convención del producto para esto: contestar «no es tuyo»
+    # para un id y «no existe» para otro convierte la API en un directorio de los
+    # prompts de los demás. Acotando la consulta, un id ajeno no existe y ya está.
+    assert intruso.status_code == 404, (
+        "la clave de un proyecto no puede borrar el prompt de otro; "
+        f"ha contestado {intruso.status_code}"
+    )
+
+    # Y el dueño sigue teniéndolo.
+    sigue = client.get(
+        f"/api/prompts/{prompt_id}",
+        params={"project_id": "ajeno"},
+        headers=_cab(claves, "ajeno"),
+    )
+    assert sigue.status_code == 200
+
+
+def test_con_mi_clave_no_puedo_borrar_la_anotacion_de_otro(cerrado):
+    """La misma puerta, en Evaluaciones.
+
+    Se escribe aparte y no como un caso más del de prompts porque el arreglo vive en
+    otro módulo: si alguien acota uno y se olvida del otro, esto lo dice. Y porque el
+    fallo se destapó con el guardia estructural, no con esta prueba: sin ella, la ruta
+    quedaba arreglada **y sin ejecutar** —tanto, que el import que le faltaba sólo lo
+    encontró el linter.
+    """
+    client, claves = cerrado
+    creada = client.post(
+        "/api/annotations",
+        json={
+            "project_id": "ajeno",
+            "trace_id": "t-ajeno",
+            "source": "human",
+            "verdict": "pass",
+            "comment": "va bien",
+        },
+        headers=_cab(claves, "ajeno"),
+    )
+    assert creada.status_code == 200, creada.text
+    anotacion_id = creada.json()["id"]
+
+    intruso = client.delete(f"/api/annotations/{anotacion_id}", headers=_cab(claves, "mio"))
+    assert intruso.status_code == 404, (
+        f"la anotación de otro proyecto no es suya para borrarla: {intruso.status_code}"
+    )
+
+    propias = client.get(
+        "/api/annotations", params={"trace_ids": "t-ajeno"}, headers=_cab(claves, "ajeno")
+    )
+    assert propias.status_code == 200
+    assert propias.json()["annotations"]["t-ajeno"], "el dueño la sigue teniendo"
+
+
+def test_con_mi_clave_no_puedo_leer_el_texto_del_prompt_de_otro(cerrado):
+    """El mismo punto ciego, en lectura y con una cara peor.
+
+    La ficha de un prompt lleva el **texto completo** de todas sus versiones. La ruta
+    pide `project_id` —así que el middleware la deja pasar si pones el tuyo— pero
+    después buscaba el prompt por su id a secas, sin acotar. Con tu proyecto en la
+    URL y el id de otro, te llevabas sus prompts enteros (D-121).
+    """
+    client, claves = cerrado
+    creado = client.post(
+        "/api/prompts",
+        json={"project_id": "ajeno", "name": "secreto", "text": "Instrucciones privadas."},
+        headers=_cab(claves, "ajeno"),
+    )
+    assert creado.status_code == 200, creado.text
+    prompt_id = creado.json()["id"]
+
+    intruso = client.get(
+        f"/api/prompts/{prompt_id}",
+        params={"project_id": "mio"},
+        headers=_cab(claves, "mio"),
+    )
+    assert intruso.status_code == 404, (
+        f"con mi proyecto en la URL y su id, me llevaba sus prompts: {intruso.status_code}"
+    )

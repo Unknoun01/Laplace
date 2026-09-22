@@ -19,6 +19,7 @@ from laplace.schema import Annotation, Dataset, DatasetItem, EvalRun, EvalRunIte
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
+from .auth import identity_of
 from .evals import Comparison, RunSummary, compare, summarize_run
 from .judge import JudgeConfig, JudgeUnavailable, build_prompt, judge_trace
 from .storage.base import TraceFilter
@@ -36,6 +37,11 @@ def _store(request: Request) -> Any:
 
 def _meta(request: Request) -> Any:
     return request.app.state.metadata
+
+
+def _alcance(request: Request) -> str | None:
+    """El proyecto al que acotar un acceso que va por id opaco (D-121)."""
+    return identity_of(request).scope(None)
 
 
 def _guard(fn, *args, **kwargs):
@@ -95,7 +101,7 @@ async def create_annotation(request: Request, body: AnnotationIn) -> Annotation:
 @router.delete("/annotations/{annotation_id}")
 async def delete_annotation(request: Request, annotation_id: str) -> dict[str, bool]:
     borrada = await run_in_threadpool(
-        _guard, _meta(request).delete_annotation, annotation_id
+        _guard, _meta(request).delete_annotation, annotation_id, _alcance(request)
     )
     if not borrada:
         raise HTTPException(status_code=404, detail="esa anotación ya no existe")
@@ -330,7 +336,9 @@ async def get_dataset(request: Request, dataset_id: str) -> dict[str, Any]:
 
 @router.delete("/datasets/{dataset_id}")
 async def delete_dataset(request: Request, dataset_id: str) -> dict[str, bool]:
-    borrado = await run_in_threadpool(_guard, _meta(request).delete_dataset, dataset_id)
+    borrado = await run_in_threadpool(
+        _guard, _meta(request).delete_dataset, dataset_id, _alcance(request)
+    )
     if not borrado:
         raise HTTPException(status_code=404, detail="ese conjunto no existe")
     return {"deleted": True}
