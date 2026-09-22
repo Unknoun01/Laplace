@@ -17,7 +17,7 @@ Tres principios que condicionan todo lo de aquí:
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Any, Literal
 
 from laplace.schema import Span
@@ -618,6 +618,128 @@ def _loop_finding(
         ],
         sample_trace_id=group.sample_trace_id,
     )
+
+
+def _loop_detail(
+    finding: Finding, group: LoopGroup, evidence: list[Span], query: str
+) -> FindingDetail:
+    """La ficha de un bucle.
+
+    No existía. La regla entró por `detect()` y nunca salió por `detail()`, así que el
+    hallazgo que más dinero devolvía del proyecto de demo llevaba a un 404 que el
+    usuario leía como «enhorabuena, ya no lo tienes» (D-113).
+    """
+    cuesta = group.extra_cost_usd > 0
+    detalle = FindingDetail(**finding.model_dump())
+
+    detalle.what_happens = (
+        f"Dentro de una misma ejecución, «{group.name}» se llama hasta "
+        f"{group.max_per_trace} veces. Las entradas no son idénticas —se diferencian en "
+        f"algún número: un contador de intentos, una página, una hora—, pero entre las "
+        f"{group.total_spans} llamadas de la ventana sólo salen "
+        f"{group.distinct_outputs} "
+        f"{'resultado distinto' if group.distinct_outputs == 1 else 'resultados distintos'}. "
+        f"Muchas vueltas y un solo resultado es la definición medible de dar vueltas sin "
+        f"avanzar."
+    )
+    detalle.why = (
+        "El agente tiene una condición de salida que no se cumple nunca, o que depende de "
+        "algo que no está mirando. Como en cada vuelta cambia un número, cree que está "
+        "haciendo algo nuevo: pregunta otra vez, recibe la misma respuesta y vuelve a "
+        "empezar hasta agotar el tope de intentos.\n\n"
+        "Es el hermano difícil de la repetición exacta y por eso se detecta aparte: una "
+        "repetición se ve comparando entradas idénticas, y aquí no hay dos entradas "
+        "idénticas. Lo que delata al bucle no es la entrada, es que la salida no cambia."
+    )
+    detalle.detection_explanation = (
+        f"Regla activa: **{MIN_VUELTAS_BUCLE} o más llamadas del mismo paso dentro de una "
+        f"traza, con entradas distintas y como mucho {MAX_SALIDAS_BUCLE} salidas "
+        f"distintas**. El `laplace.loop_hash` lo calcula la ingesta como el `dedup_hash` "
+        f"pero **ignorando los números** de la entrada, que es lo que hace visible un "
+        f"bucle con contador; el hash de salida no los ignora, porque ahí un número que "
+        f"cambia sí es avance. Exigir entradas distintas es lo que impide que esta regla "
+        f"y la de repetición cuenten el mismo dinero dos veces."
+    )
+    detalle.detection_query = query.strip()
+
+    detalle.fix_steps = [
+        FixStep(
+            title="Revisa la condición de salida",
+            body=(
+                "Es lo primero que hay que mirar: el bucle sale por el tope de intentos, no "
+                "porque haya terminado. Casi siempre falta comprobar el caso en el que la "
+                "respuesta ya es la definitiva."
+            ),
+            code=(
+                f"for intento in range(MAX_INTENTOS):\n"
+                f"    respuesta = {group.name}(...)\n"
+                f"    if respuesta == anterior:      # no avanza: no insistas\n"
+                f"        break\n"
+                f"    anterior = respuesta"
+            ),
+        ),
+        FixStep(
+            title="Corta cuando la respuesta se repite",
+            body=(
+                "Aunque la condición de salida esté bien, si dos vueltas seguidas devuelven "
+                "lo mismo no hay nada que ganar con una tercera."
+            ),
+        ),
+        FixStep(
+            title="Y deja el tope puesto",
+            body=(
+                "El tope de intentos no sobra: es lo que ha impedido que esto fuera una "
+                "cascada en vez de seis vueltas. Bájalo a lo que de verdad tenga sentido."
+            ),
+            advanced=True,
+        ),
+    ]
+
+    vueltas = (
+        f"{group.extra_spans} vueltas de más en {group.traces} "
+        f"{'traza' if group.traces == 1 else 'trazas'} durante "
+        f"{window_label(finding.observed_days)}"
+    )
+    if cuesta:
+        detalle.savings_calculation = (
+            f"{vueltas}, que suman ${group.extra_cost_usd:.6f} de coste ya gastado."
+            f"{_projection_sentence(finding)} Sólo cuenta a partir de la segunda vuelta de "
+            f"cada traza: la primera es trabajo legítimo."
+        )
+        detalle.savings_note = (
+            "El dinero ya gastado está medido, no estimado: es la suma del coste de las "
+            "vueltas que sobran. Lo estimado es la proyección a un mes, que sale de "
+            "suponer que el ritmo se mantiene."
+            if finding.monthly_saving_usd is not None
+            else "El dinero ya gastado está medido, no estimado: es la suma del coste de "
+            "las vueltas que sobran. Lo que todavía no podemos decirte es a cuánto va el "
+            "mes."
+        )
+    elif finding.window_waste_tokens > 0:
+        detalle.savings_calculation = (
+            f"{vueltas}, que mueven {_miles(finding.window_waste_tokens)} tokens y "
+            f"{_seconds(group.extra_duration_ms)} de espera. Cuánto dinero es, no lo "
+            f"sabemos: {group.model or 'ese modelo'} no está en la tabla de precios, y un "
+            f"número inventado aquí sería peor que ninguno."
+        )
+        detalle.savings_note = (
+            "Los tokens y el tiempo están medidos; el dinero no se puede calcular sin "
+            "tarifa. Si ese modelo empieza a tener precio conocido, esta misma cifra "
+            "aparecerá en dólares sin que cambies nada."
+        )
+    else:
+        detalle.savings_calculation = (
+            f"{vueltas}. Estas vueltas no consumen tokens, así que el ahorro en dinero es "
+            f"cero: lo que se recupera es tiempo, {_seconds(group.extra_duration_ms)} en la "
+            f"ventana analizada."
+        )
+        detalle.savings_note = (
+            "Este problema no te cuesta dinero, te cuesta espera. Arreglarlo hace que tu "
+            "agente responda antes."
+        )
+
+    detalle.evidence = evidence
+    return detalle
 
 
 # ---------------------------------------------------------------------------------
@@ -1332,6 +1454,82 @@ def overview(
     )
 
 
+def _detalle_repeticion(
+    store: Any, project_id: str, window: Window, key: str, ctx: _Contexto
+) -> FindingDetail | None:
+    for group in store.repeated_groups(project_id, window, min_repeats=MIN_REPEATS):
+        if group.step_key != key:
+            continue
+        finding = _repetition_finding(group, ctx.summary, ctx.dias, ctx.base)
+        evidencia = store.sample_repetition(project_id, window, group.dedup_hash)
+        return _repetition_detail(finding, group, evidencia, store.repeated_groups_sql)
+    return None
+
+
+def _detalle_bucle(
+    store: Any, project_id: str, window: Window, key: str, ctx: _Contexto
+) -> FindingDetail | None:
+    for group in store.loop_groups(
+        project_id, window, min_vueltas=MIN_VUELTAS_BUCLE, max_salidas=MAX_SALIDAS_BUCLE
+    ):
+        if group.loop_hash != key:
+            continue
+        finding = _loop_finding(group, ctx.summary, ctx.dias, ctx.base)
+        evidencia = store.sample_loop(project_id, window, group.loop_hash)
+        return _loop_detail(finding, group, evidencia, store.loop_groups_sql)
+    return None
+
+
+def _detalle_modelo(
+    store: Any, project_id: str, window: Window, key: str, ctx: _Contexto
+) -> FindingDetail | None:
+    """Las reglas 2 y 3 comparten búsqueda: las dos cuelgan de un (paso, modelo)."""
+    step_key, _, model = key.rpartition(":")
+    duplicados = _duplicate_tokens(
+        store.repeated_groups(project_id, window, min_repeats=MIN_REPEATS)
+    )
+    for bruto in store.model_usage(project_id, window, min_calls=1):
+        if bruto.key != step_key or bruto.model != model:
+            continue
+        uso = _without_duplicates(bruto, duplicados)
+        if ctx.kind == "modelo_caro":
+            todos = store.model_usage(project_id, window, min_calls=1)
+            finding = _expensive_model_finding(uso, ctx.summary, ctx.dias, ctx.base, otros=todos)
+            consulta = store.model_usage_sql
+            return _expensive_model_detail(finding, uso, consulta) if finding else None
+        finding = _fixed_context_finding(uso, ctx.summary, ctx.dias, ctx.base)
+        return _fixed_context_detail(finding, uso, store.model_usage_sql) if finding else None
+    return None
+
+
+@dataclass
+class _Contexto:
+    """Lo que toda ficha necesita saber de la ventana, calculado una sola vez."""
+
+    kind: str
+    summary: WindowSummary
+    dias: float
+    base: float | None
+
+
+#: De qué tipo de hallazgo sabe hacer ficha cada función. No es una lista decorativa:
+#: `DETAILED_KINDS` sale de aquí y `test_catalogo_hallazgos` exige que coincida con
+#: `FindingKind`, así que una regla nueva que se añada a `detect()` y no a esta tabla
+#: pone la suite en rojo el mismo día. Antes no había nada que lo exigiera, y la regla
+#: de bucles vivió cuatro tandas sin ficha: su hallazgo más caro llevaba a un 404 que
+#: el usuario leía como «enhorabuena» (D-113).
+_DETALLADORES = {
+    "repeticion": _detalle_repeticion,
+    "bucle": _detalle_bucle,
+    "modelo_caro": _detalle_modelo,
+    "contexto_fijo": _detalle_modelo,
+}
+
+#: Los tipos que `detail()` sabe reconstruir. Derivado, nunca escrito a mano: una lista
+#: escrita a mano se queda desfasada afirmando que cubre algo que no cubre.
+DETAILED_KINDS = frozenset(_DETALLADORES)
+
+
 def detail(store: Any, project_id: str, window: Window, finding_id: str) -> FindingDetail | None:
     """Recompone la ficha de un hallazgo.
 
@@ -1339,34 +1537,15 @@ def detail(store: Any, project_id: str, window: Window, finding_id: str) -> Find
     nada: se vuelve a calcular sobre la misma ventana y se busca el que coincide.
     """
     kind, _, key = finding_id.partition(":")
+    detallador = _DETALLADORES.get(kind)
+    if detallador is None:
+        return None
+
     summary = store.summarize_window(project_id, window)
-    dias = observed_days(summary, window)
-    base = _projection_base(summary, window)
-
-    if kind == "repeticion":
-        for group in store.repeated_groups(project_id, window, min_repeats=MIN_REPEATS):
-            if group.step_key != key:
-                continue
-            finding = _repetition_finding(group, summary, dias, base)
-            evidencia = store.sample_repetition(project_id, window, group.dedup_hash)
-            return _repetition_detail(finding, group, evidencia, store.repeated_groups_sql)
-        return None
-
-    if kind in ("modelo_caro", "contexto_fijo"):
-        step_key, _, model = key.rpartition(":")
-        duplicados = _duplicate_tokens(
-            store.repeated_groups(project_id, window, min_repeats=MIN_REPEATS)
-        )
-        for bruto in store.model_usage(project_id, window, min_calls=1):
-            if bruto.key != step_key or bruto.model != model:
-                continue
-            uso = _without_duplicates(bruto, duplicados)
-            if kind == "modelo_caro":
-                finding = _expensive_model_finding(uso, summary, dias, base)
-                consulta = store.model_usage_sql
-                return _expensive_model_detail(finding, uso, consulta) if finding else None
-            finding = _fixed_context_finding(uso, summary, dias, base)
-            return _fixed_context_detail(finding, uso, store.model_usage_sql) if finding else None
-        return None
-
-    return None
+    ctx = _Contexto(
+        kind=kind,
+        summary=summary,
+        dias=observed_days(summary, window),
+        base=_projection_base(summary, window),
+    )
+    return detallador(store, project_id, window, key, ctx)

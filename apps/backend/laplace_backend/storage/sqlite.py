@@ -661,6 +661,10 @@ class SQLiteStore:
         return REPEATED_GROUPS_SQL
 
     @property
+    def loop_groups_sql(self) -> str:
+        return LOOP_GROUPS_SQL
+
+    @property
     def model_usage_sql(self) -> str:
         return MODEL_USAGE_SQL
 
@@ -882,6 +886,30 @@ class SQLiteStore:
         sql = f"""
             SELECT {columnas} FROM spans
             WHERE trace_id = :trace_id AND dedup_hash = :dedup_hash
+            ORDER BY start_time, span_id LIMIT :limit
+        """
+        return [row_to_span(r) for r in self._query(sql, params)]
+
+    def sample_loop(
+        self, project_id: str, window: Window, loop_hash: str, limit: int = 40
+    ) -> list[Span]:
+        """La traza donde más vueltas da ese bucle, con sus vueltas."""
+        params = self._window_params(project_id, window)
+        params["loop_hash"] = loop_hash
+        params["limit"] = limit
+        trazas = self._query(
+            f"""SELECT trace_id, COUNT(*) AS n FROM spans
+                WHERE {WINDOW_WHERE} AND loop_hash = :loop_hash
+                GROUP BY trace_id ORDER BY n DESC, trace_id LIMIT 1""",
+            params,
+        )
+        if not trazas:
+            return []
+        params["trace_id"] = trazas[0]["trace_id"]
+        columnas = ", ".join(COLUMNS)
+        sql = f"""
+            SELECT {columnas} FROM spans
+            WHERE trace_id = :trace_id AND loop_hash = :loop_hash
             ORDER BY start_time, span_id LIMIT :limit
         """
         return [row_to_span(r) for r in self._query(sql, params)]

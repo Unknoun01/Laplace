@@ -461,6 +461,14 @@ class SpanStore(Protocol):
         """
 
     @property
+    def loop_groups_sql(self) -> str:
+        """La consulta que detecta bucles sin avance, tal cual se ejecuta.
+
+        Misma razón que `repeated_groups_sql`: la ficha del hallazgo enseña la consulta
+        que se ha ejecutado de verdad, y cada almacén tiene la suya.
+        """
+
+    @property
     def model_usage_sql(self) -> str:
         """La consulta que agrega el uso por paso, tal cual se ejecuta."""
 
@@ -501,6 +509,16 @@ class SpanStore(Protocol):
         self, project_id: str, window: Window, dedup_hash: str, limit: int = 40
     ) -> list[Span]:
         """Las ocurrencias repetidas de una traza concreta, como evidencia."""
+
+    def sample_loop(
+        self, project_id: str, window: Window, loop_hash: str, limit: int = 40
+    ) -> list[Span]:
+        """Las vueltas de un bucle en una traza concreta, como evidencia.
+
+        Gemela de `sample_repetition` y separada de ella a propósito: un bucle se agrupa
+        por `loop_hash` —que ignora los números de la entrada— y una repetición por
+        `dedup_hash`, que no. Mezclarlas devolvería una vuelta suelta en vez del bucle.
+        """
 
     def timeseries(
         self, project_id: str, window: Window, bucket_minutes: int

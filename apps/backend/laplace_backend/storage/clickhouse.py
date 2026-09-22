@@ -570,6 +570,10 @@ class ClickHouseStore:
         return REPEATED_GROUPS_SQL
 
     @property
+    def loop_groups_sql(self) -> str:
+        return LOOP_GROUPS_SQL
+
+    @property
     def model_usage_sql(self) -> str:
         return MODEL_USAGE_SQL
 
@@ -735,6 +739,41 @@ class ClickHouseStore:
                 SELECT {columns}
                 FROM spans
                 WHERE trace_id = %(trace_id)s AND dedup_hash = %(dedup_hash)s
+                ORDER BY span_id, ingested_at DESC
+                LIMIT 1 BY span_id
+            )
+            ORDER BY start_time, span_id
+            LIMIT %(limit)s
+        """
+        return [row_to_span(r) for r in _named(self._client.query(sql, parameters=params))]
+
+    def sample_loop(
+        self, project_id: str, window: Window, loop_hash: str, limit: int = 40
+    ) -> list[Span]:
+        """La traza donde más vueltas da ese bucle, con sus vueltas."""
+        params = self._window_params(project_id, window)
+        params["loop_hash"] = loop_hash
+        params["limit"] = limit
+
+        trace_sql = f"""
+            SELECT trace_id, count() AS n
+            FROM spans FINAL
+            WHERE {WINDOW_WHERE} AND loop_hash = %(loop_hash)s
+            GROUP BY trace_id
+            ORDER BY n DESC, trace_id
+            LIMIT 1
+        """
+        rows = self._client.query(trace_sql, parameters=params).result_rows
+        if not rows:
+            return []
+        params["trace_id"] = rows[0][0]
+
+        columns = ", ".join(COLUMNS)
+        sql = f"""
+            SELECT {columns} FROM (
+                SELECT {columns}
+                FROM spans
+                WHERE trace_id = %(trace_id)s AND loop_hash = %(loop_hash)s
                 ORDER BY span_id, ingested_at DESC
                 LIMIT 1 BY span_id
             )
