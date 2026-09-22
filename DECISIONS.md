@@ -1282,3 +1282,305 @@ Se arregló en los dos caminos —normal y streaming—, porque en un agente de 
 mayoría de las llamadas van en streaming y arreglarlo sólo en uno habría dejado el error
 justo donde más tráfico hay.
 
+
+## 2026-09-17 — Los proveedores, contra un modelo local
+
+### D-102 — Un modelo local para ejercitar el camino entero sin pagar nada
+Las integraciones ya se probaban contra los SDK reales, pero con el transporte HTTP
+falseado: el cuerpo de la respuesta lo escribíamos nosotros (D-098). Eso deja un último
+tramo sin tocar, y es un tramo con fallos propios: un cuerpo que llega comprimido, un SSE
+troceado como lo trocee el servidor y no como lo trocee un `bytes`, cabeceras, códigos de
+estado de verdad, un socket que se cierra a media respuesta.
+
+Ese tramo se puede recorrer gratis. Un servidor de modelos local expone la API de OpenAI;
+al cliente real se le pasa ese `base_url` y una clave ficticia, y el SDK publicado habla
+por HTTP con un modelo que genera texto. Coste cero, red real, cuerpo ajeno.
+
+**Ollama y no LM Studio**, por cuatro razones del mismo tipo —esto tiene que arrancar sin
+que nadie toque una ventana—: es un servicio y no una aplicación, se maneja entero por
+línea de comandos (así que los pasos se copian, se pegan y caben en un CI), carga el
+modelo cuando llega la petición en vez de exigir un paso previo que se olvida, y un
+modelo se pide por un nombre que es el mismo en cualquier máquina. Nada del código está
+atado a Ollama: `LAPLACE_LOCAL_BASE_URL` apunta a donde haga falta, y con LM Studio
+funciona igual cambiando el puerto.
+
+Tres decisiones de diseño que no son obvias:
+
+* **El modelo se descubre, no se escribe.** Las pruebas preguntan `GET /v1/models` y
+  eligen. Un nombre de modelo en el código de un test es exactamente lo que caducó en los
+  fixtures y en la demo (D-100), y aquí caducaría peor, porque dependería de qué se
+  descargó cada uno.
+* **Las capacidades se sondean, no se suponen.** Que el servidor mande `usage` al final
+  de un stream depende de su versión. Se comprueba con una generación de un token y, si no
+  lo manda, se salta **sólo** la prueba que lo necesita, con un motivo que dice qué
+  actualizar. Suponerlo por número de versión habría dejado una prueba midiendo otra cosa
+  sin avisar.
+* **Las comparaciones van contra el objeto que devuelve el SDK**, nunca contra números
+  escritos a mano: `span.llm.usage.output_tokens == respuesta.usage.completion_tokens`.
+  Así la prueba vale con cualquier modelo y cualquier longitud de respuesta, y si un campo
+  se renombra, nuestro lado se queda a `None` y muerde.
+
+Y una cosa que se valida por fin contra una respuesta que no hemos escrito nosotros: **un
+modelo sin tarifa no cuesta cero, cuesta «no lo sabemos»**. Un modelo local no está en la
+tabla de precios y nunca lo estará, así que pasa por el mismo camino que cualquier modelo
+nuevo de OpenAI el día que sale. Hasta ahora esa regla —la primera del motor de precios—
+sólo se había comprobado con cuerpos propios.
+
+### D-103 — Lo simulado, en un fichero aparte y con el alcance escrito en la cabecera
+Lo que un modelo local no puede dar es caché: no sirve tokens desde caché ni los reporta.
+Y la caché es el tramo más delicado del cálculo —dos proveedores con dos criterios
+distintos, escritura por encima de la entrada, reparto 5 min / 1 h— y el que ya se
+equivocó una vez en la dirección peligrosa (D-101). Hay que ejercitarlo, y para eso hay
+que falsear la respuesta.
+
+La decisión es **dónde vive eso**. Va en `test_modelo_local_simulado.py`, con «simulado»
+en el nombre del fichero y en el de cada prueba, y no como un caso más entre los reales.
+No es pulcritud: un fichero mezclado es exactamente cómo se acaba citando «el camino de
+la caché está probado contra un proveedor real» sin que sea verdad.
+
+La simulación aporta tres cosas que no estaban:
+
+* **Conformidad de forma contra los modelos de los propios SDK.** Los bloques de uso
+  simulados se validan contra `openai.types.CompletionUsage` y `anthropic.types.Usage`, y
+  se exige además que **cada clave que usamos sea un campo declarado** por ellos. Lo
+  segundo es lo que importa: los dos SDK llevan `extra="allow"`, así que un `cached_token`
+  en singular pasa la validación sin protestar, se lee como `None` en la integración y el
+  coste sale por debajo del real. Es el fallo de D-101 otra vez, y ahora hay un guardia.
+  Con su prueba de la prueba, porque una comprobación que puede pasar por vacía no es una
+  comprobación.
+* **Los mismos tokens por los dos proveedores.** Los dos bloques describen la *misma*
+  llamada contada como la cuenta cada uno, y se exige que el contrato los normalice a los
+  mismos números. D-050 se comprobaba lado a lado contra cifras escritas a mano; esto
+  compara los dos lados entre sí, que es donde se vería un error de criterio.
+* **Inyección sobre una llamada local de verdad.** Los contadores de caché se meten en la
+  respuesta del servidor local antes de que el SDK la parsee, así que el camino entero
+  —red, parseo, acumulación, span, ingesta, precios— corre con esos campos presentes. Se
+  inyecta en el transporte y no con un proxy aparte a propósito: así se lee en el código
+  que el bloque lo ponemos nosotros, en vez de esconderlo detrás de un salto de red que lo
+  hiciera parecer del servidor.
+
+**Y lo que no se ha hecho, a propósito: un adaptador que traduzca la API de Anthropic a
+la de Ollama.** Se puede escribir y tentaba, porque dejaría al cliente de `anthropic`
+hablando con un modelo local. Pero entonces la forma de la respuesta vuelve a ser la que
+*nosotros* creemos, que es exactamente el problema que D-098 vino a resolver. Anthropic
+se queda con el transporte falso y con las pruebas vivas, y eso queda escrito como hueco
+en lugar de taparse con algo que parece cobertura y no lo es.
+
+### D-104 — El alcance, escrito tres veces, porque es lo que se malinterpreta
+El riesgo de todo lo anterior no es técnico. Es que alguien lea «tests contra proveedor
+real en verde» y entienda «el modelo de coste está validado contra facturación». No lo
+está, y no puede estarlo por este camino:
+
+1. **Un modelo local no factura.** No hay factura contra la que cuadrar los tokens que
+   guardamos. Lo único que se comprueba es que el span dice lo mismo que *reportó el
+   servidor*.
+2. **No hay caché real** en ninguna parte, ni en las pruebas reales ni en las simuladas.
+3. **El tokenizador local cuenta distinto**, con su propio vocabulario, así que de ahí no
+   sale ninguna cifra en dólares que signifique nada. Por eso ninguna de esas pruebas
+   comprueba un importe: sólo de dónde sale cada número y cómo queda marcado.
+4. **Anthropic no se cubre** por este camino.
+
+Eso está escrito en tres sitios y los tres hacen falta: en `STATUS.md`, que es lo que se
+lee para saber dónde está el producto; en la cabecera de los dos ficheros de pruebas, que
+es lo que se lee cuando se van a citar; y en `docs/tests-con-modelo-local.md`, antes de
+los pasos de instalación, para que nadie monte el entorno creyendo que va a comprobar algo
+que no va a comprobar.
+
+Las pruebas que esperan una clave se han dejado **intactas y funcionando**. Son las únicas
+que pueden cerrar el agujero, y el día que haya claves siguen donde estaban.
+
+## 2026-09-18 — Una corrección, y el agente mediocre
+
+### D-105 — Ollama sí tiene caché: corrige D-103 y D-104
+D-103 y D-104 dicen que un modelo local «no sirve tokens desde caché ni los reporta» y
+que «no hay caché real en ninguna parte». **Es falso**, y se escribió sin comprobarlo.
+Lo destapó la primera traza del agente de ejemplo, que llegó con `cached_input_tokens`
+distinto de cero. Contra Ollama 0.34.1, sin Laplace de por medio: dos llamadas con el
+mismo prompt de sistema largo reportan 3 y después 1.813 tokens de caché sobre 1.819, en
+`prompt_tokens_details.cached_tokens`, con la forma exacta de OpenAI y también en
+streaming.
+
+Lo cierto es más estrecho que las dos cosas: **hay lecturas de caché reales y no hay
+escrituras.** Ollama reutiliza el prefijo de la caché de claves y valores y lo dice;
+nunca reporta `cache_write_tokens` ni nada parecido al reparto 5 min / 1 h. Y cachea con
+sus reglas —cualquier prefijo repetido, incluso de tres tokens—, no con las de OpenAI,
+que empieza en 1.024 y va por bloques.
+
+Qué cambia: la lectura de caché pasa a probarse de verdad
+(`test_local_la_cache_de_prefijo_llega_al_span`), y el fichero simulado se queda con lo
+que de verdad no se puede obtener: escrituras, la duración de Anthropic y su forma. La
+separación entre simulado y real se mantiene; lo que estaba mal era dónde caía la línea.
+Las entradas D-103 y D-104 no se reescriben, porque son el registro de lo que se decidió
+entonces; los textos vivos —STATUS, la guía, el README y las cabeceras de las pruebas—
+sí se han corregido.
+
+La lección es la misma que la del resto de esta tanda, aplicada a nosotros: una
+afirmación sobre lo que *no* hace un sistema también hay que comprobarla, y es la que
+más fácil se escribe sin mirar.
+
+## 2026-09-21 — Lo que el agente mediocre destapó
+
+Seis arreglos que salen de mirar el producto con tráfico real delante. Cinco de los seis
+son el mismo tipo de error: una cifra que se calla o que miente por redondeo conceptual,
+no por un fallo de programación.
+
+### D-106 — El sitio de un paso es el camino de llamada, no el nombre de la función
+La cobertura dejó de avisar de un paso partido en cuanto hubo dos agentes en el mismo
+proyecto. Uno metía la fecha con segundos en sus instrucciones —52 identidades en 52
+ejecuciones, ratio 1,00— y el otro no —1 en 53—. Como los pasos se agrupaban por el
+nombre de la función y los dos tenían una `resumir_para_crm`, el ratio conjunto salía
+0,50, por debajo del umbral de 0,80, y el producto se callaba.
+
+Bajar el umbral sólo habría movido el fallo de sitio. El problema era mezclar dos
+poblaciones bajo un mismo nombre. La mitad «desde dónde» de la identidad de un paso pasa
+a ser el **camino** de pasos abiertos —`atender_ticket > resumir_para_crm`—, que el SDK
+lleva en una pila de `ContextVar` y viaja en `laplace.step.site`. La etiqueta sigue
+siendo el nombre a secas, porque es lo que se lee en pantalla: el camino agrupa, no
+decora.
+
+Al auditar el resto del producto apareció un segundo sitio con el mismo fallo: la
+atribución de picos del Panel también agrupaba por nombre, así que el pico de un agente
+podía atribuirse al paso homónimo del otro. Mismo arreglo. Los demás agrupamientos
+—repeticiones, uso por modelo, prompts— ya iban por clave de paso.
+
+### D-107 — «No lo sabemos» no es «cero», y ahora hay un guardia que lo impide
+Tres pantallas distintas convertían un coste desconocido en un cero: el hallazgo de
+repetición decía «no gasta tokens de más» sobre 104 llamadas reales, el Panel enseñaba
+«Gasto total: 0 $» con el 100 % de las llamadas sin tarifa, y el inicio ponía un «$0»
+enorme con el aviso debajo —el patrón que D-073 prohibió para la proyección—.
+
+Tres parches habrían dejado abierta la cuarta puerta, así que se hizo un guardia, al
+estilo del que prohíbe `any()` en el SQL: un test recorre los modelos de la API y exige
+que **toda cifra en dólares venga acompañada** de algo que diga si se puede afirmar. Al
+escribirlo encontró tres sitios más que nadie había mirado: la serie del Panel, los picos
+y el resumen de Evaluaciones. Es decir, el fallo iba por la sexta vez, no por la tercera.
+
+La decisión de si hay dinero que afirmar vive ahora en un solo módulo, `dinero.py`, y la
+usan el inicio y el Panel. Cuando no hay ni una tarifa: el inicio enseña el motivo en vez
+del número —y debajo tokens, trazas y latencia, que sí están medidos—, las métricas de
+dinero del Panel valen `None` con su porqué, y no se enseñan picos, porque un pico se
+define por dinero.
+
+### D-108 — Las reglas de dinero tienen que funcionar sin tarifa
+Con modelos locales, dos de las tres reglas no podían disparar nunca: las dos necesitan
+la tabla de precios para calcular el ahorro. Eso deja sin producto a cualquiera que use
+Ollama, que es uno de los dos públicos de esto. Y el agente mediocre movía 8,2 veces más
+tokens que el sano sin que Laplace dijera una palabra.
+
+Las reglas pasan a detectar sobre lo que **siempre** se mide —tokens y tiempo— y el
+dinero aparece sólo cuando existe tarifa:
+
+* **Modelo caro para un paso corto**, sin tarifa: se mide en tiempo. «Este paso responde
+  4 tokens de media y usa el modelo que en tu propio tráfico tarda 4,6 veces más que
+  otro que ya usas». La alternativa sale del tráfico del usuario, no de una lista
+  nuestra: proponer un modelo que no ha probado sería inventar.
+* **Contexto fijo**: el desperdicio se expresa en tokens reenviados, y el dinero sólo se
+  añade si hay precio.
+* El orden de los hallazgos pasa a ser dinero → tokens → tiempo, porque sin tarifa el
+  primero no ordena nada.
+
+De paso, un fallo que sólo se ve con datos reales: el suelo de tokens de entrada de un
+paso se calculaba con `MIN(input_tokens)` sobre todas las llamadas, y una sola caída del
+proveedor —una llamada con 0 tokens— lo dejaba en cero y apagaba la regla del contexto
+fijo para ese paso en toda la ventana. Ahora el mínimo sólo mira llamadas que
+respondieron.
+
+**Una corrección sobre la marcha, con datos reales.** La primera versión comparaba
+**medias** de duración por llamada. En la tanda de verificación el portátil se suspendió
+a mitad, dejó dos spans de dos horas y nueve minutos, y la media de un paso inocente se
+disparó a 258 segundos por llamada: la regla lo señaló. Se cambió a **mediana**, que no
+se mueve por un valor extremo, y el falso positivo desapareció sobre los mismos datos.
+Es el tipo de fallo que no se ve con datos sembrados, porque nadie siembra un portátil
+que se duerme.
+
+Y un resultado honesto que conviene dejar escrito: con la mediana, el modelo grande
+tarda un 26 % más que el pequeño para una respuesta de dos tokens en esta máquina, por
+debajo del umbral de 1,8x. Así que sobre modelos locales esta regla **se calla**, y hace
+bien: sin tarifa, lo único que se podía afirmar era el tiempo, y el tiempo aquí apenas
+cambia. Con precios reales, la regla de siempre sigue funcionando igual.
+
+### D-109 — La regla de bucles, que era el diferenciador y no existía
+Lo que había era repetición **exacta**. Un bucle de verdad casi nunca repite exacto:
+lleva un contador de intentos, un número de página, una hora. El agente de ejemplo daba
+seis vueltas por ticket —312 llamadas al modelo en media hora, ninguna útil— y el
+producto no decía nada, porque para `dedup_hash` eran seis llamadas distintas.
+
+Un bucle atascado se define con dos señales, y hacen falta las dos:
+
+1. **Las entradas se parecen salvo en los números.** Un `loop_hash` nuevo, calculado
+   como el de deduplicación pero sustituyendo cada tirada de dígitos por `#`.
+2. **Las salidas casi no varían.** Muchas vueltas con una o dos salidas distintas es la
+   definición medible de «no avanza».
+
+La segunda no estaba en el diseño inicial y la impuso un contraejemplo que se escribió
+para probar la regla: un agente que procesa seis pedidos distintos hace seis llamadas que
+sólo se diferencian en un número, y eso es trabajo legítimo, no un bucle atascado. Por
+eso el hash de la salida **no** borra los números: ahí los números son el avance. El
+contraejemplo se queda como test.
+
+### D-110 — Tres textos que decían algo falso
+Salieron de leer la pantalla con datos reales, no de leer el código: una errata que
+duplicaba una palabra en el titular de cobertura; el consejo de «añade el precio de la
+página oficial» para modelos locales, que no tienen página ni precio ni nadie que cobre;
+y la señal de tokens del proveedor explicando como estimaciones lo que eran **llamadas
+que fallaron**, donde no hubo nada que estimar porque no hubo respuesta.
+
+El tercero es el que importa: una explicación que manda a mirar donde no es cuesta más
+que no explicar nada.
+
+## 2026-09-22 — La nube, ejecutada; y las medias que quedaban
+
+### D-111 — Leer de caché también se cobra, y la regla no lo miraba
+La regla del contexto fijo, ya rediseñada en D-108, seguía contestando media pregunta:
+cuánto del prefijo **no** se está cacheando. La otra mitad es que leer de caché no es
+gratis —OpenAI cobra la lectura entre el 10 % y el 50 % de la entrada según el modelo,
+Anthropic el 10 %—, así que un prefijo de tres mil tokens bien cacheado en diez mil
+llamadas sigue siendo una factura, y el producto se callaba porque «ya usa caché».
+
+Ahora el hallazgo sale también en ese caso, y dice otra cosa: no «actívala», que sería
+proponer lo que ya se hace, sino «la caché ya está haciendo su trabajo, pero leerla
+también se cobra: son X $, el N % de lo que gastas; eso no baja cacheando mejor, baja
+mandando menos». El umbral para hablar es que esas lecturas pesen al menos un 5 % del
+gasto del proyecto.
+
+Y una cuenta que hay que no equivocar: cuando la caché ya funciona, el dinero del
+hallazgo es **sólo** el de las lecturas. Apuntar además el ahorro de cachear sería
+prometer dinero por hacer lo que ya se hace.
+
+El test que decía «a quien ya usa la caché no se le recomienda activarla» se conserva con
+ese nombre y esa promesa —sigue comprobando que no se le propone cachear— y gana la
+comprobación nueva. Su cifra esperada se saca ahora del propio almacén y no de una cuenta
+a mano, para que no envejezca con el tamaño del fixture.
+
+### D-112 — Las medias que quedaban, y la nube ejecutada de verdad
+Cambiar a mediana la comparación de duraciones (D-108) dejaba una pregunta abierta: si
+hizo falta en una regla, probablemente hiciera falta en más. Auditado el motor entero,
+quedaba un caso: las dos reglas del modelo caro decidían con la **media** de tokens de
+salida. Una generación desbocada —un modelo que se pone a repetir hasta agotar
+`max_tokens`— mueve esa media igual que un span de dos horas movía la otra, y con ella la
+decisión. Las dos pasan a decidir por mediana; las medias se siguen enseñando, pero para
+leerlas, no para decidir.
+
+Queda uno a propósito y anotado: la duración por ejecución del Panel es una media, y
+sufriría lo mismo. Ahí la mediana exige percentiles por tramo sobre trazas, no sobre
+spans, y es un cambio de otra talla; el Panel además enseña esa cifra con su periodo al
+lado y no decide nada con ella.
+
+**Y lo que no puede repetirse:** esta tanda tocó el SQL de los dos almacenes —columna
+nueva, consulta de bucles, agrupación por camino— y se entregó con 55 pruebas saltadas
+porque ClickHouse no estaba levantado. Es la tercera vez, y las dos anteriores salieron
+fallos reales. Levantado, la suite pasa entera en 2 minutos y medio, no en trece: lo que
+tardaba eran los tiempos de espera de conexión contra un ClickHouse que no existía.
+
+Dos pruebas nuevas cierran ese agujero por donde se coló:
+
+* **La migración, sobre una base con datos dentro.** `CREATE TABLE IF NOT EXISTS` no toca
+  una tabla que ya existe, así que sobre una base vacía el `ALTER TABLE` no se ejercita
+  nunca y la prueba fácil pasa siempre. La nueva quita las tres columnas de esta tanda,
+  mete filas como las metía la versión anterior, pasa la migración por encima y exige tres
+  cosas: que el `ALTER` funcione con datos, que las filas viejas se sigan leyendo con las
+  columnas nuevas vacías, y que las consultas nuevas funcionen mezclando filas viejas y
+  nuevas. Comprobada quitando el `ALTER` del esquema: se pone en rojo.
+* **La paridad de la consulta de bucles**, con las dos trazas dando exactamente las mismas
+  vueltas, que es el tráfico empatado donde una elección arbitraria se separa (D-099). Y
+  la agrupación por camino, que también se escribió dos veces.

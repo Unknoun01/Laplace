@@ -28,6 +28,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from .dinero import motivo_sin_dinero
 from .insights import observed_days, span_label, window_label
 from .storage.base import Bucket, Window, WindowFacts
 
@@ -136,7 +137,11 @@ class SpikeCause(BaseModel):
 
 
 class Spike(BaseModel):
-    """Un tramo cuyo coste por ejecución se dispara, con su atribución."""
+    """Un tramo cuyo coste por ejecución se dispara, con su atribución.
+
+    Un pico se define por dinero, así que sin tarifas no hay picos que dar: no se
+    enseñan a cero, se dice por qué no los hay (`Panel.spikes_unavailable`, D-107).
+    """
 
     start: datetime
     end: datetime
@@ -148,6 +153,9 @@ class Spike(BaseModel):
     baseline_cost_per_trace_usd: float
     #: El sobrecoste frente a lo que habrían costado esas ejecuciones a precio normal.
     excess_usd: float
+    #: True cuando en la ventana hay llamadas sin tarifa: entonces el sobrecoste de
+    #: arriba es un SUELO y quien lo afirme tiene que decirlo (D-051, D-107).
+    cost_is_floor: bool = False
     causes: list[SpikeCause] = Field(default_factory=list)
     #: Vacío cuando hay causas. Cuando no, dice exactamente eso y no otra cosa.
     unattributed: str = ""
@@ -166,6 +174,9 @@ class PanelBucket(BaseModel):
     steps_per_trace: float | None = None
     duration_ms_per_trace: float | None = None
     is_spike: bool = False
+    #: Por qué el coste de este punto no se puede afirmar, cuando no se puede. Sin esto,
+    #: la serie pinta una línea plana en cero que se lee como «no gasta» (D-107).
+    cost_unavailable: str = ""
 
 
 class Panel(BaseModel):
@@ -276,7 +287,9 @@ def _metric(
     )
 
 
-def _per_execution_metrics(actual: _Aggregate, anterior: _Aggregate | None) -> list[Metric]:
+def _per_execution_metrics(
+    actual: _Aggregate, anterior: _Aggregate | None, sin_dinero: str = ""
+) -> list[Metric]:
     sin_datos = "no hay ejecuciones en este rango"
     prev = anterior or _Aggregate()
 
@@ -292,19 +305,35 @@ def _per_execution_metrics(actual: _Aggregate, anterior: _Aggregate | None) -> l
     dur_a, dur_b = par("duration_ms")
 
     return [
-        _metric("Coste por ejecución", "money", coste_a, coste_b, unavailable=sin_datos),
+        # Sin una sola tarifa conocida no hay cifra que dar: un 0 aquí se lee como
+        # «no cuesta nada» y es la misma mentira que proyectar sobre una hora (D-107).
+        _metric(
+            "Coste por ejecución",
+            "money",
+            None if sin_dinero else coste_a,
+            None if sin_dinero else coste_b,
+            unavailable=sin_dinero or sin_datos,
+        ),
         _metric("Tokens por ejecución", "tokens", tok_a, tok_b, unavailable=sin_datos),
         _metric("Pasos por ejecución", "count", pasos_a, pasos_b, unavailable=sin_datos),
         _metric("Duración por ejecución", "duration", dur_a, dur_b, unavailable=sin_datos),
     ]
 
 
-def _total_metrics(actual: _Aggregate, anterior: _Aggregate | None) -> list[Metric]:
+def _total_metrics(
+    actual: _Aggregate, anterior: _Aggregate | None, sin_dinero: str = ""
+) -> list[Metric]:
     """Contexto, no titular. Un total que sube porque hay más trabajo no es noticia."""
     prev = anterior or _Aggregate()
     hay = anterior is not None
     return [
-        _metric("Gasto total", "money", actual.cost_usd, prev.cost_usd if hay else None),
+        _metric(
+            "Gasto total",
+            "money",
+            None if sin_dinero else actual.cost_usd,
+            (prev.cost_usd if hay else None) if not sin_dinero else None,
+            unavailable=sin_dinero,
+        ),
         _metric("Ejecuciones", "count", float(actual.traces), float(prev.traces) if hay else None),
         _metric("Tokens", "tokens", float(actual.tokens), float(prev.tokens) if hay else None),
     ]
@@ -592,13 +621,17 @@ def attribute(
             if parte < STEP_ATTRIBUTION_SHARE:
                 continue
             nuevo = nombre not in antes.steps
+            # `nombre` es el sitio de llamada («atender_ticket > redactar»), que es lo
+            # que agrupa bien; en pantalla va la etiqueta, que es lo que el usuario
+            # reconoce (D-106).
+            etiqueta = dentro.steps[nombre].label or nombre
             causas.append(
                 SpikeCause(
                     kind="paso_nuevo" if nuevo else "paso_disparado",
                     text=(
-                        f"Un paso nuevo, «{nombre}», se lleva {_share(parte)}."
+                        f"Un paso nuevo, «{etiqueta}», se lleva {_share(parte)}."
                         if nuevo
-                        else f"El paso «{nombre}» se lleva {_share(parte)}: cuesta más "
+                        else f"El paso «{etiqueta}» se lleva {_share(parte)}: cuesta más "
                         f"por ejecución que en el resto del rango."
                     ),
                     evidence=f"${de_mas:.6f} por encima de lo que costaba antes.",
@@ -656,15 +689,18 @@ def comparable(buckets: list[Bucket]) -> str:
     return ""
 
 
-def _panel_bucket(bucket: Bucket, es_pico: bool) -> PanelBucket:
+def _panel_bucket(bucket: Bucket, es_pico: bool, sin_dinero: str = "") -> PanelBucket:
     def por_traza(valor: float) -> float | None:
         return (valor / bucket.traces) if bucket.traces else None
 
     return PanelBucket(
         start=bucket.start,
         traces=bucket.traces,
-        cost_usd=bucket.cost_usd,
-        cost_per_trace_usd=por_traza(bucket.cost_usd),
+        # Sin tarifas, el coste del punto no es cero: no existe. `None` y el motivo, que
+        # es lo que la serie sabe pintar como hueco (D-107).
+        cost_usd=0.0 if sin_dinero else bucket.cost_usd,
+        cost_per_trace_usd=None if sin_dinero else por_traza(bucket.cost_usd),
+        cost_unavailable=sin_dinero,
         tokens_per_trace=por_traza(bucket.input_tokens + bucket.output_tokens),
         steps_per_trace=por_traza(bucket.spans),
         duration_ms_per_trace=por_traza(bucket.duration_ms_sum),
@@ -680,6 +716,7 @@ def _spike(
     base_unitaria: float,
     ancho: timedelta,
     window: Window,
+    suelo: bool = False,
 ) -> Spike:
     bucket = buckets[indice]
     inicio, fin = bucket.start, bucket.start + ancho
@@ -724,6 +761,7 @@ def _spike(
         times_baseline=unitario / base_unitaria if base_unitaria else 0.0,
         baseline_cost_per_trace_usd=base_unitaria,
         excess_usd=exceso,
+        cost_is_floor=suelo,
         causes=causas,
         unattributed=sin_atribuir,
         # El explorador acepta estos filtros tal cual: es el mismo rango del pico.
@@ -775,22 +813,35 @@ def build(store: Any, project_id: str, window: Window) -> Panel:
     hay_anterior = anterior.traces > 0 and not sin_comparacion
 
     indices, base_unitaria, sin_picos = find_spikes(buckets)
+    # `resumen` hace falta antes que los picos: el sobrecoste de un pico es un suelo si
+    # en la ventana hay llamadas sin tarifa.
+    resumen = store.summarize_window(project_id, window)
     picos = [
-        _spike(store, project_id, buckets, i, base_unitaria, ancho, window) for i in indices
+        _spike(
+            store, project_id, buckets, i, base_unitaria, ancho, window,
+            suelo=bool(resumen.unknown_cost_spans or resumen.assumed_rate_spans),
+        )
+        for i in indices
     ]
 
     # Los días observados salen del mismo sitio que en el inicio y con el mismo
     # cálculo: si el panel dijera «6 horas» —el ancho de un tramo— y el inicio «menos
     # de un minuto», una de las dos pantallas estaría mintiendo sobre los mismos datos.
-    observados = observed_days(store.summarize_window(project_id, window), window)
+    observados = observed_days(resumen, window)
+    # Una sola decisión para todas las cifras en dólares de esta pantalla (D-107).
+    sin_dinero = motivo_sin_dinero(
+        llm_calls=resumen.llm_calls, unknown_cost_calls=resumen.unknown_cost_spans
+    )
     return Panel(
         project_id=project_id,
         days=window.days,
         observed_days=observados,
         bucket_minutes=ancho_min,
         has_previous=hay_anterior,
-        per_execution=_per_execution_metrics(actual, anterior if hay_anterior else None),
-        totals=_total_metrics(actual, anterior if hay_anterior else None),
+        per_execution=_per_execution_metrics(
+            actual, anterior if hay_anterior else None, sin_dinero
+        ),
+        totals=_total_metrics(actual, anterior if hay_anterior else None, sin_dinero),
         reading=read_out(
             actual,
             anterior if hay_anterior else None,
@@ -798,9 +849,13 @@ def build(store: Any, project_id: str, window: Window) -> Panel:
             sin_comparacion,
         ),
         comparison_unavailable="" if hay_anterior else sin_comparacion,
-        buckets=[_panel_bucket(b, i in set(indices)) for i, b in enumerate(buckets)],
-        spikes=picos,
-        spikes_unavailable=sin_picos,
+        buckets=[
+            _panel_bucket(b, i in set(indices), sin_dinero) for i, b in enumerate(buckets)
+        ],
+        # Un pico es «cuesta más por ejecución que lo normal». Sin una sola tarifa
+        # conocida, eso no se puede decir: se dice por qué, y no se pinta ninguno.
+        spikes=[] if sin_dinero else picos,
+        spikes_unavailable=sin_dinero or sin_picos,
     )
 
 

@@ -6,7 +6,7 @@ import { Suspense } from "react";
 import { StaticTree } from "@/components/StaticTree";
 import { BackendDown, NeedsKey, NotFound, NotYours, TableSkeleton } from "@/components/states";
 import { getFinding, getTrace, listProjects, parseDays } from "@/lib/api";
-import { duration, money, oneLine, spanLabel, windowLabel } from "@/lib/format";
+import { duration, money, oneLine, spanLabel, windowLabel, tokens } from "@/lib/format";
 import type { FindingDetail, Span } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
 
@@ -155,9 +155,23 @@ function Contenido() {
           </p>
         ) : (
           <p>
-            Este problema no te cuesta dinero: los pasos repetidos no consumen tokens. Lo
-            que te cuesta es espera, <strong>{duration(finding.window_waste_ms)}</strong> en
-            el rango analizado. Arreglarlo hace que tu agente responda antes.
+            {finding.window_waste_tokens > 0 ? (
+              <>
+                {/* Gasta tokens de verdad; lo que no sabemos es el precio. Decir «no te
+                    cuesta dinero» aquí sería convertir «no lo sabemos» en «es gratis». */}
+                Esto gasta <strong>{tokens(finding.window_waste_tokens)} tokens</strong> de
+                más y <strong>{duration(finding.window_waste_ms)}</strong> de espera en el
+                rango analizado. Cuánto dinero es, no lo sabemos:{" "}
+                {finding.cost_unavailable || "ese modelo no tiene tarifa conocida"}.
+              </>
+            ) : (
+              <>
+                Este problema no te cuesta dinero: los pasos repetidos no consumen tokens.
+                Lo que te cuesta es espera,{" "}
+                <strong>{duration(finding.window_waste_ms)}</strong> en el rango analizado.
+                Arreglarlo hace que tu agente responda antes.
+              </>
+            )}
           </p>
         )}
         {finding.savings_calculation && (

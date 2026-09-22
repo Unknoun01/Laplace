@@ -204,6 +204,25 @@ body[data-mode="pro"] .simple-only {
 .big.good {
   color: var(--teal);
 }
+/* Lo que ocupa el sitio del dinero cuando no hay tarifas. Deliberadamente NO tiene el
+   tamaño de `.big`: no es una cifra, es una explicación, y competir en tamaño con el
+   número que no existe sería volver a poner el foco donde no hay nada (D-107). */
+.nomoney {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 52ch;
+}
+.nomoney b {
+  font-size: 22px;
+  font-weight: 600;
+}
+.nomoney span {
+  color: var(--dim);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
 .pair-lbl {
   color: var(--ink-2);
   margin-top: 9px;

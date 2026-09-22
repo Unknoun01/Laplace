@@ -85,9 +85,12 @@ COLUMNS = (
     "tags",
     "metadata",
     "dedup_hash",
+    "loop_hash",
+    "loop_out_hash",
     "step_key",
     "step_label",
     "step_hint",
+    "step_site",
     "prompt_name",
     "prompt_version",
     "events",
@@ -196,8 +199,12 @@ def coverage_from_rows(fila: Any, pasos: Any) -> Any:
     """
     from .base import CoverageFacts
 
+    # Se agrupa por sitio de llamada (el camino: «atender_ticket > resumir_para_crm»)
+    # pero se NOMBRA con la etiqueta, que es lo que el usuario reconoce. Enseñar el
+    # camino entero en un titular sería ruido; agrupar por el nombre suelto era el fallo
+    # de D-106.
     partidos = [
-        p["paso"]
+        (p["etiqueta"] if "etiqueta" in p.keys() and p["etiqueta"] else p["paso"])
         for p in pasos
         if int(p["trazas"] or 0) >= SPLIT_MIN_TRACES
         and int(p["identidades"] or 0) >= int(p["trazas"] or 0) * SPLIT_RATIO
@@ -313,9 +320,14 @@ def row_to_span(r: dict[str, Any]) -> Span:
         tags=as_list(r["tags"]),
         metadata=loads(r["metadata"], {}) or {},
         dedup_hash=r["dedup_hash"],
+        loop_hash=(r["loop_hash"] if "loop_hash" in r.keys() else ""),
+        loop_out_hash=(r["loop_out_hash"] if "loop_out_hash" in r.keys() else ""),
         step_key=r["step_key"],
         step_label=r["step_label"],
         step_hint=r["step_hint"],
+        # `get` y no índice: una base de antes de D-106 no tiene la columna, y la
+        # interfaz no puede caerse por leer una traza vieja.
+        step_site=(r["step_site"] if "step_site" in r.keys() else ""),
         prompt_name=r["prompt_name"] or "",
         prompt_version=int(r["prompt_version"] or 0),
         events=events,
@@ -439,9 +451,12 @@ def span_to_row(span: Span) -> list[Any]:
         list(span.tags),
         dumps(span.metadata),
         span.dedup_hash,
+        span.loop_hash,
+        span.loop_out_hash,
         span.step_key,
         span.step_label,
         span.step_hint,
+        span.step_site,
         span.prompt_name,
         int(span.prompt_version or 0),
         dumps([event.model_dump(mode="json") for event in span.events]),

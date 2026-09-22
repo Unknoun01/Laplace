@@ -25,7 +25,7 @@ import json
 import os
 
 import pytest
-from helpers import exporter, ingest
+from helpers import exporter, span_llm
 
 openai = pytest.importorskip("openai", reason="el extra [openai] no está instalado")
 anthropic = pytest.importorskip("anthropic", reason="el extra [anthropic] no está instalado")
@@ -93,11 +93,9 @@ def _sse_anthropic(texto: str):
     )
 
 
-def _span_llm():
-    """El span de LLM que ha salido por la ingesta, ya en el contrato."""
-    spans = [s for s in ingest() if s.type == "llm"]
-    assert len(spans) == 1, f"se esperaba un span de LLM y hay {len(spans)}"
-    return spans[0]
+#: El span de LLM que ha salido por la ingesta, ya en el contrato. Vive en `helpers`
+#: porque las pruebas contra el servidor local piden exactamente lo mismo.
+_span_llm = span_llm
 
 
 # ---------------------------------------------------------------------------------

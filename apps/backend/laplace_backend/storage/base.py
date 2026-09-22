@@ -131,6 +131,38 @@ class RepeatedGroup:
 
 
 @dataclass
+class LoopGroup:
+    """Un paso que se repite muchas veces en una traza **sin repetirse exacto**.
+
+    Es la diferencia con `RepeatedGroup`: aquel agrupa llamadas idénticas, y un bucle
+    de verdad casi nunca lo es —lleva un contador de intentos, una página, una hora—.
+    `distinct_inputs > 1` es lo que dice que esto no es una repetición exacta ya
+    contada por la otra regla, y `distinct_outputs` bajo con muchas vueltas es lo que
+    dice que el bucle no avanza (D-109).
+    """
+
+    loop_hash: str
+    name: str
+    span_type: str
+    model: str = ""
+    step_key: str = ""
+    hint: str = ""
+    traces: int = 0
+    total_spans: int = 0
+    #: Vueltas de más: todo menos la primera de cada traza.
+    extra_spans: int = 0
+    max_per_trace: int = 0
+    distinct_inputs: int = 0
+    distinct_outputs: int = 0
+    extra_cost_usd: float = 0.0
+    extra_duration_ms: float = 0.0
+    extra_input_tokens: int = 0
+    extra_output_tokens: int = 0
+    extra_unknown_cost_spans: int = 0
+    sample_trace_id: str = ""
+
+
+@dataclass
 class ModelUsage:
     """Uso agregado de un modelo por paso, para razonar sobre alternativas.
 
@@ -160,7 +192,27 @@ class ModelUsage:
     avg_output_tokens: float = 0.0
     avg_input_tokens: float = 0.0
     #: Suelo de tokens de entrada: aproxima la parte fija del prompt que se reenvía.
+    #: Se calcula **sólo sobre llamadas que respondieron**. Una que falló no tiene
+    #: tokens, y con el mínimo sobre todas, una sola caída del proveedor en la ventana
+    #: dejaba este suelo en cero y apagaba la regla del contexto fijo (D-108).
     min_input_tokens: int = 0
+    #: Camino de llamada («atender_ticket > redactar_respuesta»). Sirve para titular
+    #: dos pasos homónimos de forma legible.
+    site: str = ""
+    #: Tiempo total del paso, para sumar lo que se recupera arreglándolo.
+    #: Es lo que permite decir algo útil sobre «modelo caro» cuando no hay tarifa: la
+    #: latencia se mide siempre (D-108).
+    duration_ms: float = 0.0
+    #: **Mediana** por llamada, y no la media. Con la media, un portátil que se suspende
+    #: a mitad de una tanda deja un span de dos horas y el paso entero parece lentísimo:
+    #: pasó de verdad y señaló a un paso inocente. Una mediana no se mueve por un valor
+    #: extremo, y lo que se compara entre modelos es justo eso, lo típico (D-108).
+    p50_duration_ms: float = 0.0
+    #: Y la mediana de tokens de salida, por lo mismo: una generación desbocada —un
+    #: modelo que se pone a repetir hasta agotar `max_tokens`— mueve la media de un paso
+    #: que normalmente contesta tres palabras, y la regla del modelo caro decide con ese
+    #: número. Las medias siguen existiendo, pero para enseñarlas, no para decidir.
+    p50_output_tokens: float = 0.0
     sample_trace_id: str = ""
 
 
@@ -188,10 +240,17 @@ class Bucket:
 
 @dataclass
 class StepFacts:
-    """Lo que un paso hizo y costó en un tramo."""
+    """Lo que un paso hizo y costó en un tramo.
+
+    La clave del diccionario que los contiene es el **sitio de llamada** —el camino de
+    pasos—, y `label` es cómo se llama en pantalla. Con el nombre como clave, dos
+    agentes con una función homónima compartían fila y el pico de uno se atribuía al
+    otro (D-106).
+    """
 
     cost_usd: float = 0.0
     calls: int = 0
+    label: str = ""
 
 
 @dataclass
@@ -339,14 +398,24 @@ def disambiguate(filas: list[Any]) -> list[Any]:
     los dos: un hallazgo no puede titularse distinto según dónde estén las filas. Pasa
     siempre que alguien no decora sus funciones internas, que es el caso normal
     (D-060): todas sus llamadas cuelgan del mismo span, así que comparten la etiqueta.
-    Se les añade el principio de sus instrucciones, que es lo que de verdad las separa.
+    Se les añade **de dónde se llaman** cuando se sabe —`atender_ticket` frente a
+    `responder_consulta`, que es lo que distingue a dos agentes con una función
+    homónima— y, si no, el principio de sus instrucciones. El camino primero porque se
+    lee: un título con sesenta caracteres de prompt dentro no lo lee nadie (D-106).
     """
     repetidas = {f.name for f in filas if sum(1 for g in filas if g.name == f.name) > 1}
     if not repetidas:
         return filas
     for fila in filas:
+        if fila.name not in repetidas:
+            continue
+        camino = getattr(fila, "site", "")
+        # El camino sin el último tramo, que es el propio nombre del paso.
+        desde = camino.rsplit(" > ", 1)[0] if " > " in camino else ""
         pista = getattr(fila, "hint", "")
-        if fila.name in repetidas and pista and pista != fila.name:
+        if desde and desde != fila.name:
+            fila.name = f"{fila.name} (en {desde})"
+        elif pista and pista != fila.name:
             fila.name = f"{fila.name} — «{pista}»"
     return filas
 

@@ -95,6 +95,10 @@ LAPLACE_STREAMING = "laplace.streaming"
 #: dónde» se llama, porque el nombre del propio span de LLM es `chat <modelo>` y ese
 #: es el mismo para todas las llamadas del agente (D-060).
 LAPLACE_STEP_PARENT = "laplace.step.parent"
+#: El camino entero de pasos hasta la llamada («atender_ticket > resumir_para_crm»).
+#: El nombre del padre a secas mezcla dos agentes que llamen igual a una función,
+#: y con ellos sus poblaciones de llamadas (D-106).
+LAPLACE_STEP_SITE = "laplace.step.site"
 
 #: Metro de facturación de la llamada: `standard`, `batch` o `fast`. Sólo se pone
 #: cuando la petición lo dice; su ausencia significa estándar, que es el defecto de

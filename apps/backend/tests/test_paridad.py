@@ -142,6 +142,27 @@ def _empatados(project: str) -> list[Span]:
                 modelo=modelo,
             )
         )
+    # Y un bucle: seis vueltas del mismo paso en las que lo único que cambia es el
+    # número de intento, con las dos trazas dando exactamente las mismas vueltas. Si la
+    # consulta de bucles eligiera «una cualquiera» —de ejemplo, de etiqueta, de orden—,
+    # aquí se separaría (D-109).
+    for traza in ("aaa", "zzz"):
+        trace_id = f"{project}-{traza}"
+        for i in range(6):
+            vuelta = _llm(
+                project,
+                trace_id,
+                f"{traza}-bucle-{i}",
+                nombre="chat gpt-5.6-luna",
+                dedup=f"hash-vuelta-{i}",
+                paso="esperar",
+                instante=AHORA,
+            )
+            # Mismo hash de bucle para las seis —sólo cambia el número— y una única
+            # salida distinta: es la definición de dar vueltas sin avanzar.
+            vuelta.loop_hash = "bucle-esperar"
+            vuelta.loop_out_hash = "siempre-lo-mismo"
+            spans.append(vuelta)
     return spans
 
 
@@ -187,6 +208,45 @@ def test_las_repeticiones_eligen_el_mismo_ejemplo_con_empates(dos_almacenes):
         assert a.model == b.model, a.name
         assert a.span_type == b.span_type, a.name
         assert a.extra_cost_usd == pytest.approx(b.extra_cost_usd), a.name
+
+
+def test_los_bucles_salen_iguales_en_los_dos_almacenes(dos_almacenes):
+    """La consulta de bucles es nueva y tiene gemelo en ClickHouse: dos consultas
+    escritas a mano que tienen que decir lo mismo (D-066, D-109).
+
+    El tráfico está empatado a propósito: las dos trazas dan exactamente las mismas seis
+    vueltas, así que cualquier elección arbitraria —el ejemplo, la etiqueta, el orden—
+    se separa aquí y pasaría desapercibida sobre datos normales.
+    """
+    ventana = _ventana()
+    aqui = dos_almacenes["local"].loop_groups(dos_almacenes["project"], ventana)
+    alli = dos_almacenes["nube"].loop_groups(dos_almacenes["project"], ventana)
+
+    assert aqui, "el tráfico sembrado tiene un bucle; si no sale, la prueba no mide nada"
+    assert [g.loop_hash for g in aqui] == [g.loop_hash for g in alli], "mismo orden"
+    for a, b in zip(aqui, alli, strict=True):
+        assert a.name == b.name, a.loop_hash
+        assert a.step_key == b.step_key, a.loop_hash
+        assert a.traces == b.traces, a.loop_hash
+        assert a.total_spans == b.total_spans, a.loop_hash
+        assert a.extra_spans == b.extra_spans, a.loop_hash
+        assert a.max_per_trace == b.max_per_trace, a.loop_hash
+        assert a.distinct_inputs == b.distinct_inputs, a.loop_hash
+        assert a.distinct_outputs == b.distinct_outputs, a.loop_hash
+        assert a.extra_cost_usd == pytest.approx(b.extra_cost_usd), a.loop_hash
+        assert a.extra_input_tokens == b.extra_input_tokens, a.loop_hash
+        assert a.sample_trace_id == b.sample_trace_id, a.loop_hash
+
+
+def test_la_cobertura_agrupa_por_camino_igual_en_los_dos(dos_almacenes):
+    """La agrupación por sitio de llamada también se escribió dos veces (D-106)."""
+    ventana = _ventana()
+    aqui = dos_almacenes["local"].coverage(dos_almacenes["project"], ventana)
+    alli = dos_almacenes["nube"].coverage(dos_almacenes["project"], ventana)
+
+    assert aqui.llm_calls == alli.llm_calls
+    assert aqui.steps == alli.steps
+    assert aqui.split_steps == alli.split_steps
 
 
 def test_el_orden_de_dos_hallazgos_que_cuestan_lo_mismo_no_cambia(dos_almacenes):

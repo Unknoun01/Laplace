@@ -220,7 +220,7 @@ export interface ProjectStats {
 // No forma parte del contrato de traza: son modelos de la API de diagnóstico.
 // ---------------------------------------------------------------------------------
 
-export type FindingKind = "repeticion" | "modelo_caro" | "contexto_fijo";
+export type FindingKind = "repeticion" | "modelo_caro" | "contexto_fijo" | "bucle";
 export type Difficulty = "easy" | "mid" | "hard";
 
 export interface TechItem {
@@ -248,6 +248,10 @@ export interface Finding {
   observed_days: number;
   currency: string;
   window_waste_ms: number;
+  /** Tokens de más, medidos. Existen aunque el modelo no tenga tarifa. */
+  window_waste_tokens: number;
+  /** Por qué no hay cifra en dólares en este hallazgo, cuando no la hay. */
+  cost_unavailable: string;
   /** La cifra es un SUELO: hay pasos sin tarifa o cobrados a tarifa asumida. */
   cost_is_floor: boolean;
   unknown_cost_spans: number;
@@ -311,6 +315,12 @@ export interface Overview {
   project_id: string;
   days: number;
   currency: string;
+  /**
+   * Por qué no se puede poner precio, cuando ninguna llamada tiene tarifa. Si trae
+   * texto, la pantalla enseña **esto** en lugar de la cifra grande: un «$0» enorme con
+   * el aviso debajo se lee como «no cuesta nada» (D-073, D-107).
+   */
+  cost_unavailable: string;
   window_cost_usd: number;
   /** Evitable y necesario DENTRO de la ventana: dinero medido, existe siempre. */
   window_avoidable_usd: number;
@@ -403,6 +413,8 @@ export interface Spike {
   times_baseline: number;
   baseline_cost_per_trace_usd: number;
   excess_usd: number;
+  /** El sobrecoste es un SUELO: hay llamadas sin tarifa en la ventana. */
+  cost_is_floor: boolean;
   causes: SpikeCause[];
   /** Vacío cuando hay causas. Cuando no, dice justo eso y no otra cosa. */
   unattributed: string;
@@ -416,6 +428,8 @@ export interface PanelBucket {
   cost_usd: number;
   /** `null` en un tramo sin ejecuciones: no es cero, es que no hay nada que dividir. */
   cost_per_trace_usd: number | null;
+  /** Por qué el coste de este punto no se puede afirmar. Vacío cuando sí se puede. */
+  cost_unavailable: string;
   tokens_per_trace: number | null;
   steps_per_trace: number | null;
   duration_ms_per_trace: number | null;
@@ -576,6 +590,8 @@ export interface RunSummary {
   cases: number;
   cost_usd: number;
   judge_cost_usd: number;
+  /** Llamadas de la tirada sin tarifa conocida: el coste de arriba es un suelo. */
+  unknown_cost_spans: number;
   rates: Rate[];
   prompt_versions: string[];
 }

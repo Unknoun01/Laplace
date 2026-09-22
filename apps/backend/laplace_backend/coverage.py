@@ -167,9 +167,13 @@ def build(facts: CoverageFacts, *, has_managed_prompts: bool = False) -> Coverag
                 "también."
             ),
             fix=(
-                "Añade el modelo a apps/backend/laplace_backend/pricing/model_prices.json "
-                "con su precio de la página oficial. Es un PR de una línea y la tabla se "
-                "recarga sin reiniciar."
+                "Si es un modelo de un proveedor, añádelo a "
+                "apps/backend/laplace_backend/pricing/model_prices.json con el precio de su "
+                "página oficial: es un PR de una línea y la tabla se recarga sin reiniciar. "
+                "Si corre en tu máquina —Ollama, LM Studio—, no hay tarifa que añadir: no "
+                "te cobra nadie. Entonces esta señal se queda a cero a propósito, el dinero "
+                "no se puede calcular y las reglas te hablan de tokens y de tiempo, que sí "
+                "están medidos."
             ),
         )
     )
@@ -182,12 +186,14 @@ def build(facts: CoverageFacts, *, has_managed_prompts: bool = False) -> Coverag
             consequence=(
                 "Los tokens que contamos nosotros son una aproximación, y el coste que "
                 "sale de ellos también. No es lo mismo una cifra que viene de la factura "
-                "que una que sale de dividir caracteres entre cuatro."
+                "que una que sale de dividir caracteres entre cuatro. Ojo: una llamada que "
+                "falló tampoco trae tokens, y también baja esta señal: ahí no hay nada que "
+                "estimar, es que no hubo respuesta."
             ),
             fix=(
-                "En streaming, pide el recuento al proveedor: en OpenAI, "
-                "stream_options={\"include_usage\": True}. Si una llamada no devuelve uso "
-                "es casi siempre eso."
+                "Mira primero si son llamadas con error —una caída del proveedor las "
+                "cuenta todas aquí—. Si no lo son, en streaming pide el recuento: en "
+                "OpenAI, stream_options={\"include_usage\": True}."
             ),
         )
     )
@@ -302,7 +308,9 @@ def _reading(cobertura: Coverage) -> tuple[str, str]:
     aviso = (
         f"{_de_cada_diez(peor.value or 0).capitalize()} de tu agente se nos escapan."
         if peor.key == "pasos"
-        else f"Sólo el {_pct(peor.value or 0)} de tus llamadas {peor.label.lower()}."
+        # El texto de la señal ya empieza por «Llamadas…», así que anteponer «de tus
+        # llamadas» lo duplicaba: «de tus llamadas llamadas con tarifa conocida».
+        else f"Sólo el {_pct(peor.value or 0)} de tus {peor.label.lower()}."
     )
     partidos = ""
     if cobertura.split_steps:

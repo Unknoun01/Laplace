@@ -349,7 +349,12 @@ def _proyecto_con_pico(store: SQLiteStore, project: str) -> datetime:
             tokens=500,
             paso="paso-responder",
         )
-    pico = ahora - timedelta(hours=10)
+    # El pico tiene que caber ENTERO dentro de un tramo del panel, que con tres días de
+    # ventana son seis horas. Colocándolo a una hora fija del pasado —«ahora menos 10»—
+    # caía a caballo de dos tramos según la hora a la que se lanzara el test, y entonces
+    # salían dos picos en vez de uno: el test fallaba por el reloj, no por el código.
+    tramo = (ahora - timedelta(hours=10)).replace(minute=0, second=0, microsecond=0)
+    pico = tramo - timedelta(hours=tramo.hour % 6) + timedelta(hours=1)
     for i in range(6):
         spans += _traza(
             project,

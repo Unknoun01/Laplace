@@ -15,6 +15,7 @@ import gzip
 import hashlib
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -151,6 +152,38 @@ def dedup_hash(span_type: str, name: str, model: str | None, payload: Any) -> st
     return hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
 
 
+_SOLO_DIGITOS = re.compile(r"\d+")
+_ESPACIOS = re.compile(r"\s+")
+
+
+def loop_hash(span_type: str, name: str, payload: Any, *, ignorar_numeros: bool = True) -> str:
+    """Hash de la llamada **ignorando los números**, para reconocer bucles.
+
+    `dedup_hash` sólo pilla repeticiones exactas. Un bucle de verdad casi nunca repite
+    exactamente: lleva un contador de intentos, un número de página, una marca de
+    tiempo. `estado_almacen(pedido, intento=1..6)` son seis llamadas distintas para
+    `dedup_hash` y la misma pregunta para cualquiera que las mire (D-109).
+
+    Se normaliza a lo bruto —minúsculas, cada tirada de dígitos a `#`, espacios
+    colapsados— porque lo que hace falta es agrupar, no medir parecido. Dos llamadas
+    que sólo difieren en un número caen juntas; dos que difieren en una palabra, no.
+    """
+    if isinstance(payload, (dict, list)):
+        texto = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+    else:
+        texto = "" if payload is None else str(payload)
+    # En la ENTRADA los números son ruido: el contador de intentos no cambia la
+    # pregunta. En la SALIDA son justo lo contrario, son el avance: «pedido 3
+    # procesado» y «pedido 4 procesado» son dos resultados distintos, y borrarles el
+    # número convertiría un bucle que trabaja en un bucle atascado. Lo destapó el
+    # contraejemplo de `test_un_bucle_que_avanza_no_se_señala` (D-109).
+    if ignorar_numeros:
+        texto = _SOLO_DIGITOS.sub("#", texto)
+    texto = _ESPACIOS.sub(" ", texto.lower()).strip()
+    material = "|".join([span_type, name, texto])
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
+
+
 #: Cuánto de las instrucciones se guarda como pista legible para la interfaz.
 STEP_HINT_CHARS = 80
 
@@ -186,7 +219,7 @@ def _tool_names(raw: Any) -> list[str]:
 
 def step_identity(
     attrs: dict[str, Any], name: str, messages: list[dict[str, Any]], tools: Any
-) -> tuple[str, str, str]:
+) -> tuple[str, str, str, str]:
     """Identidad estable de un paso: `(clave, etiqueta, pista)`.
 
     Un paso es **una llamada al modelo hecha desde el mismo sitio y con las mismas
@@ -205,7 +238,14 @@ def step_identity(
     nombre del span, que es lo que había antes. No se inventa una identidad que no se
     puede sostener (D-060).
     """
-    sitio = str(attrs.get(semconv.LAPLACE_STEP_PARENT) or "").strip()
+    # El sitio es el CAMINO de pasos, no sólo el padre: `atender_ticket >
+    # resumir_para_crm`. Con el padre a secas, dos agentes que llamen igual a una
+    # función caían en el mismo sitio y sus poblaciones se mezclaban (D-106). Se cae al
+    # padre para las trazas que llegaron antes de que el SDK mandara el camino.
+    sitio = str(
+        attrs.get(semconv.LAPLACE_STEP_SITE) or attrs.get(semconv.LAPLACE_STEP_PARENT) or ""
+    ).strip()
+    padre = str(attrs.get(semconv.LAPLACE_STEP_PARENT) or "").strip()
     instrucciones = _system_text(messages)
     herramientas = _tool_names(tools)
 
@@ -216,12 +256,15 @@ def step_identity(
 
     if not sitio and not huella:
         # Sin ninguna de las dos señales, el nombre es todo lo que hay.
-        return hashlib.sha256(name.encode("utf-8")).hexdigest()[:16], name, ""
+        return hashlib.sha256(name.encode("utf-8")).hexdigest()[:16], name, "", ""
 
     clave = hashlib.sha256(f"{sitio}\x00{huella}".encode()).hexdigest()[:16]
     pista = " ".join(instrucciones.split())[:STEP_HINT_CHARS]
-    etiqueta = sitio or pista or name
-    return clave, etiqueta, pista
+    # La etiqueta sigue siendo el nombre a secas: es lo que se lee en pantalla, y
+    # «atender_ticket > resumir_para_crm» en un titular sería ruido. El camino va
+    # aparte, para agrupar.
+    etiqueta = padre or sitio or pista or name
+    return clave, etiqueta, pista, sitio
 
 
 # ---------------------------------------------------------------------------------
@@ -283,20 +326,23 @@ def _build_span(proto_span: Any, project_id: str, resource: dict[str, Any], pric
 
     if llm is not None:
         dedup_payload: Any = llm.input_messages
+        salida_payload: Any = llm.output_messages
         dedup_model = llm.request_model
     elif tool is not None:
         dedup_payload = tool.arguments
+        salida_payload = tool.output
         dedup_model = None
     else:
         dedup_payload = generic_input
+        salida_payload = generic_output
         dedup_model = None
 
     if llm is not None:
-        step_key, step_label, step_hint = step_identity(
+        step_key, step_label, step_hint, step_site = step_identity(
             attrs, name, llm.input_messages, attrs.get("laplace.request.tools")
         )
     else:
-        step_key = step_label = step_hint = ""
+        step_key = step_label = step_hint = step_site = ""
 
     consumed = {
         semconv.LAPLACE_SPAN_TYPE,
@@ -340,7 +386,12 @@ def _build_span(proto_span: Any, project_id: str, resource: dict[str, Any], pric
         tags=[str(t) for t in (_json_or(attrs.get(semconv.LAPLACE_TAGS), []) or [])],
         metadata=_json_or(attrs.get(semconv.LAPLACE_METADATA), {}) or {},
         dedup_hash=dedup_hash(span_type, name, dedup_model, dedup_payload),
+        loop_hash=loop_hash(span_type, name, dedup_payload),
+        # El de la salida sirve para la otra mitad de la pregunta: un bucle que da
+        # vueltas sin avanzar produce siempre lo mismo (D-109).
+        loop_out_hash=loop_hash(span_type, name, salida_payload, ignorar_numeros=False),
         step_key=step_key,
+        step_site=step_site,
         step_label=step_label,
         step_hint=step_hint,
         # El SDK sólo escribe esto cuando ha comprobado que el texto de esa versión iba
