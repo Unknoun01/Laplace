@@ -1090,15 +1090,17 @@ class SQLiteStore:
     def observed_prompts(self, project_id: str, window: Window) -> list[ObservedPrompt]:
         """Juegos de instrucciones vistos en las trazas, para quien no gestiona prompts.
 
-        Se agrupa por `step_key`, que ya incluye la huella del prompt de sistema: dos
-        claves bajo la misma etiqueta son dos versiones del mismo paso (D-060). Sólo
-        spans de LLM: un `tool` no tiene instrucciones que versionar.
+        Se agrupa por `step_key`, que incluye el camino de llamada y la huella del
+        prompt de sistema. El camino sale también en cada fila porque es lo único que
+        deja separar «otro llamante» de «otro prompt» más arriba (D-115). Sólo spans de
+        LLM: un `tool` no tiene instrucciones que versionar.
         """
         filas = self._query(
             f"""
             SELECT
                 step_key                                             AS clave,
                 MAX(CASE WHEN step_label != '' THEN step_label ELSE name END) AS paso,
+                MAX(step_site)            AS sitio,
                 MAX(step_hint)            AS pista,
                 COUNT(DISTINCT trace_id)  AS trazas,
                 COUNT(*)                  AS llamadas,

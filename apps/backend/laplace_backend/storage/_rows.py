@@ -177,6 +177,7 @@ def row_to_observed_prompt(f: Any) -> Any:
 
     return ObservedPrompt(
         step_key=f["clave"],
+        site=f.get("sitio") or "",
         step_label=f["paso"] or "",
         hint=f["pista"] or "",
         traces=int(f["trazas"] or 0),

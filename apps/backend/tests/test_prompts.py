@@ -366,10 +366,13 @@ def test_la_version_de_prompt_se_nombra_antes_que_el_modelo_nuevo():
 # ---------------------------------------------------------------------------------
 
 
-def _observado(clave: str, pista: str, trazas: int) -> ObservedPrompt:
+def _observado(
+    clave: str, pista: str, trazas: int, sitio: str = "atender > responder"
+) -> ObservedPrompt:
     return ObservedPrompt(
         step_key=clave,
         step_label="responder",
+        site=sitio,
         hint=pista,
         traces=trazas,
         calls=trazas,
@@ -404,6 +407,93 @@ def test_un_prompt_con_datos_variables_dentro_no_son_doscientas_versiones():
     assert pasos[0].variants == []
     assert "datos variables" in pasos[0].note
     assert "30 variantes" in pasos[0].note
+
+
+def test_dos_llamantes_del_mismo_paso_no_son_dos_versiones_de_su_prompt():
+    """El fallo que D-106 dejó detrás sin que nadie lo viera (D-115).
+
+    Desde que la identidad de un paso incluye el CAMINO de llamada, dos `step_key` bajo
+    la misma etiqueta pueden ser el mismo prompt llamado desde dos sitios. La pantalla
+    seguía contándolos como versiones: «redactar» salía con «3 juegos de instrucciones»
+    y las tres filas enseñaban el mismo texto carácter por carácter. Afirmar un cambio
+    de prompt que no ocurrió es exactamente lo que esta pestaña no puede hacer.
+
+    Lo correcto no es fundirlos —dos llamantes son dos pasos, que es justo lo que D-106
+    consiguió distinguir— sino que ninguno de los dos declare una versión que no tuvo, y
+    que se puedan decir por separado en vez de leerse como un duplicado.
+    """
+    pasos = prompts.observed_steps(
+        [
+            _observado("k1", "Responde breve.", 10, sitio="atender > responder"),
+            _observado("k2", "Responde breve.", 10, sitio="resumir > responder"),
+        ]
+    )
+    assert [len(paso.variants) for paso in pasos] == [1, 1], (
+        "el prompt no cambió en ninguno de los dos caminos, así que ninguno puede "
+        f"declarar más de un juego de instrucciones: {[len(p.variants) for p in pasos]}"
+    )
+    etiquetas = sorted(paso.label for paso in pasos)
+    assert etiquetas == ["atender → responder", "resumir → responder"], (
+        f"dos bloques titulados igual se leen como un duplicado: {etiquetas}"
+    )
+
+
+def test_el_trafico_viejo_sin_camino_no_inventa_versiones():
+    """El caso que obliga a fusionar por prompt además de agrupar por camino.
+
+    Las trazas anteriores a D-106 llegaron sin `step_site`, así que dos llamantes caen
+    en el mismo grupo y sólo se distinguen por la clave. Ahí, enseñar dos filas con el
+    mismo texto sería afirmar un cambio que no hubo: se fusionan y el tráfico se suma.
+    """
+    pasos = prompts.observed_steps(
+        [
+            _observado("k1", "Responde breve.", 10, sitio=""),
+            _observado("k2", "Responde breve.", 10, sitio=""),
+        ]
+    )
+    assert len(pasos) == 1
+    assert len(pasos[0].variants) == 1, "el mismo texto dos veces no son dos versiones"
+    assert pasos[0].variants[0].traces == 20, "y el tráfico de los dos se suma"
+
+
+def test_un_prompt_que_si_cambia_bajo_el_mismo_llamante_son_dos_versiones():
+    """El contraejemplo, que es lo que impide arreglar lo de arriba de más.
+
+    Si el prompt cambia dentro del mismo camino, son dos juegos de instrucciones y hay
+    que poder verlos por separado con sus fechas: fusionarlos escondería justo lo que
+    esta pestaña existe para enseñar.
+    """
+    pasos = prompts.observed_steps(
+        [
+            _observado("k1", "Responde breve.", 10, sitio="atender > responder"),
+            _observado("k2", "Responde largo y con detalle.", 10, sitio="atender > responder"),
+        ]
+    )
+    assert len(pasos) == 1
+    assert len(pasos[0].variants) == 2
+    assert {v.hint for v in pasos[0].variants} == {
+        "Responde breve.",
+        "Responde largo y con detalle.",
+    }
+
+
+def test_la_guarda_de_la_plantilla_cuenta_prompts_y_no_llamantes():
+    """D-093 se disparaba por el motivo equivocado.
+
+    «Más de ocho variantes es una plantilla con datos dentro» dejó de ser cierto cuando
+    un paso llamado desde nueve sitios producía nueve claves con el mismo prompt. Es el
+    único sitio del producto donde se nombra la huella partida, así que dispararlo mal
+    lo deja inservible.
+    """
+    pasos = prompts.observed_steps(
+        [
+            _observado(f"k{i}", "Responde breve.", 1, sitio=f"sitio-{i} > responder")
+            for i in range(12)
+        ]
+    )
+    assert pasos[0].unstable is False, (
+        "doce llamantes del mismo prompt no son una plantilla con datos dentro"
+    )
 
 
 # ---------------------------------------------------------------------------------

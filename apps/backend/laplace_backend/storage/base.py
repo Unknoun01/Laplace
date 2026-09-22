@@ -304,14 +304,22 @@ class ObservedPrompt:
     """Un juego de instrucciones visto en las trazas, sin gestión de prompts de por medio.
 
     Es lo que sostiene la pestaña de Prompts para quien no ha adoptado nada: la
-    identidad de un paso ya incluye la huella de sus instrucciones (D-060), así que dos
-    `step_key` bajo la misma etiqueta son dos versiones del mismo prompt, con sus fechas
-    y su coste. No se puede enseñar el texto entero —sólo se guarda la pista—, pero sí
-    cuándo cambió y qué pasó con el coste, que es la mitad de la pregunta.
+    identidad de un paso incluye la huella de sus instrucciones (D-060), así que dos
+    `step_key` **bajo el mismo camino de llamada** son dos versiones del mismo prompt,
+    con sus fechas y su coste. No se puede enseñar el texto entero —sólo se guarda la
+    pista—, pero sí cuándo cambió y qué pasó con el coste, que es la mitad de la
+    pregunta.
+
+    Lo de «bajo el mismo camino» no es un matiz: esta clase decía «bajo la misma
+    etiqueta» y dejó de ser cierto el día que D-106 metió el camino de llamada dentro de
+    `step_key`. Desde entonces, un prompt que no había cambiado nunca salía en pantalla
+    como tres versiones porque se llamaba desde tres sitios (D-115).
     """
 
     step_key: str
     step_label: str
+    #: El camino de llamada. Es lo que separa «otro llamante» de «otro prompt».
+    site: str = ""
     hint: str = ""
     traces: int = 0
     calls: int = 0

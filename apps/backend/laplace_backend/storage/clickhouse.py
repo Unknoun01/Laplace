@@ -961,6 +961,7 @@ class ClickHouseStore:
                     -- distintos y la misma pantalla leerse distinto en local y en la
                     -- nube. Lo destapó el test de paridad de esta consulta.
                     max(if(step_label != '', step_label, name))     AS paso,
+                    max(step_site)         AS sitio,
                     max(step_hint)         AS pista,
                     uniqExact(trace_id)    AS trazas,
                     count()                AS llamadas,

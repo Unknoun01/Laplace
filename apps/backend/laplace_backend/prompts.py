@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import difflib
 import logging
+from dataclasses import replace
 from datetime import datetime
 from typing import Literal
 
@@ -30,6 +31,7 @@ from pydantic import BaseModel, Field
 
 from .evals import MATERIAL_COST_CHANGE, Rate, SourceComparison, compare_rates, rate_for
 from .panel import MIN_TRACES_FOR_COMPARISON
+from .pasos import hay_homonimos, nombre_de_paso
 from .storage.base import ObservedPrompt, PromptUsage
 
 logger = logging.getLogger("laplace.prompts")
@@ -575,26 +577,71 @@ def _comparison_for(card: PromptCard) -> tuple[PromptComparison | None, str]:
 # ---------------------------------------------------------------------------------
 
 
+def _fusionar_por_prompt(filas: list[ObservedPrompt]) -> list[ObservedPrompt]:
+    """Dentro de un mismo camino, junta las claves que comparten instrucciones.
+
+    Normalmente sobra: dentro de un camino, la clave sólo cambia si cambia el prompt.
+    Hace falta para el tráfico que llegó antes de que el SDK mandara el camino, donde
+    `step_site` viene vacío y dos llamantes distintos caen en el mismo grupo. Fusionar
+    por pista ahí es lo conservador: enseñar dos versiones idénticas es afirmar un
+    cambio que no hubo, y ése es justo el fallo que esto cierra (D-115).
+    """
+    por_prompt: dict[str, ObservedPrompt] = {}
+    for fila in filas:
+        previa = por_prompt.get(fila.hint)
+        if previa is None:
+            por_prompt[fila.hint] = replace(fila)
+            continue
+        previa.traces += fila.traces
+        previa.calls += fila.calls
+        previa.cost_usd += fila.cost_usd
+        previa.input_tokens += fila.input_tokens
+        previa.output_tokens += fila.output_tokens
+        primeras = [d for d in (previa.first_seen, fila.first_seen) if d]
+        ultimas = [d for d in (previa.last_seen, fila.last_seen) if d]
+        previa.first_seen = min(primeras) if primeras else None
+        previa.last_seen = max(ultimas) if ultimas else None
+    return list(por_prompt.values())
+
+
 def observed_steps(
     observed: list[ObservedPrompt],
     verdicts_by_step: dict[str, dict[str, tuple[int, int]]] | None = None,
 ) -> list[ObservedStep]:
     """Agrupa lo visto en las trazas por paso, con la guarda de la huella partida.
 
-    La identidad de un paso ya incluye la huella de sus instrucciones (D-060), así que
-    dos claves bajo la misma etiqueta son dos juegos de instrucciones del mismo paso: un
-    cambio de prompt que se puede fechar aunque nadie haya adoptado nada.
+    La identidad de un paso incluye la huella de sus instrucciones (D-060), así que dos
+    claves **del mismo camino de llamada** son dos juegos de instrucciones del mismo
+    paso: un cambio de prompt que se puede fechar aunque nadie haya adoptado nada.
+
+    Lo del camino no es un detalle de implementación. Esta función agrupaba por
+    etiqueta, que era correcto hasta que D-106 metió el camino dentro de `step_key`;
+    desde entonces un prompt que no había cambiado nunca salía como tres versiones sólo
+    porque se llamaba desde tres sitios, y la pantalla afirmaba un cambio que no
+    ocurrió. Se agrupa por camino y las variantes de un mismo camino se juntan además
+    por su pista, porque dentro de un camino lo único que mueve la clave es el prompt
+    (D-115).
 
     La guarda importa tanto como el dato. Un prompt de sistema con una fecha dentro
     genera una huella por llamada, y sin esto la pantalla enseñaría doscientas
-    «versiones» de un paso que en realidad tiene una. Cuando pasa, se dice lo que es.
+    «versiones» de un paso que en realidad tiene una. Cuando pasa, se dice lo que es —y
+    ahora cuenta prompts y no llamantes, que era el otro lado del mismo fallo.
     """
-    por_paso: dict[str, list[ObservedPrompt]] = {}
+    por_paso: dict[tuple[str, str], list[ObservedPrompt]] = {}
     for fila in observed:
-        por_paso.setdefault(fila.step_label or "(sin nombre)", []).append(fila)
+        etiqueta = fila.step_label or "(sin nombre)"
+        por_paso.setdefault((etiqueta, fila.site or ""), []).append(fila)
+
+    # Un nombre que aparece con más de un camino necesita decir de dónde viene: dos
+    # bloques titulados igual se leen como un duplicado, no como dos pasos distintos.
+    homonimos = hay_homonimos([(p.step_label or "(sin nombre)", p.site or "") for p in observed])
 
     salida: list[ObservedStep] = []
-    for etiqueta, filas in por_paso.items():
+    for (etiqueta_base, sitio), filas in por_paso.items():
+        etiqueta = nombre_de_paso(
+            etiqueta_base, sitio, con_llamante=etiqueta_base in homonimos
+        )
+        filas = _fusionar_por_prompt(filas)
         filas.sort(key=lambda f: (f.last_seen or f.first_seen or datetime.min), reverse=True)
         paso = ObservedStep(
             label=etiqueta,
