@@ -1584,3 +1584,166 @@ Dos pruebas nuevas cierran ese agujero por donde se coló:
 * **La paridad de la consulta de bucles**, con las dos trazas dando exactamente las mismas
   vueltas, que es el tráfico empatado donde una elección arbitraria se separa (D-099). Y
   la agrupación por camino, que también se escribió dos veces.
+
+### D-113 — Un hallazgo que el motor encuentra tiene que saber explicarse
+La regla de bucles entró en D-109 como «el diferenciador del producto desde el
+principio», se añadió a `detect()` y **nunca se añadió a `detail()`**. Cuatro tandas
+después, la tarjeta de 0,60 $ del proyecto de demo —la segunda que más dinero devolvía—
+llevaba a una página que decía «ese problema ya no aparece. O lo has arreglado, o ha
+dejado de darse. **Enhorabuena** en cualquiera de los dos casos». El producto felicitaba
+al usuario por su hallazgo más caro, y los cuatro bucles del proyecto hacían lo mismo.
+
+Lo que falló no fue la rama que faltaba: fue que **nada la exigía**. `detect()` y
+`detail()` son dos puertas del mismo catálogo y no había ningún sitio donde estuviera
+escrito que hay que cruzar las dos, así que una regla nueva se podía entregar entera por
+la mitad con la suite de 333 pruebas en verde.
+
+Ahora `detail()` despacha por tabla y `DETAILED_KINDS` **se deriva de esa tabla**, nunca
+se escribe a mano: una lista a mano se queda desfasada afirmando que cubre algo que no
+cubre. Dos redes, y hacen falta las dos:
+
+* Sobre tráfico que produce los cuatro tipos, cada hallazgo tiene que tener ficha. Con
+  una aserción previa que exige que el tráfico produzca los cuatro: sin ella, el día que
+  la fixture deje de generar bucles la prueba volvería a pasar sin mirar el que falla,
+  que es exactamente cómo sobrevivió el fallo original.
+* Y una estructural, que no depende de que nadie se acuerde de sembrar tráfico del tipo
+  nuevo. Es el criterio de D-097 con las rutas: una regla nueva nace sin ficha y la suite
+  lo dice el mismo día.
+
+La ficha del bucle explica además por qué se detecta aparte de una repetición: lo que
+delata a un bucle no es la entrada —nunca hay dos iguales, llevan el contador dentro—
+sino que la salida no cambia.
+
+### D-114 — Un motivo no basta con que exista: tiene que ser cierto
+El guardia de D-107 recorre los modelos de la API y exige que toda cifra en dólares venga
+con algo que diga si se puede afirmar. Comprueba que **haya** un motivo. No comprueba que
+el motivo **diga la verdad**, y por ese hueco se coló lo siguiente.
+
+La regla del modelo caro mandaba por la misma puerta dos situaciones opuestas: que el
+modelo no esté en la tabla de precios —un hueco nuestro— y que esté pero ya sea el más
+barato que conocemos, que es una respuesta. Escribía la primera frase para las dos, así
+que la pantalla afirmaba «gpt-5.6-luna no está en la tabla de precios» de un modelo cuyo
+coste pinta en las otras diez pantallas, con `unknown_cost_spans` a 0 en ese mismo
+inicio. Quien lea eso deja de creerse la tabla entera.
+
+`dinero.AFIRMACIONES_DE_SIN_TARIFA` es la lista cerrada de las formas en que el producto
+dice no tener tarifa, y un barrido sobre tráfico donde **todos** los modelos tienen
+precio exige que ninguna aparezca. Cerrada a propósito: una forma nueva de decirlo se
+añade ahí y se ve en el diff.
+
+Y al arreglarlo apareció la tercera cara. La ficha de este hallazgo estaba escrita para el
+camino del dinero, así que por el camino del tiempo la página decía «Cambia el modelo de
+ese paso a **None**» y afirmaba una alternativa más barata que no existe. **Un tipo de
+hallazgo con dos caminos son dos fichas**, y la red lo exige ahora: ninguna ficha puede
+enseñar un hueco donde va un dato.
+
+### D-115 — Lo que D-106 dejó detrás: `step_key` leído con su significado anterior
+D-106 metió el **camino de llamada** dentro de `step_key` para que dos agentes con una
+función homónima no mezclaran sus poblaciones. Fue correcto y sigue siéndolo. Lo que no
+se hizo fue repasar quién consumía esa clave dando por buena la definición vieja, y dos
+pantallas se quedaron afirmando lo que había dejado de ser cierto:
+
+* **Prompts** agrupaba las variantes por etiqueta, así que un prompt que no había cambiado
+  nunca salía como tres versiones porque se llamaba desde tres sitios: «redactar · 3
+  juegos de instrucciones» con las tres filas enseñando el mismo texto carácter por
+  carácter. La pestaña que existe para fechar cambios de prompt afirmaba uno que no
+  ocurrió. Y la guarda de D-093 —«más de ocho variantes es una plantilla con datos
+  dentro»— se podía disparar por tener nueve llamantes, dejando inservible el único sitio
+  del producto donde se nombra la huella partida.
+* **El inicio** enseñaba dos tarjetas con el título idéntico y cifras distintas, porque el
+  título de un bucle llevaba sólo el nombre de la función. De diez cosas que arreglar,
+  cuatro se leían como un duplicado del producto. Es peor que parecerlo: el usuario
+  arregla una, vuelve, ve la otra con el mismo texto y concluye que no nos hemos enterado.
+
+El barrido de todos los consumidores de `step_key` dio **tres** sitios con la suposición
+vieja —los dos de arriba y el docstring de `ObservedPrompt`— y uno que ya estaba bien:
+`coverage` agrupa por camino desde D-106.
+
+La raíz no era ninguno de los tres: era que **no había un sitio que supiera cómo se llama
+un paso**, así que cada pantalla se lo inventaba. `pasos.py` lo es ahora.
+`disambiguate()` decide **cuándo** hace falta decir de dónde viene un paso;
+`nombre_de_paso()` decide **cómo** se escribe. Dos sitios sabiendo escribir lo mismo era
+la enfermedad, un nivel por encima de los dos síntomas.
+
+Tres cosas que salieron al tirar del hilo:
+
+* A los bucles **nunca** se les aplicó `disambiguate()`. A repeticiones y a uso de modelo,
+  sí; la regla nueva volvió a entrar por media puerta, igual que en D-113.
+* Donde sí se aplicaba, iba cojo: `RepeatedGroup` no llevaba el camino, así que
+  `getattr(fila, "site")` devolvía siempre vacío y caía al peor camino —el principio del
+  prompt— que su propio docstring desaconseja.
+* Y ese peor camino no estaba recortado: el título de un hallazgo era el nombre de la
+  función más ochenta caracteres de prompt entre comillas dentro de comillas, dos de las
+  tres líneas de la tarjeta.
+
+Dos llamantes distintos **son** dos pasos, que es justo lo que D-106 consiguió distinguir.
+Lo que no puede pasar es que uno solo declare versiones que no tuvo, ni que dos se lean
+como el mismo.
+
+### D-116 — Un test que falla por el reloj es peor que no tenerlo
+Los tramos del panel se alinean al reloj. El test de paridad sembraba el pico a «ahora
+menos diez horas» con 48 minutos de duración, así que entre las 09:00 y las 10:00 UTC el
+pico cruza medianoche, se parte en dos tramos y salen dos picos donde se espera uno. Un
+13 % de las ejecuciones en rojo sin que nada esté mal.
+
+Lo revelador es que el arreglo ya existía: `_proyecto_con_pico` ancla el pico al principio
+de su tramo y lleva escrito por qué. El test de paridad no lo usaba, tenía una **copia
+inline** de la siembra, y la copia se quedó sin el anclaje. Ahora comparte la pieza.
+
+La regla: un rojo que depende del reloj enseña a no mirar el rojo, y en este proyecto el
+rojo de la nube ya se ha ignorado tres veces (D-112). Cualquier prueba que coloque tráfico
+en un instante relativo tiene que anclarlo al tramo, no al «ahora».
+
+### D-117 — La quinta cara del doble conteo: el bucle contra el modelo caro
+Salió al ir a arreglar la presentación del héroe con el 100 % evitable: antes de escribir
+«esto pasa en agentes pequeños» había que comprobar si el 100 % era verdad. No lo era. Los
+hallazgos del proyecto de demo sumaban 1,33 $ sobre un gasto de 0,75 $, y el
+`min(suma, gasto)` de `overview()` lo recortaba a exactamente el 100 %, que la pantalla
+enseña como una buena noticia.
+
+El descuento que lo impide existe desde D-061 y se alimenta **sólo** de las repeticiones
+exactas. Cuando la regla de bucles entró en D-109 nadie la enchufó, así que la del modelo
+caro volvía a reclamar la diferencia de tarifa sobre las vueltas que el bucle ya daba por
+eliminadas. Es la quinta forma que encuentra este proyecto de contar dos veces el mismo
+dinero, y la tercera cosa que la regla de bucles se dejó a medias al entrar.
+
+La red sigue la regla de STATUS de no comprobar con un tope contra el gasto —eso deja
+pasar el error mientras quepa dentro—: exige que **el tope no llegue a morder** y que
+`avoidable_ratio` no sea 1.0. En rojo decía la cifra exacta: 0,073944 prometidos sobre
+0,063000 gastados, el 117 % de la factura.
+
+Un bucle y una repetición exacta del mismo paso no se pisan entre sí —la consulta de
+bucles exige entradas distintas y la de repetición la misma—, así que sumar los dos en el
+descuento no descuenta de más. Y se pasan en `detect()` **y** en `detail()`: en uno solo,
+la ficha diría una cifra distinta de su tarjeta.
+
+**Y el `min(suma, gasto)` se queda**, pero ahora se sabe lo que es: un cinturón, no un
+cálculo. Que llegue a morder significa que dos reglas se solapan, y eso es un fallo, no
+un caso. La prueba nueva es la que lo dice.
+
+### D-118 — El héroe cuando el reparto no reparte, y la cifra que explica el hallazgo
+Dos cosas de la misma familia: enseñar el número con el que de verdad se decidió.
+
+**El héroe.** Con el doble conteo arreglado, el proyecto de demo se queda en el 93 %
+evitable, y ahí la pareja «X → Y» con su barra sigue sin decir lo que parece: una barra
+con un lado invisible no es una barra, y en letra de 54 px la segunda cifra promete que
+puedes dejar de pagar casi todo tu agente. Por encima del 90 %, el inicio enseña el gasto
+y explica lo que pasa: la cifra está medida y no se esconde, pero no se presenta como una
+promesa, porque lo que suele haber detrás es un agente pequeño donde dos o tres pasos son
+la factura entera. El aviso de `savings_needs_caution` —que salta al 60 %— se calla
+entonces: repetirlo en la misma pantalla no lo hace más creíble.
+
+**La cifra que justifica.** El repaso de medias contra medianas que pedía D-112 da que
+ninguna regla decide ya con una media. Pero tres frases explicaban el hallazgo con la
+media mientras la decisión usaba la mediana, y eso se nota justo en el caso para el que se
+eligió la mediana: once llamadas de 6 tokens y una de 3.000 dejan la mediana en 6 y la
+media en 256, así que la tarjeta decía «responde con 256 tokens de media, que es una
+respuesta muy breve». La frase que sostiene el hallazgo lo contradecía, y quien quisiera
+comprobarnos no podía. `_salida_tipica()` es el único sitio que responde «cuánto contesta
+este paso en una llamada normal», y lo usan la decisión y las tres frases. La media se
+queda en modo avanzado al lado de la mediana: verlas juntas es lo que enseña la cola larga.
+
+**Lo que queda anotado y sin tocar**, porque cambia qué modelo se recomienda y eso es una
+decisión de producto: `_modelo_mas_rapido()` promedia las medianas de varias filas del
+mismo modelo **sin ponderar por llamadas**, así que un paso de poco tráfico pesa igual que
+uno de mucho al elegir la alternativa. Es una media dentro de un camino de decisión.

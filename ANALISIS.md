@@ -3,6 +3,12 @@
 Revisión del producto entero —código, interfaz y comportamiento con tráfico real— hecha
 el 22 de septiembre de 2026 sobre el commit `da82646`.
 
+> **Estado:** los dos P0, los dos P1 y el héroe del 100 % están arreglados, cada uno con
+> la red que lo habría cazado puesta antes que el arreglo (D-113 a D-118). Al hacerlo
+> apareció un sexto fallo que este informe no vio: dos reglas reclamando el mismo dinero,
+> que es lo que producía el 100 % evitable. Lo que queda del P2 está en la lista de
+> [`STATUS.md`](STATUS.md), en «Lo que sólo se ve mirando la pantalla».
+
 El método importa para leer lo que sigue: no es una lectura de código. Se levantó el
 modo local (`laplace ui`), se le metió tráfico con `laplace demo` y con
 `examples/agente_ejemplo.py`, y se recorrieron las seis pantallas en los dos modos y a

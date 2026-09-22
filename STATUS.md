@@ -1,6 +1,6 @@
 # Estado de Laplace
 
-Última actualización: 21 de septiembre de 2026.
+Última actualización: 22 de septiembre de 2026.
 
 ## Dónde está el producto
 
@@ -136,7 +136,7 @@ Lo que sostiene esas casillas, en concreto:
   Anthropic estaba completo; faltaba leer `prompt_tokens_details.cache_write_tokens`, así
   que esos tokens se cobraban a tarifa de entrada y **nuestro coste de OpenAI salía por
   debajo del real** (D-101).
-- **333 pruebas, 329 pasando y 4 saltadas** con ClickHouse y Postgres levantados: las 4
+- **347 pruebas, 343 pasando y 4 saltadas** con ClickHouse y Postgres levantados: las 4
   son las que necesitan una clave de proveedor. El camino de la nube se ejecuta, que es
   lo que faltaba: una tanda que toca SQL de nube y se entrega con esas pruebas saltadas
   está sin terminar (D-112). Con los almacenes en pie la suite tarda dos minutos y medio;
@@ -151,6 +151,13 @@ Lo que sostiene esas casillas, en concreto:
   todo como estimado, marcar nada, devolver coste cero para un modelo sin tarifa, tragarse
   un error del servidor— y todas ponen la suite en rojo. Las 4 que siguen saltándose son
   las que llaman a la API real de los proveedores y necesitan una clave.
+- **El catálogo de hallazgos tiene red, y los avisos de «no lo sabemos» también.** Un
+  repaso del producto con tráfico real delante encontró dos fallos que eran el mismo con
+  dos caras: una regla que entró por `detect()` y nunca salió por `detail()` —los cuatro
+  bucles del proyecto de demo llevaban a un 404 que decía «enhorabuena»— y un guardia que
+  comprobaba que hubiera un motivo pero no que el motivo fuera cierto —«no está en la
+  tabla de precios» de un modelo que sí estaba—. Los dos arreglos son una tarde; lo que
+  se ha puesto son las dos redes que los habrían cazado (D-113, D-114).
 
 ## Qué queda
 
@@ -167,16 +174,64 @@ hora del despliegue (D-092).
 ## El repaso honesto
 
 Lo que aguantaría un usuario real mañana y lo que no, actualizado después de cerrar
-cobertura, autenticación y proveedores.
+cobertura, autenticación y proveedores, y después de **mirar el producto entero en
+pantalla con tráfico real delante** en lugar de leer el código. Ese repaso está en
+[`ANALISIS.md`](ANALISIS.md) y encontró seis cosas que ninguna prueba veía, dos de ellas
+graves, porque todas se manifestaban en la pantalla y ninguna en una aserción. **La
+lección es del método, no de los fallos:** una suite de 333 pruebas en verde no dice que
+el producto se lea bien, y este producto es sobre todo lo que el usuario lee.
 
 **Aguanta.** El modo local entero: `pip install`, `laplace ui`, una línea, y ves tus
 trazas con su coste. El modelo de coste por tramos, con sus suelos y sus «no lo sabemos».
-Las tres reglas de derroche, con cuatro cicatrices de doble conteo y su test cada una. El
+Las tres reglas de derroche, con cinco cicatrices de doble conteo y su test cada una. El
 panel. Evaluaciones. Prompts. Y ahora la cobertura, que es lo que hace que el silencio de
 todo lo anterior se pueda interpretar. Las integraciones de OpenAI y Anthropic ya no son
 un acto de fe: corren contra los clientes reales en cada `pytest`, y con un modelo local
 levantado corren además contra un servidor de verdad, por HTTP, sin falsear el cuerpo de
 la respuesta.
+
+### Lo que sólo se ve mirando la pantalla
+
+Seis defectos que la suite no veía, todos encontrados abriendo el producto con datos
+reales. Los cinco arreglados están en D-113 a D-118; lo que importa aquí es la forma que
+tenían, porque la próxima se parecerá:
+
+* **Dos eran el mismo fallo con dos caras.** Una regla que entró por `detect()` y nunca
+  salió por `detail()`, y un guardia que comprueba que haya un motivo pero no que el
+  motivo sea cierto. Los dos arreglos son una tarde; lo que faltaba eran las dos redes.
+* **Dos venían de D-106**, que metió el camino de llamada en `step_key` sin repasar quién
+  consumía esa clave con la definición anterior. El barrido dio tres sitios con la
+  suposición vieja y uno que ya estaba bien.
+* **Uno estaba tapado por un tope.** El `min(suma, gasto)` convertía un solape de reglas
+  en un «100 % evitable» que la pantalla enseñaba como buena noticia.
+* **Y uno era un test que fallaba por el reloj**, no por el código: 48 minutos de cada
+  seis horas.
+
+**Lo que queda de ese repaso y no se ha tocado**, por orden de lo que más se nota:
+
+1. **Cada bucle sale dos veces**, una por el span `llm` y otra por el `chain` que lo
+   envuelve. Ya no comparten título desde D-115, pero siguen siendo dos tarjetas para un
+   problema. El dinero no se cuenta dos veces; la atención del usuario sí.
+2. **El formato numérico mezcla dos convenciones en la misma línea.** `money()` usa punto
+   decimal y `number()` punto de millares, así que en la cabecera de una traza conviven
+   «120.255 / 108» y «$0.007181» y «12,8 pasos por ejecución»: tres lecturas del mismo
+   carácter. En un producto cuyo argumento es que una cifra se enseña con lo que haga
+   falta para leerla bien, esto es caro.
+3. **Los tokens se llaman «palabras» en un título** y «tokens» dos líneas más abajo, con
+   distinto separador de millares.
+4. **El árbol de traza repite el modelo en cada fila** —el nombre del span ya es
+   `chat <modelo>` por convención OTel— y pinta un envoltorio de un solo hijo con los
+   mismos tokens y el mismo coste que su padre.
+5. **Desbordamiento horizontal en móvil**: a 375 px el documento mide 394 y la última
+   columna de la tabla queda cortada. Hay dos media queries para 2.005 líneas de CSS.
+6. **`examples/agente_ejemplo.py` imprime «listo» después de que el exportador se rinda.**
+   Apunta a `:8000`, que es el puerto de la instalación con Docker; contra `laplace ui`
+   (:8100) no llega nada y el script no lo dice.
+7. **`POST /api/pricing/reload` no lleva `project_id`**, así que cualquier clave válida
+   recarga la tabla de precios de toda la instalación. Es la primera ruta que se escapa
+   del modelo «la clave ata el proyecto» de D-097.
+8. **`_modelo_mas_rapido()` promedia medianas sin ponderar por llamadas.** Es una media
+   dentro de un camino de decisión, y cambiarla cambia qué modelo se recomienda.
 
 ### Lo que sigue sin detectarse, y por qué
 
@@ -290,14 +345,49 @@ pruebas, y si se quita de ahí, se queda sin decir en ningún sitio. Y una regla
 próxima simulación: lo simulado va en un fichero propio con «simulado» en el nombre, no
 como un caso más entre los reales.
 
-**El doble conteo es el fallo recurrente de este proyecto.** Ha aparecido por cuatro
+**El doble conteo es el fallo recurrente de este proyecto.** Ha aparecido por **cinco**
 caminos distintos: dos reglas sobre los mismos tokens, dos reglas sobre el mismo paso, el
-cruce del descuento sin pareja al cambiar la clave de agrupación, y el descuento de
-tokens sin descontar llamadas. Cada uno dejó su caso en `test_insights.py`. Reglas al
-tocar el motor: los casos se añaden, nunca se sustituyen; las cifras se comprueban
-exactas y no con un tope contra el gasto total, que deja pasar el error mientras quepa
-dentro; y hay que comprobar que los tests muerden rompiendo el motor a propósito. **El
-test de regresión del solape no se toca.**
+cruce del descuento sin pareja al cambiar la clave de agrupación, el descuento de tokens
+sin descontar llamadas, y la regla de bucles que entró sin enchufarse al descuento
+(D-117). Cada uno dejó su caso en `test_insights.py`. Reglas al tocar el motor: los casos
+se añaden, nunca se sustituyen; las cifras se comprueban exactas y no con un tope contra
+el gasto total, que deja pasar el error mientras quepa dentro; y hay que comprobar que
+los tests muerden rompiendo el motor a propósito. **El test de regresión del solape no se
+toca.**
+
+Y una lectura del quinto que vale para el sexto: **`min(suma, gasto)` en `overview()` es
+un cinturón, no un cálculo.** Cuando llega a morder, el héroe enseña «100 % evitable» y
+eso se lee como una buena noticia en lugar de como lo que es: dos reglas reclamando el
+mismo dinero. Hay una prueba que exige que no muerda. Si alguien la relaja porque «total,
+el tope ya lo acota», habrá devuelto el fallo a su escondite.
+
+**Una regla nueva entra por dos puertas, no por una.** `detect()` la encuentra y
+`detail()` la explica, y la de bucles se entregó cuatro tandas sólo con la primera: su
+hallazgo más caro llevaba a un 404 que el usuario leía como «enhorabuena» (D-113). Se
+dejó además sin desambiguar el título (D-115) y sin enchufar al descuento (D-117): tres
+medias entregas de la misma regla. `DETAILED_KINDS` y `test_catalogo_hallazgos` cierran
+la primera; las otras dos no tienen guardia estructural todavía, así que al añadir una
+regla hay que recorrer a mano quién más tenía que enterarse.
+
+**Un «no lo sabemos» tiene que ser verdad, no sólo existir.** El guardia de D-107
+comprueba que una cifra en dólares venga con su compañera; no comprueba que la compañera
+diga algo cierto, y por ahí se afirmó que un modelo no tenía tarifa cuando sí la tenía
+(D-114). Toda forma nueva de decir «no hay tarifa» va en
+`dinero.AFIRMACIONES_DE_SIN_TARIFA` o el barrido no la mira.
+
+**`step_key` ya no significa lo que su nombre sugiere.** Desde D-106 lleva dentro el
+camino de llamada, así que dos claves bajo la misma etiqueta pueden ser el mismo prompt
+llamado desde dos sitios. Dos pantallas se quedaron leyéndolo con la definición vieja y
+afirmaron cambios de prompt que no ocurrieron y duplicados que no lo eran (D-115). Quien
+vaya a agrupar por `step_key` tiene que decidir primero si lo que busca es un paso o un
+prompt, y `pasos.py` es el único sitio que sabe escribir el nombre de un paso: si aparece
+un segundo, volvemos a tener dos verdades.
+
+**Una prueba que coloca tráfico en un instante relativo tiene que anclarlo al tramo.** El
+test de paridad del panel fallaba 48 minutos de cada seis horas porque su pico cruzaba
+una frontera de tramo según la hora a la que se lanzara (D-116). El arreglo ya existía en
+otra fixture y la copia inline se lo perdió. Un rojo que depende del reloj enseña a no
+mirar el rojo.
 
 **La identidad de un paso puede partirse.** Un prompt de sistema con datos variables
 —una fecha, un nombre— genera una huella distinta por llamada y parte un paso en muchos.
