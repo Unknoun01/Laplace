@@ -762,6 +762,23 @@ MIN_VECES_MAS_LENTO = 1.8
 MIN_CALLS_MODELO_RAPIDO = 5
 
 
+def _salida_tipica(usage: ModelUsage) -> float:
+    """La salida de una llamada normal de ese paso: la mediana, con la media de reserva.
+
+    Es **la misma cifra con la que decide la regla**, y por eso vive aquí y no escrita a
+    mano en cada frase. La tarjeta explicaba el hallazgo con la media mientras la
+    decisión usaba la mediana, así que un paso con una generación desbocada —once
+    llamadas de 6 tokens y una de 3.000— disparaba por la mediana y después decía
+    «responde con 256 tokens de media, que es una respuesta muy breve». La frase que
+    justifica el hallazgo contradecía al hallazgo, y dejaba al lector sin forma de
+    comprobarnos (D-118).
+
+    La media sigue estando, en modo avanzado y al lado de la mediana: ver las dos juntas
+    es justo lo que enseña que ese paso tiene una cola larga.
+    """
+    return usage.p50_output_tokens or usage.avg_output_tokens
+
+
 def _modelo_mas_rapido(usos: list[ModelUsage], excepto: str) -> tuple[str, float] | None:
     """El modelo con menos milisegundos por llamada entre los que ya usa el proyecto.
 
@@ -865,6 +882,9 @@ def _modelo_caro_sin_tarifa(
             TechItem(label="paso", value=usage.name),
             TechItem(label="modelo", value=f"{usage.model} → {nombre_rapido}"),
             TechItem(label="llamadas", value=str(usage.calls)),
+            TechItem(
+                label="salida mediana", value=f"{_salida_tipica(usage):.0f} tok"
+            ),
             TechItem(label="salida media", value=f"{usage.avg_output_tokens:.0f} tok"),
             TechItem(label="ms por llamada", value=f"{ms_actual:.0f} vs {ms_rapido:.0f}"),
         ],
@@ -916,9 +936,9 @@ def _expensive_model_finding(
         kind="modelo_caro",
         title=f"Usas el modelo caro para un paso muy corto: «{usage.name}»",
         summary=(
-            f"Ese paso responde con {usage.avg_output_tokens:.0f} tokens de media, que es una "
-            f"respuesta muy breve. Con {price.alternative} en lugar de {usage.model}, el mismo "
-            f"trabajo costaría {veces_txt} menos."
+            f"Ese paso responde con {_salida_tipica(usage):.0f} tokens en una llamada normal, "
+            f"que es una respuesta muy breve. Con {price.alternative} en lugar de "
+            f"{usage.model}, el mismo trabajo costaría {veces_txt} menos."
         ),
         window_waste_usd=ahorro,
         monthly_saving_usd=_to_monthly(ahorro, base),
@@ -931,6 +951,9 @@ def _expensive_model_finding(
             TechItem(label="paso", value=usage.name),
             TechItem(label="modelo", value=f"{usage.model} → {price.alternative}"),
             TechItem(label="llamadas", value=str(usage.calls)),
+            TechItem(
+                label="salida mediana", value=f"{_salida_tipica(usage):.0f} tok"
+            ),
             TechItem(label="salida media", value=f"{usage.avg_output_tokens:.0f} tok"),
         ],
         sample_trace_id=usage.sample_trace_id,
@@ -954,7 +977,7 @@ def _modelo_lento_detail(
 
     detalle.what_happens = (
         f"El paso «{usage.name}» ha hecho {usage.calls} llamadas a {usage.model} en la "
-        f"ventana analizada, y responde con {usage.avg_output_tokens:.0f} tokens de media: "
+        f"ventana analizada, y responde con {_salida_tipica(usage):.0f} tokens en una normal: "
         f"una etiqueta o una frase corta, no un texto elaborado. En tu propio tráfico hay "
         f"un modelo que tarda bastante menos por llamada."
     )
@@ -1025,8 +1048,8 @@ def _expensive_model_detail(
 
     detalle.what_happens = (
         f"El paso «{usage.name}» ha hecho {usage.calls} llamadas a {usage.model} en la ventana "
-        f"analizada. La respuesta media es de {usage.avg_output_tokens:.0f} tokens, que es lo "
-        f"que ocupa una etiqueta o una frase corta, no un texto elaborado."
+        f"analizada. Una llamada normal responde con {_salida_tipica(usage):.0f} tokens, que es "
+        f"lo que ocupa una etiqueta o una frase corta, no un texto elaborado."
     )
     detalle.why = (
         "Los modelos grandes se pagan sobre todo por lo que escriben. Cuando un paso sólo "

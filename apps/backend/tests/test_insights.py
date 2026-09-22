@@ -870,3 +870,68 @@ def test_las_vueltas_de_un_bucle_se_descuentan_del_uso_del_modelo(
     neto = insights._without_duplicates(uso, duplicados)
     assert neto.calls == uso.calls - bucles[0].extra_spans
     assert neto.input_tokens == uso.input_tokens - bucles[0].extra_input_tokens
+
+
+# ---------------------------------------------------------------------------------
+# La cifra que se enseña tiene que ser la cifra con la que se decidió
+# ---------------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def proyecto_con_una_generacion_desbocada(store: ClickHouseStore):
+    """Un paso que contesta cuatro palabras salvo una vez, que se desboca.
+
+    Es el caso para el que se eligió la mediana: once llamadas de 6 tokens y una de
+    3.000 dejan la mediana en 6 y la media en 255. La regla decide con la mediana —por
+    eso dispara— y la tarjeta explicaba el porqué con la media, así que decía «responde
+    con 255 tokens de media, que es una respuesta muy breve». La frase que justifica el
+    hallazgo contradecía al hallazgo.
+    """
+    project = f"test-desbocada-{uuid.uuid4().hex[:8]}"
+    spans: list[Span] = []
+    for t in range(12):
+        trace = uuid.uuid4().hex
+        spans.append(_span(project, trace, f"r{t}".ljust(16, "0"), "agente", "agent", t * 30))
+        salida = 3_000 if t == 11 else 6
+        s = _span(
+            project,
+            trace,
+            f"s{t}".ljust(16, "0"),
+            "chat gpt-5.6-terra",
+            "llm",
+            t * 30 + 1,
+            parent=f"r{t}".ljust(16, "0"),
+            dedup_hash=f"etiqueta-{t}",
+            step_key="k-etiquetar",
+            step_label="etiquetar",
+            step_site="agente > etiquetar",
+        )
+        s.llm = _llm("gpt-5.6-terra", 300, salida, 0.0015)
+        spans.append(s)
+    store.insert_spans(spans)
+    yield project
+    store.delete_project(project)
+
+
+def test_la_tarjeta_explica_el_hallazgo_con_la_cifra_que_lo_disparo(
+    store, window, proyecto_con_una_generacion_desbocada
+):
+    """El principio de siempre: la cifra que se enseña es la que se usó.
+
+    La regla decide con la mediana de salida porque una generación desbocada mueve la
+    media de un paso que normalmente contesta tres palabras. Enseñar entonces la media
+    en la frase que justifica el hallazgo es enseñar un número que contradice la propia
+    decisión, y deja al lector sin forma de comprobarnos.
+    """
+    usos = store.model_usage(proyecto_con_una_generacion_desbocada, window, min_calls=1)
+    uso = next(u for u in usos if u.key == "k-etiquetar")
+    assert uso.p50_output_tokens <= 10, "la mediana tiene que ser la respuesta corta"
+    assert uso.avg_output_tokens > 100, "y la media, la que la desbocada contamina"
+
+    hallazgos = insights.detect(store, proyecto_con_una_generacion_desbocada, window)
+    caro = next(f for f in hallazgos if f.kind == "modelo_caro")
+    assert f"{uso.p50_output_tokens:.0f} tokens" in caro.summary, (
+        f"la tarjeta tiene que citar la mediana ({uso.p50_output_tokens:.0f}), no la "
+        f"media ({uso.avg_output_tokens:.0f}): {caro.summary}"
+    )
+    assert f"{uso.avg_output_tokens:.0f} tokens de media" not in caro.summary
