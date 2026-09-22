@@ -43,6 +43,10 @@ AHORA = datetime.now(timezone.utc) - timedelta(minutes=20)
 #: para que las reglas 2 y 3 puedan disparar con dinero de por medio.
 CARO = "gpt-5.6-terra"
 
+#: Y el más barato de la tabla, que por serlo **no tiene alternativa**. Sirve para el
+#: otro camino de la regla 2, el que se mide en tiempo.
+BARATO = "gpt-5.6-luna"
+
 
 def _ventana() -> Window:
     return Window(since=AHORA - timedelta(hours=2), until=AHORA + timedelta(hours=2), days=1)
@@ -60,18 +64,20 @@ def _span(
     entrada_msgs: list[dict] | None = None,
     salida_msgs: list[dict] | None = None,
     bucle: tuple[str, str] | None = None,
+    modelo: str = CARO,
+    ms: float = 400.0,
 ) -> Span:
     inicio = AHORA + timedelta(seconds=i)
     span = Span(
         span_id=uuid.uuid4().hex[:16],
         trace_id=trace,
         project_id="catalogo",
-        name=f"chat {CARO}",
+        name=f"chat {modelo}",
         type="llm",
         status="ok",
         start_time=inicio,
-        end_time=inicio + timedelta(milliseconds=400),
-        duration_ms=400.0,
+        end_time=inicio + timedelta(milliseconds=ms),
+        duration_ms=ms,
         step_key=clave,
         step_label=paso,
         step_site=f"agente > {paso}",
@@ -81,7 +87,7 @@ def _span(
         loop_out_hash=bucle[1] if bucle else "",
     )
     span.llm = LLMAttributes(
-        request_model=CARO,
+        request_model=modelo,
         usage=TokenUsage(input_tokens=entrada_tokens, output_tokens=salida_tokens),
         cost=Cost(total_usd=0.002, input_usd=0.0015, output_usd=0.0005),
         input_messages=entrada_msgs or [{"role": "user", "content": "hola"}],
@@ -160,6 +166,25 @@ def almacen_con_los_cuatro_tipos(tmp_path):
             )
         )
 
+    # Regla 2, la otra mitad — el mismo tipo de hallazgo por su camino de tiempo: un
+    # paso lento que usa el modelo más barato de la tabla, que por serlo no tiene
+    # alternativa. Va aquí porque un tipo de hallazgo con dos caminos son dos cosas que
+    # explicar, y la segunda se entregó montada sobre la ficha de la primera (D-114).
+    for t in range(8):
+        spans.append(
+            _span(
+                f"lento-{t}",
+                paso="iterar",
+                clave="k-iterar",
+                entrada_tokens=200,
+                salida_tokens=4,
+                i=900 + t * 20,
+                dedup=f"iterar-{t}",
+                modelo=BARATO,
+                ms=900,
+            )
+        )
+
     store.insert_spans(spans)
     return store
 
@@ -190,6 +215,40 @@ def test_todo_hallazgo_que_el_motor_encuentra_sabe_explicarse(almacen_con_los_cu
         "estos hallazgos salen en el inicio y su ficha da 404, así que el usuario hace "
         f"clic en un problema real y le decimos que ya no existe: {sin_ficha}"
     )
+
+
+def test_ninguna_ficha_ensena_un_hueco_donde_va_un_dato(almacen_con_los_cuatro_tipos):
+    """Tener ficha no basta: la ficha tiene que estar escrita para ese hallazgo.
+
+    Un tipo de hallazgo con dos caminos —la regla del modelo caro mide en dinero o en
+    tiempo según haya con qué comparar— son dos cosas que explicar, y la segunda entró
+    montada sobre la ficha de la primera: el paso a seguir decía literalmente «Cambia el
+    modelo de ese paso a None» y la detección afirmaba una alternativa más barata que no
+    existía. Un `None` en pantalla es la forma que toma aquí una plantilla rellenada con
+    datos del otro caso.
+    """
+    ventana = _ventana()
+    store = almacen_con_los_cuatro_tipos
+    huecos = []
+    for hallazgo in insights.detect(store, "catalogo", ventana):
+        ficha = insights.detail(store, "catalogo", ventana, hallazgo.id)
+        assert ficha is not None
+        textos = {
+            "what_happens": ficha.what_happens,
+            "why": ficha.why,
+            "detection_explanation": ficha.detection_explanation,
+            "savings_calculation": ficha.savings_calculation,
+            "savings_note": ficha.savings_note,
+        }
+        for paso in ficha.fix_steps:
+            # `code` es opcional y vale `None` cuando el paso no lleva ejemplo: eso es
+            # el modelo, no la pantalla. Se normaliza aquí para no cazarnos a nosotros.
+            textos[f"paso «{paso.title}»"] = f"{paso.title} {paso.body} {paso.code or ''}"
+        for campo, texto in textos.items():
+            if "None" in texto:
+                huecos.append((hallazgo.id, campo, texto.strip()[:90]))
+
+    assert huecos == [], f"fichas con un hueco sin rellenar: {huecos}"
 
 
 def test_detail_reconoce_todos_los_tipos_de_hallazgo_que_existen():

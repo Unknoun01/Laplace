@@ -782,10 +782,23 @@ def _modelo_mas_rapido(usos: list[ModelUsage], excepto: str) -> tuple[str, float
     return modelo, sum(medias) / len(medias)
 
 
+#: Por qué esta regla no puede hablar de dinero. Son dos motivos **opuestos** y durante
+#: cuatro tandas se contaron como uno: el modelo no está en la tabla (un hueco nuestro)
+#: o está y ya es el más barato que conocemos (una respuesta). Decir lo primero cuando
+#: pasa lo segundo es afirmar que no conocemos una tarifa que pintamos en las otras diez
+#: pantallas, y quien lo lea deja de creerse la tabla entera (D-114).
+MotivoSinDinero = Literal["sin_tarifa", "sin_alternativa"]
+
+
 def _modelo_caro_sin_tarifa(
-    usage: ModelUsage, otros: list[ModelUsage], summary: WindowSummary, days: float
+    usage: ModelUsage,
+    otros: list[ModelUsage],
+    summary: WindowSummary,
+    days: float,
+    *,
+    motivo: MotivoSinDinero,
 ) -> Finding | None:
-    """La misma regla cuando no hay tabla de precios: se mide en tiempo, no en dinero.
+    """La misma regla cuando no hay dinero que prometer: se mide en tiempo.
 
     Un modelo local no tiene tarifa y nunca la tendrá, así que la versión de dinero de
     esta regla no puede disparar jamás: quien use Ollama —un estudiante, cualquiera
@@ -793,7 +806,8 @@ def _modelo_caro_sin_tarifa(
     es el tiempo y los tokens, y con eso se puede decir algo cierto: este paso responde
     cuatro palabras y lo hace con el modelo que más tarda de los que ya usas.
 
-    Lo que **no** se dice es cuánto dinero ahorraría, porque no se sabe.
+    Lo que **no** se dice es cuánto dinero ahorraría. `motivo` dice por qué, y los dos
+    valores llevan a frases distintas porque son cosas distintas.
     """
     # La MEDIANA de salida, no la media: una generación desbocada mueve la media de un
     # paso que normalmente contesta tres palabras, y esta regla decide con ese número.
@@ -809,6 +823,23 @@ def _modelo_caro_sin_tarifa(
         return None
 
     ahorro_ms = (ms_actual - ms_rapido) * usage.calls
+
+    if motivo == "sin_tarifa":
+        porque = (
+            f" Cuánto dinero, no lo sabemos: {usage.model} no tiene tarifa conocida."
+        )
+        sin_dinero = f"{usage.model} no está en la tabla de precios"
+    else:
+        porque = (
+            f" Cuánto dinero te ahorraría, no lo sabemos: {usage.model} ya es el más barato "
+            f"de los que conocemos, así que no hay con qué comparar su precio. Lo que sí "
+            f"está medido es el tiempo."
+        )
+        sin_dinero = (
+            f"{usage.model} ya es el más barato de la tabla: no hay precio con el que "
+            f"comparar, así que aquí sólo se puede afirmar el tiempo"
+        )
+
     return Finding(
         id=f"modelo_caro:{usage.key}:{usage.model}",
         kind="modelo_caro",
@@ -817,13 +848,12 @@ def _modelo_caro_sin_tarifa(
             f"«{usage.name}» responde con {salida:.0f} tokens en una llamada normal y usa "
             f"{usage.model}, que en tu propio tráfico tarda {ms_actual / ms_rapido:.1f} veces "
             f"más por llamada que {nombre_rapido}, un modelo que ya usas. Cambiarlo te "
-            f"ahorraría {_seconds(ahorro_ms)} en esta ventana. Cuánto dinero, no lo sabemos: "
-            f"{usage.model} no tiene tarifa conocida."
+            f"ahorraría {_seconds(ahorro_ms)} en esta ventana.{porque}"
         ),
         window_waste_usd=0.0,
         window_waste_ms=ahorro_ms,
         window_waste_tokens=usage.output_tokens,
-        cost_unavailable=f"{usage.model} no está en la tabla de precios",
+        cost_unavailable=sin_dinero,
         monthly_saving_usd=None,
         observed_days=days,
         costs_money=False,
@@ -852,8 +882,12 @@ def _expensive_model_finding(
     table = get_price_table()
     price = table.lookup(usage.model)
     if price is None or not price.alternative:
-        # Sin tarifa no hay dinero que prometer, pero sigue habiendo algo que decir.
-        return _modelo_caro_sin_tarifa(usage, otros or [], summary, days)
+        # Sin dinero que prometer sigue habiendo algo que decir, pero el motivo no es el
+        # mismo en los dos casos y durante cuatro tandas se dijo el primero para los dos
+        # (D-114): que el modelo no esté en la tabla es un hueco nuestro; que no tenga
+        # alternativa es que ya es el más barato que conocemos, y eso es una respuesta.
+        motivo: MotivoSinDinero = "sin_tarifa" if price is None else "sin_alternativa"
+        return _modelo_caro_sin_tarifa(usage, otros or [], summary, days, motivo=motivo)
     cheaper = table.lookup(price.alternative)
     if cheaper is None:
         return None
@@ -903,12 +937,90 @@ def _expensive_model_finding(
     )
 
 
+def _modelo_lento_detail(
+    finding: Finding, usage: ModelUsage, query: str
+) -> FindingDetail:
+    """La ficha del camino por tiempo de la regla del modelo caro.
+
+    Aquí no hay dinero que prometer: o el modelo no está en la tabla, o está y ya es el
+    más barato que conocemos. Lo que sí está medido es el tiempo, y la ficha habla de
+    eso y sólo de eso. El motivo concreto lo trae `finding.cost_unavailable`, que desde
+    D-114 dice cuál de los dos es.
+    """
+    rapido = next(
+        (t.value.split("→")[-1].strip() for t in finding.tech if t.label == "modelo"), ""
+    )
+    detalle = FindingDetail(**finding.model_dump())
+
+    detalle.what_happens = (
+        f"El paso «{usage.name}» ha hecho {usage.calls} llamadas a {usage.model} en la "
+        f"ventana analizada, y responde con {usage.avg_output_tokens:.0f} tokens de media: "
+        f"una etiqueta o una frase corta, no un texto elaborado. En tu propio tráfico hay "
+        f"un modelo que tarda bastante menos por llamada."
+    )
+    detalle.why = (
+        "Un paso que sólo tiene que decidir entre unas pocas opciones no necesita el "
+        "modelo más capaz, y el más capaz suele ser también el más lento. Cuando un "
+        "agente crece, todos los pasos heredan el modelo con el que se empezó a "
+        "probar.\n\n"
+        f"{finding.cost_unavailable.capitalize()}, así que aquí no te prometemos dinero: "
+        f"te enseñamos el tiempo, que está medido llamada a llamada."
+    )
+    detalle.detection_explanation = (
+        f"Regla activa: **un paso `llm` cuya salida mediana es de "
+        f"{MAX_SALIDA_TRIVIAL_SIN_TARIFA} tokens o menos y que tarda al menos "
+        f"{MIN_VECES_MAS_LENTO} veces más por llamada que otro modelo que ya usas** —con "
+        f"{MIN_CALLS_MODELO_RAPIDO} llamadas como mínimo, para que la comparación no salga "
+        f"de una muestra suelta. Se comparan **medianas**, no medias: una generación "
+        f"desbocada mueve la media de un paso que normalmente contesta tres palabras. La "
+        f"alternativa sale de tu propio tráfico, nunca de una lista nuestra de modelos."
+    )
+    detalle.detection_query = query.strip()
+
+    detalle.fix_steps = [
+        FixStep(
+            title=f"Prueba ese paso con {rapido}" if rapido else "Prueba con el otro modelo",
+            body=(
+                "Es un cambio de una palabra y afecta sólo a ese paso. Lo proponemos porque "
+                "ya lo usas en otro sitio, no porque lo hayamos elegido nosotros."
+            ),
+            code=f'model="{rapido}"  # antes: "{usage.model}"' if rapido else None,
+        ),
+        FixStep(
+            title="Comprueba que la calidad aguanta",
+            body=(
+                "Un modelo más rápido no siempre decide igual. Pasa unos cuantos casos "
+                "reales por los dos y compáralos en Evaluaciones antes de dejarlo fijo."
+            ),
+        ),
+    ]
+    detalle.savings_calculation = (
+        f"{usage.calls} llamadas en {window_label(finding.observed_days)}, a "
+        f"{_seconds(usage.p50_duration_ms)} de mediana cada una. Con el modelo rápido de tu "
+        f"tráfico se recuperan {_seconds(finding.window_waste_ms)} en esta ventana. No hay "
+        f"cifra en dólares y no la inventamos: {finding.cost_unavailable}."
+    )
+    detalle.savings_note = (
+        "El tiempo está medido, no estimado. Lo que no se puede afirmar aquí es el dinero, "
+        "y por eso no aparece ninguno."
+    )
+    return detalle
+
+
 def _expensive_model_detail(
     finding: Finding, usage: ModelUsage, query: str
 ) -> FindingDetail:
     table = get_price_table()
     price = table.lookup(usage.model)
     cheaper = table.lookup(price.alternative) if price and price.alternative else None
+
+    # La regla tiene dos caminos y esta ficha sólo sabía contar el primero. Por el
+    # segundo —cuando no hay precio con el que comparar y lo que se mide es tiempo— la
+    # página decía «Cambia el modelo de ese paso a None» y afirmaba una alternativa más
+    # barata que no existe. Un tipo de hallazgo con dos caminos son dos fichas (D-114).
+    if cheaper is None:
+        return _modelo_lento_detail(finding, usage, query)
+
     detalle = FindingDetail(**finding.model_dump())
 
     detalle.what_happens = (
