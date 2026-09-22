@@ -1747,3 +1747,95 @@ queda en modo avanzado al lado de la mediana: verlas juntas es lo que enseña la
 decisión de producto: `_modelo_mas_rapido()` promedia las medianas de varias filas del
 mismo modelo **sin ponderar por llamadas**, así que un paso de poco tráfico pesa igual que
 uno de mucho al elegir la alternativa. Es una media dentro de un camino de decisión.
+
+### D-119 — Un bucle visto desde dos alturas del árbol es un problema, no dos
+Un agente decorado envuelve cada paso en un span propio, así que seis vueltas producen
+dos grupos de bucle: el del envoltorio —que no gasta tokens y sólo puede hablar de
+tiempo— y el de la llamada al modelo que lleva dentro, que sí tiene dinero. El inicio los
+enseñaba como dos tarjetas; después de D-115 con títulos distintos, pero contando lo
+mismo. De diez cosas que arreglar, cuatro eran dos.
+
+**Que sean el mismo se sabe por los datos, no por el parecido.** El camino de llamada del
+span de modelo termina en el paso que lo envuelve —eso lo escribe el SDK, no lo deducimos
+nosotros— y además los dos tienen que cubrir las mismas trazas con las mismas vueltas. Si
+cualquiera de las dos cosas falla, son bucles distintos y se quedan los dos.
+
+Se queda el de dentro porque es el que **puede ponerle precio**: «este bucle te cuesta
+0,60 $» acciona, y «te cuesta 2,4 s» acciona menos. Se pierden los pocos milisegundos del
+envoltorio alrededor de la llamada, que es el lado bueno por el que equivocarse. Un bucle
+de herramientas **sin** llamada al modelo dentro no tiene quien lo sustituya y sigue
+saliendo con su tiempo: es la promesa de no inventar dinero donde no lo hay.
+
+La guarda de «mismas trazas y mismas vueltas» no es cosmética, y lo demostró la segunda
+mutación: quitarla dejaba la suite en verde, o sea que no tenía quien la probara. Sin
+ella bastaría con que un paso llame alguna vez al modelo para que su bucle desapareciera
+detrás del de dentro, y con él las trazas en las que da vueltas **sin** llegar a llamarlo.
+Es el patrón que D-078 prohibió en el panel: rellenar con algo que correlaciona.
+
+### D-120 — Un solo sitio que sabe escribir un número
+En la cabecera de una traza convivían «120.255 / 108» —tokens, punto de millar—,
+«$0.007181» —dinero, punto decimal— y «12,8 pasos por ejecución» —coma decimal—. Tres
+lecturas del mismo carácter en la misma pantalla, en un producto cuyo argumento entero es
+que una cifra se enseña con lo que haga falta para leerla bien.
+
+No era un descuido en un sitio. El guardia que se escribió para encontrarlos dio **cuatro**
+formateadores de dinero: `insights`, `alerts`, `prompts` y la web. El de `alerts` llevaba
+en su docstring «el mismo criterio de decimales que la interfaz, para que no se
+contradigan»: la intención estaba, pero era una copia, y las copias derivan. Es la misma
+enfermedad que `pasos.py` curó para los nombres de paso (D-115), con otra cara.
+
+`cifras.py` es el único que sabe hacerlo. **Punto para los millares, coma para los
+decimales**, que es la española, y el símbolo delante. Y `dinero_exacto()` aparte, para el
+texto que enseña la cuenta: ahí redondear a cuatro decimales rompe la suma, y este
+producto se apoya en que el lector pueda echarla a mano.
+
+Dos guardias, y hacen falta los dos porque el código vive en dos runtimes: uno lee los
+módulos que redactan texto y prohíbe el patrón que creó las cuatro copias; otro barre
+`apps/web` y prohíbe `toFixed` con decimales, que escribe el punto inglés sea cual sea el
+idioma de la página. `toFixed(0)` se deja: no emite separador, y un guardia que salta
+donde no hay nada acaba silenciado.
+
+**Divergencia conocida y aceptada:** con importes de 100 $ o más, Python redondea el medio
+al par y JavaScript hacia arriba, así que un 1.234,50 $ exacto se escribe «$1.234» en una
+frase del backend y «$1.235» en una tarjeta. Sólo ocurre en el medio exacto de un dólar.
+Queda escrito para que quien lo vea sepa que está mirado y no lo persiga como un fallo.
+
+### D-121 — El punto ciego de D-097 era una fuga entre clientes
+D-097 cerró las lecturas: middleware que deniega por defecto, claves atadas a su proyecto,
+y una nota al final —«si aparece una escritura que no lleve `project_id` ni en el cuerpo
+ni en la URL, el middleware no tiene por dónde acotarla; hoy no existe ninguna, el día que
+exista es el punto ciego»—. Existían seis.
+
+Lo que se buscaba era `POST /api/pricing/reload`, que no lleva proyecto y recarga la tabla
+de precios de toda la instalación. Lo que apareció al escribir la red estructural —recorrer
+las rutas de escritura y exigir que cada una tenga por dónde acotarse— fue otra cosa:
+
+    DELETE /api/prompts/{id} con la clave de otro proyecto → 200 OK
+
+Borrado de los prompts de otro cliente con su histórico entero. Y la vecina, peor:
+`GET /api/prompts/{id}` pide `project_id` —así que el middleware la deja pasar si pones el
+tuyo— y después buscaba el prompt por su id a secas. Con tu proyecto en la URL y el id de
+otro, te llevabas sus prompts con **el texto completo de todas sus versiones**.
+
+No es lo que D-097 cerró, y por eso pasó: aquello iba por las rutas que llevan proyecto, y
+esto va por **id opaco**, que es justo por donde el middleware no puede mirar.
+
+El arreglo es el patrón que ya estaba escrito, aplicado donde faltaba: **acotar la
+consulta, no comprobar después**. `Identity.scope(None)` da el proyecto de la clave —`None`
+sólo para el operador— y los métodos del almacén lo llevan en el `WHERE`. Un id ajeno no
+existe: 404, sin decir si existe en otro sitio, que es la regla que `Identity.require` ya
+tenía escrita para no convertir la API en un directorio de los clientes. Comprobar después
+—leer la fila, mirar de quién es, actuar— habría funcionado igual y se habría podido
+olvidar en la ruta siguiente.
+
+De paso: `delete_prompt` borraba versiones y despliegues **antes** que el prompt, así que un
+intento fallido dejaba el prompt en pie con el histórico vacío.
+
+Dos cosas que este episodio dice, y valen más que el arreglo:
+
+* **Una nota en un documento no es una red.** D-097 vio el hueco, lo escribió, y el hueco
+  se llenó de seis rutas sin que nadie se enterara. El guardia que las recorre existe
+  ahora y es lo que faltaba entonces.
+* **A `api_evals` le faltaba un import y la suite pasaba entera**, porque ninguna prueba
+  ejecutaba el borrado de una anotación por la API. Lo encontró el linter. Una ruta
+  arreglada y sin ejecutar está a un refactor de volver a estar rota.

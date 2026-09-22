@@ -136,7 +136,7 @@ Lo que sostiene esas casillas, en concreto:
   Anthropic estaba completo; faltaba leer `prompt_tokens_details.cache_write_tokens`, así
   que esos tokens se cobraban a tarifa de entrada y **nuestro coste de OpenAI salía por
   debajo del real** (D-101).
-- **347 pruebas, 343 pasando y 4 saltadas** con ClickHouse y Postgres levantados: las 4
+- **364 pruebas, 360 pasando y 4 saltadas** con ClickHouse y Postgres levantados: las 4
   son las que necesitan una clave de proveedor. El camino de la nube se ejecuta, que es
   lo que faltaba: una tanda que toca SQL de nube y se entrega con esas pruebas saltadas
   está sin terminar (D-112). Con los almacenes en pie la suite tarda dos minutos y medio;
@@ -207,31 +207,21 @@ tenían, porque la próxima se parecerá:
 * **Y uno era un test que fallaba por el reloj**, no por el código: 48 minutos de cada
   seis horas.
 
-**Lo que queda de ese repaso y no se ha tocado**, por orden de lo que más se nota:
+Los ocho puntos de aquel repaso están cerrados menos dos, y el séptimo resultó ser
+otra cosa: al ir a acotar `POST /api/pricing/reload` —la única ruta sin `project_id`—
+apareció que había **seis** rutas por id opaco sin acotar, y que con la clave de un
+proyecto se podían borrar y leer los prompts de otro (D-121). El punto ciego que D-097
+dejó anotado existía, y era más grande que la nota.
 
-1. **Cada bucle sale dos veces**, una por el span `llm` y otra por el `chain` que lo
-   envuelve. Ya no comparten título desde D-115, pero siguen siendo dos tarjetas para un
-   problema. El dinero no se cuenta dos veces; la atención del usuario sí.
-2. **El formato numérico mezcla dos convenciones en la misma línea.** `money()` usa punto
-   decimal y `number()` punto de millares, así que en la cabecera de una traza conviven
-   «120.255 / 108» y «$0.007181» y «12,8 pasos por ejecución»: tres lecturas del mismo
-   carácter. En un producto cuyo argumento es que una cifra se enseña con lo que haga
-   falta para leerla bien, esto es caro.
-3. **Los tokens se llaman «palabras» en un título** y «tokens» dos líneas más abajo, con
-   distinto separador de millares.
-4. **El árbol de traza repite el modelo en cada fila** —el nombre del span ya es
-   `chat <modelo>` por convención OTel— y pinta un envoltorio de un solo hijo con los
-   mismos tokens y el mismo coste que su padre.
-5. **Desbordamiento horizontal en móvil**: a 375 px el documento mide 394 y la última
-   columna de la tabla queda cortada. Hay dos media queries para 2.005 líneas de CSS.
-6. **`examples/agente_ejemplo.py` imprime «listo» después de que el exportador se rinda.**
-   Apunta a `:8000`, que es el puerto de la instalación con Docker; contra `laplace ui`
-   (:8100) no llega nada y el script no lo dice.
-7. **`POST /api/pricing/reload` no lleva `project_id`**, así que cualquier clave válida
-   recarga la tabla de precios de toda la instalación. Es la primera ruta que se escapa
-   del modelo «la clave ata el proyecto» de D-097.
-8. **`_modelo_mas_rapido()` promedia medianas sin ponderar por llamadas.** Es una media
-   dentro de un camino de decisión, y cambiarla cambia qué modelo se recomienda.
+**Lo que queda sin tocar, con su motivo:**
+
+1. **El árbol de traza pinta un envoltorio de un solo hijo** con los mismos tokens y el
+   mismo coste que su padre. Quitarlo o plegarlo por defecto es rediseñar la vista
+   principal de depuración, y ese nivel extra es el span `@observe` del usuario: a quien
+   está depurando le puede interesar verlo. No es un defecto con una respuesta obvia.
+2. **`_modelo_mas_rapido()` promedia medianas sin ponderar por llamadas.** Es una media
+   dentro de un camino de decisión, y cambiarla cambia qué modelo se recomienda, que es
+   una decisión de producto y no una corrección.
 
 ### Lo que sigue sin detectarse, y por qué
 
@@ -300,6 +290,15 @@ Lo que **no** demuestran, punto por punto:
    comparte un equipo entero copiándola. Para una instalación propia con un puñado de
    proyectos es suficiente y es infinitamente mejor que lo que había; para vender esto a
    dos clientes en el mismo despliegue, falta el sistema de identidades (D-010).
+
+   Y hay que decir una cosa más, porque esta sección la daba por cerrada: **la
+   separación entre clientes tenía seis agujeros y estuvieron ahí desde que existe la
+   pestaña de Prompts**. Todo lo que va por id opaco —borrar un prompt, leer su texto,
+   borrar una anotación o un conjunto— no lo mira el middleware, y no se acotaba. Está
+   arreglado y con guardia estructural (D-121), pero lo que aprende esto no es que ya
+   esté: es que el modelo de permisos de este producto se ha comprobado **dos veces con
+   la misma prueba** —«¿puede una clave leer las trazas de otro proyecto?»— y las dos
+   veces se dio por bueno el resto sin mirarlo.
 2. **No ha corrido con volumen.** Todas las cifras que se han visto salen de decenas o
    cientos de trazas sembradas. La lista de trazas escanea sin ventana temporal por
    defecto (D-008b), no hay rollups, cada consulta lleva `FINAL` y los payloads se guardan
@@ -453,6 +452,17 @@ mano en los valores esperados, así que cambiar un fixture de modelo obliga a re
 mano y a comprobar que los tests de doble conteo siguen mordiendo. Lo que no se toca son
 los modelos viejos de la tabla de precios ni las pruebas que comprueban que un nombre
 antiguo se resuelve: eso es la funcionalidad, no un resto.
+
+**La autenticación se rompe también por el id opaco, no sólo por la ruta nueva.** Lo de
+abajo sigue valiendo entero, pero le faltaba una mitad: el middleware acota por el
+`project_id` que venga en la petición, así que **todo lo que se identifica por un id y no
+por su proyecto se le escapa**. Borrar un prompt, leer su texto, borrar una anotación o un
+conjunto iban por ahí, y con la clave de un proyecto se tocaban los de otro (D-121). La
+regla, para la siguiente: una ruta que reciba un id opaco pide
+`Identity.scope(None)` y lo pasa al almacén, que lo mete en el `WHERE`. No vale
+comprobarlo en la ruta después de leer la fila: funciona igual y se olvida en la
+siguiente. `test_ninguna_ruta_de_escritura_se_queda_sin_acotar` recorre las rutas y lo
+exige; ese test tampoco se toca.
 
 **La autenticación se rompe por la ruta nueva, no por la criptografía.** Todo lo que la
 sostiene es que el middleware deniega por defecto y que la lista blanca tiene una entrada.
