@@ -157,6 +157,8 @@ export interface TraceSummary {
   cost: Cost;
   session_id: string | null;
   user_id: string | null;
+  /** La entrada del span raíz, en una línea (D-125). */
+  input_preview?: string;
 }
 
 /** Hueco reservado: se rellena en la Fase 3 (diagnóstico automático). */
@@ -241,6 +243,8 @@ export interface Finding {
   kind: FindingKind;
   title: string;
   summary: string;
+  /** Una frase para la tarjeta del inicio (D-124). */
+  lead: string;
   window_waste_usd: number;
   /** Proyección a 30 días, o `null` cuando no hay días suficientes para proyectar. */
   monthly_saving_usd: number | null;
@@ -263,6 +267,27 @@ export interface Finding {
   costs_money: boolean;
   tech: TechItem[];
   sample_trace_id: string;
+  /** Identidad exacta del paso: con ella se filtran «las trazas afectadas». */
+  step_key: string;
+  /** Lo que el usuario ha dicho de él (D-123). Vacío si nada. */
+  state: "" | "arreglado" | "ignorado" | "reaparecido";
+  state_at: string | null;
+  state_note: string;
+  fix_check: FixCheck | null;
+}
+
+/** Antes y después de marcar un hallazgo como arreglado, por ejecución (D-123). */
+export interface FixCheck {
+  marked_at: string;
+  unit: "usd" | "tokens" | "ms";
+  runs_before: number;
+  runs_after: number;
+  before_per_run: number | null;
+  after_per_run: number | null;
+  saved: number | null;
+  verdict: "pendiente" | "arreglado" | "mejor" | "sigue";
+  headline: string;
+  cost_is_floor: boolean;
 }
 
 export interface FindingDetail extends Finding {
@@ -358,6 +383,8 @@ export interface Overview {
   findings: Finding[];
   /** Cuánto de este proyecto entendemos. Va delante del dinero si es baja. */
   coverage: Coverage | null;
+  /** Arreglados o ignorados: no suman al evitable (D-123). */
+  set_aside: Finding[];
 }
 
 // ---------------------------------------------------------------------------------
@@ -719,4 +746,70 @@ export interface Diff {
   removed: number;
   unchanged: number;
   summary: string;
+}
+
+// ---------------------------------------------------------------------------------
+// Ajustes del proyecto (D-123)
+// ---------------------------------------------------------------------------------
+
+export interface Budget {
+  project_id: string;
+  monthly_usd: number | null;
+  month: string;
+  month_to_date_usd: number;
+  projected_usd: number | null;
+  ratio: number | null;
+  status: "sin-presupuesto" | "bien" | "cerca" | "va-a-pasarse" | "pasado";
+  headline: string;
+  cost_is_floor: boolean;
+  unknown_cost_spans: number;
+}
+
+export interface AlertSettings {
+  project_id: string;
+  enabled: boolean;
+  /** Sólo el host: la URL entera es un secreto y no sale nunca por la API. */
+  slack: string;
+  webhook: string;
+  email_to: string;
+  email_ready: boolean;
+  min_usd: number;
+  quiet_hours: number;
+  window_days: number;
+  muted: boolean;
+  muted_kinds: string[];
+  env_enabled: boolean;
+}
+
+export interface CostGroup {
+  key: string;
+  traces: number;
+  cost_usd: number;
+  cost_per_trace_usd: number;
+  tokens: number;
+  unknown_cost_spans: number;
+}
+
+export interface Breakdown {
+  project_id: string;
+  by: "user" | "session";
+  groups: CostGroup[];
+  untagged_traces: number;
+  untagged_cost_usd: number;
+  total_cost_usd: number;
+  unknown_cost_spans: number;
+}
+
+export interface CustomPrices {
+  models: Record<string, { input: number; output: number; cached_input?: number }>;
+  unpriced: string[];
+  editable: boolean;
+}
+
+export interface Instance {
+  local: boolean;
+  retention_days: number;
+  email_ready: boolean;
+  alerts_env_enabled: boolean;
+  operator: boolean;
 }

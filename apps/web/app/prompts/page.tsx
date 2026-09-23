@@ -17,6 +17,7 @@ import {
   setProduction,
 } from "@/lib/api";
 import { money, number, timestamp, tokens } from "@/lib/format";
+import { usePermisos } from "@/lib/permisos";
 import type {
   Diff,
   ObservedStep,
@@ -95,10 +96,8 @@ function Contenido() {
       <section className="hero">
         <h1>Los prompts de «{project}»</h1>
         <p className="lead">
-          Cada versión con lo que costó y lo que acertó sobre el tráfico que la usó. Un
-          diff y un botón de rollback los tiene cualquiera; lo que no tiene nadie más es
-          poder leer <strong>v8: 0,004 $ por ejecución, 94 %</strong> al lado de{" "}
-          <strong>v7: 0,007 $, 93 %</strong> y decidir con eso.
+          Cada versión con lo que costó y lo que acertó sobre el tráfico real que la
+          usó, para decidir cuál dejar en producción con las dos cifras delante.
         </p>
       </section>
 
@@ -141,6 +140,7 @@ function Ficha({
   query: string;
   onChange: () => void;
 }) {
+  const { escribir } = usePermisos(project);
   const [detalle, setDetalle] = useState<PromptCard | null>(null);
   const [abierto, setAbierto] = useState(false);
   const [error, setError] = useState("");
@@ -213,7 +213,7 @@ function Ficha({
         </div>
       )}
 
-      <Versiones versiones={ficha.versions} onDeploy={desplegar} />
+      <Versiones versiones={ficha.versions} onDeploy={escribir ? desplegar : undefined} />
 
       <p className="disclaimer">
         El acierto de una versión es el de las <strong>ejecuciones enteras</strong> en las
@@ -257,7 +257,8 @@ function Versiones({
   onDeploy,
 }: {
   versiones: VersionMetrics[];
-  onDeploy: (version: number) => void;
+  /** Sin él no se ofrece desplegar: quien mira es lector (D-127). */
+  onDeploy?: (version: number) => void;
 }) {
   // Las versiones sin tráfico se pliegan. En un prompt que lleva un año tocándose hay
   // treinta borradores que no corrieron nunca, y una tabla de treinta filas vacías
@@ -319,7 +320,7 @@ function Versiones({
             <td className="r">
               {/* La reserva no es una versión guardada: no se puede desplegar. */}
               {v.version > 0 && !v.in_production && (
-                <button type="button" className="vbtn ghost" onClick={() => onDeploy(v.version)}>
+                onDeploy && <button type="button" className="vbtn ghost" onClick={() => onDeploy(v.version)}>
                   Poner en producción
                 </button>
               )}
@@ -381,6 +382,7 @@ function Detalle({
   query: string;
   onChange: () => void;
 }) {
+  const { escribir } = usePermisos(project);
   const guardadas = prompt.versions.filter((v) => v.version > 0);
   const [b, setB] = useState(guardadas[0]?.version ?? 0);
   const [a, setA] = useState(guardadas[1]?.version ?? guardadas[0]?.version ?? 0);
@@ -472,6 +474,7 @@ function Detalle({
         </>
       )}
 
+      <fieldset className="sin-marco" disabled={!escribir}>
       <h3 className="sub">Guardar una versión nueva</h3>
       <p className="lead">
         Guardar no despliega. Son dos gestos distintos a propósito: es lo que te deja
@@ -491,6 +494,7 @@ function Detalle({
         <span className="chip where">Queda guardada, no servida</span>
       </div>
       {error && <p className="verr">{error}</p>}
+      </fieldset>
 
       {prompt.deploys.length > 0 && (
         <div className="pro">
@@ -532,8 +536,9 @@ function Detalle({
         <button
           type="button"
           className="vbtn ghost"
+          disabled={!escribir}
           onClick={async () => {
-            await deletePrompt(prompt.id);
+            await deletePrompt(prompt.id, project);
             onChange();
           }}
         >

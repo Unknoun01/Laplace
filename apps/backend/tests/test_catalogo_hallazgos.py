@@ -348,3 +348,74 @@ def test_la_ficha_se_titula_igual_que_la_tarjeta(almacen_con_dos_llamantes):
         assert ficha.title == hallazgo.title, (
             f"la tarjeta dice {hallazgo.title!r} y su ficha {ficha.title!r}"
         )
+
+
+# ---------------------------------------------------------------------------------
+# «Ver las trazas afectadas» y el código de ejemplo
+# ---------------------------------------------------------------------------------
+
+
+def test_cada_hallazgo_sabe_llevar_a_sus_trazas(almacen_con_los_cuatro_tipos):
+    """El botón de la ficha filtra por `step_key`, y tiene que encontrar algo.
+
+    Antes buscaba por la etiqueta técnica «paso», que las reglas de repetición y de
+    bucle no llevan: el enlace salía con `q=` vacío y enseñaba **todas** las trazas del
+    proyecto, justo en los dos tipos que más dinero devuelven.
+    """
+    from laplace_backend.storage.base import TraceFilter
+
+    store = almacen_con_los_cuatro_tipos
+    sin_trazas = []
+    for hallazgo in insights.detect(store, "catalogo", _ventana()):
+        assert hallazgo.step_key, f"{hallazgo.id} no dice de qué paso es"
+        pagina = store.list_traces(
+            TraceFilter(project_id="catalogo", step_key=hallazgo.step_key, limit=200)
+        )
+        ids = {t.trace_id for t in pagina.traces}
+        if hallazgo.sample_trace_id not in ids:
+            sin_trazas.append(hallazgo.id)
+    assert sin_trazas == [], (
+        f"el filtro de estos hallazgos no encuentra ni su propia traza de ejemplo: {sin_trazas}"
+    )
+
+
+def test_las_trazas_afectadas_son_las_de_ese_llamante(almacen_con_dos_llamantes):
+    """Con dos pasos homónimos, cada hallazgo lleva a sus trazas y no a las del otro.
+
+    Buscar por texto confundía `consultar_manual` con cualquier paso que lo contuviera
+    en el nombre, y el agente sano salía como afectado.
+    """
+    from laplace_backend.storage.base import TraceFilter
+
+    store = almacen_con_dos_llamantes
+    bucles = [f for f in insights.detect(store, "catalogo", _ventana()) if f.kind == "bucle"]
+    assert len(bucles) == 2
+    for bucle in bucles:
+        llamante = "planificar" if "planificar" in bucle.title else "revisar"
+        pagina = store.list_traces(
+            TraceFilter(project_id="catalogo", step_key=bucle.step_key, limit=200)
+        )
+        ids = [t.trace_id for t in pagina.traces]
+        assert ids, f"{bucle.title}: el filtro no encuentra nada"
+        ajenas = [i for i in ids if not i.startswith(llamante)]
+        assert ajenas == [], f"{bucle.title}: trae trazas del otro llamante {ajenas}"
+
+
+@pytest.mark.parametrize("fixture", ["almacen_con_los_cuatro_tipos", "almacen_con_dos_llamantes"])
+def test_el_codigo_de_ejemplo_no_lleva_el_titulo_dentro(fixture, request):
+    """El fragmento que se copia tiene que poder pegarse.
+
+    El título de un paso puede llevar el llamante —«agente → consultar_manual»— o una
+    pista del prompt entre comillas, y los dos acababan dentro del Python de ejemplo:
+    `respuesta = agente_de_equipaje → consultar_manual(...)`.
+    """
+    store = request.getfixturevalue(fixture)
+    ventana = _ventana()
+    malos = []
+    for hallazgo in insights.detect(store, "catalogo", ventana):
+        ficha = insights.detail(store, "catalogo", ventana, hallazgo.id)
+        assert ficha is not None
+        for paso in ficha.fix_steps:
+            if paso.code and any(c in paso.code for c in ("→", "«", "»")):
+                malos.append((hallazgo.id, paso.code.splitlines()[0]))
+    assert malos == [], f"código de ejemplo con decoración de título dentro: {malos}"

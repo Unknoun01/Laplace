@@ -1,0 +1,451 @@
+"""API de lo que el usuario decide sobre su proyecto (D-123).
+
+Estado de cada hallazgo, presupuesto, alertas, tarifas propias, reparto del gasto por
+usuario y por sesión, datos de ejemplo y borrado. Todo cuelga de la misma tabla de
+ajustes por proyecto, y va en su propio router por lo mismo que Evaluaciones y Prompts:
+metido en `api.py` lo habría convertido en un cajón.
+
+Las reglas de acceso son las de siempre (D-097, D-121). Lo que lleva proyecto lo acota
+el middleware; lo que es de la instalación entera —las tarifas, los datos de ejemplo—
+pide que quien llama la vea entera, que en local es cualquiera y en la nube el operador.
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
+
+from . import presupuesto
+from .alerts import CLAVE_AJUSTES, webhook_valido
+from .auth import identity_of
+from .ingest.otlp import recalcular_coste
+from .pricing import custom_prices, get_price_table, set_custom_prices
+from .seguimiento import clave
+from .storage.base import Window
+from .storage.metadata import MetadataUnavailable
+
+logger = logging.getLogger("laplace.api.ajustes")
+
+router = APIRouter(prefix="/api")
+
+
+def _store(request: Request) -> Any:
+    return request.app.state.store
+
+
+def _meta(request: Request) -> Any:
+    return request.app.state.metadata
+
+
+def _guard(fn, *args, **kwargs):
+    """«No hay dónde guardar» es un 503 con su motivo, nunca un 200 que miente."""
+    try:
+        return fn(*args, **kwargs)
+    except MetadataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def _solo_instalacion(que: str) -> HTTPException:
+    """Lo que afecta a todos los proyectos pide ver todos los proyectos.
+
+    La comprobación va escrita en cada ruta y no escondida aquí: la red de D-121 lee el
+    código de la ruta, y una comprobación que no se ve es una que se puede quitar.
+    """
+    return HTTPException(
+        status_code=403,
+        detail=f"{que} afecta a todos los proyectos de esta instalación, así que pide "
+        "una clave de instalación y no la de un proyecto",
+    )
+
+
+def _ventana(days: int) -> Window:
+    hasta = datetime.now(timezone.utc)
+    return Window(since=hasta - timedelta(days=days), until=hasta, days=days)
+
+
+# ---------------------------------------------------------------------------------
+# Estado de un hallazgo
+# ---------------------------------------------------------------------------------
+
+
+class FindingStateIn(BaseModel):
+    project_id: str
+    finding_id: str
+    status: str = Field(pattern="^(arreglado|ignorado)$")
+    note: str = ""
+
+
+@router.post("/finding-state")
+async def set_finding_state(request: Request, body: FindingStateIn) -> dict[str, Any]:
+    """Marca un hallazgo como arreglado o ignorado. Se guarda cuándo: es la frontera
+    entre el antes y el después con la que se comprueba si el arreglo ha servido."""
+    valor = {
+        "status": body.status,
+        "at": datetime.now(timezone.utc).isoformat(),
+        "note": body.note.strip()[:500],
+    }
+    await run_in_threadpool(
+        _guard, _meta(request).set_setting, body.project_id, clave(body.finding_id), valor
+    )
+    return {"finding_id": body.finding_id, **valor}
+
+
+@router.delete("/finding-state")
+async def clear_finding_state(
+    request: Request, project_id: str, finding_id: str
+) -> dict[str, Any]:
+    """Lo devuelve a la lista, como si no se hubiera marcado nunca."""
+    borrado = await run_in_threadpool(
+        _guard, _meta(request).delete_setting, project_id, clave(finding_id)
+    )
+    return {"finding_id": finding_id, "cleared": borrado}
+
+
+# ---------------------------------------------------------------------------------
+# Presupuesto
+# ---------------------------------------------------------------------------------
+
+
+@router.get("/budget", response_model=presupuesto.Budget)
+async def get_budget(request: Request, project_id: str) -> presupuesto.Budget:
+    tope = await run_in_threadpool(presupuesto.leer, _meta(request), project_id)
+    return await run_in_threadpool(presupuesto.calcular, _store(request), project_id, tope)
+
+
+class BudgetIn(BaseModel):
+    """Lo que escribe el usuario. No lleva `_usd` a propósito: es un tope que pone
+    él, no una cifra que el producto afirme, y el guardia de D-107 va por esas."""
+
+    project_id: str
+    #: Dólares al mes. `None` o 0 lo quita.
+    monthly_limit: float | None = Field(default=None, ge=0)
+
+
+@router.put("/budget", response_model=presupuesto.Budget)
+async def put_budget(request: Request, body: BudgetIn) -> presupuesto.Budget:
+    meta = _meta(request)
+    if body.monthly_limit:
+        await run_in_threadpool(
+            _guard,
+            meta.set_setting,
+            body.project_id,
+            presupuesto.CLAVE,
+            {"monthly_usd": body.monthly_limit},
+        )
+    else:
+        await run_in_threadpool(_guard, meta.delete_setting, body.project_id, presupuesto.CLAVE)
+    tope = body.monthly_limit or None
+    return await run_in_threadpool(presupuesto.calcular, _store(request), body.project_id, tope)
+
+
+# ---------------------------------------------------------------------------------
+# Alertas desde la interfaz
+# ---------------------------------------------------------------------------------
+
+#: Lo que la interfaz puede poner. Los secretos —URLs de webhook— se aceptan pero no
+#: se devuelven nunca enteros.
+_CAMPOS_ALERTA = (
+    "webhook_url",
+    "generic_webhook_url",
+    "email_to",
+    "min_usd",
+    "quiet_hours",
+    "muted",
+    "muted_kinds",
+)
+
+
+def _oculto(url: str) -> str:
+    """De una URL secreta, sólo el host: basta para reconocerla y no sirve para usarla."""
+    from urllib.parse import urlparse
+
+    if not url:
+        return ""
+    return f"{urlparse(url).hostname or '?'}/…"
+
+
+def _vista_alertas(request: Request, project_id: str) -> dict[str, Any]:
+    runner = request.app.state.alerts
+    ajustes = runner.config_for(project_id)
+    return {
+        "project_id": project_id,
+        "enabled": ajustes.enabled,
+        "slack": _oculto(ajustes.webhook_url),
+        "webhook": _oculto(ajustes.generic_webhook_url),
+        "email_to": ajustes.email_to,
+        "email_ready": runner.email_ready,
+        "min_usd": ajustes.min_usd,
+        "quiet_hours": ajustes.quiet_hours,
+        "window_days": ajustes.window_days,
+        "muted": ajustes.muted,
+        "muted_kinds": sorted(ajustes.muted_kinds),
+        "env_enabled": request.app.state.settings.alerts_enabled,
+    }
+
+
+@router.get("/alert-settings")
+async def get_alert_settings(request: Request, project_id: str) -> dict[str, Any]:
+    return await run_in_threadpool(_vista_alertas, request, project_id)
+
+
+class AlertSettingsIn(BaseModel):
+    project_id: str
+    #: Un campo ausente no se toca; una cadena vacía quita ese canal.
+    webhook_url: str | None = None
+    generic_webhook_url: str | None = None
+    email_to: str | None = None
+    #: Umbral en dólares ya gastados. Se guarda como `min_usd`, que es como lo llama el
+    #: resto de las alertas; aquí no lleva el sufijo por lo mismo que `BudgetIn`.
+    threshold: float | None = Field(default=None, ge=0)
+    quiet_hours: float | None = Field(default=None, ge=0)
+    muted: bool | None = None
+    muted_kinds: list[str] | None = None
+
+
+@router.put("/alert-settings")
+async def put_alert_settings(request: Request, body: AlertSettingsIn) -> dict[str, Any]:
+    meta = _meta(request)
+    actual = await run_in_threadpool(meta.get_setting, body.project_id, CLAVE_AJUSTES) or {}
+    cambios = body.model_dump(exclude_unset=True, exclude={"project_id"})
+    if "threshold" in cambios:
+        cambios["min_usd"] = cambios.pop("threshold")
+    for campo in ("webhook_url", "generic_webhook_url"):
+        url = (cambios.get(campo) or "").strip()
+        if url and not webhook_valido(url):
+            raise HTTPException(
+                status_code=400,
+                detail="el webhook tiene que ser https (o http contra esta misma máquina)",
+            )
+    if (cambios.get("webhook_url") or "").strip() and "slack.com" not in cambios["webhook_url"]:
+        raise HTTPException(
+            status_code=400,
+            detail="eso no parece un webhook de Slack; ponlo como webhook genérico",
+        )
+    correo = (cambios.get("email_to") or "").strip()
+    if correo and "@" not in correo:
+        raise HTTPException(status_code=400, detail="esa dirección de correo no es válida")
+    nuevo = {**actual, **{k: v for k, v in cambios.items() if k in _CAMPOS_ALERTA}}
+    await run_in_threadpool(_guard, meta.set_setting, body.project_id, CLAVE_AJUSTES, nuevo)
+    return await run_in_threadpool(_vista_alertas, request, body.project_id)
+
+
+@router.post("/alert-settings/test")
+async def test_alert(request: Request, project_id: str) -> dict[str, Any]:
+    """Manda un mensaje de prueba por los canales puestos. Es la única forma de saber
+    que el webhook está bien antes de que haga falta de verdad."""
+    runner = request.app.state.alerts
+    ajustes = runner.config_for(project_id)
+    if not ajustes.enabled:
+        raise HTTPException(status_code=400, detail="no hay ningún canal puesto, o está silenciado")
+    texto = (
+        f"*Laplace · «{project_id}»* — mensaje de prueba. Si lo lees, las alertas de este "
+        "proyecto llegan aquí."
+    )
+    llegado = await run_in_threadpool(runner._enviar, ajustes, texto)
+    return {"delivered": llegado}
+
+
+# ---------------------------------------------------------------------------------
+# Quién gasta: por usuario y por sesión
+# ---------------------------------------------------------------------------------
+
+
+class CostGroupOut(BaseModel):
+    key: str
+    traces: int
+    cost_usd: float
+    cost_per_trace_usd: float
+    tokens: int
+    #: Llamadas sin tarifa dentro del grupo: su coste es un suelo.
+    unknown_cost_spans: int = 0
+
+
+class Breakdown(BaseModel):
+    project_id: str
+    by: str
+    groups: list[CostGroupOut]
+    #: Ejecuciones que no dicen de quién son. Sin esto, los grupos sumarían menos que el
+    #: total sin explicación.
+    untagged_traces: int = 0
+    untagged_cost_usd: float = 0.0
+    total_cost_usd: float = 0.0
+    unknown_cost_spans: int = 0
+
+
+@router.get("/breakdown", response_model=Breakdown)
+async def get_breakdown(
+    request: Request,
+    project_id: str,
+    by: str = Query("user", pattern="^(user|session)$"),
+    days: int = Query(7, ge=1, le=90),
+    limit: int = Query(10, ge=1, le=100),
+) -> Breakdown:
+    grupos = await run_in_threadpool(
+        _store(request).cost_by, project_id, _ventana(days), by, limit + 1
+    )
+    sin = next((g for g in grupos if not g.key), None)
+    con = [g for g in grupos if g.key][:limit]
+    total = sum(g.cost_usd for g in grupos)
+    return Breakdown(
+        project_id=project_id,
+        by=by,
+        groups=[
+            CostGroupOut(
+                key=g.key,
+                traces=g.traces,
+                cost_usd=g.cost_usd,
+                cost_per_trace_usd=g.cost_usd / g.traces if g.traces else 0.0,
+                tokens=g.tokens,
+                unknown_cost_spans=g.unknown_cost_spans,
+            )
+            for g in con
+        ],
+        untagged_traces=sin.traces if sin else 0,
+        untagged_cost_usd=sin.cost_usd if sin else 0.0,
+        total_cost_usd=total,
+        unknown_cost_spans=sum(g.unknown_cost_spans for g in grupos),
+    )
+
+
+# ---------------------------------------------------------------------------------
+# Tarifas propias
+# ---------------------------------------------------------------------------------
+
+
+class PriceIn(BaseModel):
+    model: str = Field(min_length=1, max_length=200)
+    #: Dólares por millón de tokens, como en la tabla.
+    input: float = Field(ge=0)
+    output: float = Field(ge=0)
+    cached_input: float | None = Field(default=None, ge=0)
+
+
+def _recalcular(store: Any, modelo: str) -> int:
+    """Vuelve a poner precio a todo lo guardado de ese modelo. Devuelve cuántos spans."""
+    spans = store.spans_by_model(modelo)
+    if not spans:
+        return 0
+    tabla = get_price_table()
+    store.insert_spans([recalcular_coste(s, tabla) for s in spans])
+    return len(spans)
+
+
+def _guardar_tarifas(meta: Any, modelos: dict[str, dict[str, Any]]) -> None:
+    meta.set_setting("*", "prices", {"models": modelos})
+    set_custom_prices(modelos)
+
+
+@router.get("/pricing/custom")
+async def get_custom_prices(request: Request) -> dict[str, Any]:
+    """Las tarifas propias y los modelos vistos que siguen sin tarifa."""
+    identidad = identity_of(request)
+    sin_tarifa: set[str] = set()
+    for p in await run_in_threadpool(_store(request).list_projects):
+        if not identidad.allows(p.project_id):
+            continue
+        resumen = await run_in_threadpool(
+            _store(request).summarize_window, p.project_id, _ventana(90)
+        )
+        sin_tarifa.update(resumen.models_without_price)
+    return {
+        "models": custom_prices(),
+        "unpriced": sorted(sin_tarifa),
+        "editable": identidad.sees_everything,
+    }
+
+
+@router.put("/pricing/custom")
+async def put_custom_price(request: Request, body: PriceIn) -> dict[str, Any]:
+    if not identity_of(request).sees_everything:
+        raise _solo_instalacion("cambiar una tarifa")
+    modelos = custom_prices()
+    entrada: dict[str, Any] = {"input": body.input, "output": body.output}
+    if body.cached_input is not None:
+        entrada["cached_input"] = body.cached_input
+    modelos[body.model.strip()] = entrada
+    await run_in_threadpool(_guard, _guardar_tarifas, _meta(request), modelos)
+    recalculados = await run_in_threadpool(_recalcular, _store(request), body.model.strip())
+    return {"model": body.model.strip(), "repriced_spans": recalculados}
+
+
+@router.delete("/pricing/custom")
+async def delete_custom_price(request: Request, model: str) -> dict[str, Any]:
+    if not identity_of(request).sees_everything:
+        raise _solo_instalacion("quitar una tarifa")
+    modelos = custom_prices()
+    if modelos.pop(model, None) is None:
+        raise HTTPException(status_code=404, detail="ese modelo no tiene tarifa propia")
+    await run_in_threadpool(_guard, _guardar_tarifas, _meta(request), modelos)
+    recalculados = await run_in_threadpool(_recalcular, _store(request), model)
+    return {"model": model, "repriced_spans": recalculados}
+
+
+# ---------------------------------------------------------------------------------
+# La instalación, los datos de ejemplo y el borrado
+# ---------------------------------------------------------------------------------
+
+
+@router.get("/instance")
+async def instance(request: Request) -> dict[str, Any]:
+    """Lo que la pantalla de ajustes necesita saber de esta instalación."""
+    settings = request.app.state.settings
+    return {
+        "local": settings.store == "sqlite",
+        "retention_days": settings.retention_days,
+        "email_ready": request.app.state.alerts.email_ready,
+        "alerts_env_enabled": settings.alerts_enabled,
+        "operator": identity_of(request).sees_everything,
+    }
+
+
+@router.post("/demo")
+async def load_demo(request: Request) -> dict[str, Any]:
+    """Manda las trazas de `laplace demo` desde la propia interfaz, sólo en local.
+
+    Quien acaba de instalar tiene una pantalla vacía y un comando que teclear en otra
+    ventana. En la nube no: meter datos inventados en una instalación compartida es
+    lo último que alguien espera de un botón.
+    """
+    if not identity_of(request).sees_everything:
+        raise _solo_instalacion("cargar datos de ejemplo")
+    if request.app.state.settings.store != "sqlite":
+        raise HTTPException(status_code=404, detail="los datos de ejemplo sólo existen en local")
+    from laplace.demo import enviar_trazas_de_ejemplo
+
+    origen = str(request.base_url).rstrip("/")
+    enviadas = await run_in_threadpool(enviar_trazas_de_ejemplo, origen, "demo")
+    return {"project_id": "demo", "traces": enviadas}
+
+
+@router.delete("/projects")
+async def delete_project(request: Request, project_id: str, confirm: str) -> dict[str, Any]:
+    """Borra un proyecto entero: trazas, anotaciones, conjuntos, prompts y ajustes.
+
+    `confirm` tiene que repetir el nombre: es la misma fricción que pide la pantalla, y
+    un `DELETE` escrito a mano con el id equivocado no se lleva nada por delante.
+    """
+    if confirm != project_id:
+        raise HTTPException(status_code=400, detail="confirm tiene que repetir el proyecto")
+    await run_in_threadpool(_store(request).delete_project, project_id)
+    await run_in_threadpool(_guard, _meta(request).delete_project_data, project_id)
+    # Con cuentas, el proyecto deja de ser de su organización y queda escrito quién lo
+    # borró (D-127). En local no hay ni una cosa ni la otra.
+    cuentas = getattr(request.app.state, "cuentas", None)
+    if cuentas is not None:
+        org_id = await run_in_threadpool(cuentas.org_del_proyecto, project_id)
+        await run_in_threadpool(cuentas.soltar_proyecto, project_id)
+        await run_in_threadpool(
+            cuentas.anotar,
+            org_id or "",
+            identity_of(request).user_id,
+            "borrar_proyecto",
+            project_id,
+        )
+    logger.warning("proyecto borrado entero — %s", project_id)
+    return {"project_id": project_id, "deleted": True}
+

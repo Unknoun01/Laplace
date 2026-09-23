@@ -674,6 +674,8 @@ def comparable(buckets: list[Bucket]) -> str:
     resto de la pantalla —que sí es cierto—.
     """
     trazas = sum(b.traces for b in buckets)
+    if trazas == 0:
+        return "el periodo anterior no tiene ninguna ejecución"
     if trazas < MIN_TRACES_FOR_COMPARISON:
         return (
             f"el periodo anterior sólo tiene {trazas} "

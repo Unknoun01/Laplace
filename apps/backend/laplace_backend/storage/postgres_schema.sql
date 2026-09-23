@@ -213,3 +213,18 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO projects (id, name)
 VALUES ('*', 'todos los proyectos')
 ON CONFLICT (id) DO NOTHING;
+
+-- Ajustes por proyecto, clave → JSON: estado de hallazgos, presupuesto, alertas y
+-- tarifas propias (D-123). '*' es la instalación entera.
+CREATE TABLE IF NOT EXISTS settings (
+    project_id  TEXT NOT NULL,
+    key         TEXT NOT NULL,
+    value       JSONB NOT NULL,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (project_id, key)
+);
+
+-- Claves con caducidad, último uso y autor (D-127). NULL en las de antes: no caducan.
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS expires_at   TEXT;
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS last_used_at TEXT;
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS created_by   TEXT;

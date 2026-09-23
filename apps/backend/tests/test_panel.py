@@ -125,7 +125,12 @@ def test_un_periodo_anterior_casi_vacio_no_sirve_para_comparar():
     un 193.100 %», y ese número quema la confianza en el resto de la pantalla.
     """
     vacio = [Bucket(start=AHORA + timedelta(hours=i)) for i in range(12)]
-    assert "muy pocas para comparar" in panel.comparable(vacio)
+    # Sin ninguna, se dice así: «sólo tiene 0 ejecuciones» no es español (D-122).
+    assert "no tiene ninguna ejecución" in panel.comparable(vacio)
+
+    pocas = [Bucket(start=AHORA + timedelta(hours=i)) for i in range(12)]
+    pocas[0].traces = 2
+    assert "muy pocas para comparar" in panel.comparable(pocas)
 
     # Un periodo con ejecuciones pero sólo al final tampoco vale: el proyecto acababa
     # de empezar a enviar trazas.

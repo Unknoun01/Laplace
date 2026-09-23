@@ -27,6 +27,7 @@ from typing import Any, Literal
 from laplace.schema import Annotation, AnnotationSource, EvalRun
 from pydantic import BaseModel, Field
 
+from . import cifras
 from .storage.base import TraceCost
 
 logger = logging.getLogger("laplace.evals")
@@ -325,11 +326,8 @@ def _pct(x: float) -> str:
 
 
 def _money(x: float) -> str:
-    if x >= 1:
-        return f"${x:.2f}"
-    if x >= 0.01:
-        return f"${x:.4f}".rstrip("0")
-    return f"${x:.6f}".rstrip("0")
+    """El mismo importe que el resto del producto: coma española (D-120)."""
+    return cifras.dinero(x)
 
 
 def compare_rates(source: AnnotationSource, a: Rate, b: Rate) -> SourceComparison:

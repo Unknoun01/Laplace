@@ -34,6 +34,11 @@ class TraceFilter:
     user_id: str | None = None
     #: Busca en el nombre de los spans y en el id de la traza.
     search: str | None = None
+    #: Identidad exacta de un paso (`step_key`, o el nombre si no la tiene). Es lo que
+    #: usa «Ver las trazas afectadas» de un hallazgo: buscar por texto confundía
+    #: `consultar_manual` con `consultar_manual_cacheado`, y en los hallazgos cuyo
+    #: título lleva el llamante no encontraba nada.
+    step_key: str | None = None
     span_type: str | None = None
     #: Filtros que sólo ofrece el modo avanzado del explorador.
     model: str | None = None
@@ -57,6 +62,22 @@ def decode_cursor(cursor: str | None) -> tuple[datetime | None, str | None]:
         return datetime.fromisoformat(timestamp), trace_id or None
     except ValueError:
         return None, None
+
+
+@dataclass
+class CostGroup:
+    """El gasto de un usuario o de una sesión en la ventana (D-123).
+
+    `key` vacío agrupa las ejecuciones que no dicen de quién son: se devuelve igual,
+    porque esconderlas haría que los grupos sumaran menos que el total sin explicarlo.
+    """
+
+    key: str
+    traces: int = 0
+    cost_usd: float = 0.0
+    tokens: int = 0
+    #: Llamadas sin tarifa dentro del grupo: si no es cero, `cost_usd` es un suelo.
+    unknown_cost_spans: int = 0
 
 
 @dataclass

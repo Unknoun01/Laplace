@@ -16,6 +16,7 @@ import {
   parseDays,
   runJudge,
 } from "@/lib/api";
+import { usePermisos } from "@/lib/permisos";
 import { duration, money, number, timestamp, tokens } from "@/lib/format";
 import type {
   Comparison,
@@ -110,7 +111,14 @@ function Contenido() {
         </p>
       </section>
 
-      <Experimento project={project} runs={runs} juez={juez} onJudged={() => recargar(project)} />
+      <Experimento
+        project={project}
+        runs={runs}
+        datasets={datasets}
+        juez={juez}
+        query={query}
+        onJudged={() => recargar(project)}
+      />
 
       <Conjuntos
         project={project}
@@ -131,12 +139,16 @@ function Contenido() {
 function Experimento({
   project,
   runs,
+  datasets,
   juez,
+  query,
   onJudged,
 }: {
   project: string;
   runs: RunSummary[];
+  datasets: Dataset[];
   juez: JudgeStatus | null;
+  query: string;
   onJudged: () => void;
 }) {
   const [a, setA] = useState("");
@@ -167,19 +179,61 @@ function Experimento({
   }
 
   if (runs.length < 2) {
+    // Tres pasos que se marcan solos al cumplirse, en vez de tres párrafos que había que
+    // leer para saber por dónde empezar (D-125).
+    const conjunto = datasets[0]?.name ?? "mi-conjunto";
+    const pasos = [
+      {
+        hecho: datasets.length > 0,
+        titulo: "Guarda un conjunto de casos",
+        cuerpo: (
+          <>
+            Ejecuciones reales de tu agente. Desde <Link href={`/trazas${query}`}>el
+            explorador</Link>, filtra y pulsa «Guardar estas trazas como conjunto», o créalo
+            aquí abajo con las más recientes.
+          </>
+        ),
+      },
+      {
+        hecho: runs.length >= 1,
+        titulo: "Lánzalo con la versión actual",
+        cuerpo: (
+          <>
+            La tirada la lanza el SDK en tu proceso —Laplace no ejecuta tu agente—:
+            <pre>{`import laplace
+laplace.init(project="${project}")
+laplace.run_dataset("${conjunto}", mi_agente, variant="actual")`}</pre>
+          </>
+        ),
+      },
+      {
+        hecho: runs.length >= 2,
+        titulo: "Y otra vez con la versión nueva",
+        cuerpo: (
+          <>
+            Otro prompt, otro modelo: la misma línea con otro <code>variant</code>. Con las
+            dos tiradas, aquí aparece la comparación de acierto y coste. El acierto sale de
+            tus anotaciones o del juez automático.
+          </>
+        ),
+      },
+    ];
+    const siguiente = pasos.findIndex((p) => !p.hecho);
     return (
       <section className="sec">
         <h2>Comparar dos versiones</h2>
-        <p className="lead">
-          Hacen falta al menos dos tiradas del mismo conjunto. Una tirada la lanza el SDK
-          en tu propio proceso —Laplace no ejecuta tu agente— y tarda una línea:
-        </p>
-        <pre>{`import laplace
-laplace.init(project="${project}")
-laplace.run_dataset("mi-conjunto", mi_agente, variant="prompt-v3")`}</pre>
-        <p className="disclaimer">
-          Crea antes un conjunto de casos aquí abajo, desde un filtro del explorador.
-        </p>
+        <p className="lead">Tres pasos, y cada uno se marca solo cuando está hecho.</p>
+        <ol className="pasos">
+          {pasos.map((p, i) => (
+            <li
+              key={p.titulo}
+              className={p.hecho ? "hecho" : i === siguiente ? "siguiente" : "pendiente"}
+            >
+              <b>{p.titulo}</b>
+              {i === siguiente && <div className="cuerpo">{p.cuerpo}</div>}
+            </li>
+          ))}
+        </ol>
       </section>
     );
   }
@@ -468,8 +522,10 @@ function Conjuntos({
     }
   }
 
+  const { escribir } = usePermisos(project);
   return (
     <section className="sec">
+      <fieldset className="sin-marco" disabled={!escribir}>
       <h2>Conjuntos de casos</h2>
       <p className="lead">
         Colecciones de ejecuciones <strong>reales</strong> de tu agente. No hay casos
@@ -504,9 +560,10 @@ function Conjuntos({
         </button>
       </div>
       <p className="disclaimer">
-        ¿Quieres otro filtro? Fíltralo primero en{" "}
-        <Link href={`/trazas${query}`}>el explorador</Link> y vuelve: el conjunto guarda el
-        filtro con el que se formó, para que después se pueda discutir de dónde salió.
+        ¿Quieres otro filtro? Fíltralo en{" "}
+        <Link href={`/trazas${query}`}>el explorador</Link> y pulsa «Guardar estas trazas
+        como conjunto de casos»: el conjunto guarda el filtro con el que se formó, para
+        que después se pueda discutir de dónde salió.
       </p>
       {error && <p className="verr">{error}</p>}
 
@@ -545,7 +602,7 @@ function Conjuntos({
                       type="button"
                       className="vbtn ghost"
                       onClick={async () => {
-                        await deleteDataset(d.id);
+                        await deleteDataset(d.id, project);
                         onChange();
                       }}
                     >
@@ -558,6 +615,7 @@ function Conjuntos({
           </table>
         </div>
       )}
+      </fieldset>
     </section>
   );
 }

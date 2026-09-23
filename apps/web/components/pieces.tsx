@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { duration, money, tokens } from "@/lib/format";
+import { duration, money, moneyShort, tokens } from "@/lib/format";
+import { Euros } from "@/lib/moneda";
 import type { Finding, SpanType } from "@/lib/types";
 
 /** Punto de color por tipo de span. El mismo código en todo el producto. */
@@ -22,7 +23,9 @@ export function BigMoney({
   return (
     <div>
       <div className={`big num${good ? " good" : ""}`}>{money(amount, currency)}</div>
-      <div className="pair-lbl">{label}</div>
+      <div className="pair-lbl">
+        {label} <Euros usd={amount} />
+      </div>
     </div>
   );
 }
@@ -78,15 +81,18 @@ export function FindingCard({ finding, href }: { finding: Finding; href: string 
   const enTokens = flojo && finding.window_waste_tokens > 0;
 
   return (
-    <Link href={href} className={`card${flojo ? " low" : ""}`}>
+    <Link href={href} className={`card${flojo ? " low" : ""}${finding.state ? ` st-${finding.state}` : ""}`}>
       <div className="card-top">
         <h3>{finding.title}</h3>
-        <div className="price">
+        <div
+          className="price"
+          title={finding.costs_money ? money(finding.window_waste_usd, finding.currency) : undefined}
+        >
           {enTokens
             ? tokens(finding.window_waste_tokens)
             : flojo
             ? duration(finding.window_waste_ms)
-            : `${finding.cost_is_floor ? "≥ " : ""}${money(
+            : `${finding.cost_is_floor ? "≥ " : ""}${moneyShort(
                 proyecta ? finding.monthly_saving_usd! : finding.window_waste_usd,
                 finding.currency,
               )}`}
@@ -103,14 +109,35 @@ export function FindingCard({ finding, href }: { finding: Finding; href: string 
           </small>
         </div>
       </div>
-      <p>{finding.summary}</p>
+      {/* Una frase en Sencillo: el título dice qué pasa y la cifra cuánto; el párrafo
+          entero repetía las dos cosas y hacía la lista de tres pantallas (D-124). */}
+      <p className="simple-only">{finding.lead || finding.summary}</p>
+      <p className="pro">{finding.summary}</p>
+      {finding.state === "reaparecido" && finding.fix_check && (
+        <p className="estado reaparecido">
+          <strong>Lo marcaste como arreglado y sigue saliendo.</strong>{" "}
+          {finding.fix_check.headline}
+        </p>
+      )}
+      {finding.state === "arreglado" && finding.fix_check && (
+        <p className="estado arreglado">
+          <strong>Marcado como arreglado.</strong> {finding.fix_check.headline}
+        </p>
+      )}
       <footer>
-        <span className={`chip ${finding.difficulty}`}>{finding.difficulty_label}</span>
-        {finding.scope_label && <span className="chip where">{finding.scope_label}</span>}
-        {flojo && <span className="chip where">No cuesta dinero, cuesta tiempo</span>}
+        {/* Texto con un punto de color, no una caja: con borde y fondo se leían como
+            botones y no lo son. Toda la tarjeta es el enlace (D-125). */}
+        <span className={`meta dificultad ${finding.difficulty}`}>{finding.difficulty_label}</span>
+        {finding.scope_label && <span className="meta">{finding.scope_label}</span>}
+        {/* Con tokens de más sí cuesta dinero: lo que no sabemos es cuánto. Decir «no
+            cuesta dinero» ahí convertía «no lo sabemos» en «es gratis» (D-107). */}
+        {enTokens && <span className="meta">Gasta tokens; sin tarifa para ponerle precio</span>}
         {!flojo && finding.cost_is_floor && (
-          <span className="chip where">Es un suelo: el coste real puede ser mayor</span>
+          <span className="meta">Es un suelo: el coste real puede ser mayor</span>
         )}
+        <span className="meta ver" aria-hidden>
+          Ver cómo arreglarlo →
+        </span>
       </footer>
       <div className="techline pro">
         {finding.tech.map((item) => (

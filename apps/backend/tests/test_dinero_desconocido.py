@@ -36,13 +36,23 @@ import pytest
 from laplace.schema import Cost, LLMAttributes, Span, TokenUsage
 from pydantic import BaseModel
 
-from laplace_backend import api, api_evals, api_prompts, coverage, dinero, insights, panel
+from laplace_backend import (
+    api,
+    api_ajustes,
+    api_evals,
+    api_prompts,
+    coverage,
+    dinero,
+    insights,
+    panel,
+    presupuesto,
+)
 from laplace_backend.storage.base import Window
 from laplace_backend.storage.sqlite import SQLiteStore
 
 AHORA = datetime.now(timezone.utc) - timedelta(minutes=20)
 
-MODULOS = (api, api_evals, api_prompts, coverage, insights, panel)
+MODULOS = (api, api_ajustes, api_evals, api_prompts, coverage, insights, panel, presupuesto)
 
 
 # ---------------------------------------------------------------------------------

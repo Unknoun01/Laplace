@@ -88,3 +88,16 @@ def hay_homonimos(pasos: list[tuple[str, str]]) -> set[str]:
     for label, site in pasos:
         caminos.setdefault((label or "").strip(), set()).add((site or "").strip())
     return {label for label, sitios in caminos.items() if len(sitios) > 1}
+
+
+def identificador(nombre: str) -> str:
+    """El nombre de la función, tal y como se escribe en código.
+
+    Lo contrario de `nombre_de_paso` y `con_pista`: un título puede llevar el llamante
+    —`agente → consultar_manual`— o una pista del prompt, y los dos son ruido, o
+    directamente código inválido, dentro de un fragmento de Python que el usuario va a
+    copiar. Vive aquí porque es el único sitio que sabe cómo se decora un nombre.
+    """
+    base = (nombre or "").split(" → ")[-1]
+    base = base.split(" — «")[0].strip()
+    return base or "paso"

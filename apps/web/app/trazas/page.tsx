@@ -7,14 +7,17 @@ import { VerdictDots, Verdicts } from "@/components/Verdicts";
 import { BackendDown, NeedsKey, NoProject, NotYours, TableSkeleton } from "@/components/states";
 import {
   annotationsFor,
+  createDataset,
   getOverview,
   listProjects,
   listTraces,
   parseDays,
   windowStart,
 } from "@/lib/api";
+import { descargarCsv } from "@/lib/csv";
 import { duration, money, relative, timestamp, tokens } from "@/lib/format";
 import type { Annotation, TraceListPage, TraceSummary } from "@/lib/types";
+import { usePermisos } from "@/lib/permisos";
 import { useApi } from "@/lib/useApi";
 import { LIVE_INTERVAL_MS, type Live, useLive } from "@/lib/useLive";
 
@@ -44,11 +47,16 @@ function Contenido() {
   const days = parseDays(params.get("days") ?? undefined);
   const sort = SORTS.some((s) => s.value === params.get("sort")) ? params.get("sort")! : "cost";
   const q = params.get("q") ?? "";
+  // El filtro por paso llega desde la ficha de un hallazgo: identidad exacta, no texto.
+  const step = params.get("step") ?? "";
+  const stepLabel = params.get("step_label") ?? "";
   const status = params.get("status") ?? "";
   const type = params.get("type") ?? "";
   const model = params.get("model") ?? "";
   const minCostRaw = params.get("min_cost") ?? "";
   const session = params.get("session") ?? "";
+  // Llega desde el reparto por usuario del Panel (D-123).
+  const user = params.get("user") ?? "";
   const cursor = params.get("cursor") ?? "";
 
   const estado = useApi(async () => {
@@ -61,6 +69,7 @@ function Contenido() {
         project_id: project,
         since: windowStart(days),
         search: q || undefined,
+        step_key: step || undefined,
         status: status || undefined,
         span_type: type || undefined,
         sort,
@@ -68,12 +77,13 @@ function Contenido() {
         model: model || undefined,
         min_cost_usd: Number.isFinite(minCost) && minCost > 0 ? minCost : undefined,
         session_id: session || undefined,
+        user_id: user || undefined,
       }),
       // Sólo para poblar el desplegable de modelos del modo avanzado.
       getOverview(project, days).catch(() => null),
     ]);
     return { project, page, overview };
-  }, [pedido, days, sort, q, status, type, model, minCostRaw, session, cursor]);
+  }, [pedido, days, sort, q, step, status, type, model, minCostRaw, session, user, cursor]);
 
   if (estado.fase === "cargando") return <TableSkeleton />;
   if (estado.fase === "sin-backend") return <BackendDown />;
@@ -102,6 +112,9 @@ function Contenido() {
       <form method="GET" className="toolbar">
         <input type="hidden" name="project" value={project} />
         <input type="hidden" name="days" value={days} />
+        {step && <input type="hidden" name="step" value={step} />}
+        {step && <input type="hidden" name="step_label" value={stepLabel} />}
+        {user && <input type="hidden" name="user" value={user} />}
         <input
           type="search"
           name="q"
@@ -162,6 +175,73 @@ function Contenido() {
         </button>
       </form>
 
+      {step && (
+        <p className="filtro-paso">
+          {/* Filtra por el paso, no por la repetición: puede haber ejecuciones que pasen
+              por él sin repetirlo, y decir «las del problema» sería decir de más. */}
+          <span>
+            Sólo las ejecuciones que pasan por el paso del problema: <strong>{stepLabel || step}</strong>
+          </span>
+          <Link href={`/trazas?${sinPaso(params)}`} className="btn">
+            Quitar
+          </Link>
+        </p>
+      )}
+
+      {user && (
+        <p className="filtro-paso">
+          <span>
+            Sólo las ejecuciones del usuario <strong>{user}</strong>
+          </span>
+          <Link href={`/trazas?${sinParametro(params, "user")}`} className="btn">
+            Quitar
+          </Link>
+        </p>
+      )}
+
+      {page.traces.length > 0 && (
+        <div className="explorer-tools">
+          <button
+            type="button"
+            className="btn small"
+            onClick={() =>
+              exportarTrazas(project, {
+                project_id: project,
+                since: windowStart(days),
+                search: q || undefined,
+                step_key: step || undefined,
+                status: status || undefined,
+                span_type: type || undefined,
+                model: model || undefined,
+                session_id: session || undefined,
+                user_id: user || undefined,
+              })
+            }
+          >
+            Exportar CSV
+          </button>
+        </div>
+      )}
+
+      {page.traces.length > 0 && (
+        <GuardarConjunto
+          project={project}
+          context={context}
+          filter={{
+            since: windowStart(days),
+            search: q || undefined,
+            step_key: step || undefined,
+            status: status || undefined,
+            span_type: type || undefined,
+            model: model || undefined,
+            min_cost_usd: minCostRaw || undefined,
+            session_id: session || undefined,
+            user_id: user || undefined,
+            sort,
+          }}
+        />
+      )}
+
       {page.traces.length === 0 ? (
         <div className="state">
           <h2>Ninguna traza coincide</h2>
@@ -194,6 +274,7 @@ function Contenido() {
               project_id: project,
               since: windowStart(days),
               search: q || undefined,
+              step_key: step || undefined,
               status: status || undefined,
               span_type: type || undefined,
               sort: "recent",
@@ -204,6 +285,147 @@ function Contenido() {
         />
       )}
     </main>
+  );
+}
+
+/** Los mismos parámetros sin uno de los filtros. */
+function sinParametro(params: { toString(): string }, clave: string): string {
+  const next = new URLSearchParams(params.toString());
+  next.delete(clave);
+  next.delete("cursor");
+  return next.toString();
+}
+
+/**
+ * Todas las trazas del filtro, a CSV (D-123). Se pide por orden de llegada, que es el
+ * único con cursor, y con un tope: un CSV de cien mil filas no lo abre nadie, y quien
+ * lo necesite tiene la API.
+ */
+const TOPE_CSV = 2000;
+
+async function exportarTrazas(
+  project: string,
+  filtro: Parameters<typeof listTraces>[0],
+): Promise<void> {
+  const filas: (string | number | null)[][] = [];
+  let cursor: string | undefined;
+  do {
+    const pagina = await listTraces({ ...filtro, sort: "recent", limit: 200, cursor });
+    for (const t of pagina.traces) {
+      filas.push([
+        t.trace_id,
+        t.root_name,
+        t.start_time,
+        t.status,
+        t.session_id ?? "",
+        t.user_id ?? "",
+        t.span_count,
+        t.usage.input_tokens,
+        t.usage.output_tokens,
+        t.cost.total_usd,
+        t.unknown_cost_spans > 0 ? "sí" : "no",
+        t.duration_ms,
+        t.models.join(" "),
+      ]);
+    }
+    cursor = pagina.next_cursor ?? undefined;
+  } while (cursor && filas.length < TOPE_CSV);
+  descargarCsv(
+    `laplace-${project}-trazas`,
+    [
+      "Traza",
+      "Agente",
+      "Inicio",
+      "Estado",
+      "Sesión",
+      "Usuario",
+      "Pasos",
+      "Tokens entrada",
+      "Tokens salida",
+      "Coste (USD)",
+      "Coste incompleto",
+      "Duración (ms)",
+      "Modelos",
+    ],
+    filas.slice(0, TOPE_CSV),
+  );
+}
+
+/** Los mismos parámetros sin el filtro por paso. */
+function sinPaso(params: { toString(): string }): string {
+  const next = new URLSearchParams(params.toString());
+  next.delete("step");
+  next.delete("step_label");
+  next.delete("cursor");
+  return next.toString();
+}
+
+/**
+ * Guardar lo que se está viendo como conjunto de casos.
+ *
+ * Evaluaciones decía «fíltralo en el explorador y vuelve», pero al volver el filtro no
+ * viajaba: el conjunto se creaba siempre con las más recientes. El filtro vive aquí,
+ * así que el botón también.
+ */
+function GuardarConjunto({
+  project,
+  context,
+  filter,
+}: {
+  project: string;
+  context: string;
+  filter: Record<string, string | undefined>;
+}) {
+  const { escribir } = usePermisos(project);
+  const [nombre, setNombre] = useState("");
+  const [estado, setEstado] = useState<"" | "creando" | "hecho">("");
+  const [error, setError] = useState("");
+
+  async function guardar() {
+    if (!nombre.trim()) return;
+    setEstado("creando");
+    setError("");
+    try {
+      await createDataset({ project_id: project, name: nombre.trim(), filter, limit: 50 });
+      setEstado("hecho");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "no se ha podido crear");
+      setEstado("");
+    }
+  }
+
+  if (!escribir) return null;
+  if (estado === "hecho") {
+    return (
+      <p className="guardar-conjunto">
+        Conjunto «{nombre.trim()}» creado con este filtro.{" "}
+        <Link href={`/evaluaciones?${context}`}>Ir a Evaluaciones</Link>
+      </p>
+    );
+  }
+
+  return (
+    <details className="guardar-conjunto">
+      <summary>Guardar estas trazas como conjunto de casos</summary>
+      <div className="ab">
+        <input
+          className="field grow"
+          value={nombre}
+          onChange={(e) => setNombre(e.target.value)}
+          placeholder="Nombre, p. ej. regresiones-checkout"
+          aria-label="Nombre del conjunto"
+        />
+        <button
+          type="button"
+          className="btn"
+          onClick={guardar}
+          disabled={estado === "creando" || !nombre.trim()}
+        >
+          {estado === "creando" ? "Creando…" : "Guardar (hasta 50)"}
+        </button>
+      </div>
+      {error && <p className="verr">{error}</p>}
+    </details>
   );
 }
 
@@ -387,12 +609,14 @@ function Row({
             {failed && (
               <span
                 className="badge"
-                style={{ marginLeft: 9, background: "#1d0f11", color: "var(--rose)", borderColor: "#5c2f35" }}
+                style={{ marginLeft: 9, background: "var(--rose-bg)", color: "var(--rose)", borderColor: "var(--rose-line)" }}
               >
                 {trace.error_count} error{trace.error_count > 1 ? "es" : ""}
               </span>
             )}
           </span>
+          {/* Lo que le pidieron: es lo que distingue una fila de la de al lado (D-125). */}
+          {trace.input_preview && <div className="pregunta">«{trace.input_preview}»</div>}
           <div className="meta">
             <span className="simple-only">{trace.trace_id.slice(0, 12)}</span>
             <span className="pro">{trace.trace_id}</span>

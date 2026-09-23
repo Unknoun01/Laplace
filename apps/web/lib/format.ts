@@ -21,6 +21,12 @@ const SYMBOLS: Record<string, string> = { USD: "$", EUR: "€" };
  */
 export const SEPARADOR_DECIMAL = ",";
 const LOCALE = "es-ES";
+/**
+ * `es-ES` no agrupa los números de cuatro cifras —escribe «1360» y «11.314»—, y el
+ * backend sí («1.360»). En la misma tarjeta se leían las dos formas, así que el millar
+ * se pone siempre, como en `cifras.miles`.
+ */
+const AGRUPAR = { useGrouping: "always" } as unknown as Intl.NumberFormatOptions;
 
 export function money(amount: number, currency = "USD"): string {
   const symbol = SYMBOLS[currency] ?? `${currency} `;
@@ -34,8 +40,23 @@ export function money(amount: number, currency = "USD"): string {
   return `${symbol}${round(amount, 6)}`;
 }
 
+/**
+ * Un importe para leer de un vistazo, no para cuadrar cuentas (D-124).
+ *
+ * En la tarjeta de un problema, «$0,000816» no dice nada: por debajo del céntimo se
+ * escribe «< $0,01». La cifra exacta sigue en la ficha y en el `title`. Donde el
+ * importe por paso o por ejecución ES la medida —el árbol, el explorador, el panel—
+ * se usa `money()`, que no redondea a nada.
+ */
+export function moneyShort(amount: number, currency = "USD"): string {
+  const symbol = SYMBOLS[currency] ?? `${currency} `;
+  if (amount > 0 && amount < 0.01) return `< ${symbol}0${SEPARADOR_DECIMAL}01`;
+  return money(amount, currency);
+}
+
 function round(value: number, decimals: number): string {
   const fixed = value.toLocaleString(LOCALE, {
+    ...AGRUPAR,
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   });
@@ -52,7 +73,7 @@ function round(value: number, decimals: number): string {
  * fila y «1234.567» en la de al lado (D-120).
  */
 export function exacto(value: number, decimals: number): string {
-  return value.toLocaleString(LOCALE, { maximumFractionDigits: decimals });
+  return value.toLocaleString(LOCALE, { ...AGRUPAR, maximumFractionDigits: decimals });
 }
 
 export function duration(ms: number): string {
@@ -70,7 +91,7 @@ export function tokens(count: number): string {
 }
 
 export function number(value: number): string {
-  return new Intl.NumberFormat(LOCALE).format(value);
+  return new Intl.NumberFormat(LOCALE, AGRUPAR).format(value);
 }
 
 export function percent(ratio: number): string {

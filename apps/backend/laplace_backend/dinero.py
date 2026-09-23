@@ -18,6 +18,8 @@ tiempo—, que son datos y no estimaciones.
 
 from __future__ import annotations
 
+from . import cifras
+
 #: Nombres que valen como «compañera» de una cifra en dólares dentro de un modelo de la
 #: API: alguna de ellas tiene que estar para que la interfaz pueda saber si el número se
 #: puede afirmar. La lista es cerrada a propósito: si hace falta una nueva, que se añada
@@ -75,7 +77,8 @@ def motivo_sin_dinero(*, llm_calls: int, unknown_cost_calls: int) -> str:
     if llm_calls <= 0 or unknown_cost_calls < llm_calls:
         return ""
     return (
-        f"No podemos poner precio a esto: ninguna de las {llm_calls} llamadas al modelo "
+        "No podemos poner precio a esto: ninguna de las "
+        f"{cifras.miles(llm_calls)} llamadas al modelo "
         "tiene tarifa conocida. Lo que sí está medido —tokens, llamadas y tiempo— sale "
         "abajo."
     )

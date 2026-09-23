@@ -43,6 +43,7 @@ from ._rows import (
 )
 from .base import (
     Bucket,
+    CostGroup,
     CoverageFacts,
     LoopGroup,
     ModelUsage,
@@ -448,6 +449,8 @@ _TRACE_AGGREGATE = """
     SUM(cost_rate_assumed = 1)                         AS assumed_rate_spans,
     MAX(session_id)                                    AS trace_session_id,
     MAX(user_id)                                       AS trace_user_id,
+    MAX(CASE WHEN parent_span_id = '' THEN substr(input_payload, 1, 600) END)
+                                                       AS root_input,
     GROUP_CONCAT(DISTINCT NULLIF(request_model, ''))   AS modelos
 """
 
@@ -588,11 +591,18 @@ class SQLiteStore:
         if filters.until is not None:
             clauses.append("start_time <= :until")
             params["until"] = _iso(filters.until)
+        # Sesión y usuario los lleva el span raíz, no cada llamada: filtrar los spans
+        # por ellos dejaba fuera los hijos y la traza salía con coste y tokens a cero.
+        # Se filtran trazas, igual que el modelo (D-123).
         if filters.session_id:
-            clauses.append("session_id = :session_id")
+            clauses.append(
+                "trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE session_id = :session_id)"
+            )
             params["session_id"] = filters.session_id
         if filters.user_id:
-            clauses.append("user_id = :user_id")
+            clauses.append(
+                "trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE user_id = :user_id)"
+            )
             params["user_id"] = filters.user_id
         if filters.model:
             # El modelo es de un span, no de la traza: se filtra por trazas que lo usan.
@@ -613,6 +623,9 @@ class SQLiteStore:
         if filters.span_type:
             sub.append("span_type = :span_type")
             params["span_type"] = filters.span_type
+        if filters.step_key:
+            sub.append("(CASE WHEN step_key != '' THEN step_key ELSE name END) = :paso")
+            params["paso"] = filters.step_key
         if filters.search:
             sub.append("(instr(lower(name), lower(:search)) > 0 OR trace_id LIKE :prefijo)")
             params["search"] = filters.search
@@ -1179,6 +1192,57 @@ class SQLiteStore:
     def delete_project(self, project_id: str) -> None:
         self._conn.execute("DELETE FROM spans WHERE project_id = :p", {"p": project_id})
         self._conn.commit()
+
+    # -- tarifas propias, reparto por usuario y retención (D-123) -------------------
+
+    def spans_by_model(self, model: str) -> list[Span]:
+        """Todas las llamadas a un modelo, de todos los proyectos. Para el recálculo."""
+        columnas = ", ".join(COLUMNS)
+        sql = (
+            f"SELECT {columnas} FROM spans WHERE span_type = 'llm' "
+            "AND (request_model = :m OR response_model = :m) ORDER BY start_time, span_id"
+        )
+        return [row_to_span(r) for r in self._query(sql, {"m": model})]
+
+    def cost_by(
+        self, project_id: str, window: Window, dimension: str, limit: int = 20
+    ) -> list[CostGroup]:
+        columna = {"user": "user_id", "session": "session_id"}[dimension]
+        params = {**self._window_params(project_id, window), "limit": limit}
+        sql = f"""
+            WITH por_traza AS (
+                SELECT trace_id,
+                       MAX({columna})                                  AS clave,
+                       SUM(cost_total_usd)                             AS coste,
+                       SUM(input_tokens + output_tokens)               AS tokens,
+                       SUM(span_type = 'llm' AND cost_unknown = 1)     AS sin_tarifa
+                FROM spans
+                WHERE {WINDOW_WHERE}
+                GROUP BY trace_id
+            )
+            SELECT clave, COUNT(*) AS trazas, SUM(coste) AS coste, SUM(tokens) AS tokens,
+                   SUM(sin_tarifa) AS sin_tarifa
+            FROM por_traza
+            GROUP BY clave
+            ORDER BY coste DESC, trazas DESC, clave
+            LIMIT :limit
+        """
+        return [
+            CostGroup(
+                key=r["clave"] or "",
+                traces=int(r["trazas"] or 0),
+                cost_usd=float(r["coste"] or 0.0),
+                tokens=int(r["tokens"] or 0),
+                unknown_cost_spans=int(r["sin_tarifa"] or 0),
+            )
+            for r in self._query(sql, params)
+        ]
+
+    def delete_before(self, cutoff: datetime) -> int:
+        """Borra los spans que empezaron antes de `cutoff`. Es la retención."""
+        cur = self._conn.execute("DELETE FROM spans WHERE start_time < :c", {"c": _iso(cutoff)})
+        self._conn.commit()
+        return cur.rowcount
 
     def health(self) -> bool:
         try:

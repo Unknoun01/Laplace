@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { DEFAULT_DAYS, RANGES, listProjects } from "@/lib/api";
+import { DEFAULT_DAYS, type Me, RANGES, getMe, listProjects, logout } from "@/lib/api";
 import type { ProjectStats } from "@/lib/types";
 
 /**
@@ -20,11 +20,19 @@ export function TopBar() {
   // La lista de proyectos la pide la propia barra. Si el backend no responde se queda
   // vacía y cada pantalla explica el problema: el armazón nunca debe caerse por eso.
   const [projects, setProjects] = useState<ProjectStats[]>([]);
+  const [me, setMe] = useState<Me | null>(null);
+  // En las pantallas de entrar no hay nada que navegar todavía: sin sesión, cada pestaña
+  // sería un 401 que devuelve aquí (D-127).
+  const acceso = ["/entrar", "/configurar", "/invitacion"].some((r) => pathname.startsWith(r));
   useEffect(() => {
+    getMe()
+      .then(setMe)
+      .catch(() => setMe(null));
+    if (acceso) return;
     listProjects()
       .then(setProjects)
       .catch(() => setProjects([]));
-  }, []);
+  }, [acceso]);
 
   const project = params.get("project") ?? projects[0]?.id ?? "";
   const days = Number(params.get("days")) || DEFAULT_DAYS;
@@ -45,20 +53,51 @@ export function TopBar() {
   if (days !== DEFAULT_DAYS) keep.set("days", String(days));
   const query = keep.toString() ? `?${keep.toString()}` : "";
 
+  if (acceso) {
+    return (
+      <header className="topbar">
+        <span className="mark">
+          <Logo />
+          Laplace
+        </span>
+      </header>
+    );
+  }
+
   return (
     <header className="topbar">
       <Link href={`/${query}`} className="mark">
         <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
           <path
             d="M2 15.5 C 5 15.5, 6 2.5, 9 2.5 S 13 15.5, 16 15.5"
-            stroke="#7C93F5"
+            stroke="var(--iris)"
             strokeWidth="1.6"
             strokeLinecap="round"
           />
-          <circle cx="9" cy="2.5" r="1.8" fill="#7C93F5" />
+          <circle cx="9" cy="2.5" r="1.8" fill="var(--iris)" />
         </svg>
         Laplace
       </Link>
+      {/* El proyecto va junto al logo, como una ruta: es el contexto de todo lo demás, y
+          al final de la barra se cortaba en móvil («demo…») (D-125). */}
+      <div className="brand-ctx">
+        <span className="slash" aria-hidden>
+          /
+        </span>
+        <select
+          className="ctx proyecto"
+          aria-label="Proyecto"
+          value={project}
+          onChange={(event) => setParam("project", event.target.value)}
+        >
+          {projects.length === 0 && <option value="">Sin proyectos</option>}
+          {projects.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.id}
+            </option>
+          ))}
+        </select>
+      </div>
 
       <nav className="nav">
         <Link href={`/${query}`} aria-current={pathname === "/" ? "page" : undefined}>
@@ -89,22 +128,15 @@ export function TopBar() {
         >
           Prompts
         </Link>
+        <Link
+          href={`/ajustes${query}`}
+          aria-current={pathname === "/ajustes" ? "page" : undefined}
+        >
+          Ajustes
+        </Link>
       </nav>
 
       <div className="pick">
-        <select
-          className="ctx"
-          aria-label="Proyecto"
-          value={project}
-          onChange={(event) => setParam("project", event.target.value)}
-        >
-          {projects.length === 0 && <option value="">Sin proyectos</option>}
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.id}
-            </option>
-          ))}
-        </select>
         <select
           className="ctx"
           aria-label="Rango temporal"
@@ -118,15 +150,65 @@ export function TopBar() {
           ))}
         </select>
         <ModeToggle />
+        {me?.user && <MenuUsuario me={me} />}
       </div>
     </header>
+  );
+}
+
+function Logo() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+      <path
+        d="M2 15.5 C 5 15.5, 6 2.5, 9 2.5 S 13 15.5, 16 15.5"
+        stroke="var(--iris)"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+      <circle cx="9" cy="2.5" r="1.8" fill="var(--iris)" />
+    </svg>
+  );
+}
+
+/**
+ * Quién eres y la salida (D-127). Sólo en la nube: en local no hay nadie más que tú.
+ * La inicial y no el email entero: la barra no tiene sitio, y el email sale al pasar.
+ */
+function MenuUsuario({ me }: { me: Me }) {
+  const user = me.user!;
+  const inicial = (user.name || user.email).trim().charAt(0).toUpperCase();
+  return (
+    <details className="usuario">
+      <summary title={user.email} aria-label={`Tu cuenta: ${user.email}`}>
+        {inicial}
+      </summary>
+      <div className="usuario-menu">
+        <p>
+          {user.name && <strong>{user.name}</strong>}
+          <span>{user.email}</span>
+        </p>
+        <Link href="/organizacion">Organización y cuenta</Link>
+        <button
+          type="button"
+          onClick={async () => {
+            try {
+              await logout();
+            } finally {
+              window.location.href = "/entrar";
+            }
+          }}
+        >
+          Salir
+        </button>
+      </div>
+    </details>
   );
 }
 
 const STORAGE_KEY = "laplace.mode";
 
 /**
- * Diagnóstico / Avanzado. Es la columna vertebral del producto: el mismo contenido
+ * Sencillo / Avanzado. Es la columna vertebral del producto: el mismo contenido
  * sirve a alguien inexperto y a un desarrollador, sin partir el producto en dos.
  *
  * El modo es global y se recuerda entre visitas: un dev no debería tener que darle a
@@ -149,14 +231,19 @@ function ModeToggle() {
     }
   };
 
+  // Un interruptor y no dos botones: «Sencillo» al lado de la pestaña «Diagnóstico» se
+  // leía como otra navegación, y dos botones comían el sitio que la barra no tiene.
   return (
-    <div className="seg" role="group" aria-label="Nivel de detalle">
-      <button type="button" aria-pressed={!pro} onClick={() => change(false)}>
-        Diagnóstico
-      </button>
-      <button type="button" aria-pressed={pro} onClick={() => change(true)}>
-        Avanzado
-      </button>
-    </div>
+    <button
+      type="button"
+      className="switch"
+      role="switch"
+      aria-checked={pro}
+      onClick={() => change(!pro)}
+      title="Enseña la capa técnica: consultas, atributos, identificadores"
+    >
+      <i aria-hidden />
+      Avanzado
+    </button>
   );
 }

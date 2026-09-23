@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
-import { getApiKey, setApiKey } from "@/lib/api";
+import { useEffect, useState } from "react";
+import { type Me, getApiKey, getInstance, getMe, loadDemo, setApiKey } from "@/lib/api";
 
 /**
  * El endpoint al que apuntar el SDK: el origen desde el que se está sirviendo esta
@@ -59,10 +59,81 @@ export function NoProject() {
       <pre>
         {`import laplace\n\nlaplace.init(\n    project=\"mi-agente\",\n    endpoint=\"${endpointActual()}\",\n)`}
       </pre>
-      <p style={{ marginTop: 18 }}>
-        ¿Sólo quieres verlo funcionando? <code>laplace demo</code> manda unas trazas de
-        ejemplo —datos inventados, en un proyecto aparte— para ver qué detecta.
+      <PrimerProyecto />
+      <CargarDemo />
+    </div>
+  );
+}
+
+/**
+ * Con cuenta, el primer paso no es copiar un fragmento: es crear la clave del primer
+ * proyecto, que es lo que lo pone a nombre de tu organización (D-127).
+ */
+function PrimerProyecto() {
+  const [me, setMe] = useState<Me | null>(null);
+  useEffect(() => {
+    getMe()
+      .then(setMe)
+      .catch(() => setMe(null));
+  }, []);
+  if (!me?.user) return null;
+  return (
+    <p style={{ marginTop: 14 }}>
+      En esta instalación el agente necesita una clave para enviar trazas.{" "}
+      <Link href="/organizacion">Créala en Organización</Link>: ahí mismo sale el
+      fragmento de arriba con la clave puesta.
+    </p>
+  );
+}
+
+/**
+ * Los datos de ejemplo, con un botón (D-123).
+ *
+ * Antes era «teclea `laplace demo` en otra terminal», que es justo el paso en el que
+ * se pierde quien acaba de instalar. En la nube no se ofrece: meter datos inventados en
+ * una instalación compartida no es lo que nadie espera de un botón.
+ */
+function CargarDemo() {
+  const [local, setLocal] = useState(false);
+  const [cargando, setCargando] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    getInstance()
+      .then((i) => setLocal(i.local && i.operator))
+      .catch(() => setLocal(false));
+  }, []);
+
+  async function cargar() {
+    setCargando(true);
+    setError("");
+    try {
+      await loadDemo();
+      window.location.href = "/?project=demo";
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "no se han podido cargar");
+      setCargando(false);
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 18 }}>
+      <p>
+        ¿Sólo quieres verlo funcionando? Carga unas trazas de ejemplo —datos inventados, en
+        un proyecto aparte llamado «demo»— y mira qué detecta.
       </p>
+      {local ? (
+        <div className="actions" style={{ paddingTop: 8 }}>
+          <button type="button" className="btn primary" onClick={cargar} disabled={cargando}>
+            {cargando ? "Cargando…" : "Cargar datos de ejemplo"}
+          </button>
+        </div>
+      ) : (
+        <p>
+          Desde una terminal: <code>laplace demo</code>.
+        </p>
+      )}
+      {error && <p className="verr">{error}</p>}
     </div>
   );
 }
@@ -125,15 +196,32 @@ export function NothingToFix({
  */
 export function NeedsKey({ mensaje }: { mensaje?: string }) {
   const [valor, setValor] = useState(getApiKey());
+  const [me, setMe] = useState<Me | null>(null);
+
+  // Con cuentas (D-127), quien llega sin sesión no tiene por qué saber qué es una clave
+  // de API: se le manda a entrar, o a configurar si la instalación está por estrenar.
+  // Pegar una clave queda como alternativa, para quien de verdad tiene una.
+  useEffect(() => {
+    getMe()
+      .then((m) => {
+        setMe(m);
+        if (m.mode !== "nube" || m.user || m.by_key) return;
+        const vuelta = encodeURIComponent(window.location.pathname + window.location.search);
+        window.location.href = m.needs_setup ? "/configurar" : `/entrar?next=${vuelta}`;
+      })
+      .catch(() => setMe(null));
+  }, []);
+
+  if (me && me.mode === "nube" && !me.user && !me.by_key) return <Cargando />;
+
   return (
     <div className="state">
       <h2>Esta instalación pide una clave</h2>
       <p>
         {mensaje && mensaje !== "credencial inválida"
           ? mensaje
-          : "La clave va en cada petición y se guarda sólo en este navegador. Si no tienes una, la crea quien administra este Laplace:"}
+          : "La clave va en cada petición y se guarda sólo en este navegador. Si no tienes una, la crea quien administra esta organización, en Organización → Claves."}
       </p>
-      <pre>python -m laplace_backend.keys create --project mi-agente</pre>
       <div className="actions">
         <input
           className="field"
@@ -153,6 +241,9 @@ export function NeedsKey({ mensaje }: { mensaje?: string }) {
         >
           Guardar y entrar
         </button>
+        <a href="/entrar" className="btn">
+          Entrar con tu cuenta
+        </a>
       </div>
       <p className="disclaimer">
         Se guarda en el almacenamiento de este navegador, no se manda a ningún sitio más

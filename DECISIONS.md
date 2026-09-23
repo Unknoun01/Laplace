@@ -1839,3 +1839,186 @@ Dos cosas que este episodio dice, y valen más que el arreglo:
 * **A `api_evals` le faltaba un import y la suite pasaba entera**, porque ninguna prueba
   ejecutaba el borrado de una anotación por la API. Lo encontró el linter. Una ruta
   arreglada y sin ejecutar está a un refactor de volver a estar rota.
+
+### D-122 — Diez cosas que un cliente habría visto en su primera tarde
+Una auditoría mirando el producto como lo mira quien paga —no como lo mira quien lo
+escribe— encontró diez defectos, todos en pantalla y ninguno en una aserción. Los que
+importan son los tres primeros, porque son **botones que no hacen lo que dicen**:
+
+* **«Ver las trazas afectadas» enseñaba todas las trazas** en los hallazgos de repetición
+  y de bucle, que son los que más dinero devuelven. Buscaba por la etiqueta técnica
+  «paso», que esas dos reglas no llevan, y salía `q=` vacío. Buscar por texto tampoco
+  servía en los demás: el título lleva el llamante, y `consultar_manual` casaba con
+  `consultar_manual_cacheado`, así que el agente sano salía como afectado. Ahora cada
+  hallazgo lleva su `step_key` y el explorador filtra por **identidad exacta** en los dos
+  almacenes, con un aviso visible y un «Quitar».
+* **«Ya lo he arreglado, vuelve a medir» sólo recargaba.** Las cifras cuentan la ventana
+  entera, así que el arreglo no se veía: el botón prometía justo lo que no hacía, en el
+  momento en que el usuario más quiere creernos. Mientras no exista el antes y el después
+  de verdad, lo honesto es llevar a las ejecuciones más nuevas de ese paso y decir que un
+  arreglo deja de sumar cuando lo viejo sale del rango.
+* **No se podía crear un conjunto de casos desde un filtro.** Evaluaciones decía
+  «fíltralo en el explorador y vuelve», y el formulario enviaba siempre `{sort:
+  "recent"}`. El filtro vive en el explorador, así que el botón de guardar también.
+
+El resto, en corto: el código de ejemplo metía el título entero en Python
+(`respuesta = agente → consultar_manual(...)`); la ficha de un bucle decía «las entradas no
+son idénticas» y dos líneas después «3 llamadas idénticas más»; una tarjeta con tokens de
+más y sin tarifa llevaba la etiqueta «No cuesta dinero»; la ayuda de precios mandaba a
+editar un fichero del repo que quien instala con `pip` no tiene —ahora hay
+`LAPLACE_PRICES_EXTRA`— y salía dos veces seguidas; `es-ES` no agrupa las cifras de cuatro
+dígitos y el backend sí, así que «1360» y «11.314» convivían; el `_seconds` del backend y
+el `_money` de evaluaciones seguían escribiendo el punto inglés que D-120 creía cerrado; y
+el modo sencillo se llamaba «Diagnóstico», como la pestaña de al lado.
+
+La lección repite la de D-113, y por eso las redes van antes que la entrada: el filtro de
+cada hallazgo tiene que encontrar su traza de ejemplo y sólo las de su llamante, y ningún
+fragmento de código puede llevar la decoración de un título.
+
+### D-123 — Lo que el usuario decide, en una pantalla y no en variables de entorno
+La auditoría de D-122 terminó con una lista de lo que faltaba mirando al que paga, y casi
+todo tenía la misma forma: el producto sabía la respuesta y el usuario no tenía por dónde
+preguntarla, o sólo podía decirla editando un fichero. Entra entero, con una decisión de
+diseño que lo sostiene y cuatro que conviene dejar escritas.
+
+**Una tabla de ajustes, clave → JSON por proyecto**, en los tres almacenes de metadatos.
+Estado de cada hallazgo, presupuesto, alertas y tarifas propias (`*` es la instalación).
+Ninguno se consulta por nada que no sea su clave, y cada tabla nueva son tres
+implementaciones: cinco tablas habrían sido quince métodos para lo mismo.
+
+* **Arreglado no es lo que dice el usuario, es lo que se mide después.** Marcar guarda el
+  instante; se compara la ejecución media de antes (siete días) con la de después, y con
+  menos de cinco ejecuciones después no se dice nada. Si sigue saliendo igual vuelve a la
+  lista como `reaparecido`. Por ejecución y no en totales: con la mitad de tráfico, el
+  total baja solo. Lo arreglado y lo ignorado salen del evitable —que es lo que todavía
+  se puede hacer— y no alertan.
+* **Una tarifa nueva alcanza lo ya guardado.** El coste se calcula en la ingesta (D-005),
+  así que poner un precio sólo servía para lo que llegara después. Se recalcula con la
+  misma función que usa la ingesta y se reescribe el span: los dos almacenes sustituyen
+  por clave, así que no hay doble conteo.
+* **Los canales de alerta de la interfaz no piden `LAPLACE_ALERTS_ENABLED`.** Ponerlos ya
+  es encenderlas a propósito para ese proyecto. El webhook del entorno sigue exigiéndolo.
+  Las URL son secretos: se aceptan y nunca se devuelven enteras.
+* **El presupuesto mide los días con la misma función que el inicio.** La primera versión
+  contaba desde la primera traza hasta ahora y proyectaba el mes con once horas de datos
+  justo debajo de un inicio que decía «todavía no proyectamos». Dos lecturas del mismo
+  dato en la misma pantalla es la forma de este proyecto de equivocarse, otra vez.
+
+Mirando la pantalla con esto delante salieron dos fallos que no eran nuevos. Filtrar las
+trazas por usuario o por sesión —el modo avanzado ya lo permitía— filtraba **spans**, y
+como esos campos los lleva el span raíz, la traza salía en la lista con coste y tokens a
+cero. Y el HTML de la interfaz local se servía sin `Cache-Control`: tras actualizar
+Laplace, el navegador enseñaba la versión anterior por heurística, sin ningún aviso.
+
+Lo que queda fuera, a propósito: cuentas y roles, y el SDK de TypeScript. No son
+funciones de una pantalla, son proyectos, y meterlos aquí habría sido hacerlos mal.
+
+### D-124 — El rigor delante tapaba lo que el rigor protege
+En un móvil, la primera pantalla del inicio eran dos avisos —«casi todo es evitable» y
+«todavía no proyectamos»— y ni un solo problema. Cada aviso era cierto y estaba bien
+argumentado; juntos convertían el producto en un informe que había que leer entero antes
+de llegar a lo que se había venido a ver.
+
+No se quita ninguno. Se parte cada uno en **una línea que se lee siempre** y **un porqué
+que se despliega**, y la línea conserva lo que no se puede perder: que el total está
+incompleto, que es un suelo, que no se proyecta. Lo que se pliega es la argumentación,
+no la advertencia.
+
+Con el mismo criterio, en la lista:
+
+* Las tarjetas llevan **una frase** (`lead`) en lugar del resumen de tres o cuatro líneas.
+  El título ya dice qué pasa y la cifra cuánto cuesta; el resumen repetía las dos cosas.
+  Sigue entero en la ficha y en modo avanzado.
+* **Por debajo del céntimo, la tarjeta dice «< $0,01»**, con la cifra exacta en el
+  `title` y en la ficha. «$0,000816» no se lee; se descifra. Donde el importe por paso o
+  por ejecución es la medida —el árbol, el explorador, el panel— sigue sin redondear.
+* Fuera de Prompts la frase «un diff y un rollback los tiene cualquiera; lo que no tiene
+  nadie más…» con cifras inventadas: es texto de la web comercial, no de una pantalla
+  donde alguien está mirando sus propios datos.
+
+### D-125 — Que se vea como un producto, sin cambiar lo que dice
+Lo último de la auditoría era la forma, y casi todo tenía un motivo funcional detrás:
+
+* **Colores en tokens, y tema claro.** Había cuarenta hex sueltos por el CSS —bordes y
+  fondos tintados de cada color de estado— y un tema claro habría sido perseguirlos uno a
+  uno. Ahora son tokens con nombre (`--amber-bg`, `--rose-line`…); el tema claro redefine
+  la paleta y nada más. Sigue al sistema, y en Ajustes se puede fijar uno; se aplica en el
+  mismo script que el modo, antes del primer pintado, para que no haya fogonazo.
+* **Las fuentes se sirven desde Laplace.** `next/font` las descarga al construir. El modo
+  local presumía de no llamar a nadie y pedía dos hojas de estilo a Google cada vez.
+* **Título por pestaña y favicon.** Con tres fichas abiertas, tres pestañas «Laplace».
+  La traza y la ficha llevan su propio nombre.
+* **La barra ya no se parte.** El proyecto va junto al logo como una ruta; las pestañas
+  se desplazan, con el borde difuminado para que se note; el doble botón Sencillo /
+  Avanzado es un interruptor. En móvil, dos filas y 87 px, antes tres y 125.
+* **Tres acciones a la vista.** El inicio enseña los tres problemas que más devuelven y
+  despliega el resto; lo que sólo cuesta tiempo va aparte, porque «531 ms» y «$1,21» no
+  se comparan. Las etiquetas de la tarjeta son texto con un punto de color: con borde y
+  fondo se leían como botones.
+* **La lista de trazas dice qué le preguntaron al agente.** Era la misma fila doce veces
+  con un hash distinto. `input_preview` sale de la entrada del span raíz: la primera
+  cadena con contenido, o el último mensaje del usuario, en una línea.
+* **La gráfica empieza en el primer dato.** Con once horas en un rango de siete días, dos
+  barras aplastadas contra el borde y veintiséis tramos de nada. Los vacíos del final se
+  quedan: «no ha llegado nada desde entonces» sí es información.
+* **Evaluaciones vacía es una lista de tres pasos** que se marcan solos, en vez de tres
+  párrafos que había que leer para saber por dónde empezar.
+
+El contraste del tema claro se ha comprobado recorriendo los textos de inicio, traza,
+ficha (en modo avanzado) y panel: nada por debajo de 3:1 salvo la barra decorativa de la
+ruta, que está oculta a los lectores de pantalla. El resto de pantallas no se ha medido.
+
+### D-126 — El SQL de nube de D-122 a D-125, ejecutado
+Las cuatro tandas anteriores se entregaron con el camino de la nube escrito y sin
+ejecutar, que es exactamente lo que D-112 llama «sin terminar». Con ClickHouse y Postgres
+levantados, la suite entera da **389 pasan y 4 saltadas** —las cuatro que necesitan una
+clave de proveedor—, y hay un fichero nuevo, `test_ajustes_nube.py`, que siembra los mismos
+spans en los dos almacenes y exige que digan lo mismo en todo lo nuevo: reparto por
+usuario, filtros por usuario y por paso, la pregunta de cada traza, el recálculo de una
+tarifa (que en ClickHouse depende de que reinsertar sustituya y no duplique), la
+retención, los ajustes en Postgres y el borrado de un proyecto sin tocar a otro. Se ha
+comprobado rompiendo a propósito el filtro por usuario de ClickHouse: la prueba se pone en
+rojo.
+
+Encima, un recorrido de punta a punta por la API con el backend en modo nube: tráfico
+real por OTLP, marcar un hallazgo, ficha, presupuesto, reparto, alertas, la lista de
+trazas y el borrado. Todo contestó lo que tenía que contestar a la primera. Que no hiciera
+falta arreglar nada no hace inútil la tanda: hasta hoy eso era una suposición.
+
+### D-127 — Cuentas: las personas entran, los agentes escriben con clave
+Hasta aquí la nube sólo sabía de claves, creadas por línea de comandos y pegadas en el
+navegador. Servía para que un cliente no leyera a otro y no servía para un equipo: nadie
+sabía quién había hecho qué, quitarle el acceso a una persona era rotar la clave de todos,
+y la primera pantalla de un producto de pago era «pega aquí tu clave».
+
+**Las cuentas no sustituyen a las claves**: una sesión acaba en la misma `Identity` del
+middleware que una clave, con los proyectos de sus organizaciones y su rol en cada uno. Ni
+una ruta de datos ha tenido que cambiar. Lo que sí ha cambiado:
+
+* **Toda escritura con sesión dice sobre qué proyecto es.** Una clave tiene un proyecto;
+  una persona, varios, y «su primer proyecto» —lo que hacían las rutas por id opaco— es
+  la forma de que un lector de A escriba en A porque es miembro de B. El middleware exige
+  el proyecto y mira el rol en ése; la interfaz lo manda siempre.
+* **La primera cuenta sale de un código que va al log**, no de quien primero llegue a la
+  URL. Adopta los proyectos que ya existían: sin dueño serían invisibles para todos.
+* **CSRF sin tokens**: toda escritura con cookie trae `X-Laplace`, que un formulario de
+  otro sitio no puede poner sin pasar por CORS. Se pide también al entrar, que es lo que
+  impide que otro sitio te meta en una cuenta suya.
+* **Sin dependencias**: `scrypt` de la biblioteca estándar, un almacén de cuentas único
+  para SQLite y Postgres (mismas consultas, otro marcador), y el freno de intentos en
+  memoria —su trabajo es hacer inútil probar contraseñas, no llevar un registro; eso lo
+  hace la auditoría—.
+* **La interfaz no ofrece lo que el rol no permite**, pero no es la protección: el
+  backend lo rechaza igual. Ante la duda deja escribir y que diga que no el backend; una
+  pantalla sin botones por un fallo de red sería peor.
+
+Tres fallos que sólo salieron ejecutando, y que por eso merecen línea: el admin de una
+organización cualquiera no podía crear el primer proyecto de la suya (el nombre nuevo
+venía en el cuerpo y el middleware lo rechazaba por no ser todavía de nadie); en Postgres
+la clave apunta a `projects` con clave foránea y en SQLite no, así que el almacén fallaba
+en uno y no en otro; y «último uso» de las claves se guardaba en una columna que nadie
+actualizaba. Los tres tienen prueba.
+
+`keys.py` decía que no debía existir un endpoint que emitiera credenciales porque la
+primera tenía que salir de algún sitio. Ahora sale del código de configuración, y crear
+claves pide sesión de admin. Queda fuera, a propósito: SSO y verificación de email.

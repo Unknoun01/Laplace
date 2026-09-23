@@ -404,6 +404,52 @@ def _build_span(proto_span: Any, project_id: str, resource: dict[str, Any], pric
     )
 
 
+def _coste(prices: Any, model: str | None, usage: TokenUsage, tier: str, region: str) -> Cost:
+    """El coste de una llamada. Lo usan la ingesta y el recálculo, y es el mismo."""
+    breakdown = prices.compute(
+        model,
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        cached_input_tokens=usage.cached_input_tokens,
+        cache_write_tokens=usage.cache_write_tokens,
+        cache_write_1h_tokens=usage.cache_write_1h_tokens,
+        tier=tier,
+        region=region,
+    )
+    return Cost(
+        input_usd=breakdown.input_usd,
+        output_usd=breakdown.output_usd,
+        total_usd=breakdown.total_usd,
+        cache_read_usd=breakdown.cache_read_usd,
+        cache_write_usd=breakdown.cache_write_usd,
+        cache_saving_usd=breakdown.cache_saving_usd,
+        unknown=breakdown.unknown,
+        rate_assumed=breakdown.assumed,
+        rate_note=breakdown.note,
+        rate=breakdown.rate,
+    )
+
+
+def recalcular_coste(span: Span, prices: Any) -> Span:
+    """El mismo span con el coste calculado otra vez contra la tabla en vigor.
+
+    Existe para las tarifas propias (D-123): el coste se calcula en la ingesta, así que
+    un precio añadido después no alcanzaba a lo ya guardado y el modelo seguía saliendo
+    como «no lo sabemos» en todo el histórico.
+    """
+    if span.llm is None:
+        return span
+    llm = span.llm
+    coste = _coste(
+        prices,
+        llm.response_model or llm.request_model,
+        llm.usage,
+        llm.billing_tier,
+        llm.billing_region,
+    )
+    return span.model_copy(update={"llm": llm.model_copy(update={"cost": coste})})
+
+
 def _build_llm(attrs: dict[str, Any], prices: Any) -> LLMAttributes:
     usage = TokenUsage(
         input_tokens=int(attrs.get(semconv.GEN_AI_USAGE_INPUT_TOKENS) or 0),
@@ -421,16 +467,7 @@ def _build_llm(attrs: dict[str, Any], prices: Any) -> LLMAttributes:
     tier = str(attrs.get(semconv.LAPLACE_BILLING_TIER) or "standard")
     region = str(attrs.get(semconv.LAPLACE_BILLING_REGION) or "global")
 
-    breakdown = prices.compute(
-        response_model or request_model,
-        input_tokens=usage.input_tokens,
-        output_tokens=usage.output_tokens,
-        cached_input_tokens=usage.cached_input_tokens,
-        cache_write_tokens=usage.cache_write_tokens,
-        cache_write_1h_tokens=usage.cache_write_1h_tokens,
-        tier=tier,
-        region=region,
-    )
+    coste = _coste(prices, response_model or request_model, usage, tier, region)
 
     params = {
         key.rsplit(".", 1)[-1]: value
@@ -451,18 +488,7 @@ def _build_llm(attrs: dict[str, Any], prices: Any) -> LLMAttributes:
         billing_tier=tier,
         billing_region=region,
         usage=usage,
-        cost=Cost(
-            input_usd=breakdown.input_usd,
-            output_usd=breakdown.output_usd,
-            total_usd=breakdown.total_usd,
-            cache_read_usd=breakdown.cache_read_usd,
-            cache_write_usd=breakdown.cache_write_usd,
-            cache_saving_usd=breakdown.cache_saving_usd,
-            unknown=breakdown.unknown,
-            rate_assumed=breakdown.assumed,
-            rate_note=breakdown.note,
-            rate=breakdown.rate,
-        ),
+        cost=coste,
         input_messages=_as_message_list(attrs.get(semconv.GEN_AI_INPUT_MESSAGES)),
         output_messages=_as_message_list(attrs.get(semconv.GEN_AI_OUTPUT_MESSAGES)),
         params=params,

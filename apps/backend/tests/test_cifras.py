@@ -130,3 +130,13 @@ def test_la_web_no_puede_volver_al_punto_decimal_ingles():
         "`toFixed` con decimales escribe siempre el punto decimal inglés, sea cual sea "
         f"el idioma de la página: es el patrón que creó el problema. {culpables}"
     )
+
+
+def test_identificador_quita_el_llamante_y_la_pista():
+    """El nombre de un paso en código no lleva la decoración del título."""
+    from laplace_backend.pasos import identificador
+
+    assert identificador("agente_de_equipaje → consultar_manual") == "consultar_manual"
+    assert identificador("responder — «Responde usando el manual…»") == "responder"
+    assert identificador("buscar_vuelos") == "buscar_vuelos"
+    assert identificador("") == "paso"

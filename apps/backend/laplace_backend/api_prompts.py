@@ -64,7 +64,10 @@ def _alcance(request: Request) -> str | None:
     otro sitio. Es el patrón de lectura de D-097 aplicado también a la escritura, y al
     id opaco que el middleware no puede ver (D-121).
     """
-    return identity_of(request).scope(None)
+    # Con cuentas, una identidad tiene varios proyectos y «el suyo» ya no es uno: el
+    # proyecto viene en la petición, y el middleware ya ha comprobado que puede tocarlo
+    # (D-127). Sin él, lo de siempre.
+    return identity_of(request).scope(request.query_params.get("project_id"))
 
 
 def _window(days: int) -> Window:

@@ -6,10 +6,11 @@ import { Suspense, useEffect, useState } from "react";
 import { TraceTree } from "@/components/TraceTree";
 import { Verdicts } from "@/components/Verdicts";
 import { BackendDown, NeedsKey, NotFound, NotYours, TableSkeleton } from "@/components/states";
-import { getTrace, judgePrompt, judgeStatus, parseDays, runJudge } from "@/lib/api";
+import { getOverview, getTrace, judgePrompt, judgeStatus, parseDays, runJudge } from "@/lib/api";
 import { duration, money, number, timestamp } from "@/lib/format";
 import { allNodes } from "@/lib/tree";
-import type { Annotation, JudgeStatus, Trace, TraceSummary } from "@/lib/types";
+import type { Annotation, Finding, JudgeStatus, Trace, TraceSummary } from "@/lib/types";
+import { useTitulo } from "@/lib/titulo";
 import { useApi } from "@/lib/useApi";
 
 /**
@@ -23,7 +24,15 @@ function Contenido() {
   const days = parseDays(params.get("days") ?? undefined);
   const proyecto = params.get("project") ?? "";
 
-  const estado = useApi(() => getTrace(traceId, proyecto || undefined), [traceId, proyecto]);
+  const estado = useApi(async () => {
+    const trace = await getTrace(traceId, proyecto || undefined);
+    // Los problemas del proyecto, para decir cuáles pasan en esta ejecución. Si fallan,
+    // la traza se enseña igual: es un añadido, no lo que se ha venido a ver.
+    const project = proyecto || trace?.summary.project_id || "";
+    const overview = trace && project ? await getOverview(project, days).catch(() => null) : null;
+    return { trace, findings: [...(overview?.findings ?? []), ...(overview?.set_aside ?? [])] };
+  }, [traceId, proyecto, days]);
+  useTitulo(estado.fase === "listo" ? estado.datos.trace?.summary.root_name : null);
 
   if (estado.fase === "cargando") return <TableSkeleton />;
   if (estado.fase === "sin-backend") return <BackendDown />;
@@ -31,7 +40,7 @@ function Contenido() {
   if (estado.fase === "sin-permiso") return <NotYours mensaje={estado.error.message} />;
   if (estado.fase === "error") return <BackendDown mensaje={estado.error.message} />;
 
-  const trace = estado.datos;
+  const { trace, findings } = estado.datos;
   const project = proyecto || trace?.summary.project_id || "";
   const context = `project=${encodeURIComponent(project)}&days=${days}`;
 
@@ -45,9 +54,7 @@ function Contenido() {
     );
   }
 
-  // Si esta ejecución repite pasos, enlazamos al problema que los explica.
-  const looping = allNodes(trace.roots).find((node) => node.repeat_count >= 3);
-  const findingId = looping ? `repeticion:${looping.span.step_key}` : null;
+  const aqui = problemasDeLaTraza(trace, findings);
 
   return (
     <main>
@@ -68,30 +75,30 @@ function Contenido() {
 
       <Anotar project={project} trace={trace} />
 
-      {(findingId || trace.diagnosis) && (
-        <div
-          style={{
-            border: "1px solid #33407a",
-            background: "#111631",
-            borderRadius: "var(--r)",
-            padding: "12px 16px",
-            marginBottom: 16,
-            fontSize: 14,
-          }}
-        >
-          {trace.diagnosis ? (
-            <>
-              <strong>{trace.diagnosis.cause}</strong>
-              {trace.diagnosis.suggestion && <> — {trace.diagnosis.suggestion}</>}
-            </>
-          ) : (
-            <>
-              Esta ejecución repite pasos con la misma entrada.{" "}
-              <Link href={`/problema?${context}&id=${encodeURIComponent(findingId!)}`}>
-                Ver qué cuesta y cómo arreglarlo →
-              </Link>
-            </>
-          )}
+      {trace.diagnosis && (
+        <div className="en-esta-traza">
+          <strong>{trace.diagnosis.cause}</strong>
+          {trace.diagnosis.suggestion && <> — {trace.diagnosis.suggestion}</>}
+        </div>
+      )}
+
+      {aqui.length > 0 && (
+        <div className="en-esta-traza">
+          <strong>
+            {aqui.length === 1
+              ? "En esta ejecución pasa un problema detectado:"
+              : `En esta ejecución pasan ${aqui.length} problemas detectados:`}
+          </strong>
+          <ul>
+            {aqui.map((f) => (
+              <li key={f.id}>
+                <Link href={`/problema?${context}&id=${encodeURIComponent(f.id)}`}>
+                  {f.title} →
+                </Link>
+                {f.state && <span className="muted"> · {f.state === "ignorado" ? "ignorado" : f.state === "reaparecido" ? "marcado como arreglado, pero sigue" : "marcado como arreglado"}</span>}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -102,6 +109,26 @@ function Contenido() {
       </div>
     </main>
   );
+}
+
+/**
+ * Qué problemas del proyecto pasan en esta ejecución (D-123).
+ *
+ * Antes sólo se enlazaba la repetición, adivinando su identificador; un bucle o un
+ * modelo caro en esta misma traza no se decía. Ahora se cruza por `step_key`, que es la
+ * misma identidad con la que la ficha filtra sus trazas. Una repetición o un bucle sólo
+ * cuentan si el paso sale más de una vez aquí: pasar por él una vez no es repetirlo.
+ */
+function problemasDeLaTraza(trace: Trace, findings: Finding[]): Finding[] {
+  const veces = new Map<string, number>();
+  for (const node of allNodes(trace.roots)) {
+    const clave = node.span.step_key || node.span.name;
+    veces.set(clave, (veces.get(clave) ?? 0) + 1);
+  }
+  return findings.filter((f) => {
+    const n = veces.get(f.step_key) ?? 0;
+    return f.kind === "repeticion" || f.kind === "bucle" ? n >= 2 : n >= 1;
+  });
 }
 
 /**

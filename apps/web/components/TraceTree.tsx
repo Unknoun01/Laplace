@@ -228,10 +228,10 @@ function SpanPanel({ node }: { node: TraceTreeNode }) {
             style={{
               margin: "0 0 14px",
               padding: "9px 12px",
-              border: "1px solid #5c2f35",
-              background: "#1d0f11",
+              border: "1px solid var(--rose-line)",
+              background: "var(--rose-bg)",
               borderRadius: "var(--r)",
-              color: "#f0b8bd",
+              color: "var(--rose-ink)",
               fontSize: 14,
             }}
           >

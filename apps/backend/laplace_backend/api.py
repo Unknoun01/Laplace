@@ -18,6 +18,7 @@ from .insights import detail as finding_detail
 from .panel import Panel
 from .panel import build as build_panel
 from .pricing import get_price_table, reload_price_table
+from .seguimiento import aplicar_estados, leer_estados
 from .storage.base import TraceFilter, Window, decode_cursor
 from .tree import build_tree, summarize
 
@@ -119,6 +120,8 @@ async def list_traces(
     session_id: str | None = None,
     user_id: str | None = None,
     search: str | None = None,
+    #: Identidad exacta de un paso: la que trae cada hallazgo en `step_key`.
+    step_key: str | None = None,
     span_type: str | None = None,
     sort: str = Query("recent", pattern="^(recent|cost|duration)$"),
     #: Filtros que sólo ofrece el modo avanzado del explorador.
@@ -142,6 +145,7 @@ async def list_traces(
         session_id=session_id,
         user_id=user_id,
         search=search,
+        step_key=step_key,
         span_type=span_type,
         sort=sort,
         model=model,
@@ -210,8 +214,15 @@ async def get_overview(
     # defecto suyo: es que no usa esa parte. La señal se enseña igual pero no pinta de
     # rojo ni cuenta para el veredicto, y eso hay que saberlo aquí (D-096).
     gestiona = bool(await run_in_threadpool(_metadata(request).list_prompts, project_id))
+    estados = await run_in_threadpool(leer_estados, _metadata(request), project_id)
     return await run_in_threadpool(
-        overview, _store(request), project_id, _window(days), has_managed_prompts=gestiona
+        lambda: overview(
+            _store(request),
+            project_id,
+            _window(days),
+            has_managed_prompts=gestiona,
+            states=estados,
+        )
     )
 
 
@@ -233,6 +244,13 @@ async def get_finding(
     )
     if found is None:
         raise HTTPException(status_code=404, detail="ese problema ya no aparece en esta ventana")
+    # El estado que le haya puesto el usuario, con su comprobación si lo marcó como
+    # arreglado: la ficha es donde se lee si el arreglo ha servido (D-123).
+    estados = await run_in_threadpool(leer_estados, _metadata(request), project_id)
+    if finding_id in estados:
+        await run_in_threadpool(
+            aplicar_estados, _store(request), project_id, [found], estados
+        )
     return found
 
 
@@ -292,21 +310,21 @@ async def alerts_status(
     salte la primera alerta es enseñarle la decisión que se tomaría.
     """
     runner = getattr(request.app.state, "alerts", None)
-    if runner is None:
-        return {
-            "enabled": False,
-            "detail": (
-                "Las alertas están apagadas. Enciéndelas con LAPLACE_ALERTS_ENABLED=true "
-                "y LAPLACE_ALERTS_SLACK_WEBHOOK con tu webhook entrante de Slack."
-            ),
-            "projects": [],
-        }
-
     proyectos = (
         [project_id]
         if project_id
         else [p.project_id for p in await run_in_threadpool(_store(request).list_projects)]
     )
+    if runner is None or not any(runner.config_for(pid).enabled for pid in proyectos):
+        return {
+            "enabled": False,
+            "detail": (
+                "Las alertas están apagadas. Pon un canal en Ajustes, o enciéndelas para "
+                "toda la instalación con LAPLACE_ALERTS_ENABLED=true y "
+                "LAPLACE_ALERTS_SLACK_WEBHOOK con tu webhook entrante de Slack."
+            ),
+            "projects": [],
+        }
 
     salida = []
     for pid in proyectos:

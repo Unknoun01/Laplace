@@ -309,6 +309,9 @@ class TraceSummary(_Model):
 
     session_id: str | None = None
     user_id: str | None = None
+    #: Lo que le pidieron al agente, en una línea: la entrada del span raíz. Sin esto
+    #: la lista eran doce filas con el mismo nombre de agente y un hash (D-125).
+    input_preview: str = ""
 
 
 # ---------------------------------------------------------------------------------

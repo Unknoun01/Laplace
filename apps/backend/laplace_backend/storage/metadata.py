@@ -135,6 +135,18 @@ class MetadataStore(Protocol):
 
     def revoke_api_key(self, key_id: str) -> bool: ...
 
+    # -- ajustes por proyecto -----------------------------------------------------------
+
+    def get_setting(self, project_id: str, key: str) -> dict[str, Any] | None: ...
+
+    def set_setting(self, project_id: str, key: str, value: dict[str, Any]) -> None: ...
+
+    def list_settings(self, project_id: str, prefix: str = "") -> dict[str, dict[str, Any]]: ...
+
+    def delete_setting(self, project_id: str, key: str) -> bool: ...
+
+    def delete_project_data(self, project_id: str) -> None: ...
+
 
 # ---------------------------------------------------------------------------------
 # Traducción de filas, compartida por los dos almacenes
@@ -415,11 +427,47 @@ CREATE TABLE IF NOT EXISTS api_keys (
     key_hash    TEXT NOT NULL UNIQUE,
     name        TEXT NOT NULL DEFAULT '',
     created_at  TEXT NOT NULL,
-    revoked_at  TEXT
+    revoked_at  TEXT,
+    -- Caducidad, último uso y autor (D-127). NULL en las claves de antes, que no caducan.
+    expires_at  TEXT,
+    last_used_at TEXT,
+    created_by  TEXT
 );
 
 CREATE INDEX IF NOT EXISTS api_keys_project_idx ON api_keys (project_id);
+
+-- Ajustes por proyecto, clave → JSON: el estado de cada hallazgo, el presupuesto, las
+-- alertas configuradas desde la interfaz y las tarifas propias (D-123). Una tabla y no
+-- cinco porque ninguno de ellos se consulta por nada que no sea su clave, y cada tabla
+-- nueva son tres implementaciones que mantener.
+-- `project_id` es '*' para lo que vale para toda la instalación.
+CREATE TABLE IF NOT EXISTS settings (
+    project_id  TEXT NOT NULL,
+    key         TEXT NOT NULL,
+    value       TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (project_id, key)
+);
 """
+
+
+#: Lo que se borra al borrar un proyecto, hijos primero (D-123).
+_BORRAR_PROYECTO_SQLITE = (
+    "DELETE FROM dataset_items WHERE dataset_id IN "
+    "(SELECT id FROM datasets WHERE project_id = ?)",
+    "DELETE FROM eval_run_items WHERE run_id IN "
+    "(SELECT id FROM eval_runs WHERE project_id = ?)",
+    "DELETE FROM prompt_versions WHERE prompt_id IN "
+    "(SELECT id FROM prompts WHERE project_id = ?)",
+    "DELETE FROM prompt_deploys WHERE prompt_id IN "
+    "(SELECT id FROM prompts WHERE project_id = ?)",
+    "DELETE FROM annotations WHERE project_id = ?",
+    "DELETE FROM datasets WHERE project_id = ?",
+    "DELETE FROM eval_runs WHERE project_id = ?",
+    "DELETE FROM prompts WHERE project_id = ?",
+    "DELETE FROM settings WHERE project_id = ?",
+    "DELETE FROM api_keys WHERE project_id = ?",
+)
 
 
 class SQLiteMetadataStore:
@@ -443,6 +491,12 @@ class SQLiteMetadataStore:
     def migrate(self) -> None:
         with self._conn() as conn:
             conn.executescript(_SQLITE_SCHEMA)
+            # Ficheros de antes de D-127: `CREATE TABLE IF NOT EXISTS` no añade columnas.
+            for columna in ("expires_at", "last_used_at", "created_by"):
+                try:
+                    conn.execute(f"ALTER TABLE api_keys ADD COLUMN {columna} TEXT")
+                except sqlite3.OperationalError:
+                    pass
 
     def health(self) -> bool:
         try:
@@ -899,7 +953,7 @@ class SQLiteMetadataStore:
     def api_key_by_hash(self, key_hash: str) -> dict[str, Any] | None:
         with self._conn() as conn:
             fila = conn.execute(
-                "SELECT id, project_id, name, created_at, revoked_at FROM api_keys "
+                "SELECT id, project_id, name, created_at, revoked_at, expires_at FROM api_keys "
                 "WHERE key_hash = ?",
                 (key_hash,),
             ).fetchone()
@@ -931,6 +985,50 @@ class SQLiteMetadataStore:
                 (_now().isoformat(), key_id),
             )
             return cur.rowcount > 0
+
+    # -- ajustes por proyecto -------------------------------------------------------------
+
+    def get_setting(self, project_id: str, key: str) -> dict[str, Any] | None:
+        with self._conn() as conn:
+            fila = conn.execute(
+                "SELECT value FROM settings WHERE project_id = ? AND key = ?",
+                (project_id, key),
+            ).fetchone()
+        return _loads(fila["value"]) if fila else None
+
+    def set_setting(self, project_id: str, key: str, value: dict[str, Any]) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO settings (project_id, key, value, updated_at) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT (project_id, key) "
+                "DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                (project_id, key, json.dumps(value, ensure_ascii=False), _now().isoformat()),
+            )
+
+    def list_settings(self, project_id: str, prefix: str = "") -> dict[str, dict[str, Any]]:
+        with self._conn() as conn:
+            filas = conn.execute(
+                "SELECT key, value FROM settings WHERE project_id = ? AND substr(key, 1, ?) = ? "
+                "ORDER BY key",
+                (project_id, len(prefix), prefix),
+            ).fetchall()
+        return {f["key"]: _loads(f["value"]) for f in filas}
+
+    def delete_setting(self, project_id: str, key: str) -> bool:
+        with self._conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM settings WHERE project_id = ? AND key = ?", (project_id, key)
+            )
+            return cur.rowcount > 0
+
+    def delete_project_data(self, project_id: str) -> None:
+        """Todo lo mutable de un proyecto. Los hijos antes que los padres."""
+        with self._conn() as conn:
+            conn.execute("BEGIN")
+            for sql in _BORRAR_PROYECTO_SQLITE:
+                conn.execute(sql, (project_id,))
+            conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+            conn.execute("COMMIT")
 
 
 def _dataset_from_row(r: Any) -> Dataset:
@@ -1091,6 +1189,21 @@ class NullMetadataStore:
 
     def revoke_api_key(self, key_id: str) -> bool:
         raise MetadataUnavailable("no hay base de metadatos")
+
+    def get_setting(self, project_id: str, key: str) -> dict[str, Any] | None:
+        return None
+
+    def set_setting(self, project_id: str, key: str, value: dict[str, Any]) -> None:
+        raise MetadataUnavailable("no hay base de metadatos: el ajuste no se ha guardado")
+
+    def list_settings(self, project_id: str, prefix: str = "") -> dict[str, dict[str, Any]]:
+        return {}
+
+    def delete_setting(self, project_id: str, key: str) -> bool:
+        raise MetadataUnavailable("no hay base de metadatos")
+
+    def delete_project_data(self, project_id: str) -> None:
+        return None
 
 
 class MetadataUnavailable(RuntimeError):

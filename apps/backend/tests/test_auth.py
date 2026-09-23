@@ -445,6 +445,34 @@ def test_la_clave_de_instalacion_si_recarga_los_precios(cerrado):
     assert respuesta.json()["models"] > 0
 
 
+def test_la_clave_de_un_proyecto_no_pone_tarifas_ni_carga_la_demo(cerrado):
+    """Una tarifa propia cambia el coste de todos los proyectos, y la demo mete datos en
+    la instalación: las dos son del operador, como recargar la tabla (D-123)."""
+    client, claves = cerrado
+    precio = client.put(
+        "/api/pricing/custom",
+        json={"model": "x", "input": 1, "output": 1},
+        headers=_cab(claves, "mio"),
+    )
+    assert precio.status_code == 403
+    assert client.post("/api/demo", headers=_cab(claves, "mio")).status_code == 403
+
+
+def test_con_mi_clave_no_toco_los_ajustes_de_otro(cerrado):
+    """Presupuesto, alertas y estados llevan proyecto: el middleware los acota."""
+    client, claves = cerrado
+    r = client.put(
+        "/api/budget", json={"project_id": "ajeno", "monthly_limit": 1}, headers=_cab(claves, "mio")
+    )
+    assert r.status_code == 403
+    r = client.delete(
+        "/api/projects",
+        params={"project_id": "ajeno", "confirm": "ajeno"},
+        headers=_cab(claves, "mio"),
+    )
+    assert r.status_code == 403
+
+
 def test_leer_los_precios_lo_puede_hacer_cualquiera_con_clave(cerrado):
     """Leer la tabla no es lo mismo que recargarla: son los precios públicos de los
     proveedores, y la interfaz de cualquier proyecto los necesita para explicarse."""
@@ -464,10 +492,10 @@ def test_ninguna_ruta_de_escritura_se_queda_sin_acotar():
     """
     import inspect
 
-    from laplace_backend import api, api_evals, api_prompts
+    from laplace_backend import api, api_ajustes, api_cuentas, api_evals, api_prompts
 
     sin_acotar: list[str] = []
-    for modulo in (api, api_evals, api_prompts):
+    for modulo in (api, api_evals, api_prompts, api_ajustes, api_cuentas):
         for ruta in modulo.router.routes:
             if not set(getattr(ruta, "methods", set())) & {"POST", "PUT", "PATCH", "DELETE"}:
                 continue
@@ -481,6 +509,10 @@ def test_ninguna_ruta_de_escritura_se_queda_sin_acotar():
                 or "project_id" in fuente
                 or "_alcance(request)" in fuente
                 or "sees_everything" in fuente
+                # Las de la organización comprueban el rol en esa organización (D-127);
+                # las de entrar las atiende el middleware como anónimas a propósito.
+                or "_exigir_org" in fuente
+                or ruta.path.startswith("/api/auth/")
             )
             if not acotada:
                 sin_acotar.append(f"{modulo.__name__}.{ruta.endpoint.__name__} {ruta.path}")
