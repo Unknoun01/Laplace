@@ -50,6 +50,10 @@ logger = logging.getLogger("laplace")
 #: compromiso: un rollback tarda como mucho eso en llegar a un proceso vivo, y un
 #: agente con tráfico no castiga al backend con una petición por llamada.
 DEFAULT_TTL_SECONDS = 60.0
+#: Lo que espera `get_prompt()` a Laplace antes de servir la copia guardada o la reserva.
+#: Va en el camino de cada petición del agente: con los 30 s genéricos del cliente, un
+#: Laplace colgado añadía medio minuto a cada fallo de caché del producto de otro.
+FETCH_TIMEOUT_SECONDS = 5.0
 
 #: Cuántos textos servidos se recuerdan para atribuir una llamada. Son los últimos de
 #: este contexto: un agente que use más de ocho prompts distintos en un mismo paso está
@@ -246,7 +250,7 @@ def get_prompt(
         consulta = f"project_id={quote(project_id)}&name={quote(name)}"
         if version:
             consulta += f"&version={int(version)}"
-        datos = request(f"{base}/api/prompts/resolve?{consulta}")
+        datos = request(f"{base}/api/prompts/resolve?{consulta}", timeout=FETCH_TIMEOUT_SECONDS)
     except LaplaceHTTPError as exc:
         return _degrade(clave, name, fallback, exc)
 

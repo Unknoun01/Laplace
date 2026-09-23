@@ -2022,3 +2022,47 @@ actualizaba. Los tres tienen prueba.
 `keys.py` decía que no debía existir un endpoint que emitiera credenciales porque la
 primera tenía que salir de algún sitio. Ahora sale del código de configuración, y crear
 claves pide sesión de admin. Queda fuera, a propósito: SSO y verificación de email.
+
+### D-128 — La auditoría de septiembre: nueve costuras, y una red por cada una
+Una auditoría de todo el código encontró nueve fallos críticos. Ninguno estaba en lo que
+las pruebas recorrían; todos, en lo que quedaba entre dos piezas. Se arreglan juntos y
+cada uno deja su prueba en `test_auditoria_p1.py`, escrita como el ataque que era.
+
+* **Fugas entre proyectos.** `/api/alerts` sin `project_id` listaba todos los proyectos de
+  la instalación. Y lo que se pide por id —conjuntos, tiradas, anotaciones— no se
+  comprobaba contra la identidad: con un id ajeno se leían casos de otro cliente, se
+  comparaban sus tiradas o se colgaban veredictos de sus trazas (pisando el suyo, porque
+  la anotación se reescribe por traza, fuente y autor). Regla: **lo que se busca por id se
+  compara con la identidad, y si no es suyo contesta 404**, como si no existiera.
+* **Una clave de proyecto no gobierna el proyecto.** `_check_role` sólo miraba a las
+  personas, así que la clave de ingesta —la que vive en el entorno de los agentes, que es
+  donde se filtra— podía borrar el proyecto o mandar sus alertas a otro sitio. Lo de admin
+  pide ahora una persona con ese rol o la clave de instalación. Anotar y escribir datos,
+  no: eso sigue siendo cosa de la clave.
+* **La nube reventaba en cuatro rutas.** Postgres y el almacén nulo no aceptaban el
+  alcance que las rutas les pasan desde D-121 (`get_prompt(id, proyecto)` y compañía):
+  `TypeError` en la ficha de un prompt, al desplegar, al borrar. Las rutas se prueban
+  contra SQLite y nadie lo vio. La red es una prueba que compara la firma de cada método
+  del protocolo en las tres implementaciones.
+* **Un Postgres lento al arrancar dejaba la instalación muerta.** Se instalaba el almacén
+  nulo para siempre, y como el nulo no puede verificar claves, todo —la ingesta incluida—
+  era 503 hasta reiniciar. Ahora se queda el de Postgres, que se recupera solo, y las
+  migraciones, las tarifas y las cuentas se reintentan en segundo plano.
+* **El SDK no mandaba la clave** al pedir prompts ni al registrar tiradas. En la nube,
+  `get_prompt()` servía en silencio el texto de reserva. Ahora manda las mismas cabeceras
+  que el exportador de spans, y espera 5 s y no 30: va en el camino de cada petición.
+* **Sin tope al tamaño de lo que entra.** Ni el cuerpo ni el gzip descomprimido tenían
+  límite, y el proceso es de todos. `LAPLACE_MAX_BODY_MB` (32 por defecto) se aplica en un
+  middleware ASGI que corta antes de que nadie lea, y el gzip se descomprime con tope.
+* **SSRF por el webhook de alertas.** Cualquier https valía, y las redirecciones se
+  seguían. Ahora el host tiene que ser público al guardar y resolver a direcciones
+  públicas al enviar, y una redirección no se sigue. En local sigue valiendo la propia
+  máquina. Queda, anotada, la ventana entre resolver y conectar.
+* **`X-Forwarded-For` se creía siempre**, y el freno de intentos por IP no frenaba. Sólo
+  se cree a los proxies de `LAPLACE_TRUSTED_PROXIES` (IP, rango o nombre: en compose es
+  `web`, que es por donde entra la interfaz). Aceptar una invitación con una cuenta que ya
+  existe prueba una contraseña, y ahora lleva el mismo freno que entrar.
+
+La lectura de conjunto es la de siempre en este proyecto: la regla no se cumple porque se
+recuerde. La comprobación de rutas nuevas ya existía (D-097); faltaba la misma idea para
+la propiedad de los objetos y para la paridad de los almacenes.

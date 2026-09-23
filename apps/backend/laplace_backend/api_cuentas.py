@@ -48,11 +48,57 @@ def _cuentas(request: Request) -> Any:
     return cuentas
 
 
+def es_proxy_de_confianza(ip: str, confiables: frozenset[str]) -> bool:
+    """Si `ip` es uno de los proxies declarados: una IP, un rango CIDR o un nombre.
+
+    El nombre sirve para `docker compose`, donde la IP del contenedor `web` cambia en
+    cada arranque pero su nombre no. Se resuelve en cada consulta: sólo se pregunta al
+    entrar, aceptar una invitación o anotar en la auditoría, no en cada petición.
+    """
+    import ipaddress
+    import socket
+
+    try:
+        direccion = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    for entrada in confiables:
+        try:
+            if direccion in ipaddress.ip_network(entrada, strict=False):
+                return True
+            continue
+        except ValueError:
+            pass
+        try:
+            resueltas = {i[4][0] for i in socket.getaddrinfo(entrada, None)}
+        except OSError:
+            continue
+        if ip in resueltas:
+            return True
+    return False
+
+
+def _por_proxy(request: Request) -> bool:
+    """Si la conexión viene de un proxy declarado en `LAPLACE_TRUSTED_PROXIES`.
+
+    Sólo entonces se cree a las cabeceras `X-Forwarded-*`. Antes se creían siempre, y
+    cualquiera podía poner una IP distinta en cada intento: el freno por IP no frenaba y
+    la auditoría apuntaba la IP que el atacante quisiera.
+    """
+    directa = request.client.host if request.client else ""
+    confiables = request.app.state.settings.trusted_proxy_list
+    return bool(directa and confiables) and es_proxy_de_confianza(directa, confiables)
+
+
 def _ip(request: Request) -> str:
-    reenviada = request.headers.get("x-forwarded-for", "")
-    return (reenviada.split(",")[0].strip() if reenviada else "") or (
-        request.client.host if request.client else ""
-    )
+    directa = request.client.host if request.client else ""
+    if not _por_proxy(request):
+        return directa
+    # El último salto es el que añadió nuestro proxy; los anteriores los pone el cliente
+    # y pueden ser cualquier cosa.
+    saltos = [h.strip() for h in request.headers.get("x-forwarded-for", "").split(",")]
+    saltos = [h for h in saltos if h]
+    return saltos[-1] if saltos else directa
 
 
 def _local(request: Request) -> bool:
@@ -61,7 +107,7 @@ def _local(request: Request) -> bool:
 
 def _poner_cookie(request: Request, response: Response, token: str) -> None:
     segura = request.url.scheme == "https" or (
-        request.headers.get("x-forwarded-proto", "") == "https"
+        _por_proxy(request) and request.headers.get("x-forwarded-proto", "") == "https"
     )
     response.set_cookie(
         COOKIE,
@@ -310,8 +356,18 @@ async def accept(request: Request, response: Response, body: AcceptIn) -> dict[s
 
     existente = await run_in_threadpool(cuentas.usuario_por_email, info["email"])
     if existente is not None:
+        # Aquí también se prueba una contraseña, así que lleva el mismo freno que entrar:
+        # sin él, un enlace de invitación era un sitio donde probarlas sin límite.
+        frenos = request.app.state.frenos
+        claves = (f"email:{info['email']}", f"ip:{_ip(request)}")
+        if frenos.bloqueado(*claves):
+            raise HTTPException(
+                status_code=429,
+                detail="demasiados intentos fallidos. Espera un cuarto de hora y vuelve a probar",
+            )
         usuario, guardado = existente
-        if not comprobar_contrasena(body.password, guardado):
+        if not await run_in_threadpool(comprobar_contrasena, body.password, guardado):
+            frenos.fallo(*claves)
             raise HTTPException(status_code=403, detail="la contraseña de tu cuenta no es ésa")
     else:
         motivo = validar_contrasena(body.password)

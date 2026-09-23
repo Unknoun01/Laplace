@@ -56,6 +56,13 @@ services:
       LAPLACE_CLICKHOUSE_DATABASE: laplace
       LAPLACE_POSTGRES_DSN: postgresql://laplace:laplace@postgres:5432/laplace
       LAPLACE_CORS_ORIGINS: http://localhost:3000
+      # La interfaz llega al backend a través de Next (contenedor `web`), así que la IP
+      # de quien entra viene en X-Forwarded-For. Sólo se cree a ese contenedor: sin esto,
+      # todos los usuarios compartirían la IP de `web` y el freno de intentos por IP.
+      # Si pones otro proxy delante (nginx, un balanceador), añádelo aquí.
+      LAPLACE_TRUSTED_PROXIES: "${LAPLACE_TRUSTED_PROXIES:-web}"
+      # Tope de una petición, en MiB. Un lote OTLP normal son unos pocos megas.
+      LAPLACE_MAX_BODY_MB: "${LAPLACE_MAX_BODY_MB:-32}"
       # Autenticacion. En la nube se exige clave por defecto; esto solo existe para
       # poder quitarla a sabiendas en una maquina de pruebas, y el log lo grita cuando
       # esta desactivada (D-097). Las claves se crean con:

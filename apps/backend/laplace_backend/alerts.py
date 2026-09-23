@@ -22,9 +22,11 @@ sitio —SQLite en local, Postgres en la nube—, exactamente como el resto del 
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import logging
 import smtplib
+import socket
 import sqlite3
 import urllib.error
 import urllib.request
@@ -603,7 +605,7 @@ class SlackNotifier:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(peticion, timeout=self._timeout) as respuesta:  # noqa: S310
+            with _SIN_REDIRECCIONES.open(peticion, timeout=self._timeout) as respuesta:
                 return 200 <= respuesta.status < 300
         except urllib.error.URLError as exc:
             logger.warning("no se ha podido avisar a Slack: %s", exc)
@@ -617,12 +619,16 @@ class WebhookNotifier:
     redactado y el proyecto, que es lo mínimo para enrutarlo al otro lado.
     """
 
-    def __init__(self, timeout: float = 10.0) -> None:
+    def __init__(self, timeout: float = 10.0, *, permitir_local: bool = False) -> None:
         self._timeout = timeout
+        #: Sólo en modo local: ahí el webhook de un n8n en el portátil es legítimo, y
+        #: la máquina es de quien lo configura.
+        self._permitir_local = permitir_local
 
     def send(self, url: str, text: str, project_id: str) -> bool:
-        if not webhook_valido(url):
-            logger.error("el webhook no es https ni apunta a esta máquina; no se manda nada")
+        motivo = destino_inseguro(url, permitir_local=self._permitir_local)
+        if motivo:
+            logger.error("webhook de %s rechazado, no se manda nada: %s", project_id, motivo)
             return False
         cuerpo = json.dumps(
             {"text": text, "content": text, "project": project_id, "source": "laplace"},
@@ -632,22 +638,102 @@ class WebhookNotifier:
             url, data=cuerpo, headers={"Content-Type": "application/json"}, method="POST"
         )
         try:
-            with urllib.request.urlopen(peticion, timeout=self._timeout) as respuesta:  # noqa: S310
+            with _SIN_REDIRECCIONES.open(peticion, timeout=self._timeout) as respuesta:
                 return 200 <= respuesta.status < 300
         except urllib.error.URLError as exc:
             logger.warning("no se ha podido avisar al webhook: %s", exc)
             return False
 
 
-def webhook_valido(url: str) -> bool:
+# ---------------------------------------------------------------------------------
+# A dónde se puede mandar (SSRF)
+#
+# La URL de un webhook la pone quien administra un proyecto, y quien la usa es el
+# servidor, desde dentro de la red del despliegue. Sin comprobar, un webhook
+# `https://10.0.0.5/…`, `https://clickhouse/…` o uno público que redirige a
+# `http://169.254.169.254/…` convertía el botón de «probar» en una forma de tocar
+# servicios internos, con `delivered` de oráculo. Tres barreras:
+#
+# 1. Al guardar, sin red: https, con host, y que no sea una IP privada ni «localhost».
+# 2. Al enviar: el nombre se resuelve y **todas** sus direcciones tienen que ser
+#    públicas. Es lo que para a un nombre público que apunta a una IP interna.
+# 3. Las redirecciones no se siguen. Un webhook contesta; no manda a otro sitio.
+#
+# Queda la ventana entre resolver y conectar (DNS rebinding); cerrarla exige fijar la IP
+# en la conexión, y se anota como mejora.
+# ---------------------------------------------------------------------------------
+
+
+class _NoSeguirRedirecciones(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+        raise urllib.error.HTTPError(
+            req.full_url,
+            code,
+            f"el webhook redirige a otro sitio ({newurl}); no se sigue",
+            headers,
+            fp,
+        )
+
+
+_SIN_REDIRECCIONES = urllib.request.build_opener(_NoSeguirRedirecciones)
+
+_NOMBRES_LOCALES = ("localhost", "localhost.localdomain", "ip6-localhost")
+
+
+def _ip_literal(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    try:
+        return ipaddress.ip_address(host.strip("[]"))
+    except ValueError:
+        return None
+
+
+def _es_local(host: str) -> bool:
+    ip = _ip_literal(host)
+    return host.lower() in _NOMBRES_LOCALES or (ip is not None and ip.is_loopback)
+
+
+def webhook_valido(url: str, *, permitir_local: bool = False) -> bool:
+    """La comprobación de guardar: de forma, sin tocar la red.
+
+    En modo local se admite además `http(s)` contra la propia máquina. En la nube, sólo
+    https hacia un host que no sea, a la vista, interno.
+    """
     from urllib.parse import urlparse
 
     partes = urlparse(url)
-    if not partes.hostname:
+    host = partes.hostname or ""
+    if not host or partes.scheme not in ("http", "https"):
         return False
-    if partes.scheme == "https":
+    if permitir_local and _es_local(host):
         return True
-    return partes.scheme == "http" and partes.hostname in ("localhost", "127.0.0.1", "::1")
+    if partes.scheme != "https" or host.lower() in _NOMBRES_LOCALES:
+        return False
+    ip = _ip_literal(host)
+    return ip is None or ip.is_global
+
+
+def destino_inseguro(url: str, *, permitir_local: bool = False) -> str:
+    """El motivo por el que no se manda a esa URL, o cadena vacía si se puede.
+
+    Es la comprobación de enviar: repite la de forma y resuelve el nombre.
+    """
+    from urllib.parse import urlparse
+
+    if not webhook_valido(url, permitir_local=permitir_local):
+        return "tiene que ser https hacia un host público"
+    partes = urlparse(url)
+    host = partes.hostname or ""
+    if permitir_local and _es_local(host):
+        return ""
+    try:
+        infos = socket.getaddrinfo(host, partes.port or 443, proto=socket.IPPROTO_TCP)
+    except OSError as exc:
+        return f"no se puede resolver {host}: {exc}"
+    for info in infos:
+        ip = _ip_literal(str(info[4][0]).split("%")[0])
+        if ip is None or not ip.is_global:
+            return f"{host} resuelve a una dirección no pública ({info[4][0]})"
+    return ""
 
 
 class EmailNotifier:

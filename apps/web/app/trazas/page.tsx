@@ -468,13 +468,13 @@ function Listado({
   const idsPagina = page.traces.map((t) => t.trace_id).join(",");
   useEffect(() => {
     let vigente = true;
-    annotationsFor(idsPagina.split(",").filter(Boolean))
+    annotationsFor(idsPagina.split(",").filter(Boolean), project)
       .then((a) => vigente && setAnotaciones(a))
       .catch(() => undefined);
     return () => {
       vigente = false;
     };
-  }, [idsPagina]);
+  }, [idsPagina, project]);
   const activo = puedeVivir && enVivo;
   // Al pausar se dejan de pedir trazas, pero las que ya han llegado **se quedan**:
   // borrarlas al pausar castigaría justo al que ha visto algo y quiere mirarlo con

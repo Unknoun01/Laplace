@@ -214,12 +214,16 @@ async def put_alert_settings(request: Request, body: AlertSettingsIn) -> dict[st
     cambios = body.model_dump(exclude_unset=True, exclude={"project_id"})
     if "threshold" in cambios:
         cambios["min_usd"] = cambios.pop("threshold")
+    local = request.app.state.settings.store == "sqlite"
     for campo in ("webhook_url", "generic_webhook_url"):
         url = (cambios.get(campo) or "").strip()
-        if url and not webhook_valido(url):
+        if url and not webhook_valido(url, permitir_local=local):
             raise HTTPException(
                 status_code=400,
-                detail="el webhook tiene que ser https (o http contra esta misma máquina)",
+                detail=(
+                    "el webhook tiene que ser https hacia un host público"
+                    + (" (o contra esta misma máquina)" if local else "")
+                ),
             )
     if (cambios.get("webhook_url") or "").strip() and "slack.com" not in cambios["webhook_url"]:
         raise HTTPException(

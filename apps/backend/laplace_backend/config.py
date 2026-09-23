@@ -40,6 +40,17 @@ class Settings(BaseSettings):
 
     cors_origins: str = "http://localhost:3000"
 
+    #: Tamaño máximo de un cuerpo de petición, en MiB, tal como llega por el cable. Un
+    #: lote OTLP normal son unos pocos megas; sin tope, una sola petición podía llenar
+    #: la memoria del proceso que comparten todos los proyectos. Descomprimido se admite
+    #: hasta `OTLP_EXPANSION` veces esto (ver `ingest/otlp.py`).
+    max_body_mb: int = 32
+    #: Proxies de los que se cree `X-Forwarded-For` y `X-Forwarded-Proto`, separados por
+    #: comas: IPs, rangos CIDR o nombres de host (`web` en docker compose). Vacío: no se
+    #: cree a nadie y cuenta la IP de la conexión. Sin esto, cualquiera ponía la cabecera
+    #: y se saltaba el freno de intentos por IP.
+    trusted_proxies: str = ""
+
     #: Aplica las migraciones de ClickHouse y Postgres al arrancar. En un despliegue
     #: real esto lo haría un job aparte; con un solo proceso es más simple así.
     auto_migrate: bool = True
@@ -110,6 +121,14 @@ class Settings(BaseSettings):
         if elegido in ("false", "0", "no"):
             return False
         return self.store != "sqlite"
+
+    @property
+    def max_body_bytes(self) -> int:
+        return max(1, self.max_body_mb) * 1024 * 1024
+
+    @property
+    def trusted_proxy_list(self) -> frozenset[str]:
+        return frozenset(p.strip() for p in self.trusted_proxies.split(",") if p.strip())
 
     @property
     def cors_origin_list(self) -> list[str]:

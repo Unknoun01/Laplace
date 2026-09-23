@@ -363,11 +363,29 @@ class AuthMiddleware(BaseHTTPMiddleware):
         primer proyecto» es la forma de que un lector de A escriba en A porque es miembro
         de B.
         """
-        if not identidad.user_id or request.method not in _ESCRITURAS:
+        if request.method not in _ESCRITURAS:
             return
         # La organización no va por proyecto: sus rutas comprueban el rol en esa
         # organización con `_exigir_org` (api_cuentas.py).
         if request.url.path.startswith("/api/org"):
+            return
+        es_de_admin = any(
+            request.method == metodo and request.url.path.startswith(ruta)
+            for metodo, ruta in ADMIN_WRITES
+        )
+        if not identidad.user_id:
+            # Una clave de proyecto escribe datos —spans, anotaciones, tiradas—, pero no
+            # gobierna el proyecto. Esas claves viven en el entorno de los agentes de los
+            # clientes, que es donde se filtran; con una de ellas se podía borrar el
+            # proyecto entero o mandar sus alertas a otro sitio. Lo de admin pide una
+            # persona con ese rol o la clave de instalación (y el modo local, que es
+            # abierto a propósito, la tiene).
+            if es_de_admin and not identidad.sees_everything:
+                raise AuthError(
+                    403,
+                    "esto lo hace una persona con rol de admin desde la interfaz, no una "
+                    "clave de API de proyecto",
+                )
             return
         from .cuentas import rol_suficiente
 
@@ -384,14 +402,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if not proyecto:
             raise AuthError(400, "esta escritura tiene que decir sobre qué proyecto es")
         rol = identidad.roles.get(proyecto)
-        necesita = (
-            "admin"
-            if any(
-                request.method == metodo and request.url.path.startswith(ruta)
-                for metodo, ruta in ADMIN_WRITES
-            )
-            else "miembro"
-        )
+        necesita = "admin" if es_de_admin else "miembro"
         if not rol_suficiente(rol, necesita):
             raise AuthError(
                 403,

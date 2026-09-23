@@ -30,6 +30,7 @@ from ..config import Settings
 from .metadata import (
     ANNOTATION_COLUMNS,
     ANNOTATION_READ,
+    MetadataUnavailable,
     NullMetadataStore,
     annotation_from_row,
     annotation_values,
@@ -118,7 +119,13 @@ class PostgresMetadataStore:
         # portátil sería cobrar por algo que no se usa (D-068).
         import psycopg
 
-        return psycopg.connect(self._dsn, autocommit=True)
+        # «No conecto» se dice como lo que es: no hay dónde guardar, que las rutas ya
+        # traducen a 503 con su motivo, en vez de un 500 con la traza de psycopg. Y con
+        # tope: sin él, un Postgres que no contesta cuelga el hilo el tiempo del sistema.
+        try:
+            return psycopg.connect(self._dsn, autocommit=True, connect_timeout=5)
+        except psycopg.OperationalError as exc:
+            raise MetadataUnavailable(f"postgres no responde: {exc}") from exc
 
     def migrate(self) -> None:
         with self._connect() as conn:
@@ -181,23 +188,34 @@ class PostgresMetadataStore:
 
     # -- anotaciones -----------------------------------------------------------------
 
-    def list_annotations(self, trace_id: str) -> list[Annotation]:
+    def list_annotations(
+        self, trace_id: str, project_id: str | None = None
+    ) -> list[Annotation]:
+        where, args = "trace_id = %s", [trace_id]
+        if project_id:
+            where, args = "trace_id = %s AND project_id = %s", [trace_id, project_id]
         with self._connect() as conn:
             filas = conn.execute(
-                f"SELECT {ANNOTATION_READ} FROM annotations WHERE trace_id = %s "
+                f"SELECT {ANNOTATION_READ} FROM annotations WHERE {where} "
                 f"ORDER BY created_at",
-                (trace_id,),
+                args,
             ).fetchall()
         return [annotation_from_row(r) for r in _rows(ANNOTATION_READ, filas)]
 
-    def annotations_for(self, trace_ids: list[str]) -> dict[str, list[Annotation]]:
+    def annotations_for(
+        self, trace_ids: list[str], project_id: str | None = None
+    ) -> dict[str, list[Annotation]]:
         if not trace_ids:
             return {}
+        where, args = "trace_id = ANY(%s)", [list(trace_ids)]
+        if project_id:
+            where += " AND project_id = %s"
+            args.append(project_id)
         with self._connect() as conn:
             filas = conn.execute(
                 f"SELECT {ANNOTATION_READ} FROM annotations "
-                f"WHERE trace_id = ANY(%s) ORDER BY created_at",
-                (list(trace_ids),),
+                f"WHERE {where} ORDER BY created_at",
+                args,
             ).fetchall()
         salida: dict[str, list[Annotation]] = {}
         for fila in _rows(ANNOTATION_READ, filas):
@@ -237,9 +255,17 @@ class PostgresMetadataStore:
             ).fetchone()
         return annotation_from_row(_rows(ANNOTATION_READ, [fila])[0])
 
-    def delete_annotation(self, annotation_id: str) -> bool:
+    def delete_annotation(self, annotation_id: str, project_id: str | None = None) -> bool:
+        """Acotado al proyecto, igual que en SQLite (D-121): un id ajeno no se encuentra.
+
+        Las rutas llaman a todos los almacenes con el alcance; una firma que no lo
+        aceptara reventaba con `TypeError` sólo en la nube, que es donde importa.
+        """
+        where, args = "id = %s", [annotation_id]
+        if project_id:
+            where, args = "id = %s AND project_id = %s", [annotation_id, project_id]
         with self._connect() as conn:
-            cur = conn.execute("DELETE FROM annotations WHERE id = %s", (annotation_id,))
+            cur = conn.execute(f"DELETE FROM annotations WHERE {where}", args)
             return bool(cur.rowcount)
 
     # -- conjuntos de casos ------------------------------------------------------------
@@ -305,9 +331,13 @@ class PostgresMetadataStore:
             ).fetchall()
         return [_item(f) for f in filas]
 
-    def delete_dataset(self, dataset_id: str) -> bool:
+    def delete_dataset(self, dataset_id: str, project_id: str | None = None) -> bool:
+        # Los casos se van con él por la clave foránea con `ON DELETE CASCADE`.
+        where, args = "id = %s", [dataset_id]
+        if project_id:
+            where, args = "id = %s AND project_id = %s", [dataset_id, project_id]
         with self._connect() as conn:
-            cur = conn.execute("DELETE FROM datasets WHERE id = %s", (dataset_id,))
+            cur = conn.execute(f"DELETE FROM datasets WHERE {where}", args)
             return bool(cur.rowcount)
 
     # -- tiradas -------------------------------------------------------------------------
@@ -412,13 +442,16 @@ class PostgresMetadataStore:
             ).fetchall()
         return [prompt_from_row(r) for r in _rows(_PROMPT_ALIASES, filas)]
 
-    def get_prompt(self, prompt_id: str) -> Prompt | None:
+    def get_prompt(self, prompt_id: str, project_id: str | None = None) -> Prompt | None:
+        where, args = "p.id = %s", [prompt_id]
+        if project_id:
+            where, args = "p.id = %s AND p.project_id = %s", [prompt_id, project_id]
         with self._connect() as conn:
             fila = conn.execute(
                 f"SELECT {PROMPT_READ}, COUNT(v.id) AS n "
                 f"FROM prompts p LEFT JOIN prompt_versions v ON v.prompt_id = p.id "
-                f"WHERE p.id = %s GROUP BY p.id",
-                (prompt_id,),
+                f"WHERE {where} GROUP BY p.id",
+                args,
             ).fetchone()
         if fila is None:
             return None
@@ -504,9 +537,12 @@ class PostgresMetadataStore:
             ).fetchall()
         return [prompt_deploy_from_row(r) for r in _rows(_DEPLOY_ALIASES, filas)]
 
-    def delete_prompt(self, prompt_id: str) -> bool:
+    def delete_prompt(self, prompt_id: str, project_id: str | None = None) -> bool:
+        where, args = "id = %s", [prompt_id]
+        if project_id:
+            where, args = "id = %s AND project_id = %s", [prompt_id, project_id]
         with self._connect() as conn:
-            cur = conn.execute("DELETE FROM prompts WHERE id = %s", (prompt_id,))
+            cur = conn.execute(f"DELETE FROM prompts WHERE {where}", args)
             return bool(cur.rowcount)
 
     # -- claves de API -------------------------------------------------------------------
@@ -653,10 +689,17 @@ def build_metadata_store(settings: Settings) -> Any:
 
     if not settings.postgres_enabled:
         return NullMetadataStore()
+    # Postgres aunque no responda ahora mismo. Antes, un fallo en el arranque instalaba
+    # el almacén nulo **para siempre**: su `api_key_by_hash` levanta, así que toda
+    # petición con clave —la ingesta incluida— recibía 503 hasta que alguien reiniciara,
+    # aunque Postgres volviera a los diez segundos. Cada operación abre su conexión, así
+    # que en cuanto vuelve, se recupera solo.
     store = PostgresMetadataStore(settings)
     if not store.health():
-        logger.warning("postgres no disponible; se sigue sin metadatos")
-        return NullMetadataStore()
+        logger.warning(
+            "postgres no responde al arrancar; se sigue intentando en cada operación "
+            "(mientras tanto, lo que necesita metadatos contesta 503)"
+        )
     return store
 
 

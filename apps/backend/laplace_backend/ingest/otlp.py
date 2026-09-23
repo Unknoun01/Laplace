@@ -16,6 +16,7 @@ import hashlib
 import json
 import logging
 import re
+import zlib
 from datetime import datetime, timezone
 from typing import Any
 
@@ -43,12 +44,43 @@ _STATUS_BY_CODE = {0: "unset", 1: "ok", 2: "error"}
 # ---------------------------------------------------------------------------------
 
 
+#: Cuánto puede crecer un cuerpo al descomprimirlo, respecto al tope del cable. Las
+#: trazas comprimen bien (texto repetido), pero no mil veces: eso es una bomba.
+OTLP_EXPANSION = 4
+
+
+class CuerpoDemasiadoGrande(ValueError):
+    """El cuerpo, descomprimido, pasa del tope. La ruta lo convierte en un 413."""
+
+
+def _gunzip(body: bytes, maximo: int) -> bytes:
+    """`gzip.decompress` con tope: nunca materializa más de `maximo` bytes.
+
+    `gzip.decompress` a secas descomprime lo que haga falta, y diez megas de ceros
+    comprimidos son diez gigas en memoria: con cualquier clave de ingesta se tumbaba el
+    proceso que comparten todos los proyectos.
+    """
+    descompresor = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    salida = descompresor.decompress(body, maximo)
+    if descompresor.unconsumed_tail:
+        raise CuerpoDemasiadoGrande(f"el cuerpo descomprimido pasa de {maximo} bytes")
+    return salida + descompresor.flush()
+
+
 def decode_request(
-    body: bytes, content_type: str = "", content_encoding: str = ""
+    body: bytes,
+    content_type: str = "",
+    content_encoding: str = "",
+    max_bytes: int | None = None,
 ) -> ExportTraceServiceRequest:
-    """Acepta protobuf (lo que emite el SDK) y JSON (cómodo para depurar con curl)."""
+    """Acepta protobuf (lo que emite el SDK) y JSON (cómodo para depurar con curl).
+
+    `max_bytes` es el tope del cuerpo ya descomprimido; `None`, sin tope (pruebas).
+    """
     if "gzip" in (content_encoding or "").lower():
-        body = gzip.decompress(body)
+        body = _gunzip(body, max_bytes) if max_bytes else gzip.decompress(body)
+    if max_bytes and len(body) > max_bytes:
+        raise CuerpoDemasiadoGrande(f"el cuerpo pasa de {max_bytes} bytes")
 
     request = ExportTraceServiceRequest()
     if "json" in (content_type or "").lower():

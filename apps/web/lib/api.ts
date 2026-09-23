@@ -251,10 +251,15 @@ export function deleteAnnotation(id: string, projectId: string): Promise<{ delet
   );
 }
 
-export async function annotationsFor(traceIds: string[]): Promise<Record<string, Annotation[]>> {
+/** Con el proyecto: el backend acota las anotaciones a él y no devuelve las de otros. */
+export async function annotationsFor(
+  traceIds: string[],
+  projectId: string,
+): Promise<Record<string, Annotation[]>> {
   if (traceIds.length === 0) return {};
   const data = await get<{ annotations: Record<string, Annotation[]> }>("/api/annotations", {
     trace_ids: traceIds.join(","),
+    project_id: projectId,
   });
   return data.annotations;
 }

@@ -150,7 +150,13 @@ def test_cada_rol_puede_lo_suyo_y_nada_más(app):
         # Leer, todos.
         for c in (lector, miembro):
             assert c.get("/api/overview", params={"project_id": "previo"}).status_code == 200
-        anotar = {"project_id": "previo", "trace_id": "t1", "verdict": "pass"}
+        # Una traza que existe: anotar una que no es del proyecto es un 404 (D-128).
+        traza = miembro.get("/api/traces", params={"project_id": "previo"}).json()
+        anotar = {
+            "project_id": "previo",
+            "trace_id": traza["traces"][0]["trace_id"],
+            "verdict": "pass",
+        }
         assert lector.post("/api/annotations", json=anotar, headers=H).status_code == 403
         assert miembro.post("/api/annotations", json=anotar, headers=H).status_code == 200
         # Presupuesto y alertas, sólo admin.
