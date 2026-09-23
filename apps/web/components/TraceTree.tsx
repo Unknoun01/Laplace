@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { duration, money, number, pretty, tokens } from "@/lib/format";
+import { duration, exacto, money, number, pretty, tokens } from "@/lib/format";
 import { allNodes, barGeometry, flatten, timeWindow } from "@/lib/tree";
 import type { Span, Trace, TraceTreeNode } from "@/lib/types";
 
@@ -155,7 +155,14 @@ export function TraceTree({ trace }: { trace: Trace }) {
                   <i className={`kind ${failed ? "err" : span.type}`} aria-hidden />
                   <span className="node-name">
                     {span.name}
-                    {span.llm?.request_model && <small>{span.llm.request_model}</small>}
+                    {/* El nombre de un span de LLM ya es «chat <modelo>» por la
+                        convención GenAI de OTel, así que añadirlo aparte lo escribía dos
+                        veces en cada fila: «chat gpt-5.6-luna gpt-5.6-luna». Se enseña
+                        sólo cuando aporta algo, que es cuando el nombre no lo lleva
+                        —un span manual, o un agente que nombra sus pasos a mano. */}
+                    {span.llm?.request_model && !span.name.includes(span.llm.request_model) && (
+                      <small>{span.llm.request_model}</small>
+                    )}
                   </span>
                   {node.children.length > 0 && isCollapsed && (
                     <span className="badge quiet">+{node.subtree.span_count - 1}</span>
@@ -221,10 +228,10 @@ function SpanPanel({ node }: { node: TraceTreeNode }) {
             style={{
               margin: "0 0 14px",
               padding: "9px 12px",
-              border: "1px solid #5c2f35",
-              background: "#1d0f11",
+              border: "1px solid var(--rose-line)",
+              background: "var(--rose-bg)",
               borderRadius: "var(--r)",
-              color: "#f0b8bd",
+              color: "var(--rose-ink)",
               fontSize: 14,
             }}
           >
@@ -433,7 +440,7 @@ function Attributes({ span }: { span: Span }) {
     ["laplace.step.label", span.step_label],
     ["start_time", span.start_time],
     ["end_time", span.end_time],
-    ["duration_ms", span.duration_ms.toFixed(3)],
+    ["duration_ms", exacto(span.duration_ms, 3)],
   ];
   if (span.llm) {
     rows.push([

@@ -17,6 +17,7 @@ import {
   setProduction,
 } from "@/lib/api";
 import { money, number, timestamp, tokens } from "@/lib/format";
+import { usePermisos } from "@/lib/permisos";
 import type {
   Diff,
   ObservedStep,
@@ -95,10 +96,8 @@ function Contenido() {
       <section className="hero">
         <h1>Los prompts de «{project}»</h1>
         <p className="lead">
-          Cada versión con lo que costó y lo que acertó sobre el tráfico que la usó. Un
-          diff y un botón de rollback los tiene cualquiera; lo que no tiene nadie más es
-          poder leer <strong>v8: 0,004 $ por ejecución, 94 %</strong> al lado de{" "}
-          <strong>v7: 0,007 $, 93 %</strong> y decidir con eso.
+          Cada versión con lo que costó y lo que acertó sobre el tráfico real que la
+          usó, para decidir cuál dejar en producción con las dos cifras delante.
         </p>
       </section>
 
@@ -141,6 +140,7 @@ function Ficha({
   query: string;
   onChange: () => void;
 }) {
+  const { escribir } = usePermisos(project);
   const [detalle, setDetalle] = useState<PromptCard | null>(null);
   const [abierto, setAbierto] = useState(false);
   const [error, setError] = useState("");
@@ -213,7 +213,7 @@ function Ficha({
         </div>
       )}
 
-      <Versiones versiones={ficha.versions} onDeploy={desplegar} />
+      <Versiones versiones={ficha.versions} onDeploy={escribir ? desplegar : undefined} />
 
       <p className="disclaimer">
         El acierto de una versión es el de las <strong>ejecuciones enteras</strong> en las
@@ -257,7 +257,8 @@ function Versiones({
   onDeploy,
 }: {
   versiones: VersionMetrics[];
-  onDeploy: (version: number) => void;
+  /** Sin él no se ofrece desplegar: quien mira es lector (D-127). */
+  onDeploy?: (version: number) => void;
 }) {
   // Las versiones sin tráfico se pliegan. En un prompt que lleva un año tocándose hay
   // treinta borradores que no corrieron nunca, y una tabla de treinta filas vacías
@@ -319,7 +320,7 @@ function Versiones({
             <td className="r">
               {/* La reserva no es una versión guardada: no se puede desplegar. */}
               {v.version > 0 && !v.in_production && (
-                <button type="button" className="vbtn ghost" onClick={() => onDeploy(v.version)}>
+                onDeploy && <button type="button" className="vbtn ghost" onClick={() => onDeploy(v.version)}>
                   Poner en producción
                 </button>
               )}
@@ -381,6 +382,7 @@ function Detalle({
   query: string;
   onChange: () => void;
 }) {
+  const { escribir } = usePermisos(project);
   const guardadas = prompt.versions.filter((v) => v.version > 0);
   const [b, setB] = useState(guardadas[0]?.version ?? 0);
   const [a, setA] = useState(guardadas[1]?.version ?? guardadas[0]?.version ?? 0);
@@ -472,6 +474,7 @@ function Detalle({
         </>
       )}
 
+      <fieldset className="sin-marco" disabled={!escribir}>
       <h3 className="sub">Guardar una versión nueva</h3>
       <p className="lead">
         Guardar no despliega. Son dos gestos distintos a propósito: es lo que te deja
@@ -491,33 +494,36 @@ function Detalle({
         <span className="chip where">Queda guardada, no servida</span>
       </div>
       {error && <p className="verr">{error}</p>}
+      </fieldset>
 
       {prompt.deploys.length > 0 && (
         <div className="pro">
           <h3 className="sub">Historial de despliegues</h3>
-          <table className="tbl">
-            <thead>
-              <tr>
-                <th>Cuándo</th>
-                <th>Versión</th>
-                <th>Quién</th>
-                <th>Nota</th>
-              </tr>
-            </thead>
-            <tbody>
-              {prompt.deploys.map((d) => (
-                <tr key={d.id}>
-                  <td>{timestamp(d.at)}</td>
-                  <td>
-                    v{d.version}
-                    {d.rollback && <span className="chip where mini">vuelta atrás</span>}
-                  </td>
-                  <td>{d.actor || "—"}</td>
-                  <td>{d.note || "—"}</td>
+          <div className="tbl-scroll">
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>Cuándo</th>
+                  <th>Versión</th>
+                  <th>Quién</th>
+                  <th>Nota</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {prompt.deploys.map((d) => (
+                  <tr key={d.id}>
+                    <td>{timestamp(d.at)}</td>
+                    <td>
+                      v{d.version}
+                      {d.rollback && <span className="chip where mini">vuelta atrás</span>}
+                    </td>
+                    <td>{d.actor || "—"}</td>
+                    <td>{d.note || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           <p className="disclaimer">
             Este historial cuenta la historia; <strong>no</strong> atribuye picos. Para eso
             el <Link href={`/panel${query}`}>panel</Link> usa la versión que aparece en las
@@ -530,8 +536,9 @@ function Detalle({
         <button
           type="button"
           className="vbtn ghost"
+          disabled={!escribir}
           onClick={async () => {
-            await deletePrompt(prompt.id);
+            await deletePrompt(prompt.id, project);
             onChange();
           }}
         >
@@ -645,33 +652,35 @@ function PasoObservado({ paso }: { paso: ObservedStep }) {
         <p className="unattributed">{paso.note}</p>
       ) : (
         <div className="ancha">
-        <table className="tbl">
-          <thead>
-            <tr>
-              <th>Instrucciones (principio)</th>
-              <th className="r">Por ejecución</th>
-              <th className="r">Ejecuciones</th>
-              <th className="r hide-sm">Desde</th>
-              <th className="r hide-sm">Hasta</th>
-            </tr>
-          </thead>
-          <tbody>
-            {paso.variants.map((v) => (
-              <tr key={v.step_key}>
-                <td>
-                  <span className="hint">{v.hint || "(sin instrucciones capturadas)"}</span>
-                  <div className="meta pro">{v.step_key}</div>
-                </td>
-                <td className="r money">
-                  {v.cost_per_execution_usd === null ? "—" : money(v.cost_per_execution_usd)}
-                </td>
-                <td className="r">{number(v.traces)}</td>
-                <td className="r hide-sm">{v.first_seen ? timestamp(v.first_seen) : "—"}</td>
-                <td className="r hide-sm">{v.last_seen ? timestamp(v.last_seen) : "—"}</td>
+        <div className="tbl-scroll">
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Instrucciones (principio)</th>
+                <th className="r">Por ejecución</th>
+                <th className="r">Ejecuciones</th>
+                <th className="r hide-sm">Desde</th>
+                <th className="r hide-sm">Hasta</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {paso.variants.map((v) => (
+                <tr key={v.step_key}>
+                  <td>
+                    <span className="hint">{v.hint || "(sin instrucciones capturadas)"}</span>
+                    <div className="meta pro">{v.step_key}</div>
+                  </td>
+                  <td className="r money">
+                    {v.cost_per_execution_usd === null ? "—" : money(v.cost_per_execution_usd)}
+                  </td>
+                  <td className="r">{number(v.traces)}</td>
+                  <td className="r hide-sm">{v.first_seen ? timestamp(v.first_seen) : "—"}</td>
+                  <td className="r hide-sm">{v.last_seen ? timestamp(v.last_seen) : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         </div>
       )}
     </article>

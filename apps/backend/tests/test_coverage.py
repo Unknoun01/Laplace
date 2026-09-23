@@ -94,8 +94,12 @@ def test_una_senal_mala_manda_sobre_las_otras_tres_buenas():
     assert cobertura.level == "malo"
     assert cobertura.prominent is True
     assert "se nos escapan" in cobertura.headline
-    # Y dice qué hacer, no sólo que está mal.
-    assert "@laplace.observe" in cobertura.detail
+    # Y dice qué hacer, no sólo que está mal: en la señal que va mal, que es donde la
+    # pantalla lo pinta.
+    assert "@laplace.observe" in _señal(cobertura, "pasos").fix
+    # Pero una sola vez. Repetirlo en el texto del bloque era leer el mismo párrafo dos
+    # veces seguidas (D-122).
+    assert "@laplace.observe" not in cobertura.detail
 
 
 def test_la_consecuencia_dice_que_el_silencio_no_es_una_buena_noticia():

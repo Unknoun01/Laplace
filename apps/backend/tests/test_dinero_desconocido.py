@@ -36,13 +36,23 @@ import pytest
 from laplace.schema import Cost, LLMAttributes, Span, TokenUsage
 from pydantic import BaseModel
 
-from laplace_backend import api, api_evals, api_prompts, coverage, dinero, insights, panel
+from laplace_backend import (
+    api,
+    api_ajustes,
+    api_evals,
+    api_prompts,
+    coverage,
+    dinero,
+    insights,
+    panel,
+    presupuesto,
+)
 from laplace_backend.storage.base import Window
 from laplace_backend.storage.sqlite import SQLiteStore
 
 AHORA = datetime.now(timezone.utc) - timedelta(minutes=20)
 
-MODULOS = (api, api_evals, api_prompts, coverage, insights, panel)
+MODULOS = (api, api_ajustes, api_evals, api_prompts, coverage, insights, panel, presupuesto)
 
 
 # ---------------------------------------------------------------------------------
@@ -396,3 +406,103 @@ def test_una_llamada_fallida_no_apaga_la_regla_del_contexto_fijo(tmp_path):
     assert [f for f in hallazgos if f.kind == "contexto_fijo"], (
         "una llamada caída no puede dejar mudo al paso entero"
     )
+
+
+# ---------------------------------------------------------------------------------
+# 4. El motivo tiene que ser cierto, no sólo existir
+# ---------------------------------------------------------------------------------
+#
+# El guardia de arriba comprueba que una cifra de dinero venga con algo que diga si se
+# puede afirmar. No comprueba que ese algo diga la verdad, y por ese hueco se coló lo
+# siguiente: la regla del modelo caro mandaba por la misma puerta dos situaciones
+# distintas —«no está en la tabla de precios» y «está, pero ya es el más barato y no
+# tiene con qué compararse»— y escribía el primer mensaje para las dos. Resultado: el
+# producto afirmando que no conoce la tarifa de un modelo cuyo coste pinta en las otras
+# diez pantallas. Un usuario que lea eso deja de creerse la tabla entera (D-114).
+
+
+def _llamada_con_tarifa(project: str, trace: str, *, paso: str, modelo: str, entrada: int,
+                        salida: int, ms: float, i: int) -> Span:
+    """Como `_llamada`, pero de un modelo que sí está en la tabla de precios."""
+    span = _llamada(project, trace, paso=paso, modelo=modelo, entrada=entrada,
+                    salida=salida, ms=ms, i=i)
+    span.llm.cost = Cost(total_usd=0.004, input_usd=0.003, output_usd=0.001, unknown=False)
+    return span
+
+
+@pytest.fixture
+def almacen_todo_con_tarifa(tmp_path):
+    """Un proyecto donde **todos** los modelos tienen precio conocido.
+
+    `iterar` usa el más barato de la tabla, que por serlo no tiene alternativa con la
+    que compararse; `clasificar` usa uno más caro y más rápido. Es la situación que
+    hacía hablar al producto de tarifas desconocidas sin que faltara ninguna.
+    """
+    store = SQLiteStore(tmp_path / "con-tarifa.db")
+    store.migrate()
+    spans = []
+    for t in range(8):
+        spans.append(
+            _llamada_con_tarifa("tienda", f"c-{t}", paso="iterar", modelo="gpt-5.6-luna",
+                                entrada=200, salida=4, ms=900, i=t * 10)
+        )
+        spans.append(
+            _llamada_con_tarifa("tienda", f"c-{t}", paso="clasificar",
+                                modelo="gpt-5.6-terra", entrada=200, salida=6, ms=300,
+                                i=t * 10 + 3)
+        )
+    store.insert_spans(spans)
+    return store
+
+
+def test_un_motivo_de_no_saber_el_dinero_tiene_que_ser_cierto(almacen_todo_con_tarifa):
+    """El guardia nuevo, y el que generaliza.
+
+    Sobre tráfico donde no falta ni una tarifa, ninguna frase del producto puede decir
+    que falta. Barre `cost_unavailable` y `summary` de todos los hallazgos contra la
+    lista cerrada de `dinero.AFIRMACIONES_DE_SIN_TARIFA`: si alguien escribe una forma
+    nueva de decirlo, la añade ahí y este barrido la mira desde el primer día.
+    """
+    hallazgos = insights.detect(almacen_todo_con_tarifa, "tienda", _ventana())
+    assert hallazgos, "sin hallazgos este barrido no mira nada"
+
+    mentiras = [
+        (f.id, texto)
+        for f in hallazgos
+        for texto in (f.cost_unavailable, f.summary)
+        if texto and dinero.afirma_no_tener_tarifa(texto)
+    ]
+    assert mentiras == [], (
+        "todos los modelos de este proyecto están en la tabla de precios, así que "
+        "ninguna frase puede decir lo contrario. Dicen: "
+        f"{mentiras}"
+    )
+
+
+def test_el_mas_barato_de_la_tabla_no_es_un_modelo_sin_tarifa(almacen_todo_con_tarifa):
+    """El caso concreto, dicho con sus dos nombres.
+
+    `gpt-5.6-luna` no tiene alternativa **porque ya es el más barato**, no porque no
+    tenga precio. Las dos cosas apagan la versión de dinero de la regla y son
+    razones opuestas: una es un hueco de nuestra tabla y la otra es una respuesta.
+    """
+    from laplace_backend.pricing import get_price_table
+
+    assert get_price_table().lookup("gpt-5.6-luna") is not None, (
+        "esta prueba se apoya en que el modelo esté en la tabla; si deja de estar, "
+        "hay que elegir otro, no relajar la aserción"
+    )
+
+    hallazgos = insights.detect(almacen_todo_con_tarifa, "tienda", _ventana())
+    iterar = [f for f in hallazgos if f.kind == "modelo_caro" and "iterar" in f.title]
+    assert iterar, "el paso lento con salida corta tiene que salir señalado por tiempo"
+
+    hallazgo = iterar[0]
+    assert not dinero.afirma_no_tener_tarifa(hallazgo.cost_unavailable), (
+        f"dice que no hay tarifa de un modelo que sí la tiene: {hallazgo.cost_unavailable!r}"
+    )
+    assert not dinero.afirma_no_tener_tarifa(hallazgo.summary), (
+        f"lo mismo en el resumen de la tarjeta: {hallazgo.summary!r}"
+    )
+    # Y lo que sí es cierto se dice: no hay con qué comparar el precio.
+    assert "barato" in hallazgo.cost_unavailable or "comparar" in hallazgo.cost_unavailable

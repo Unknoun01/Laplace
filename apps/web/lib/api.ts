@@ -1,11 +1,16 @@
 import type {
   Annotation,
   AnnotationVerdict,
+  AlertSettings,
+  Breakdown,
+  Budget,
   Comparison,
+  CustomPrices,
   Dataset,
   DatasetItem,
   Diff,
   FindingDetail,
+  Instance,
   JudgeStatus,
   Overview,
   Panel,
@@ -65,6 +70,9 @@ function cabeceras(extra?: Record<string, string>): Record<string, string> {
   const clave = getApiKey();
   return {
     ...(extra ?? {}),
+    // Toda petición la lleva: el backend la exige en las escrituras con sesión, y un
+    // formulario de otro sitio no puede ponerla sin pasar por CORS (D-127).
+    "X-Laplace": "1",
     ...(clave ? { Authorization: `Bearer ${clave}` } : {}),
   };
 }
@@ -145,6 +153,9 @@ export async function getFinding(
 export interface TraceQuery {
   project_id?: string;
   search?: string;
+  /** Identidad exacta de un paso, la que trae cada hallazgo en `step_key`. */
+  step_key?: string;
+  user_id?: string;
   status?: string;
   session_id?: string;
   span_type?: string;
@@ -232,8 +243,12 @@ export function annotate(input: {
   return send<Annotation>("/api/annotations", "POST", input);
 }
 
-export function deleteAnnotation(id: string): Promise<{ deleted: boolean }> {
-  return send<{ deleted: boolean }>(`/api/annotations/${encodeURIComponent(id)}`, "DELETE");
+/** Con el proyecto: con cuentas, una escritura dice sobre qué proyecto es (D-127). */
+export function deleteAnnotation(id: string, projectId: string): Promise<{ deleted: boolean }> {
+  return send<{ deleted: boolean }>(
+    `/api/annotations/${encodeURIComponent(id)}?project_id=${encodeURIComponent(projectId)}`,
+    "DELETE",
+  );
 }
 
 export async function annotationsFor(traceIds: string[]): Promise<Record<string, Annotation[]>> {
@@ -293,8 +308,11 @@ export function createDataset(input: {
   return send<Dataset>("/api/datasets", "POST", input);
 }
 
-export function deleteDataset(id: string): Promise<{ deleted: boolean }> {
-  return send<{ deleted: boolean }>(`/api/datasets/${encodeURIComponent(id)}`, "DELETE");
+export function deleteDataset(id: string, projectId: string): Promise<{ deleted: boolean }> {
+  return send<{ deleted: boolean }>(
+    `/api/datasets/${encodeURIComponent(id)}?project_id=${encodeURIComponent(projectId)}`,
+    "DELETE",
+  );
 }
 
 export async function listRuns(projectId: string, datasetId?: string): Promise<RunSummary[]> {
@@ -364,6 +382,232 @@ export function setProduction(
   );
 }
 
-export function deletePrompt(id: string): Promise<{ deleted: boolean }> {
-  return send<{ deleted: boolean }>(`/api/prompts/${encodeURIComponent(id)}`, "DELETE");
+export function deletePrompt(id: string, projectId: string): Promise<{ deleted: boolean }> {
+  return send<{ deleted: boolean }>(
+    `/api/prompts/${encodeURIComponent(id)}?project_id=${encodeURIComponent(projectId)}`,
+    "DELETE",
+  );
+}
+
+// ---------------------------------------------------------------------------------
+// Ajustes del proyecto (D-123)
+// ---------------------------------------------------------------------------------
+
+export function setFindingState(input: {
+  project_id: string;
+  finding_id: string;
+  status: "arreglado" | "ignorado";
+  note?: string;
+}): Promise<{ status: string; at: string }> {
+  return send("/api/finding-state", "POST", input);
+}
+
+export function clearFindingState(projectId: string, findingId: string): Promise<unknown> {
+  const q = new URLSearchParams({ project_id: projectId, finding_id: findingId });
+  return send(`/api/finding-state?${q}`, "DELETE");
+}
+
+export function getBudget(projectId: string): Promise<Budget> {
+  return get<Budget>("/api/budget", { project_id: projectId });
+}
+
+export function setBudget(projectId: string, monthlyLimit: number | null): Promise<Budget> {
+  return send<Budget>("/api/budget", "PUT", { project_id: projectId, monthly_limit: monthlyLimit });
+}
+
+export function getAlertSettings(projectId: string): Promise<AlertSettings> {
+  return get<AlertSettings>("/api/alert-settings", { project_id: projectId });
+}
+
+export function setAlertSettings(
+  projectId: string,
+  cambios: Partial<{
+    webhook_url: string;
+    generic_webhook_url: string;
+    email_to: string;
+    threshold: number;
+    quiet_hours: number;
+    muted: boolean;
+    muted_kinds: string[];
+  }>,
+): Promise<AlertSettings> {
+  return send<AlertSettings>("/api/alert-settings", "PUT", { project_id: projectId, ...cambios });
+}
+
+export function testAlert(projectId: string): Promise<{ delivered: boolean }> {
+  return send(`/api/alert-settings/test?project_id=${encodeURIComponent(projectId)}`, "POST");
+}
+
+export function getBreakdown(
+  projectId: string,
+  days: number,
+  by: "user" | "session",
+): Promise<Breakdown> {
+  return get<Breakdown>("/api/breakdown", { project_id: projectId, days, by });
+}
+
+export function getCustomPrices(): Promise<CustomPrices> {
+  return get<CustomPrices>("/api/pricing/custom");
+}
+
+export function setCustomPrice(input: {
+  model: string;
+  input: number;
+  output: number;
+  cached_input?: number;
+}): Promise<{ repriced_spans: number }> {
+  return send("/api/pricing/custom", "PUT", input);
+}
+
+export function deleteCustomPrice(model: string): Promise<{ repriced_spans: number }> {
+  return send(`/api/pricing/custom?model=${encodeURIComponent(model)}`, "DELETE");
+}
+
+export function getInstance(): Promise<Instance> {
+  return get<Instance>("/api/instance");
+}
+
+export function loadDemo(): Promise<{ project_id: string; traces: number }> {
+  return send("/api/demo", "POST");
+}
+
+export function deleteProject(projectId: string): Promise<{ deleted: boolean }> {
+  const q = new URLSearchParams({ project_id: projectId, confirm: projectId });
+  return send(`/api/projects?${q}`, "DELETE");
+}
+
+// ---------------------------------------------------------------------------------
+// Cuentas y organización (D-127)
+// ---------------------------------------------------------------------------------
+
+export type Rol = "lector" | "miembro" | "admin" | "propietario";
+
+export interface Me {
+  mode: "local" | "nube";
+  user: { id: string; email: string; name: string; is_admin: boolean } | null;
+  orgs?: { id: string; name: string; role: Rol }[];
+  needs_setup?: boolean;
+  by_key?: boolean;
+  /** Rol en cada proyecto que ve. Vacío para quien administra la instalación. */
+  roles?: Record<string, Rol>;
+}
+
+export interface OrgKey {
+  id: string;
+  project_id: string;
+  name: string;
+  created_at: string;
+  revoked_at: string | null;
+  expires_at: string | null;
+  last_used_at: string | null;
+  created_by: string;
+}
+
+export interface Org {
+  id: string;
+  name: string;
+  role: Rol;
+  members: { user_id: string; email: string; name: string; role: Rol; since: string }[];
+  projects: string[];
+  invitations?: { email: string; role: Rol; created_at: string; expires_at: string }[];
+  keys?: OrgKey[];
+}
+
+export function getMe(): Promise<Me> {
+  return get<Me>("/api/auth/me");
+}
+
+export function login(email: string, password: string): Promise<{ ok: boolean }> {
+  return send("/api/auth/login", "POST", { email, password });
+}
+
+export function logout(): Promise<{ ok: boolean }> {
+  return send("/api/auth/logout", "POST");
+}
+
+export function logoutAll(): Promise<{ closed_sessions: number }> {
+  return send("/api/auth/logout-all", "POST");
+}
+
+export function setupInstallation(input: {
+  token: string;
+  email: string;
+  name: string;
+  password: string;
+  org_name: string;
+}): Promise<{ ok: boolean }> {
+  return send("/api/auth/setup", "POST", input);
+}
+
+export function changePassword(
+  current: string,
+  next: string,
+): Promise<{ closed_sessions: number }> {
+  return send("/api/auth/password", "POST", { current, new: next });
+}
+
+export function getInvitation(
+  token: string,
+): Promise<{ org_name: string; email: string; role: Rol; has_account: boolean }> {
+  return get("/api/auth/invitation", { token });
+}
+
+export function acceptInvitation(
+  token: string,
+  name: string,
+  password: string,
+): Promise<{ org_name: string }> {
+  return send("/api/auth/accept", "POST", { token, name, password });
+}
+
+export function getOrg(orgId: string): Promise<Org> {
+  return get<Org>("/api/org", { org_id: orgId });
+}
+
+export function invite(
+  orgId: string,
+  email: string,
+  role: Rol,
+): Promise<{ link: string; emailed: boolean }> {
+  return send("/api/org/invitations", "POST", { org_id: orgId, email, role });
+}
+
+export function cancelInvite(orgId: string, email: string): Promise<unknown> {
+  const q = new URLSearchParams({ org_id: orgId, email });
+  return send(`/api/org/invitations?${q}`, "DELETE");
+}
+
+export function setMemberRole(orgId: string, userId: string, role: Rol): Promise<unknown> {
+  return send("/api/org/members", "PUT", { org_id: orgId, user_id: userId, role });
+}
+
+export function removeMember(orgId: string, userId: string): Promise<unknown> {
+  const q = new URLSearchParams({ org_id: orgId, user_id: userId });
+  return send(`/api/org/members?${q}`, "DELETE");
+}
+
+export function createKey(input: {
+  org_id: string;
+  project_id: string;
+  name: string;
+  expires_days: number;
+}): Promise<{ id: string; key: string; project_id: string }> {
+  return send("/api/org/keys", "POST", input);
+}
+
+export function revokeKey(orgId: string, keyId: string): Promise<unknown> {
+  const q = new URLSearchParams({ org_id: orgId, key_id: keyId });
+  return send(`/api/org/keys?${q}`, "DELETE");
+}
+
+export interface AuditEvent {
+  at: string;
+  action: string;
+  target: string;
+  ip: string;
+  email: string;
+}
+
+export function getAudit(orgId: string): Promise<{ events: AuditEvent[] }> {
+  return get("/api/org/audit", { org_id: orgId });
 }

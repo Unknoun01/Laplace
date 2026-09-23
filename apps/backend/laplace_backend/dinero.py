@@ -18,6 +18,8 @@ tiempo—, que son datos y no estimaciones.
 
 from __future__ import annotations
 
+from . import cifras
+
 #: Nombres que valen como «compañera» de una cifra en dólares dentro de un modelo de la
 #: API: alguna de ellas tiene que estar para que la interfaz pueda saber si el número se
 #: puede afirmar. La lista es cerrada a propósito: si hace falta una nueva, que se añada
@@ -33,6 +35,37 @@ COMPANERAS = (
 )
 
 
+#: Trozos de texto con los que el producto afirma **no tener tarifa** para algo. La
+#: lista existe porque el guardia de D-107 comprueba que haya un motivo y no que el
+#: motivo sea cierto, y por ese hueco se coló una regla diciendo «gpt-5.6-luna no esta
+#: en la tabla de precios» de un modelo que si estaba: era el mas barato y por eso no
+#: tenia alternativa, que es otra cosa (D-114).
+#:
+#: `test_un_motivo_de_no_saber_el_dinero_tiene_que_ser_cierto` la usa para barrer los
+#: hallazgos sobre trafico donde **todos** los modelos tienen tarifa: ahi ninguna de
+#: estas frases puede aparecer. Cerrada a proposito: una forma nueva de decirlo se
+#: anade aqui y se ve en el diff.
+AFIRMACIONES_DE_SIN_TARIFA = (
+    "no esta en la tabla de precios",
+    "no tiene tarifa conocida",
+    "sin tarifa conocida",
+    "ninguna de las",  # «…llamadas al modelo tiene tarifa conocida»
+)
+
+
+def afirma_no_tener_tarifa(texto: str) -> bool:
+    """Si un texto del producto dice que no hay tarifa para algo.
+
+    Compara sin tildes para que una frase nueva no se escape por un acento.
+    """
+    plano = (
+        texto.lower()
+        .replace("á", "a").replace("é", "e").replace("í", "i")
+        .replace("ó", "o").replace("ú", "u")
+    )
+    return any(frase in plano for frase in AFIRMACIONES_DE_SIN_TARIFA)
+
+
 def motivo_sin_dinero(*, llm_calls: int, unknown_cost_calls: int) -> str:
     """Por qué no se puede poner precio, o cadena vacía si sí se puede.
 
@@ -44,7 +77,8 @@ def motivo_sin_dinero(*, llm_calls: int, unknown_cost_calls: int) -> str:
     if llm_calls <= 0 or unknown_cost_calls < llm_calls:
         return ""
     return (
-        f"No podemos poner precio a esto: ninguna de las {llm_calls} llamadas al modelo "
+        "No podemos poner precio a esto: ninguna de las "
+        f"{cifras.miles(llm_calls)} llamadas al modelo "
         "tiene tarifa conocida. Lo que sí está medido —tokens, llamadas y tiempo— sale "
         "abajo."
     )

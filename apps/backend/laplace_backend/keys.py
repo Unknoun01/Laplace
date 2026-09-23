@@ -12,6 +12,11 @@ maestra —un segundo camino de validación, que es un segundo sitio donde equiv
 de un acceso a la base, que es exactamente esto. Con `docker compose exec backend` se
 crea la primera clave en diez segundos y no hay ninguna ruta que pueda emitir poderes.
 
+Desde D-127 las claves también se crean en la interfaz (Organización → Claves), con sesión
+de admin de la organización: la primera credencial ya no tiene que salir de aquí, sale del
+código de configuración que el servidor escribe en su log. Esta herramienta queda para
+scripts y para quien administra la base.
+
 La clave se enseña **una vez**: lo que se guarda es su SHA-256, así que si se pierde no
 se puede recuperar, sólo revocar y crear otra. Eso es lo correcto y conviene decirlo en
 el momento en que se imprime.

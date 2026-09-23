@@ -177,6 +177,7 @@ def row_to_observed_prompt(f: Any) -> Any:
 
     return ObservedPrompt(
         step_key=f["clave"],
+        site=f.get("sitio") or "",
         step_label=f["paso"] or "",
         hint=f["pista"] or "",
         traces=int(f["trazas"] or 0),
@@ -387,7 +388,46 @@ def row_to_summary(r: dict[str, Any]) -> TraceSummary:
         models=sorted(modelos or []),
         session_id=r["trace_session_id"] or None,
         user_id=r["trace_user_id"] or None,
+        input_preview=vista_previa(r.get("root_input")),
     )
+
+
+def vista_previa(payload: Any, largo: int = 140) -> str:
+    """La entrada de una traza en una línea legible.
+
+    La entrada es lo que el usuario pasó a su función decorada, serializado: un dict de
+    argumentos, una lista de mensajes o un texto. Se busca la primera cadena que diga
+    algo —el argumento de texto, el último mensaje del usuario— en vez de enseñar el
+    JSON entero con sus llaves.
+    """
+    if not payload:
+        return ""
+    texto = str(payload)
+    try:
+        datos = json.loads(texto)
+    except (ValueError, TypeError):
+        datos = texto
+
+    def primera(valor: Any) -> str:
+        if isinstance(valor, str):
+            return valor
+        if isinstance(valor, dict):
+            if isinstance(valor.get("content"), str):
+                return valor["content"]
+            for v in valor.values():
+                encontrado = primera(v)
+                if encontrado:
+                    return encontrado
+        if isinstance(valor, list):
+            usuarios = [m for m in valor if isinstance(m, dict) and m.get("role") == "user"]
+            for v in reversed(usuarios or valor):
+                encontrado = primera(v)
+                if encontrado:
+                    return encontrado
+        return ""
+
+    linea = " ".join(primera(datos).split())
+    return linea if len(linea) <= largo else linea[: largo - 1].rstrip() + "…"
 
 
 def span_to_row(span: Span) -> list[Any]:

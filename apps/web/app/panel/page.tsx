@@ -2,11 +2,11 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { BackendDown, Cargando, NeedsKey, NoProject, NoTracesYet, NotYours } from "@/components/states";
-import { getPanel, listProjects, parseDays } from "@/lib/api";
-import { dayHour, duration, money, number, spanLabel, tokens } from "@/lib/format";
-import type { Metric, Panel, Spike } from "@/lib/types";
+import { getBreakdown, getPanel, listProjects, parseDays } from "@/lib/api";
+import { dayHour, decimal, duration, money, number, spanLabel, tokens } from "@/lib/format";
+import type { Breakdown, Metric, Panel, Spike } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
 
 /**
@@ -80,9 +80,113 @@ function Contenido() {
         </div>
       </section>
 
+      <QuienGasta project={project} days={days} currency={panel.currency} />
+
       <Spikes panel={panel} />
     </main>
   );
+}
+
+/**
+ * Quién gasta más: por usuario o por sesión (D-123).
+ *
+ * Las trazas ya traían `user_id` y `session_id` y ninguna pantalla los usaba. «¿Qué
+ * cliente me cuesta más?» es la pregunta que se entiende sin saber qué es un span. Las
+ * ejecuciones que no dicen de quién son se cuentan aparte, con su cifra: si no, los
+ * grupos sumarían menos que el total sin explicarlo.
+ */
+function QuienGasta({ project, days, currency }: { project: string; days: number; currency: string }) {
+  const [by, setBy] = useState<"user" | "session">("user");
+  const [datos, setDatos] = useState<Breakdown | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let vigente = true;
+    setDatos(null);
+    getBreakdown(project, days, by)
+      .then((d) => vigente && setDatos(d))
+      .catch((e) => vigente && setError(e instanceof Error ? e.message : "no se ha podido cargar"));
+    return () => {
+      vigente = false;
+    };
+  }, [project, days, by]);
+
+  const nombre = by === "user" ? "usuario" : "sesión";
+  const context = `project=${encodeURIComponent(project)}&days=${days}`;
+  return (
+    <section className="sec">
+      <div className="sec-head">
+        <h2>Quién gasta más</h2>
+        <div className="seg" role="group" aria-label="Agrupar por">
+          <button type="button" aria-pressed={by === "user"} onClick={() => setBy("user")}>
+            Usuarios
+          </button>
+          <button type="button" aria-pressed={by === "session"} onClick={() => setBy("session")}>
+            Sesiones
+          </button>
+        </div>
+      </div>
+      {error && <p className="verr">{error}</p>}
+      {datos && datos.groups.length === 0 && (
+        <p className="lead">
+          Ninguna ejecución de este rango dice de qué {nombre} es. Con{" "}
+          <code>laplace.set_context({by === "user" ? "user_id" : "session_id"}=…)</code> en tu
+          agente, aquí verás a quién se le va el gasto.
+        </p>
+      )}
+      {datos && datos.groups.length > 0 && (
+        <>
+          <table className="tabla-simple ancha">
+            <thead>
+              <tr>
+                <th>{by === "user" ? "Usuario" : "Sesión"}</th>
+                <th>Ejecuciones</th>
+                <th>Por ejecución</th>
+                <th>Total</th>
+                <th>Del gasto</th>
+              </tr>
+            </thead>
+            <tbody>
+              {datos.groups.map((g) => (
+                <tr key={g.key}>
+                  <td>
+                    <Link
+                      href={`/trazas?${context}&${by === "user" ? "user" : "session"}=${encodeURIComponent(g.key)}`}
+                    >
+                      {g.key}
+                    </Link>
+                  </td>
+                  <td className="num">{number(g.traces)}</td>
+                  <td className="num">{money(g.cost_per_trace_usd, currency)}</td>
+                  <td className="num">
+                    {g.unknown_cost_spans > 0 ? "≥ " : ""}
+                    {money(g.cost_usd, currency)}
+                  </td>
+                  <td className="num">
+                    {datos.total_cost_usd > 0
+                      ? porcentajeDelGasto(g.cost_usd / datos.total_cost_usd)
+                      : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {datos.untagged_traces > 0 && (
+            <p className="disclaimer">
+              Además, {number(datos.untagged_traces)} ejecuciones sin {nombre} (
+              {money(datos.untagged_cost_usd, currency)}).
+            </p>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+/** «0 %» para un usuario que sí gasta algo se lee como que no gasta nada. */
+function porcentajeDelGasto(ratio: number): string {
+  if (ratio > 0 && ratio < 0.001) return "< 0,1 %";
+  return `${decimal(ratio * 100)} %`;
 }
 
 /**
@@ -150,9 +254,17 @@ function Chart({ panel }: { panel: Panel }) {
   const conDatos = panel.buckets.filter((b) => b.cost_per_trace_usd !== null);
   if (conDatos.length < 2) return null;
 
+  // El eje empieza un tramo antes del primer dato, no al principio del rango: con once
+  // horas de datos en un rango de siete días, las barras quedaban aplastadas contra el
+  // borde derecho y el resto era un vacío que no decía nada (D-125). Los vacíos del
+  // final se quedan: «no ha llegado nada desde entonces» sí es información.
+  const primero = panel.buckets.findIndex((b) => b.traces > 0);
+  const tramos = panel.buckets.slice(Math.max(primero - 1, 0));
+  const recortado = tramos.length < panel.buckets.length;
+
   const tope = Math.max(...conDatos.map((b) => b.cost_per_trace_usd ?? 0));
-  const topeTrazas = Math.max(...panel.buckets.map((b) => b.traces), 1);
-  const paso = ancho / panel.buckets.length;
+  const topeTrazas = Math.max(...tramos.map((b) => b.traces), 1);
+  const paso = ancho / tramos.length;
 
   return (
     <div className="chart">
@@ -165,7 +277,7 @@ function Chart({ panel }: { panel: Panel }) {
         </span>
       </div>
       <svg viewBox={`0 0 ${ancho} ${alto}`} role="img" aria-label="Coste por ejecución por tramo">
-        {panel.buckets.map((b, i) => {
+        {tramos.map((b, i) => {
           const x = i * paso;
           const volumen = (b.traces / topeTrazas) * alto;
           const unitario = b.cost_per_trace_usd;
@@ -198,8 +310,11 @@ function Chart({ panel }: { panel: Panel }) {
         })}
       </svg>
       <div className="chart-foot">
-        <span>{dayHour(panel.buckets[0].start)}</span>
-        <span>{dayHour(panel.buckets[panel.buckets.length - 1].start)}</span>
+        <span>
+          {dayHour(tramos[0].start)}
+          {recortado && " · desde el primer dato"}
+        </span>
+        <span>{dayHour(tramos[tramos.length - 1].start)}</span>
       </div>
       <p className="disclaimer">
         Los tramos sin ejecuciones se quedan en blanco. No es coste cero: es que no hubo
@@ -269,7 +384,7 @@ function SpikeCard({ spike, panel }: { spike: Spike; panel: Panel }) {
         En ese tramo cada ejecución costó{" "}
         <strong>{money(spike.cost_per_trace_usd, panel.currency)}</strong>, frente a los{" "}
         {money(spike.baseline_cost_per_trace_usd, panel.currency)} de costumbre:{" "}
-        <strong>{spike.times_baseline.toFixed(1)} veces más</strong> sobre{" "}
+        <strong>{decimal(spike.times_baseline)} veces más</strong> sobre{" "}
         {number(spike.traces)} {spike.traces === 1 ? "ejecución" : "ejecuciones"}.
       </p>
 

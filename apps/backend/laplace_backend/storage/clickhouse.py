@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,7 @@ from ._rows import (
 from ._rows import utc as _utc
 from .base import (
     Bucket,
+    CostGroup,
     CoverageFacts,
     LoopGroup,
     ModelUsage,
@@ -82,6 +84,7 @@ SELECT
     modelo,
     max(etiqueta)                    AS nombre,
     max(pista)                       AS pista,
+    max(sitio)                       AS sitio,
     max(tipo)                        AS tipo,
     -- El desempate va DENTRO de la clave: con `argMax(x, n)` a secas, dos trazas que
     -- repiten lo mismo el mismo número de veces —el caso normal— devuelven un ejemplo
@@ -104,6 +107,7 @@ FROM (
         dedup_hash,
         max(if(step_label != '', step_label, name)) AS etiqueta,
         max(step_hint)                     AS pista,
+        max(step_site)                     AS sitio,
         max(span_type)                     AS tipo,
         max(request_model)                 AS modelo,
         max(if(step_key != '', step_key, name)) AS paso,
@@ -178,6 +182,7 @@ SELECT
     loop_hash                        AS hash_ejemplo,
     max(etiqueta)                    AS nombre,
     max(pista)                       AS pista,
+    max(sitio)                       AS sitio,
     max(tipo)                        AS tipo,
     max(modelo)                      AS modelo,
     max(paso)                        AS paso,
@@ -199,6 +204,7 @@ FROM (
         loop_hash,
         max(if(step_label != '', step_label, name)) AS etiqueta,
         max(step_hint)                     AS pista,
+        max(step_site)                     AS sitio,
         max(span_type)                     AS tipo,
         max(request_model)                 AS modelo,
         max(if(step_key != '', step_key, name)) AS paso,
@@ -379,6 +385,7 @@ class ClickHouseStore:
                 countIf(cost_rate_assumed = 1)                         AS assumed_rate_spans,
                 max(session_id)                                        AS trace_session_id,
                 max(user_id)                                           AS trace_user_id,
+                substring(maxIf(input_payload, parent_span_id = ''), 1, 600) AS root_input,
                 arrayDistinct(groupArrayIf(request_model, request_model != '')) AS modelos
             FROM spans FINAL
             {where}
@@ -406,8 +413,11 @@ class ClickHouseStore:
         if filters.until is not None:
             clauses.append("start_time <= %(until)s")
             params["until"] = _utc(filters.until)
+        # Sesión y usuario los lleva el span raíz: se filtran trazas, no spans (D-123).
         if filters.session_id:
-            clauses.append("session_id = %(session_id)s")
+            clauses.append(
+                "trace_id IN (SELECT trace_id FROM spans WHERE session_id = %(session_id)s)"
+            )
             params["session_id"] = filters.session_id
         if filters.model:
             # El modelo es de un span, no de la traza: se filtra por trazas que lo usan.
@@ -417,7 +427,7 @@ class ClickHouseStore:
             )
             params["model"] = filters.model
         if filters.user_id:
-            clauses.append("user_id = %(user_id)s")
+            clauses.append("trace_id IN (SELECT trace_id FROM spans WHERE user_id = %(user_id)s)")
             params["user_id"] = filters.user_id
 
         # El estado es una propiedad de la traza entera, no de un span: "ok" significa
@@ -434,6 +444,9 @@ class ClickHouseStore:
         if filters.span_type:
             sub.append("span_type = %(span_type)s")
             params["span_type"] = filters.span_type
+        if filters.step_key:
+            sub.append("if(step_key != '', step_key, name) = %(paso)s")
+            params["paso"] = filters.step_key
         if filters.search:
             sub.append(
                 "(positionCaseInsensitive(name, %(search)s) > 0"
@@ -570,6 +583,10 @@ class ClickHouseStore:
         return REPEATED_GROUPS_SQL
 
     @property
+    def loop_groups_sql(self) -> str:
+        return LOOP_GROUPS_SQL
+
+    @property
     def model_usage_sql(self) -> str:
         return MODEL_USAGE_SQL
 
@@ -596,6 +613,7 @@ class ClickHouseStore:
                 span_type=r["tipo"],
                 model=r["modelo"] or "",
                 step_key=r["paso"] or "",
+                site=r["sitio"] or "",
                 traces=int(r["trazas"]),
                 total_spans=int(r["total_spans"]),
                 extra_spans=int(r["extra_spans"]),
@@ -620,7 +638,7 @@ class ClickHouseStore:
         """Gemelo del de sqlite.py: mismos umbrales, mismos alias (D-066, D-109)."""
         params = self._window_params(project_id, window)
         params.update(min_vueltas=min_vueltas, max_salidas=max_salidas, limit=limit)
-        return [
+        grupos = [
             LoopGroup(
                 loop_hash=r["hash_ejemplo"],
                 name=r["nombre"],
@@ -628,6 +646,7 @@ class ClickHouseStore:
                 span_type=r["tipo"],
                 model=r["modelo"] or "",
                 step_key=r["paso"] or "",
+                site=r["sitio"] or "",
                 traces=int(r["trazas"]),
                 total_spans=int(r["total_spans"]),
                 extra_spans=int(r["extra_spans"]),
@@ -643,6 +662,9 @@ class ClickHouseStore:
             )
             for r in _named(self._client.query(LOOP_GROUPS_SQL, parameters=params))
         ]
+        # El gemelo de sqlite: los bucles nunca pasaron por el desambiguado, así que dos
+        # llamantes del mismo paso daban dos tarjetas con el título idéntico (D-115).
+        return disambiguate(grupos)
 
     def model_usage(
         self, project_id: str, window: Window, *, min_calls: int = 5, limit: int = 50
@@ -735,6 +757,41 @@ class ClickHouseStore:
                 SELECT {columns}
                 FROM spans
                 WHERE trace_id = %(trace_id)s AND dedup_hash = %(dedup_hash)s
+                ORDER BY span_id, ingested_at DESC
+                LIMIT 1 BY span_id
+            )
+            ORDER BY start_time, span_id
+            LIMIT %(limit)s
+        """
+        return [row_to_span(r) for r in _named(self._client.query(sql, parameters=params))]
+
+    def sample_loop(
+        self, project_id: str, window: Window, loop_hash: str, limit: int = 40
+    ) -> list[Span]:
+        """La traza donde más vueltas da ese bucle, con sus vueltas."""
+        params = self._window_params(project_id, window)
+        params["loop_hash"] = loop_hash
+        params["limit"] = limit
+
+        trace_sql = f"""
+            SELECT trace_id, count() AS n
+            FROM spans FINAL
+            WHERE {WINDOW_WHERE} AND loop_hash = %(loop_hash)s
+            GROUP BY trace_id
+            ORDER BY n DESC, trace_id
+            LIMIT 1
+        """
+        rows = self._client.query(trace_sql, parameters=params).result_rows
+        if not rows:
+            return []
+        params["trace_id"] = rows[0][0]
+
+        columns = ", ".join(COLUMNS)
+        sql = f"""
+            SELECT {columns} FROM (
+                SELECT {columns}
+                FROM spans
+                WHERE trace_id = %(trace_id)s AND loop_hash = %(loop_hash)s
                 ORDER BY span_id, ingested_at DESC
                 LIMIT 1 BY span_id
             )
@@ -922,6 +979,7 @@ class ClickHouseStore:
                     -- distintos y la misma pantalla leerse distinto en local y en la
                     -- nube. Lo destapó el test de paridad de esta consulta.
                     max(if(step_label != '', step_label, name))     AS paso,
+                    max(step_site)         AS sitio,
                     max(step_hint)         AS pista,
                     uniqExact(trace_id)    AS trazas,
                     count()                AS llamadas,
@@ -994,6 +1052,61 @@ class ClickHouseStore:
             "DELETE FROM spans WHERE project_id = %(project_id)s",
             parameters={"project_id": project_id},
         )
+
+    # -- tarifas propias, reparto por usuario y retención (D-123) -------------------
+
+    def spans_by_model(self, model: str) -> list[Span]:
+        """Todas las llamadas a un modelo, de todos los proyectos. Para el recálculo."""
+        columns = ", ".join(COLUMNS)
+        sql = f"""
+            SELECT {columns} FROM spans FINAL
+            WHERE span_type = 'llm' AND (request_model = %(m)s OR response_model = %(m)s)
+            ORDER BY start_time, span_id
+        """
+        return [
+            row_to_span(r)
+            for r in _named(self._client.query(sql, parameters={"m": model}))
+        ]
+
+    def cost_by(
+        self, project_id: str, window: Window, dimension: str, limit: int = 20
+    ) -> list[CostGroup]:
+        columna = {"user": "user_id", "session": "session_id"}[dimension]
+        params = {**self._window_params(project_id, window), "limit": limit}
+        sql = f"""
+            SELECT clave, count() AS trazas, sum(coste) AS coste, sum(tokens) AS tokens,
+                   sum(sin_tarifa) AS sin_tarifa
+            FROM (
+                SELECT trace_id,
+                       max({columna})                                    AS clave,
+                       sum(cost_total_usd)                               AS coste,
+                       sum(input_tokens + output_tokens)                 AS tokens,
+                       countIf(span_type = 'llm' AND cost_unknown = 1)   AS sin_tarifa
+                FROM spans FINAL
+                WHERE {WINDOW_WHERE}
+                GROUP BY trace_id
+            )
+            GROUP BY clave
+            ORDER BY coste DESC, trazas DESC, clave
+            LIMIT %(limit)s
+        """
+        return [
+            CostGroup(
+                key=r["clave"] or "",
+                traces=int(r["trazas"] or 0),
+                cost_usd=float(r["coste"] or 0.0),
+                tokens=int(r["tokens"] or 0),
+                unknown_cost_spans=int(r["sin_tarifa"] or 0),
+            )
+            for r in _named(self._client.query(sql, parameters=params))
+        ]
+
+    def delete_before(self, cutoff: datetime) -> int:
+        """Borra los spans que empezaron antes de `cutoff`. Es la retención."""
+        self._client.command(
+            "DELETE FROM spans WHERE start_time < %(c)s", parameters={"c": cutoff}
+        )
+        return -1
 
     def health(self) -> bool:
         try:

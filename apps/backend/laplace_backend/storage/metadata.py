@@ -73,7 +73,7 @@ class MetadataStore(Protocol):
 
     def save_annotation(self, project_id: str, annotation: Annotation) -> Annotation: ...
 
-    def delete_annotation(self, annotation_id: str) -> bool: ...
+    def delete_annotation(self, annotation_id: str, project_id: str | None = None) -> bool: ...
 
     # -- conjuntos de casos -----------------------------------------------------------
 
@@ -85,7 +85,7 @@ class MetadataStore(Protocol):
 
     def list_dataset_items(self, dataset_id: str) -> list[DatasetItem]: ...
 
-    def delete_dataset(self, dataset_id: str) -> bool: ...
+    def delete_dataset(self, dataset_id: str, project_id: str | None = None) -> bool: ...
 
     # -- tiradas ----------------------------------------------------------------------
 
@@ -105,7 +105,7 @@ class MetadataStore(Protocol):
 
     def list_prompts(self, project_id: str) -> list[Prompt]: ...
 
-    def get_prompt(self, prompt_id: str) -> Prompt | None: ...
+    def get_prompt(self, prompt_id: str, project_id: str | None = None) -> Prompt | None: ...
 
     def add_prompt_version(
         self, prompt_id: str, text: str, *, notes: str = "", author: str = ""
@@ -121,7 +121,7 @@ class MetadataStore(Protocol):
 
     def list_prompt_deploys(self, prompt_id: str) -> list[PromptDeploy]: ...
 
-    def delete_prompt(self, prompt_id: str) -> bool: ...
+    def delete_prompt(self, prompt_id: str, project_id: str | None = None) -> bool: ...
 
     # -- claves de API (autenticación) -------------------------------------------------
 
@@ -134,6 +134,18 @@ class MetadataStore(Protocol):
     def list_api_keys(self, project_id: str | None = None) -> list[dict[str, Any]]: ...
 
     def revoke_api_key(self, key_id: str) -> bool: ...
+
+    # -- ajustes por proyecto -----------------------------------------------------------
+
+    def get_setting(self, project_id: str, key: str) -> dict[str, Any] | None: ...
+
+    def set_setting(self, project_id: str, key: str, value: dict[str, Any]) -> None: ...
+
+    def list_settings(self, project_id: str, prefix: str = "") -> dict[str, dict[str, Any]]: ...
+
+    def delete_setting(self, project_id: str, key: str) -> bool: ...
+
+    def delete_project_data(self, project_id: str) -> None: ...
 
 
 # ---------------------------------------------------------------------------------
@@ -415,11 +427,47 @@ CREATE TABLE IF NOT EXISTS api_keys (
     key_hash    TEXT NOT NULL UNIQUE,
     name        TEXT NOT NULL DEFAULT '',
     created_at  TEXT NOT NULL,
-    revoked_at  TEXT
+    revoked_at  TEXT,
+    -- Caducidad, último uso y autor (D-127). NULL en las claves de antes, que no caducan.
+    expires_at  TEXT,
+    last_used_at TEXT,
+    created_by  TEXT
 );
 
 CREATE INDEX IF NOT EXISTS api_keys_project_idx ON api_keys (project_id);
+
+-- Ajustes por proyecto, clave → JSON: el estado de cada hallazgo, el presupuesto, las
+-- alertas configuradas desde la interfaz y las tarifas propias (D-123). Una tabla y no
+-- cinco porque ninguno de ellos se consulta por nada que no sea su clave, y cada tabla
+-- nueva son tres implementaciones que mantener.
+-- `project_id` es '*' para lo que vale para toda la instalación.
+CREATE TABLE IF NOT EXISTS settings (
+    project_id  TEXT NOT NULL,
+    key         TEXT NOT NULL,
+    value       TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (project_id, key)
+);
 """
+
+
+#: Lo que se borra al borrar un proyecto, hijos primero (D-123).
+_BORRAR_PROYECTO_SQLITE = (
+    "DELETE FROM dataset_items WHERE dataset_id IN "
+    "(SELECT id FROM datasets WHERE project_id = ?)",
+    "DELETE FROM eval_run_items WHERE run_id IN "
+    "(SELECT id FROM eval_runs WHERE project_id = ?)",
+    "DELETE FROM prompt_versions WHERE prompt_id IN "
+    "(SELECT id FROM prompts WHERE project_id = ?)",
+    "DELETE FROM prompt_deploys WHERE prompt_id IN "
+    "(SELECT id FROM prompts WHERE project_id = ?)",
+    "DELETE FROM annotations WHERE project_id = ?",
+    "DELETE FROM datasets WHERE project_id = ?",
+    "DELETE FROM eval_runs WHERE project_id = ?",
+    "DELETE FROM prompts WHERE project_id = ?",
+    "DELETE FROM settings WHERE project_id = ?",
+    "DELETE FROM api_keys WHERE project_id = ?",
+)
 
 
 class SQLiteMetadataStore:
@@ -443,6 +491,12 @@ class SQLiteMetadataStore:
     def migrate(self) -> None:
         with self._conn() as conn:
             conn.executescript(_SQLITE_SCHEMA)
+            # Ficheros de antes de D-127: `CREATE TABLE IF NOT EXISTS` no añade columnas.
+            for columna in ("expires_at", "last_used_at", "created_by"):
+                try:
+                    conn.execute(f"ALTER TABLE api_keys ADD COLUMN {columna} TEXT")
+                except sqlite3.OperationalError:
+                    pass
 
     def health(self) -> bool:
         try:
@@ -532,9 +586,20 @@ class SQLiteMetadataStore:
             ).fetchone()
         return annotation_from_row(fila)
 
-    def delete_annotation(self, annotation_id: str) -> bool:
+    def delete_annotation(self, annotation_id: str, project_id: str | None = None) -> bool:
+        """Borra una anotación, **acotada al proyecto de quien la pide**.
+
+        El `project_id` no es opcional por comodidad: es `None` sólo para la clave de
+        instalación, que ve todo. Para cualquier otra, `Identity.scope()` lo rellena, y
+        entonces el borrado de un id ajeno no encuentra nada y sale 404. Es el mismo
+        patrón con el que D-097 cerró las lecturas, aplicado a las escrituras: acotar la
+        consulta en vez de comprobar antes, para que no se pueda olvidar (D-121).
+        """
+        where, args = "id = ?", [annotation_id]
+        if project_id:
+            where, args = "id = ? AND project_id = ?", [annotation_id, project_id]
         with self._conn() as conn:
-            cur = conn.execute("DELETE FROM annotations WHERE id = ?", (annotation_id,))
+            cur = conn.execute(f"DELETE FROM annotations WHERE {where}", args)
             return cur.rowcount > 0
 
     # -- conjuntos ---------------------------------------------------------------------
@@ -602,11 +667,19 @@ class SQLiteMetadataStore:
             ).fetchall()
         return [_item_from_row(f) for f in filas]
 
-    def delete_dataset(self, dataset_id: str) -> bool:
+    def delete_dataset(self, dataset_id: str, project_id: str | None = None) -> bool:
+        """Igual que `delete_annotation`: el borrado va acotado, no comprobado (D-121)."""
+        where, args = "id = ?", [dataset_id]
+        if project_id:
+            where, args = "id = ? AND project_id = ?", [dataset_id, project_id]
         with self._conn() as conn:
-            conn.execute("DELETE FROM dataset_items WHERE dataset_id = ?", (dataset_id,))
-            cur = conn.execute("DELETE FROM datasets WHERE id = ?", (dataset_id,))
-            return cur.rowcount > 0
+            cur = conn.execute(f"DELETE FROM datasets WHERE {where}", args)
+            borrado = cur.rowcount > 0
+            if borrado:
+                conn.execute(
+                    "DELETE FROM dataset_items WHERE dataset_id = ?", (dataset_id,)
+                )
+            return borrado
 
     # -- tiradas -----------------------------------------------------------------------
 
@@ -724,14 +797,22 @@ class SQLiteMetadataStore:
             ).fetchall()
         return [prompt_from_row(f) for f in filas]
 
-    def get_prompt(self, prompt_id: str) -> Prompt | None:
+    def get_prompt(self, prompt_id: str, project_id: str | None = None) -> Prompt | None:
+        """Un prompt por su id, acotado al proyecto de quien lo pide (D-121).
+
+        Lo usan las rutas que escriben —añadir versión, desplegar, borrar— para saber de
+        quién es antes de tocarlo. Acotado, un id ajeno no existe.
+        """
+        where, args = "p.id = ?", [prompt_id]
+        if project_id:
+            where, args = "p.id = ? AND p.project_id = ?", [prompt_id, project_id]
         with self._conn() as conn:
             fila = conn.execute(
                 "SELECT p.id, p.project_id, p.name, p.description, p.created_at, "
                 "       p.updated_at, p.production_version, COUNT(v.id) AS n "
-                "FROM prompts p LEFT JOIN prompt_versions v ON v.prompt_id = p.id "
-                "WHERE p.id = ? GROUP BY p.id",
-                (prompt_id,),
+                f"FROM prompts p LEFT JOIN prompt_versions v ON v.prompt_id = p.id "
+                f"WHERE {where} GROUP BY p.id",
+                args,
             ).fetchone()
         return prompt_from_row(fila) if fila and fila["id"] else None
 
@@ -844,19 +925,35 @@ class SQLiteMetadataStore:
             ).fetchall()
         return [prompt_deploy_from_row(f) for f in filas]
 
-    def delete_prompt(self, prompt_id: str) -> bool:
+    def delete_prompt(self, prompt_id: str, project_id: str | None = None) -> bool:
+        """Igual que `delete_annotation`: el borrado va acotado, no comprobado (D-121).
+
+        El orden importa: primero el prompt, y su histórico sólo si de verdad se borró.
+        Antes se borraban las versiones y los despliegues primero, así que un intento
+        ajeno dejaba el prompt en pie y su histórico vacío, que es peor que no borrar
+        nada.
+        """
+        where, args = "id = ?", [prompt_id]
+        if project_id:
+            where, args = "id = ? AND project_id = ?", [prompt_id, project_id]
         with self._conn() as conn:
-            conn.execute("DELETE FROM prompt_versions WHERE prompt_id = ?", (prompt_id,))
-            conn.execute("DELETE FROM prompt_deploys WHERE prompt_id = ?", (prompt_id,))
-            cur = conn.execute("DELETE FROM prompts WHERE id = ?", (prompt_id,))
-            return cur.rowcount > 0
+            cur = conn.execute(f"DELETE FROM prompts WHERE {where}", args)
+            borrado = cur.rowcount > 0
+            if borrado:
+                conn.execute(
+                    "DELETE FROM prompt_versions WHERE prompt_id = ?", (prompt_id,)
+                )
+                conn.execute(
+                    "DELETE FROM prompt_deploys WHERE prompt_id = ?", (prompt_id,)
+                )
+            return borrado
 
     # -- claves de API -------------------------------------------------------------------
 
     def api_key_by_hash(self, key_hash: str) -> dict[str, Any] | None:
         with self._conn() as conn:
             fila = conn.execute(
-                "SELECT id, project_id, name, created_at, revoked_at FROM api_keys "
+                "SELECT id, project_id, name, created_at, revoked_at, expires_at FROM api_keys "
                 "WHERE key_hash = ?",
                 (key_hash,),
             ).fetchone()
@@ -888,6 +985,50 @@ class SQLiteMetadataStore:
                 (_now().isoformat(), key_id),
             )
             return cur.rowcount > 0
+
+    # -- ajustes por proyecto -------------------------------------------------------------
+
+    def get_setting(self, project_id: str, key: str) -> dict[str, Any] | None:
+        with self._conn() as conn:
+            fila = conn.execute(
+                "SELECT value FROM settings WHERE project_id = ? AND key = ?",
+                (project_id, key),
+            ).fetchone()
+        return _loads(fila["value"]) if fila else None
+
+    def set_setting(self, project_id: str, key: str, value: dict[str, Any]) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO settings (project_id, key, value, updated_at) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT (project_id, key) "
+                "DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                (project_id, key, json.dumps(value, ensure_ascii=False), _now().isoformat()),
+            )
+
+    def list_settings(self, project_id: str, prefix: str = "") -> dict[str, dict[str, Any]]:
+        with self._conn() as conn:
+            filas = conn.execute(
+                "SELECT key, value FROM settings WHERE project_id = ? AND substr(key, 1, ?) = ? "
+                "ORDER BY key",
+                (project_id, len(prefix), prefix),
+            ).fetchall()
+        return {f["key"]: _loads(f["value"]) for f in filas}
+
+    def delete_setting(self, project_id: str, key: str) -> bool:
+        with self._conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM settings WHERE project_id = ? AND key = ?", (project_id, key)
+            )
+            return cur.rowcount > 0
+
+    def delete_project_data(self, project_id: str) -> None:
+        """Todo lo mutable de un proyecto. Los hijos antes que los padres."""
+        with self._conn() as conn:
+            conn.execute("BEGIN")
+            for sql in _BORRAR_PROYECTO_SQLITE:
+                conn.execute(sql, (project_id,))
+            conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+            conn.execute("COMMIT")
 
 
 def _dataset_from_row(r: Any) -> Dataset:
@@ -1048,6 +1189,21 @@ class NullMetadataStore:
 
     def revoke_api_key(self, key_id: str) -> bool:
         raise MetadataUnavailable("no hay base de metadatos")
+
+    def get_setting(self, project_id: str, key: str) -> dict[str, Any] | None:
+        return None
+
+    def set_setting(self, project_id: str, key: str, value: dict[str, Any]) -> None:
+        raise MetadataUnavailable("no hay base de metadatos: el ajuste no se ha guardado")
+
+    def list_settings(self, project_id: str, prefix: str = "") -> dict[str, dict[str, Any]]:
+        return {}
+
+    def delete_setting(self, project_id: str, key: str) -> bool:
+        raise MetadataUnavailable("no hay base de metadatos")
+
+    def delete_project_data(self, project_id: str) -> None:
+        return None
 
 
 class MetadataUnavailable(RuntimeError):

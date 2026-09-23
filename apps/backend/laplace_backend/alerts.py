@@ -24,15 +24,18 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import smtplib
 import sqlite3
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
 from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import quote
 
+from . import cifras
 from .config import Settings
 from .insights import Finding, Overview, span_label, window_label
 from .storage.base import Window
@@ -42,6 +45,8 @@ logger = logging.getLogger("laplace.alerts")
 #: Cabecera de un webhook entrante de Slack. Se comprueba para no mandar la factura de
 #: nadie a un host cualquiera por una errata en la configuración.
 SLACK_HOST_SUFFIX = "slack.com"
+#: Clave de los ajustes de alertas puestos desde la interfaz (D-123).
+CLAVE_AJUSTES = "alerts"
 
 
 # ---------------------------------------------------------------------------------
@@ -69,10 +74,15 @@ class ProjectAlertConfig:
     muted: bool = False
     #: Reglas concretas que no alertan (`repeticion`, `modelo_caro`, `contexto_fijo`).
     muted_kinds: frozenset[str] = frozenset()
+    #: Canales que se ponen desde la interfaz (D-123): un webhook cualquiera, que recibe
+    #: JSON, y una dirección de correo. Slack sigue siendo `webhook_url`.
+    generic_webhook_url: str = ""
+    email_to: str = ""
 
     @property
     def enabled(self) -> bool:
-        return bool(self.webhook_url) and not self.muted
+        canales = self.webhook_url or self.generic_webhook_url or self.email_to
+        return bool(canales) and not self.muted
 
 
 class AlertConfig:
@@ -99,7 +109,10 @@ class AlertConfig:
     def __init__(self, settings: Settings) -> None:
         self._base = ProjectAlertConfig(
             project_id="",
-            webhook_url=settings.alerts_slack_webhook,
+            # El webhook del entorno sólo cuenta con las alertas encendidas por entorno.
+            # Los canales puestos desde la interfaz no lo necesitan: ponerlos ya es
+            # encenderlas a propósito para ese proyecto (D-123).
+            webhook_url=settings.alerts_slack_webhook if settings.alerts_enabled else "",
             min_usd=settings.alerts_min_usd,
             quiet_hours=settings.alerts_quiet_hours,
             window_days=settings.alerts_window_days,
@@ -123,9 +136,17 @@ class AlertConfig:
         self._base = _apply(self._base, datos.get("defaults") or {})
         self._por_proyecto = dict(datos.get("projects") or {})
 
-    def for_project(self, project_id: str) -> ProjectAlertConfig:
+    def for_project(
+        self, project_id: str, desde_interfaz: dict[str, Any] | None = None
+    ) -> ProjectAlertConfig:
+        """Entorno, después el fichero, y encima lo que se puso en la interfaz.
+
+        La interfaz manda porque es lo último que alguien ha dicho a propósito sobre
+        ese proyecto, y es lo que la pantalla enseña como configuración en vigor.
+        """
         ajustes = self._por_proyecto.get(project_id) or {}
-        return _apply(replace(self._base, project_id=project_id), ajustes)
+        config = _apply(replace(self._base, project_id=project_id), ajustes)
+        return _apply(config, desde_interfaz or {})
 
     def finding_url(self, project_id: str, finding: Finding, days: int) -> str:
         """Enlace directo a la ficha del problema, la misma que abre la interfaz.
@@ -146,6 +167,8 @@ def _apply(base: ProjectAlertConfig, ajustes: dict[str, Any]) -> ProjectAlertCon
     cambios: dict[str, Any] = {}
     for clave, cast in (
         ("webhook_url", str),
+        ("generic_webhook_url", str),
+        ("email_to", str),
         ("min_usd", float),
         ("quiet_hours", float),
         ("window_days", int),
@@ -404,6 +427,9 @@ class Decision:
     #: que llevan un periodo de calma entero sin verse: se olvidan.
     forgotten: list[str]
     reason: str = ""
+    #: Aviso de presupuesto que toca mandar (D-123), y su clave en el estado.
+    budget_notice: str = ""
+    budget_key: str = ""
 
 
 def decide(
@@ -467,14 +493,14 @@ def decide(
 
 
 def money(amount: float) -> str:
-    """El mismo criterio de decimales que la interfaz, para que no se contradigan."""
-    if amount >= 100:
-        return f"${amount:,.0f}".replace(",", ".")
-    if amount >= 1:
-        return f"${amount:.2f}"
-    if amount >= 0.01:
-        return f"${amount:.4f}".rstrip("0")
-    return f"${amount:.6f}".rstrip("0")
+    """El mismo criterio de decimales que la interfaz, para que no se contradigan.
+
+    Esto era una **copia** del criterio, con su propio ladder de decimales, y el
+    docstring de arriba ya decía la intención que la copia no cumplía: se quedó con el
+    punto decimal inglés mientras la alerta escribía los millares en español, así que un
+    mismo mensaje de Slack podía llevar «$1.234» y «$5.00» (D-120).
+    """
+    return cifras.dinero(amount)
 
 
 def _amount_phrase(finding: Finding, ventana: str) -> str:
@@ -584,6 +610,89 @@ class SlackNotifier:
             return False
 
 
+class WebhookNotifier:
+    """Un POST con JSON a un webhook cualquiera: Teams, Discord, un n8n propio (D-123).
+
+    HTTPS obligatorio salvo contra la propia máquina. El cuerpo lleva el texto ya
+    redactado y el proyecto, que es lo mínimo para enrutarlo al otro lado.
+    """
+
+    def __init__(self, timeout: float = 10.0) -> None:
+        self._timeout = timeout
+
+    def send(self, url: str, text: str, project_id: str) -> bool:
+        if not webhook_valido(url):
+            logger.error("el webhook no es https ni apunta a esta máquina; no se manda nada")
+            return False
+        cuerpo = json.dumps(
+            {"text": text, "content": text, "project": project_id, "source": "laplace"},
+            ensure_ascii=False,
+        ).encode("utf-8")
+        peticion = urllib.request.Request(  # noqa: S310 - el esquema se valida arriba
+            url, data=cuerpo, headers={"Content-Type": "application/json"}, method="POST"
+        )
+        try:
+            with urllib.request.urlopen(peticion, timeout=self._timeout) as respuesta:  # noqa: S310
+                return 200 <= respuesta.status < 300
+        except urllib.error.URLError as exc:
+            logger.warning("no se ha podido avisar al webhook: %s", exc)
+            return False
+
+
+def webhook_valido(url: str) -> bool:
+    from urllib.parse import urlparse
+
+    partes = urlparse(url)
+    if not partes.hostname:
+        return False
+    if partes.scheme == "https":
+        return True
+    return partes.scheme == "http" and partes.hostname in ("localhost", "127.0.0.1", "::1")
+
+
+class EmailNotifier:
+    """Correo por SMTP. La credencial vive en el entorno; el destinatario, en la
+    interfaz (D-123)."""
+
+    def __init__(self, settings: Settings) -> None:
+        self._s = settings
+
+    @property
+    def configured(self) -> bool:
+        return bool(self._s.smtp_host and (self._s.smtp_from or self._s.smtp_user))
+
+    def send(self, to: str, subject: str, text: str) -> bool:
+        if not self.configured:
+            logger.error(
+                "hay un correo de alertas puesto pero no hay servidor: falta LAPLACE_SMTP_HOST"
+            )
+            return False
+        mensaje = EmailMessage()
+        mensaje["From"] = self._s.smtp_from or self._s.smtp_user
+        mensaje["To"] = to
+        mensaje["Subject"] = subject
+        mensaje.set_content(text)
+        try:
+            with smtplib.SMTP(self._s.smtp_host, self._s.smtp_port, timeout=15) as smtp:
+                if self._s.smtp_starttls:
+                    smtp.starttls()
+                if self._s.smtp_user:
+                    smtp.login(self._s.smtp_user, self._s.smtp_password)
+                smtp.send_message(mensaje)
+            return True
+        except (OSError, smtplib.SMTPException) as exc:
+            logger.warning("no se ha podido mandar el correo de alertas: %s", exc)
+            return False
+
+
+def texto_plano(mrkdwn: str) -> str:
+    """El mensaje de Slack sin su marcado, para el correo y los webhooks genéricos."""
+    import re
+
+    texto = re.sub(r"<([^|>]+)\|([^>]+)>", r"\2 (\1)", mrkdwn)
+    return texto.replace("*", "").replace("_", "")
+
+
 def _looks_like_slack(url: str) -> bool:
     from urllib.parse import urlparse
 
@@ -614,28 +723,94 @@ class AlertRunner:
         config: AlertConfig,
         state: AlertState,
         notifier: SlackNotifier | None = None,
+        *,
+        metadata: Any = None,
+        webhook: WebhookNotifier | None = None,
+        email: EmailNotifier | None = None,
     ) -> None:
         self._store = store
         self._config = config
         self._state = state
         self._notifier = notifier or SlackNotifier()
+        #: De aquí salen los ajustes puestos en la interfaz, los estados de cada
+        #: hallazgo y el presupuesto. Sin ella, lo de siempre: entorno y fichero.
+        self._metadata = metadata
+        self._webhook = webhook or WebhookNotifier()
+        self._email = email
+
+    def _desde_interfaz(self, project_id: str) -> dict[str, Any]:
+        if self._metadata is None:
+            return {}
+        try:
+            return self._metadata.get_setting(project_id, CLAVE_AJUSTES) or {}
+        except Exception:  # noqa: BLE001
+            logger.warning("no se leen los ajustes de alertas de %s", project_id, exc_info=True)
+            return {}
 
     def config_for(self, project_id: str) -> ProjectAlertConfig:
         """Los ajustes en vigor para un proyecto. Los lee la API de estado."""
-        return self._config.for_project(project_id)
+        return self._config.for_project(project_id, self._desde_interfaz(project_id))
+
+    @property
+    def email_ready(self) -> bool:
+        return self._email is not None and self._email.configured
+
+    def _enviar(self, ajustes: ProjectAlertConfig, texto: str) -> bool:
+        """Por cada canal puesto. Cuenta como enviado si ha llegado por alguno."""
+        llegados: list[bool] = []
+        if ajustes.webhook_url:
+            llegados.append(self._notifier.send(ajustes.webhook_url, texto))
+        plano = texto_plano(texto)
+        if ajustes.generic_webhook_url:
+            llegados.append(
+                self._webhook.send(ajustes.generic_webhook_url, plano, ajustes.project_id)
+            )
+        if ajustes.email_to and self._email is not None:
+            asunto = f"Laplace · {ajustes.project_id}: " + plano.splitlines()[0].split("—")[-1]
+            llegados.append(self._email.send(ajustes.email_to, asunto.strip(), plano))
+        return any(llegados)
+
+    def _presupuesto(self, project_id: str, ahora: datetime) -> tuple[str, str]:
+        """El aviso de presupuesto que toca, si toca, y su clave en el estado."""
+        if self._metadata is None:
+            return "", ""
+        from . import presupuesto
+
+        tope = presupuesto.leer(self._metadata, project_id)
+        if tope is None:
+            return "", ""
+        b = presupuesto.calcular(self._store, project_id, tope, ahora)
+        pct = presupuesto.aviso_pendiente(b)
+        if pct is None:
+            return "", ""
+        clave = f"budget:{b.month}:{pct}"
+        if clave in self._state.read(project_id):
+            return "", ""
+        return f"*Presupuesto* — {b.headline}", clave
 
     def evaluate(self, project_id: str, *, dry_run: bool = False) -> Decision:
         """Un proyecto. `dry_run` calcula la decisión sin mandar ni recordar nada."""
         from .insights import overview as build_overview
 
-        ajustes = self._config.for_project(project_id)
+        ajustes = self.config_for(project_id)
         if not ajustes.enabled:
-            return Decision(project_id, [], [], [], reason="silenciado o sin webhook")
+            return Decision(
+                project_id, [], [], [], reason="silenciado o sin canal: ni webhook ni correo"
+            )
 
-        vista = build_overview(self._store, project_id, _window(ajustes.window_days))
+        # Lo marcado como arreglado o ignorado no alerta: ya tiene respuesta (D-123).
+        estados = {}
+        if self._metadata is not None:
+            from .seguimiento import leer_estados
+
+            estados = leer_estados(self._metadata, project_id)
+        vista = build_overview(
+            self._store, project_id, _window(ajustes.window_days), states=estados
+        )
         ahora = datetime.now(timezone.utc)
         previos = self._state.read(project_id)
         decision = decide(vista, ajustes, previos, ahora)
+        decision.budget_notice, decision.budget_key = self._presupuesto(project_id, ahora)
         if dry_run:
             return decision
 
@@ -649,18 +824,35 @@ class AlertRunner:
                 previo.amount_usd = finding.window_waste_usd
                 self._state.save(project_id, previo)
 
-        if not decision.due:
+        if not decision.due and not decision.budget_notice:
             return decision
 
         urls = {
             f.id: self._config.finding_url(project_id, f, ajustes.window_days)
             for f in decision.due
         }
-        texto = compose(vista, decision, ajustes, urls)
-        if not self._notifier.send(ajustes.webhook_url, texto):
+        partes = []
+        if decision.budget_notice:
+            partes.append(f"*Laplace · «{project_id}»* — {decision.budget_notice}")
+        if decision.due:
+            partes.append(compose(vista, decision, ajustes, urls))
+        texto = "\n\n".join(partes)
+        if not self._enviar(ajustes, texto):
             # No se recuerda lo que no se ha mandado: si el envío falla, el siguiente
             # ciclo lo vuelve a intentar en lugar de tragarse el aviso para siempre.
-            return replace(decision, due=[], reason="el envío a Slack ha fallado")
+            return replace(decision, due=[], reason="el envío ha fallado por todos los canales")
+
+        if decision.budget_key:
+            self._state.save(
+                project_id,
+                AlertRecord(
+                    finding_id=decision.budget_key,
+                    notified_at=ahora,
+                    seen_at=ahora,
+                    amount_usd=0.0,
+                    times=1,
+                ),
+            )
 
         for finding in decision.due:
             anterior = previos.get(finding.id)

@@ -167,9 +167,10 @@ def build(facts: CoverageFacts, *, has_managed_prompts: bool = False) -> Coverag
                 "también."
             ),
             fix=(
-                "Si es un modelo de un proveedor, añádelo a "
-                "apps/backend/laplace_backend/pricing/model_prices.json con el precio de su "
-                "página oficial: es un PR de una línea y la tabla se recarga sin reiniciar. "
+                "Si es un modelo de un proveedor, escribe su tarifa en un JSON tuyo "
+                "—{\"models\": {\"nombre-del-modelo\": {\"input\": 1.0, \"output\": 4.0}}}, "
+                "en dólares por millón de tokens, de su página oficial— y arranca Laplace "
+                "con LAPLACE_PRICES_EXTRA apuntando a ese fichero. "
                 "Si corre en tu máquina —Ollama, LM Studio—, no hay tarifa que añadir: no "
                 "te cobra nadie. Entonces esta señal se queda a cero a propósito, el dinero "
                 "no se puede calcular y las reglas te hablan de tokens y de tiempo, que sí "
@@ -323,7 +324,9 @@ def _reading(cobertura: Coverage) -> tuple[str, str]:
         )
     return (
         f"{aviso} Léelo antes que las cifras de abajo.",
-        f"{peor.consequence} {peor.fix}{partidos}",
+        # El «qué hacer» ya sale debajo, en la señal que va mal: repetirlo aquí era
+        # leer el mismo párrafo dos veces seguidas.
+        f"{peor.consequence}{partidos}",
     )
 
 

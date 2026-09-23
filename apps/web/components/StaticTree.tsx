@@ -41,7 +41,10 @@ export function StaticTree({ trace, highlight }: { trace: Trace; highlight?: str
               <KindDot type={span.type} failed={failed} />
               <span className="node-name">
                 {span.name}
-                {span.llm?.request_model && <small>{span.llm.request_model}</small>}
+                {/* Mismo motivo que en `TraceTree`: el nombre ya lleva el modelo. */}
+                {span.llm?.request_model && !span.name.includes(span.llm.request_model) && (
+                  <small>{span.llm.request_model}</small>
+                )}
               </span>
               {node.repeat_count > 1 && (
                 <span className="badge" title="Misma llamada, misma entrada">

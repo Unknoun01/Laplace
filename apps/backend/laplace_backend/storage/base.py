@@ -12,6 +12,8 @@ from typing import Any, Protocol, runtime_checkable
 
 from laplace.schema import Span, TraceSummary
 
+from ..pasos import con_pista, nombre_de_paso
+
 
 @dataclass
 class TraceFilter:
@@ -32,6 +34,11 @@ class TraceFilter:
     user_id: str | None = None
     #: Busca en el nombre de los spans y en el id de la traza.
     search: str | None = None
+    #: Identidad exacta de un paso (`step_key`, o el nombre si no la tiene). Es lo que
+    #: usa «Ver las trazas afectadas» de un hallazgo: buscar por texto confundía
+    #: `consultar_manual` con `consultar_manual_cacheado`, y en los hallazgos cuyo
+    #: título lleva el llamante no encontraba nada.
+    step_key: str | None = None
     span_type: str | None = None
     #: Filtros que sólo ofrece el modo avanzado del explorador.
     model: str | None = None
@@ -55,6 +62,22 @@ def decode_cursor(cursor: str | None) -> tuple[datetime | None, str | None]:
         return datetime.fromisoformat(timestamp), trace_id or None
     except ValueError:
         return None, None
+
+
+@dataclass
+class CostGroup:
+    """El gasto de un usuario o de una sesión en la ventana (D-123).
+
+    `key` vacío agrupa las ejecuciones que no dicen de quién son: se devuelve igual,
+    porque esconderlas haría que los grupos sumaran menos que el total sin explicarlo.
+    """
+
+    key: str
+    traces: int = 0
+    cost_usd: float = 0.0
+    tokens: int = 0
+    #: Llamadas sin tarifa dentro del grupo: si no es cero, `cost_usd` es un suelo.
+    unknown_cost_spans: int = 0
 
 
 @dataclass
@@ -110,6 +133,9 @@ class RepeatedGroup:
     #: Paso al que pertenece la repetición. Sin él, el descuento que impide contar dos
     #: veces el mismo ahorro no encuentra su pareja en `ModelUsage` (D-061).
     step_key: str = ""
+    #: Camino de llamada. Es lo que deja titular dos pasos homónimos sin que las dos
+    #: tarjetas del inicio se lean como un duplicado (D-115).
+    site: str = ""
     #: Trozo de las instrucciones, para distinguir dos pasos con el mismo título.
     hint: str = ""
     traces: int = 0
@@ -146,6 +172,8 @@ class LoopGroup:
     span_type: str
     model: str = ""
     step_key: str = ""
+    #: Camino de llamada, por lo mismo que en `RepeatedGroup` (D-115).
+    site: str = ""
     hint: str = ""
     traces: int = 0
     total_spans: int = 0
@@ -304,14 +332,22 @@ class ObservedPrompt:
     """Un juego de instrucciones visto en las trazas, sin gestión de prompts de por medio.
 
     Es lo que sostiene la pestaña de Prompts para quien no ha adoptado nada: la
-    identidad de un paso ya incluye la huella de sus instrucciones (D-060), así que dos
-    `step_key` bajo la misma etiqueta son dos versiones del mismo prompt, con sus fechas
-    y su coste. No se puede enseñar el texto entero —sólo se guarda la pista—, pero sí
-    cuándo cambió y qué pasó con el coste, que es la mitad de la pregunta.
+    identidad de un paso incluye la huella de sus instrucciones (D-060), así que dos
+    `step_key` **bajo el mismo camino de llamada** son dos versiones del mismo prompt,
+    con sus fechas y su coste. No se puede enseñar el texto entero —sólo se guarda la
+    pista—, pero sí cuándo cambió y qué pasó con el coste, que es la mitad de la
+    pregunta.
+
+    Lo de «bajo el mismo camino» no es un matiz: esta clase decía «bajo la misma
+    etiqueta» y dejó de ser cierto el día que D-106 metió el camino de llamada dentro de
+    `step_key`. Desde entonces, un prompt que no había cambiado nunca salía en pantalla
+    como tres versiones porque se llamaba desde tres sitios (D-115).
     """
 
     step_key: str
     step_label: str
+    #: El camino de llamada. Es lo que separa «otro llamante» de «otro prompt».
+    site: str = ""
     hint: str = ""
     traces: int = 0
     calls: int = 0
@@ -402,6 +438,10 @@ def disambiguate(filas: list[Any]) -> list[Any]:
     `responder_consulta`, que es lo que distingue a dos agentes con una función
     homónima— y, si no, el principio de sus instrucciones. El camino primero porque se
     lee: un título con sesenta caracteres de prompt dentro no lo lee nadie (D-106).
+
+    Cómo se escribe el nombre lo decide `pasos.nombre_de_paso`, que es el único sitio
+    del producto que lo sabe. Aquí se decide **cuándo** hace falta. Tenerlo en dos
+    sitios era el fallo que esto mismo arregla, un nivel más arriba (D-115).
     """
     repetidas = {f.name for f in filas if sum(1 for g in filas if g.name == f.name) > 1}
     if not repetidas:
@@ -409,14 +449,13 @@ def disambiguate(filas: list[Any]) -> list[Any]:
     for fila in filas:
         if fila.name not in repetidas:
             continue
-        camino = getattr(fila, "site", "")
-        # El camino sin el último tramo, que es el propio nombre del paso.
-        desde = camino.rsplit(" > ", 1)[0] if " > " in camino else ""
-        pista = getattr(fila, "hint", "")
-        if desde and desde != fila.name:
-            fila.name = f"{fila.name} (en {desde})"
-        elif pista and pista != fila.name:
-            fila.name = f"{fila.name} — «{pista}»"
+        nombre = nombre_de_paso(fila.name, getattr(fila, "site", ""))
+        if nombre != fila.name:
+            fila.name = nombre
+            continue
+        # Sin camino —tráfico anterior a D-106, o un agente sin decorar— lo único que
+        # queda para separarlos es el principio de sus instrucciones, recortado.
+        fila.name = con_pista(fila.name, getattr(fila, "hint", ""))
     return filas
 
 
@@ -461,6 +500,14 @@ class SpanStore(Protocol):
         """
 
     @property
+    def loop_groups_sql(self) -> str:
+        """La consulta que detecta bucles sin avance, tal cual se ejecuta.
+
+        Misma razón que `repeated_groups_sql`: la ficha del hallazgo enseña la consulta
+        que se ha ejecutado de verdad, y cada almacén tiene la suya.
+        """
+
+    @property
     def model_usage_sql(self) -> str:
         """La consulta que agrega el uso por paso, tal cual se ejecuta."""
 
@@ -501,6 +548,16 @@ class SpanStore(Protocol):
         self, project_id: str, window: Window, dedup_hash: str, limit: int = 40
     ) -> list[Span]:
         """Las ocurrencias repetidas de una traza concreta, como evidencia."""
+
+    def sample_loop(
+        self, project_id: str, window: Window, loop_hash: str, limit: int = 40
+    ) -> list[Span]:
+        """Las vueltas de un bucle en una traza concreta, como evidencia.
+
+        Gemela de `sample_repetition` y separada de ella a propósito: un bucle se agrupa
+        por `loop_hash` —que ignora los números de la entrada— y una repetición por
+        `dedup_hash`, que no. Mezclarlas devolvería una vuelta suelta en vez del bucle.
+        """
 
     def timeseries(
         self, project_id: str, window: Window, bucket_minutes: int

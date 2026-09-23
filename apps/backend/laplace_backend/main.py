@@ -15,6 +15,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 from .api import router
+from .api_ajustes import router as ajustes_router
+from .api_cuentas import router as cuentas_router
 from .api_evals import router as evals_router
 from .api_prompts import router as prompts_router
 from .auth import AuthMiddleware
@@ -56,24 +58,94 @@ def build_metadata(settings: Settings):
     return build_metadata_store(settings)
 
 
-def build_alerts(settings: Settings, store):
-    """El evaluador de alertas, o `None` si están apagadas.
+def build_alerts(settings: Settings, store, metadata=None):
+    """El evaluador de alertas.
 
     Es el mismo objeto en local y en la nube: cambia dónde se guarda el estado, igual
     que cambia dónde se guardan las trazas. `laplace ui` levanta las alertas con las
     mismas variables de entorno que un despliegue (D-075).
+
+    Se construye siempre desde D-123: los canales también se ponen en la interfaz, por
+    proyecto. Sin ningún canal puesto no manda nada, que es lo que ya pasaba.
     """
-    if not settings.alerts_enabled:
-        return None
-    from .alerts import AlertConfig, AlertRunner, build_alert_state
+    from .alerts import AlertConfig, AlertRunner, EmailNotifier, build_alert_state
 
     config = AlertConfig(settings)
-    if not config.base_url:
+    if settings.alerts_enabled and not config.base_url:
         logger.warning(
             "las alertas van sin enlace: falta LAPLACE_ALERTS_BASE_URL con la raíz "
             "pública de la interfaz"
         )
-    return AlertRunner(store, config, build_alert_state(settings))
+    return AlertRunner(
+        store,
+        config,
+        build_alert_state(settings),
+        metadata=metadata,
+        email=EmailNotifier(settings),
+    )
+
+
+async def retention_loop(store, days: int) -> None:
+    """Borra lo que pasa de `days` días, una vez al día (D-123)."""
+    from datetime import datetime, timedelta, timezone
+
+    while True:
+        try:
+            corte = datetime.now(timezone.utc) - timedelta(days=days)
+            await asyncio.to_thread(store.delete_before, corte)
+            logger.info("retención: borrados los spans anteriores a %s", corte.date())
+            await asyncio.sleep(86400)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            logger.exception("fallo en la retención; se reintenta en una hora")
+            await asyncio.sleep(3600)
+
+
+def preparar_cuentas(app: FastAPI, settings: Settings) -> None:
+    """Cuentas en la nube (D-127): el almacén, el freno de intentos y, si todavía no hay
+    ninguna persona, el código de un solo uso para crear la primera.
+
+    El código va al log y no a la pantalla: quien puede leer el log de un despliegue es
+    quien lo administra, y quien llega a la URL no tiene por qué serlo.
+    """
+    import secrets
+
+    from .cuentas import Frenos
+    from .cuentas import build as build_cuentas
+
+    app.state.frenos = Frenos()
+    app.state.setup_token = ""
+    app.state.cuentas = build_cuentas(settings) if settings.auth_enforced else None
+    if app.state.cuentas is None:
+        return
+    try:
+        app.state.cuentas.migrate()
+        if app.state.cuentas.hay_usuarios():
+            return
+    except Exception:  # noqa: BLE001
+        logger.exception("no se pudo preparar la base de cuentas")
+        return
+    app.state.setup_token = settings.setup_token or secrets.token_urlsafe(18)
+    logger.warning(
+        "no hay ninguna cuenta todavía. Crea la primera en /configurar con este código "
+        "(sólo vale una vez): %s",
+        app.state.setup_token,
+    )
+
+
+def load_custom_prices(metadata) -> None:
+    """Las tarifas puestas desde la interfaz, al arrancar (D-123)."""
+    from .pricing import set_custom_prices
+
+    try:
+        guardadas = metadata.get_setting("*", "prices") or {}
+    except Exception:  # noqa: BLE001
+        logger.warning("no se pueden leer las tarifas propias", exc_info=True)
+        return
+    if guardadas.get("models"):
+        set_custom_prices(guardadas["models"])
+        logger.info("tarifas propias cargadas — %d modelos", len(guardadas["models"]))
 
 
 @asynccontextmanager
@@ -114,25 +186,32 @@ async def lifespan(app: FastAPI):
     if app.state.judge.enabled:
         logger.info("LLM-as-judge activo — modelo=%s", app.state.judge.model)
 
-    app.state.alerts = build_alerts(settings, app.state.store)
-    tarea = None
-    if app.state.alerts is not None:
-        from .alerts import alert_loop
+    load_custom_prices(app.state.metadata)
+    preparar_cuentas(app, settings)
 
-        tarea = asyncio.create_task(
-            alert_loop(app.state.alerts, settings.alerts_interval_seconds)
-        )
+    app.state.alerts = build_alerts(settings, app.state.store, app.state.metadata)
+    from .alerts import alert_loop
+
+    tareas = [
+        asyncio.create_task(alert_loop(app.state.alerts, settings.alerts_interval_seconds))
+    ]
+    if settings.alerts_enabled:
         logger.info(
             "alertas a Slack activas — repaso cada %ds, umbral %s$, calma %sh",
             settings.alerts_interval_seconds,
             settings.alerts_min_usd,
             settings.alerts_quiet_hours,
         )
+    if settings.retention_days > 0:
+        tareas.append(
+            asyncio.create_task(retention_loop(app.state.store, settings.retention_days))
+        )
+        logger.info("retención activa — se guardan %d días", settings.retention_days)
 
     try:
         yield
     finally:
-        if tarea is not None:
+        for tarea in tareas:
             tarea.cancel()
 
 
@@ -159,6 +238,7 @@ app.add_middleware(
     AuthMiddleware,
     required=get_settings().auth_enforced,
     metadata_getter=lambda: app.state.metadata,
+    cuentas_getter=lambda: getattr(app.state, "cuentas", None),
 )
 
 # Los routers van ANTES del comodín de la interfaz: FastAPI resuelve por orden de
@@ -166,6 +246,8 @@ app.add_middleware(
 app.include_router(router)
 app.include_router(evals_router)
 app.include_router(prompts_router)
+app.include_router(ajustes_router)
+app.include_router(cuentas_router)
 
 
 def _log_auth(settings: Settings) -> None:
@@ -283,6 +365,15 @@ def interfaz(ruta: str) -> Response:
         except (ValueError, OSError):
             continue
         if resuelto.is_file():
-            return FileResponse(resuelto)
+            # Sin `Cache-Control`, el navegador cachea el HTML por heurística a partir
+            # de `Last-Modified`, y tras actualizar Laplace se seguía viendo la
+            # interfaz anterior sin ningún aviso. El HTML se revalida siempre; lo de
+            # `_next/static` lleva hash en el nombre y puede guardarse para siempre.
+            cache = (
+                "public, max-age=31536000, immutable"
+                if "_next/static/" in resuelto.as_posix()
+                else "no-cache"
+            )
+            return FileResponse(resuelto, headers={"Cache-Control": cache})
 
     return FileResponse(raiz / "404.html", status_code=404)

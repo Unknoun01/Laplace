@@ -81,6 +81,31 @@ _VERSION_ALIASES = "id, prompt_id, version, text, notes, author, created_at"
 _DEPLOY_ALIASES = "id, prompt_id, version, at, actor, note, rollback"
 
 
+#: Lo que se borra al borrar un proyecto, hijos primero (D-123).
+_BORRAR_PROYECTO = (
+    "DELETE FROM dataset_items WHERE dataset_id IN "
+    "(SELECT id FROM datasets WHERE project_id = %s)",
+    "DELETE FROM eval_run_items WHERE run_id IN "
+    "(SELECT id FROM eval_runs WHERE project_id = %s)",
+    "DELETE FROM prompt_versions WHERE prompt_id IN "
+    "(SELECT id FROM prompts WHERE project_id = %s)",
+    "DELETE FROM prompt_deploys WHERE prompt_id IN "
+    "(SELECT id FROM prompts WHERE project_id = %s)",
+    "DELETE FROM annotations WHERE project_id = %s",
+    "DELETE FROM datasets WHERE project_id = %s",
+    "DELETE FROM eval_runs WHERE project_id = %s",
+    "DELETE FROM prompts WHERE project_id = %s",
+    "DELETE FROM settings WHERE project_id = %s",
+    "DELETE FROM api_keys WHERE project_id = %s",
+)
+#: Lo que sólo existe en la nube.
+_BORRAR_PROYECTO_PG = (
+    "DELETE FROM trace_diagnoses WHERE project_id = %s",
+    "DELETE FROM alert_state WHERE project_id = %s",
+    "DELETE FROM projects WHERE id = %s",
+)
+
+
 class PostgresMetadataStore:
     """Acceso a Postgres. Una conexión por operación: se usa poco y así no hay estado."""
 
@@ -489,7 +514,7 @@ class PostgresMetadataStore:
     def api_key_by_hash(self, key_hash: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             fila = conn.execute(
-                "SELECT id, project_id, name, created_at, revoked_at FROM api_keys "
+                "SELECT id, project_id, name, created_at, revoked_at, expires_at FROM api_keys "
                 "WHERE key_hash = %s",
                 (key_hash,),
             ).fetchone()
@@ -501,6 +526,7 @@ class PostgresMetadataStore:
             "name": fila[2],
             "created_at": fila[3],
             "revoked_at": fila[4],
+            "expires_at": fila[5],
         }
 
     def create_api_key(self, key_id: str, project_id: str, key_hash: str, name: str) -> None:
@@ -538,6 +564,47 @@ class PostgresMetadataStore:
                 (key_id,),
             )
             return bool(cur.rowcount)
+
+    # -- ajustes por proyecto -------------------------------------------------------------
+
+    def get_setting(self, project_id: str, key: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            fila = conn.execute(
+                "SELECT value FROM settings WHERE project_id = %s AND key = %s",
+                (project_id, key),
+            ).fetchone()
+        return _json(fila[0]) if fila else None
+
+    def set_setting(self, project_id: str, key: str, value: dict[str, Any]) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO settings (project_id, key, value, updated_at) "
+                "VALUES (%s, %s, %s::jsonb, now()) ON CONFLICT (project_id, key) "
+                "DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at",
+                (project_id, key, json.dumps(value, ensure_ascii=False)),
+            )
+
+    def list_settings(self, project_id: str, prefix: str = "") -> dict[str, dict[str, Any]]:
+        with self._connect() as conn:
+            filas = conn.execute(
+                "SELECT key, value FROM settings WHERE project_id = %s "
+                "AND left(key, %s) = %s ORDER BY key",
+                (project_id, len(prefix), prefix),
+            ).fetchall()
+        return {f[0]: _json(f[1]) for f in filas}
+
+    def delete_setting(self, project_id: str, key: str) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM settings WHERE project_id = %s AND key = %s", (project_id, key)
+            )
+            return bool(cur.rowcount)
+
+    def delete_project_data(self, project_id: str) -> None:
+        """Todo lo mutable de un proyecto, en una transacción. Hijos primero."""
+        with self._connect() as conn, conn.transaction():
+            for sql in (*_BORRAR_PROYECTO, *_BORRAR_PROYECTO_PG):
+                conn.execute(sql, (project_id,))
 
 
 def _dataset(f: tuple) -> Dataset:
@@ -596,3 +663,10 @@ def build_metadata_store(settings: Settings) -> Any:
 #: Nombre anterior, que usaban el `main` y las pruebas antes de que hubiera dos
 #: implementaciones de verdad. Se mantiene para no romper importaciones.
 MetadataStore = PostgresMetadataStore
+
+
+def _json(value: Any) -> Any:
+    """`jsonb` llega ya decodificado con psycopg; texto, si alguien lo guardó así."""
+    if isinstance(value, (dict, list)):
+        return value
+    return json.loads(value) if value else None

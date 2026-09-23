@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     #: tiene cuentas por diseño (D-010) y se dice por el log al arrancar. `true` y
     #: `false` fuerzan, y forzar `false` en la nube deja un aviso en cada arranque.
     auth_required: str = "auto"
+    #: Código para crear la primera cuenta (D-127). Vacío: se genera uno al arrancar y se
+    #: escribe en el log. Fijarlo sirve para despliegues automatizados.
+    setup_token: str = ""
 
     cors_origins: str = "http://localhost:3000"
 
@@ -62,6 +65,21 @@ class Settings(BaseSettings):
     alerts_min_usd: float = 1.0
     #: Horas de silencio por hallazgo tras avisar de él.
     alerts_quiet_hours: float = 24.0
+
+    # -- alertas por correo (D-123) ----------------------------------------------------
+    #: El servidor de correo es de la instalación, no de un proyecto: el destinatario se
+    #: pone en la interfaz, pero la credencial SMTP es un secreto y vive en el entorno.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_starttls: bool = True
+
+    # -- retención (D-123) -------------------------------------------------------------
+    #: Días que se guardan las trazas. 0 = para siempre, que es lo que había; se decide
+    #: a propósito y no por omisión, porque borrar datos no se enciende solo.
+    retention_days: int = 0
 
     # -- evaluaciones: LLM-as-judge (Fase 5) -----------------------------------------
     #: Apagado por defecto. El veredicto de máquina es opcional: anotar a mano funciona

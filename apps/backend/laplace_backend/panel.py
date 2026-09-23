@@ -28,6 +28,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from . import cifras
 from .dinero import motivo_sin_dinero
 from .insights import observed_days, span_label, window_label
 from .storage.base import Bucket, Window, WindowFacts
@@ -634,7 +635,7 @@ def attribute(
                         else f"El paso «{etiqueta}» se lleva {_share(parte)}: cuesta más "
                         f"por ejecución que en el resto del rango."
                     ),
-                    evidence=f"${de_mas:.6f} por encima de lo que costaba antes.",
+                    evidence=f"{cifras.dinero_exacto(de_mas)} por encima de lo que costaba antes.",
                 )
             )
 
@@ -673,6 +674,8 @@ def comparable(buckets: list[Bucket]) -> str:
     resto de la pantalla —que sí es cierto—.
     """
     trazas = sum(b.traces for b in buckets)
+    if trazas == 0:
+        return "el periodo anterior no tiene ninguna ejecución"
     if trazas < MIN_TRACES_FOR_COMPARISON:
         return (
             f"el periodo anterior sólo tiene {trazas} "

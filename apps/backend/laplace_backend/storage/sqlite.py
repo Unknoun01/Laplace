@@ -43,6 +43,7 @@ from ._rows import (
 )
 from .base import (
     Bucket,
+    CostGroup,
     CoverageFacts,
     LoopGroup,
     ModelUsage,
@@ -196,7 +197,7 @@ WITH numerados AS (
         cost_unknown, cost_rate_assumed,
         CASE WHEN step_key   != '' THEN step_key   ELSE name END AS paso,
         CASE WHEN step_label != '' THEN step_label ELSE name END AS etiqueta,
-        step_hint,
+        step_hint, step_site,
         ROW_NUMBER() OVER (
             PARTITION BY trace_id, dedup_hash ORDER BY start_time, span_id
         ) AS orden
@@ -210,6 +211,7 @@ por_traza AS (
         MAX(paso)          AS paso,
         MAX(etiqueta)      AS etiqueta,
         MAX(step_hint)     AS pista,
+        MAX(step_site)     AS sitio,
         MAX(span_type)     AS tipo,
         MAX(request_model) AS modelo,
         COUNT(*)           AS n,
@@ -229,6 +231,7 @@ SELECT
     modelo,
     MAX(etiqueta)                                          AS nombre,
     MAX(pista)                                             AS pista,
+    MAX(sitio)                                             AS sitio,
     MAX(tipo)                                              AS tipo,
     substr(MAX(printf('%012d', n) || dedup_hash), 13)      AS hash_ejemplo,
     COUNT(DISTINCT trace_id)                               AS trazas,
@@ -288,6 +291,7 @@ WITH por_traza AS (
         loop_hash,
         MAX(CASE WHEN step_label != '' THEN step_label ELSE name END) AS etiqueta,
         MAX(step_hint)                     AS pista,
+        MAX(step_site)                     AS sitio,
         MAX(span_type)                     AS tipo,
         MAX(request_model)                 AS modelo,
         MAX(CASE WHEN step_key != '' THEN step_key ELSE name END) AS paso,
@@ -312,6 +316,7 @@ SELECT
     loop_hash                          AS hash_ejemplo,
     MAX(etiqueta)                      AS nombre,
     MAX(pista)                         AS pista,
+    MAX(sitio)                         AS sitio,
     MAX(tipo)                          AS tipo,
     MAX(modelo)                        AS modelo,
     MAX(paso)                          AS paso,
@@ -444,6 +449,8 @@ _TRACE_AGGREGATE = """
     SUM(cost_rate_assumed = 1)                         AS assumed_rate_spans,
     MAX(session_id)                                    AS trace_session_id,
     MAX(user_id)                                       AS trace_user_id,
+    MAX(CASE WHEN parent_span_id = '' THEN substr(input_payload, 1, 600) END)
+                                                       AS root_input,
     GROUP_CONCAT(DISTINCT NULLIF(request_model, ''))   AS modelos
 """
 
@@ -584,11 +591,18 @@ class SQLiteStore:
         if filters.until is not None:
             clauses.append("start_time <= :until")
             params["until"] = _iso(filters.until)
+        # Sesión y usuario los lleva el span raíz, no cada llamada: filtrar los spans
+        # por ellos dejaba fuera los hijos y la traza salía con coste y tokens a cero.
+        # Se filtran trazas, igual que el modelo (D-123).
         if filters.session_id:
-            clauses.append("session_id = :session_id")
+            clauses.append(
+                "trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE session_id = :session_id)"
+            )
             params["session_id"] = filters.session_id
         if filters.user_id:
-            clauses.append("user_id = :user_id")
+            clauses.append(
+                "trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE user_id = :user_id)"
+            )
             params["user_id"] = filters.user_id
         if filters.model:
             # El modelo es de un span, no de la traza: se filtra por trazas que lo usan.
@@ -609,6 +623,9 @@ class SQLiteStore:
         if filters.span_type:
             sub.append("span_type = :span_type")
             params["span_type"] = filters.span_type
+        if filters.step_key:
+            sub.append("(CASE WHEN step_key != '' THEN step_key ELSE name END) = :paso")
+            params["paso"] = filters.step_key
         if filters.search:
             sub.append("(instr(lower(name), lower(:search)) > 0 OR trace_id LIKE :prefijo)")
             params["search"] = filters.search
@@ -659,6 +676,10 @@ class SQLiteStore:
     @property
     def repeated_groups_sql(self) -> str:
         return REPEATED_GROUPS_SQL
+
+    @property
+    def loop_groups_sql(self) -> str:
+        return LOOP_GROUPS_SQL
 
     @property
     def model_usage_sql(self) -> str:
@@ -751,6 +772,7 @@ class SQLiteStore:
                 span_type=r["tipo"],
                 model=r["modelo"] or "",
                 step_key=r["paso"] or "",
+                site=r["sitio"] or "",
                 traces=int(r["trazas"]),
                 total_spans=int(r["total_spans"]),
                 extra_spans=int(r["extra_spans"]),
@@ -773,7 +795,7 @@ class SQLiteStore:
     ) -> list[LoopGroup]:
         params = self._window_params(project_id, window)
         params.update(min_vueltas=min_vueltas, max_salidas=max_salidas, limit=limit)
-        return [
+        grupos = [
             LoopGroup(
                 loop_hash=r["hash_ejemplo"],
                 name=r["nombre"],
@@ -781,6 +803,7 @@ class SQLiteStore:
                 span_type=r["tipo"],
                 model=r["modelo"] or "",
                 step_key=r["paso"] or "",
+                site=r["sitio"] or "",
                 traces=int(r["trazas"]),
                 total_spans=int(r["total_spans"]),
                 extra_spans=int(r["extra_spans"]),
@@ -796,6 +819,9 @@ class SQLiteStore:
             )
             for r in self._query(LOOP_GROUPS_SQL, params)
         ]
+        # Los bucles nunca pasaron por aquí, y por eso el inicio enseñaba dos tarjetas
+        # con el título idéntico para dos llamantes distintos del mismo paso (D-115).
+        return disambiguate(grupos)
 
     def model_usage(
         self, project_id: str, window: Window, *, min_calls: int = 5, limit: int = 50
@@ -882,6 +908,30 @@ class SQLiteStore:
         sql = f"""
             SELECT {columnas} FROM spans
             WHERE trace_id = :trace_id AND dedup_hash = :dedup_hash
+            ORDER BY start_time, span_id LIMIT :limit
+        """
+        return [row_to_span(r) for r in self._query(sql, params)]
+
+    def sample_loop(
+        self, project_id: str, window: Window, loop_hash: str, limit: int = 40
+    ) -> list[Span]:
+        """La traza donde más vueltas da ese bucle, con sus vueltas."""
+        params = self._window_params(project_id, window)
+        params["loop_hash"] = loop_hash
+        params["limit"] = limit
+        trazas = self._query(
+            f"""SELECT trace_id, COUNT(*) AS n FROM spans
+                WHERE {WINDOW_WHERE} AND loop_hash = :loop_hash
+                GROUP BY trace_id ORDER BY n DESC, trace_id LIMIT 1""",
+            params,
+        )
+        if not trazas:
+            return []
+        params["trace_id"] = trazas[0]["trace_id"]
+        columnas = ", ".join(COLUMNS)
+        sql = f"""
+            SELECT {columnas} FROM spans
+            WHERE trace_id = :trace_id AND loop_hash = :loop_hash
             ORDER BY start_time, span_id LIMIT :limit
         """
         return [row_to_span(r) for r in self._query(sql, params)]
@@ -1062,15 +1112,17 @@ class SQLiteStore:
     def observed_prompts(self, project_id: str, window: Window) -> list[ObservedPrompt]:
         """Juegos de instrucciones vistos en las trazas, para quien no gestiona prompts.
 
-        Se agrupa por `step_key`, que ya incluye la huella del prompt de sistema: dos
-        claves bajo la misma etiqueta son dos versiones del mismo paso (D-060). Sólo
-        spans de LLM: un `tool` no tiene instrucciones que versionar.
+        Se agrupa por `step_key`, que incluye el camino de llamada y la huella del
+        prompt de sistema. El camino sale también en cada fila porque es lo único que
+        deja separar «otro llamante» de «otro prompt» más arriba (D-115). Sólo spans de
+        LLM: un `tool` no tiene instrucciones que versionar.
         """
         filas = self._query(
             f"""
             SELECT
                 step_key                                             AS clave,
                 MAX(CASE WHEN step_label != '' THEN step_label ELSE name END) AS paso,
+                MAX(step_site)            AS sitio,
                 MAX(step_hint)            AS pista,
                 COUNT(DISTINCT trace_id)  AS trazas,
                 COUNT(*)                  AS llamadas,
@@ -1140,6 +1192,57 @@ class SQLiteStore:
     def delete_project(self, project_id: str) -> None:
         self._conn.execute("DELETE FROM spans WHERE project_id = :p", {"p": project_id})
         self._conn.commit()
+
+    # -- tarifas propias, reparto por usuario y retención (D-123) -------------------
+
+    def spans_by_model(self, model: str) -> list[Span]:
+        """Todas las llamadas a un modelo, de todos los proyectos. Para el recálculo."""
+        columnas = ", ".join(COLUMNS)
+        sql = (
+            f"SELECT {columnas} FROM spans WHERE span_type = 'llm' "
+            "AND (request_model = :m OR response_model = :m) ORDER BY start_time, span_id"
+        )
+        return [row_to_span(r) for r in self._query(sql, {"m": model})]
+
+    def cost_by(
+        self, project_id: str, window: Window, dimension: str, limit: int = 20
+    ) -> list[CostGroup]:
+        columna = {"user": "user_id", "session": "session_id"}[dimension]
+        params = {**self._window_params(project_id, window), "limit": limit}
+        sql = f"""
+            WITH por_traza AS (
+                SELECT trace_id,
+                       MAX({columna})                                  AS clave,
+                       SUM(cost_total_usd)                             AS coste,
+                       SUM(input_tokens + output_tokens)               AS tokens,
+                       SUM(span_type = 'llm' AND cost_unknown = 1)     AS sin_tarifa
+                FROM spans
+                WHERE {WINDOW_WHERE}
+                GROUP BY trace_id
+            )
+            SELECT clave, COUNT(*) AS trazas, SUM(coste) AS coste, SUM(tokens) AS tokens,
+                   SUM(sin_tarifa) AS sin_tarifa
+            FROM por_traza
+            GROUP BY clave
+            ORDER BY coste DESC, trazas DESC, clave
+            LIMIT :limit
+        """
+        return [
+            CostGroup(
+                key=r["clave"] or "",
+                traces=int(r["trazas"] or 0),
+                cost_usd=float(r["coste"] or 0.0),
+                tokens=int(r["tokens"] or 0),
+                unknown_cost_spans=int(r["sin_tarifa"] or 0),
+            )
+            for r in self._query(sql, params)
+        ]
+
+    def delete_before(self, cutoff: datetime) -> int:
+        """Borra los spans que empezaron antes de `cutoff`. Es la retención."""
+        cur = self._conn.execute("DELETE FROM spans WHERE start_time < :c", {"c": _iso(cutoff)})
+        self._conn.commit()
+        return cur.rowcount
 
     def health(self) -> bool:
         try:

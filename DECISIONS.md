@@ -1584,3 +1584,441 @@ Dos pruebas nuevas cierran ese agujero por donde se coló:
 * **La paridad de la consulta de bucles**, con las dos trazas dando exactamente las mismas
   vueltas, que es el tráfico empatado donde una elección arbitraria se separa (D-099). Y
   la agrupación por camino, que también se escribió dos veces.
+
+### D-113 — Un hallazgo que el motor encuentra tiene que saber explicarse
+La regla de bucles entró en D-109 como «el diferenciador del producto desde el
+principio», se añadió a `detect()` y **nunca se añadió a `detail()`**. Cuatro tandas
+después, la tarjeta de 0,60 $ del proyecto de demo —la segunda que más dinero devolvía—
+llevaba a una página que decía «ese problema ya no aparece. O lo has arreglado, o ha
+dejado de darse. **Enhorabuena** en cualquiera de los dos casos». El producto felicitaba
+al usuario por su hallazgo más caro, y los cuatro bucles del proyecto hacían lo mismo.
+
+Lo que falló no fue la rama que faltaba: fue que **nada la exigía**. `detect()` y
+`detail()` son dos puertas del mismo catálogo y no había ningún sitio donde estuviera
+escrito que hay que cruzar las dos, así que una regla nueva se podía entregar entera por
+la mitad con la suite de 333 pruebas en verde.
+
+Ahora `detail()` despacha por tabla y `DETAILED_KINDS` **se deriva de esa tabla**, nunca
+se escribe a mano: una lista a mano se queda desfasada afirmando que cubre algo que no
+cubre. Dos redes, y hacen falta las dos:
+
+* Sobre tráfico que produce los cuatro tipos, cada hallazgo tiene que tener ficha. Con
+  una aserción previa que exige que el tráfico produzca los cuatro: sin ella, el día que
+  la fixture deje de generar bucles la prueba volvería a pasar sin mirar el que falla,
+  que es exactamente cómo sobrevivió el fallo original.
+* Y una estructural, que no depende de que nadie se acuerde de sembrar tráfico del tipo
+  nuevo. Es el criterio de D-097 con las rutas: una regla nueva nace sin ficha y la suite
+  lo dice el mismo día.
+
+La ficha del bucle explica además por qué se detecta aparte de una repetición: lo que
+delata a un bucle no es la entrada —nunca hay dos iguales, llevan el contador dentro—
+sino que la salida no cambia.
+
+### D-114 — Un motivo no basta con que exista: tiene que ser cierto
+El guardia de D-107 recorre los modelos de la API y exige que toda cifra en dólares venga
+con algo que diga si se puede afirmar. Comprueba que **haya** un motivo. No comprueba que
+el motivo **diga la verdad**, y por ese hueco se coló lo siguiente.
+
+La regla del modelo caro mandaba por la misma puerta dos situaciones opuestas: que el
+modelo no esté en la tabla de precios —un hueco nuestro— y que esté pero ya sea el más
+barato que conocemos, que es una respuesta. Escribía la primera frase para las dos, así
+que la pantalla afirmaba «gpt-5.6-luna no está en la tabla de precios» de un modelo cuyo
+coste pinta en las otras diez pantallas, con `unknown_cost_spans` a 0 en ese mismo
+inicio. Quien lea eso deja de creerse la tabla entera.
+
+`dinero.AFIRMACIONES_DE_SIN_TARIFA` es la lista cerrada de las formas en que el producto
+dice no tener tarifa, y un barrido sobre tráfico donde **todos** los modelos tienen
+precio exige que ninguna aparezca. Cerrada a propósito: una forma nueva de decirlo se
+añade ahí y se ve en el diff.
+
+Y al arreglarlo apareció la tercera cara. La ficha de este hallazgo estaba escrita para el
+camino del dinero, así que por el camino del tiempo la página decía «Cambia el modelo de
+ese paso a **None**» y afirmaba una alternativa más barata que no existe. **Un tipo de
+hallazgo con dos caminos son dos fichas**, y la red lo exige ahora: ninguna ficha puede
+enseñar un hueco donde va un dato.
+
+### D-115 — Lo que D-106 dejó detrás: `step_key` leído con su significado anterior
+D-106 metió el **camino de llamada** dentro de `step_key` para que dos agentes con una
+función homónima no mezclaran sus poblaciones. Fue correcto y sigue siéndolo. Lo que no
+se hizo fue repasar quién consumía esa clave dando por buena la definición vieja, y dos
+pantallas se quedaron afirmando lo que había dejado de ser cierto:
+
+* **Prompts** agrupaba las variantes por etiqueta, así que un prompt que no había cambiado
+  nunca salía como tres versiones porque se llamaba desde tres sitios: «redactar · 3
+  juegos de instrucciones» con las tres filas enseñando el mismo texto carácter por
+  carácter. La pestaña que existe para fechar cambios de prompt afirmaba uno que no
+  ocurrió. Y la guarda de D-093 —«más de ocho variantes es una plantilla con datos
+  dentro»— se podía disparar por tener nueve llamantes, dejando inservible el único sitio
+  del producto donde se nombra la huella partida.
+* **El inicio** enseñaba dos tarjetas con el título idéntico y cifras distintas, porque el
+  título de un bucle llevaba sólo el nombre de la función. De diez cosas que arreglar,
+  cuatro se leían como un duplicado del producto. Es peor que parecerlo: el usuario
+  arregla una, vuelve, ve la otra con el mismo texto y concluye que no nos hemos enterado.
+
+El barrido de todos los consumidores de `step_key` dio **tres** sitios con la suposición
+vieja —los dos de arriba y el docstring de `ObservedPrompt`— y uno que ya estaba bien:
+`coverage` agrupa por camino desde D-106.
+
+La raíz no era ninguno de los tres: era que **no había un sitio que supiera cómo se llama
+un paso**, así que cada pantalla se lo inventaba. `pasos.py` lo es ahora.
+`disambiguate()` decide **cuándo** hace falta decir de dónde viene un paso;
+`nombre_de_paso()` decide **cómo** se escribe. Dos sitios sabiendo escribir lo mismo era
+la enfermedad, un nivel por encima de los dos síntomas.
+
+Tres cosas que salieron al tirar del hilo:
+
+* A los bucles **nunca** se les aplicó `disambiguate()`. A repeticiones y a uso de modelo,
+  sí; la regla nueva volvió a entrar por media puerta, igual que en D-113.
+* Donde sí se aplicaba, iba cojo: `RepeatedGroup` no llevaba el camino, así que
+  `getattr(fila, "site")` devolvía siempre vacío y caía al peor camino —el principio del
+  prompt— que su propio docstring desaconseja.
+* Y ese peor camino no estaba recortado: el título de un hallazgo era el nombre de la
+  función más ochenta caracteres de prompt entre comillas dentro de comillas, dos de las
+  tres líneas de la tarjeta.
+
+Dos llamantes distintos **son** dos pasos, que es justo lo que D-106 consiguió distinguir.
+Lo que no puede pasar es que uno solo declare versiones que no tuvo, ni que dos se lean
+como el mismo.
+
+### D-116 — Un test que falla por el reloj es peor que no tenerlo
+Los tramos del panel se alinean al reloj. El test de paridad sembraba el pico a «ahora
+menos diez horas» con 48 minutos de duración, así que entre las 09:00 y las 10:00 UTC el
+pico cruza medianoche, se parte en dos tramos y salen dos picos donde se espera uno. Un
+13 % de las ejecuciones en rojo sin que nada esté mal.
+
+Lo revelador es que el arreglo ya existía: `_proyecto_con_pico` ancla el pico al principio
+de su tramo y lleva escrito por qué. El test de paridad no lo usaba, tenía una **copia
+inline** de la siembra, y la copia se quedó sin el anclaje. Ahora comparte la pieza.
+
+La regla: un rojo que depende del reloj enseña a no mirar el rojo, y en este proyecto el
+rojo de la nube ya se ha ignorado tres veces (D-112). Cualquier prueba que coloque tráfico
+en un instante relativo tiene que anclarlo al tramo, no al «ahora».
+
+### D-117 — La quinta cara del doble conteo: el bucle contra el modelo caro
+Salió al ir a arreglar la presentación del héroe con el 100 % evitable: antes de escribir
+«esto pasa en agentes pequeños» había que comprobar si el 100 % era verdad. No lo era. Los
+hallazgos del proyecto de demo sumaban 1,33 $ sobre un gasto de 0,75 $, y el
+`min(suma, gasto)` de `overview()` lo recortaba a exactamente el 100 %, que la pantalla
+enseña como una buena noticia.
+
+El descuento que lo impide existe desde D-061 y se alimenta **sólo** de las repeticiones
+exactas. Cuando la regla de bucles entró en D-109 nadie la enchufó, así que la del modelo
+caro volvía a reclamar la diferencia de tarifa sobre las vueltas que el bucle ya daba por
+eliminadas. Es la quinta forma que encuentra este proyecto de contar dos veces el mismo
+dinero, y la tercera cosa que la regla de bucles se dejó a medias al entrar.
+
+La red sigue la regla de STATUS de no comprobar con un tope contra el gasto —eso deja
+pasar el error mientras quepa dentro—: exige que **el tope no llegue a morder** y que
+`avoidable_ratio` no sea 1.0. En rojo decía la cifra exacta: 0,073944 prometidos sobre
+0,063000 gastados, el 117 % de la factura.
+
+Un bucle y una repetición exacta del mismo paso no se pisan entre sí —la consulta de
+bucles exige entradas distintas y la de repetición la misma—, así que sumar los dos en el
+descuento no descuenta de más. Y se pasan en `detect()` **y** en `detail()`: en uno solo,
+la ficha diría una cifra distinta de su tarjeta.
+
+**Y el `min(suma, gasto)` se queda**, pero ahora se sabe lo que es: un cinturón, no un
+cálculo. Que llegue a morder significa que dos reglas se solapan, y eso es un fallo, no
+un caso. La prueba nueva es la que lo dice.
+
+### D-118 — El héroe cuando el reparto no reparte, y la cifra que explica el hallazgo
+Dos cosas de la misma familia: enseñar el número con el que de verdad se decidió.
+
+**El héroe.** Con el doble conteo arreglado, el proyecto de demo se queda en el 93 %
+evitable, y ahí la pareja «X → Y» con su barra sigue sin decir lo que parece: una barra
+con un lado invisible no es una barra, y en letra de 54 px la segunda cifra promete que
+puedes dejar de pagar casi todo tu agente. Por encima del 90 %, el inicio enseña el gasto
+y explica lo que pasa: la cifra está medida y no se esconde, pero no se presenta como una
+promesa, porque lo que suele haber detrás es un agente pequeño donde dos o tres pasos son
+la factura entera. El aviso de `savings_needs_caution` —que salta al 60 %— se calla
+entonces: repetirlo en la misma pantalla no lo hace más creíble.
+
+**La cifra que justifica.** El repaso de medias contra medianas que pedía D-112 da que
+ninguna regla decide ya con una media. Pero tres frases explicaban el hallazgo con la
+media mientras la decisión usaba la mediana, y eso se nota justo en el caso para el que se
+eligió la mediana: once llamadas de 6 tokens y una de 3.000 dejan la mediana en 6 y la
+media en 256, así que la tarjeta decía «responde con 256 tokens de media, que es una
+respuesta muy breve». La frase que sostiene el hallazgo lo contradecía, y quien quisiera
+comprobarnos no podía. `_salida_tipica()` es el único sitio que responde «cuánto contesta
+este paso en una llamada normal», y lo usan la decisión y las tres frases. La media se
+queda en modo avanzado al lado de la mediana: verlas juntas es lo que enseña la cola larga.
+
+**Lo que queda anotado y sin tocar**, porque cambia qué modelo se recomienda y eso es una
+decisión de producto: `_modelo_mas_rapido()` promedia las medianas de varias filas del
+mismo modelo **sin ponderar por llamadas**, así que un paso de poco tráfico pesa igual que
+uno de mucho al elegir la alternativa. Es una media dentro de un camino de decisión.
+
+### D-119 — Un bucle visto desde dos alturas del árbol es un problema, no dos
+Un agente decorado envuelve cada paso en un span propio, así que seis vueltas producen
+dos grupos de bucle: el del envoltorio —que no gasta tokens y sólo puede hablar de
+tiempo— y el de la llamada al modelo que lleva dentro, que sí tiene dinero. El inicio los
+enseñaba como dos tarjetas; después de D-115 con títulos distintos, pero contando lo
+mismo. De diez cosas que arreglar, cuatro eran dos.
+
+**Que sean el mismo se sabe por los datos, no por el parecido.** El camino de llamada del
+span de modelo termina en el paso que lo envuelve —eso lo escribe el SDK, no lo deducimos
+nosotros— y además los dos tienen que cubrir las mismas trazas con las mismas vueltas. Si
+cualquiera de las dos cosas falla, son bucles distintos y se quedan los dos.
+
+Se queda el de dentro porque es el que **puede ponerle precio**: «este bucle te cuesta
+0,60 $» acciona, y «te cuesta 2,4 s» acciona menos. Se pierden los pocos milisegundos del
+envoltorio alrededor de la llamada, que es el lado bueno por el que equivocarse. Un bucle
+de herramientas **sin** llamada al modelo dentro no tiene quien lo sustituya y sigue
+saliendo con su tiempo: es la promesa de no inventar dinero donde no lo hay.
+
+La guarda de «mismas trazas y mismas vueltas» no es cosmética, y lo demostró la segunda
+mutación: quitarla dejaba la suite en verde, o sea que no tenía quien la probara. Sin
+ella bastaría con que un paso llame alguna vez al modelo para que su bucle desapareciera
+detrás del de dentro, y con él las trazas en las que da vueltas **sin** llegar a llamarlo.
+Es el patrón que D-078 prohibió en el panel: rellenar con algo que correlaciona.
+
+### D-120 — Un solo sitio que sabe escribir un número
+En la cabecera de una traza convivían «120.255 / 108» —tokens, punto de millar—,
+«$0.007181» —dinero, punto decimal— y «12,8 pasos por ejecución» —coma decimal—. Tres
+lecturas del mismo carácter en la misma pantalla, en un producto cuyo argumento entero es
+que una cifra se enseña con lo que haga falta para leerla bien.
+
+No era un descuido en un sitio. El guardia que se escribió para encontrarlos dio **cuatro**
+formateadores de dinero: `insights`, `alerts`, `prompts` y la web. El de `alerts` llevaba
+en su docstring «el mismo criterio de decimales que la interfaz, para que no se
+contradigan»: la intención estaba, pero era una copia, y las copias derivan. Es la misma
+enfermedad que `pasos.py` curó para los nombres de paso (D-115), con otra cara.
+
+`cifras.py` es el único que sabe hacerlo. **Punto para los millares, coma para los
+decimales**, que es la española, y el símbolo delante. Y `dinero_exacto()` aparte, para el
+texto que enseña la cuenta: ahí redondear a cuatro decimales rompe la suma, y este
+producto se apoya en que el lector pueda echarla a mano.
+
+Dos guardias, y hacen falta los dos porque el código vive en dos runtimes: uno lee los
+módulos que redactan texto y prohíbe el patrón que creó las cuatro copias; otro barre
+`apps/web` y prohíbe `toFixed` con decimales, que escribe el punto inglés sea cual sea el
+idioma de la página. `toFixed(0)` se deja: no emite separador, y un guardia que salta
+donde no hay nada acaba silenciado.
+
+**Divergencia conocida y aceptada:** con importes de 100 $ o más, Python redondea el medio
+al par y JavaScript hacia arriba, así que un 1.234,50 $ exacto se escribe «$1.234» en una
+frase del backend y «$1.235» en una tarjeta. Sólo ocurre en el medio exacto de un dólar.
+Queda escrito para que quien lo vea sepa que está mirado y no lo persiga como un fallo.
+
+### D-121 — El punto ciego de D-097 era una fuga entre clientes
+D-097 cerró las lecturas: middleware que deniega por defecto, claves atadas a su proyecto,
+y una nota al final —«si aparece una escritura que no lleve `project_id` ni en el cuerpo
+ni en la URL, el middleware no tiene por dónde acotarla; hoy no existe ninguna, el día que
+exista es el punto ciego»—. Existían seis.
+
+Lo que se buscaba era `POST /api/pricing/reload`, que no lleva proyecto y recarga la tabla
+de precios de toda la instalación. Lo que apareció al escribir la red estructural —recorrer
+las rutas de escritura y exigir que cada una tenga por dónde acotarse— fue otra cosa:
+
+    DELETE /api/prompts/{id} con la clave de otro proyecto → 200 OK
+
+Borrado de los prompts de otro cliente con su histórico entero. Y la vecina, peor:
+`GET /api/prompts/{id}` pide `project_id` —así que el middleware la deja pasar si pones el
+tuyo— y después buscaba el prompt por su id a secas. Con tu proyecto en la URL y el id de
+otro, te llevabas sus prompts con **el texto completo de todas sus versiones**.
+
+No es lo que D-097 cerró, y por eso pasó: aquello iba por las rutas que llevan proyecto, y
+esto va por **id opaco**, que es justo por donde el middleware no puede mirar.
+
+El arreglo es el patrón que ya estaba escrito, aplicado donde faltaba: **acotar la
+consulta, no comprobar después**. `Identity.scope(None)` da el proyecto de la clave —`None`
+sólo para el operador— y los métodos del almacén lo llevan en el `WHERE`. Un id ajeno no
+existe: 404, sin decir si existe en otro sitio, que es la regla que `Identity.require` ya
+tenía escrita para no convertir la API en un directorio de los clientes. Comprobar después
+—leer la fila, mirar de quién es, actuar— habría funcionado igual y se habría podido
+olvidar en la ruta siguiente.
+
+De paso: `delete_prompt` borraba versiones y despliegues **antes** que el prompt, así que un
+intento fallido dejaba el prompt en pie con el histórico vacío.
+
+Dos cosas que este episodio dice, y valen más que el arreglo:
+
+* **Una nota en un documento no es una red.** D-097 vio el hueco, lo escribió, y el hueco
+  se llenó de seis rutas sin que nadie se enterara. El guardia que las recorre existe
+  ahora y es lo que faltaba entonces.
+* **A `api_evals` le faltaba un import y la suite pasaba entera**, porque ninguna prueba
+  ejecutaba el borrado de una anotación por la API. Lo encontró el linter. Una ruta
+  arreglada y sin ejecutar está a un refactor de volver a estar rota.
+
+### D-122 — Diez cosas que un cliente habría visto en su primera tarde
+Una auditoría mirando el producto como lo mira quien paga —no como lo mira quien lo
+escribe— encontró diez defectos, todos en pantalla y ninguno en una aserción. Los que
+importan son los tres primeros, porque son **botones que no hacen lo que dicen**:
+
+* **«Ver las trazas afectadas» enseñaba todas las trazas** en los hallazgos de repetición
+  y de bucle, que son los que más dinero devuelven. Buscaba por la etiqueta técnica
+  «paso», que esas dos reglas no llevan, y salía `q=` vacío. Buscar por texto tampoco
+  servía en los demás: el título lleva el llamante, y `consultar_manual` casaba con
+  `consultar_manual_cacheado`, así que el agente sano salía como afectado. Ahora cada
+  hallazgo lleva su `step_key` y el explorador filtra por **identidad exacta** en los dos
+  almacenes, con un aviso visible y un «Quitar».
+* **«Ya lo he arreglado, vuelve a medir» sólo recargaba.** Las cifras cuentan la ventana
+  entera, así que el arreglo no se veía: el botón prometía justo lo que no hacía, en el
+  momento en que el usuario más quiere creernos. Mientras no exista el antes y el después
+  de verdad, lo honesto es llevar a las ejecuciones más nuevas de ese paso y decir que un
+  arreglo deja de sumar cuando lo viejo sale del rango.
+* **No se podía crear un conjunto de casos desde un filtro.** Evaluaciones decía
+  «fíltralo en el explorador y vuelve», y el formulario enviaba siempre `{sort:
+  "recent"}`. El filtro vive en el explorador, así que el botón de guardar también.
+
+El resto, en corto: el código de ejemplo metía el título entero en Python
+(`respuesta = agente → consultar_manual(...)`); la ficha de un bucle decía «las entradas no
+son idénticas» y dos líneas después «3 llamadas idénticas más»; una tarjeta con tokens de
+más y sin tarifa llevaba la etiqueta «No cuesta dinero»; la ayuda de precios mandaba a
+editar un fichero del repo que quien instala con `pip` no tiene —ahora hay
+`LAPLACE_PRICES_EXTRA`— y salía dos veces seguidas; `es-ES` no agrupa las cifras de cuatro
+dígitos y el backend sí, así que «1360» y «11.314» convivían; el `_seconds` del backend y
+el `_money` de evaluaciones seguían escribiendo el punto inglés que D-120 creía cerrado; y
+el modo sencillo se llamaba «Diagnóstico», como la pestaña de al lado.
+
+La lección repite la de D-113, y por eso las redes van antes que la entrada: el filtro de
+cada hallazgo tiene que encontrar su traza de ejemplo y sólo las de su llamante, y ningún
+fragmento de código puede llevar la decoración de un título.
+
+### D-123 — Lo que el usuario decide, en una pantalla y no en variables de entorno
+La auditoría de D-122 terminó con una lista de lo que faltaba mirando al que paga, y casi
+todo tenía la misma forma: el producto sabía la respuesta y el usuario no tenía por dónde
+preguntarla, o sólo podía decirla editando un fichero. Entra entero, con una decisión de
+diseño que lo sostiene y cuatro que conviene dejar escritas.
+
+**Una tabla de ajustes, clave → JSON por proyecto**, en los tres almacenes de metadatos.
+Estado de cada hallazgo, presupuesto, alertas y tarifas propias (`*` es la instalación).
+Ninguno se consulta por nada que no sea su clave, y cada tabla nueva son tres
+implementaciones: cinco tablas habrían sido quince métodos para lo mismo.
+
+* **Arreglado no es lo que dice el usuario, es lo que se mide después.** Marcar guarda el
+  instante; se compara la ejecución media de antes (siete días) con la de después, y con
+  menos de cinco ejecuciones después no se dice nada. Si sigue saliendo igual vuelve a la
+  lista como `reaparecido`. Por ejecución y no en totales: con la mitad de tráfico, el
+  total baja solo. Lo arreglado y lo ignorado salen del evitable —que es lo que todavía
+  se puede hacer— y no alertan.
+* **Una tarifa nueva alcanza lo ya guardado.** El coste se calcula en la ingesta (D-005),
+  así que poner un precio sólo servía para lo que llegara después. Se recalcula con la
+  misma función que usa la ingesta y se reescribe el span: los dos almacenes sustituyen
+  por clave, así que no hay doble conteo.
+* **Los canales de alerta de la interfaz no piden `LAPLACE_ALERTS_ENABLED`.** Ponerlos ya
+  es encenderlas a propósito para ese proyecto. El webhook del entorno sigue exigiéndolo.
+  Las URL son secretos: se aceptan y nunca se devuelven enteras.
+* **El presupuesto mide los días con la misma función que el inicio.** La primera versión
+  contaba desde la primera traza hasta ahora y proyectaba el mes con once horas de datos
+  justo debajo de un inicio que decía «todavía no proyectamos». Dos lecturas del mismo
+  dato en la misma pantalla es la forma de este proyecto de equivocarse, otra vez.
+
+Mirando la pantalla con esto delante salieron dos fallos que no eran nuevos. Filtrar las
+trazas por usuario o por sesión —el modo avanzado ya lo permitía— filtraba **spans**, y
+como esos campos los lleva el span raíz, la traza salía en la lista con coste y tokens a
+cero. Y el HTML de la interfaz local se servía sin `Cache-Control`: tras actualizar
+Laplace, el navegador enseñaba la versión anterior por heurística, sin ningún aviso.
+
+Lo que queda fuera, a propósito: cuentas y roles, y el SDK de TypeScript. No son
+funciones de una pantalla, son proyectos, y meterlos aquí habría sido hacerlos mal.
+
+### D-124 — El rigor delante tapaba lo que el rigor protege
+En un móvil, la primera pantalla del inicio eran dos avisos —«casi todo es evitable» y
+«todavía no proyectamos»— y ni un solo problema. Cada aviso era cierto y estaba bien
+argumentado; juntos convertían el producto en un informe que había que leer entero antes
+de llegar a lo que se había venido a ver.
+
+No se quita ninguno. Se parte cada uno en **una línea que se lee siempre** y **un porqué
+que se despliega**, y la línea conserva lo que no se puede perder: que el total está
+incompleto, que es un suelo, que no se proyecta. Lo que se pliega es la argumentación,
+no la advertencia.
+
+Con el mismo criterio, en la lista:
+
+* Las tarjetas llevan **una frase** (`lead`) en lugar del resumen de tres o cuatro líneas.
+  El título ya dice qué pasa y la cifra cuánto cuesta; el resumen repetía las dos cosas.
+  Sigue entero en la ficha y en modo avanzado.
+* **Por debajo del céntimo, la tarjeta dice «< $0,01»**, con la cifra exacta en el
+  `title` y en la ficha. «$0,000816» no se lee; se descifra. Donde el importe por paso o
+  por ejecución es la medida —el árbol, el explorador, el panel— sigue sin redondear.
+* Fuera de Prompts la frase «un diff y un rollback los tiene cualquiera; lo que no tiene
+  nadie más…» con cifras inventadas: es texto de la web comercial, no de una pantalla
+  donde alguien está mirando sus propios datos.
+
+### D-125 — Que se vea como un producto, sin cambiar lo que dice
+Lo último de la auditoría era la forma, y casi todo tenía un motivo funcional detrás:
+
+* **Colores en tokens, y tema claro.** Había cuarenta hex sueltos por el CSS —bordes y
+  fondos tintados de cada color de estado— y un tema claro habría sido perseguirlos uno a
+  uno. Ahora son tokens con nombre (`--amber-bg`, `--rose-line`…); el tema claro redefine
+  la paleta y nada más. Sigue al sistema, y en Ajustes se puede fijar uno; se aplica en el
+  mismo script que el modo, antes del primer pintado, para que no haya fogonazo.
+* **Las fuentes se sirven desde Laplace.** `next/font` las descarga al construir. El modo
+  local presumía de no llamar a nadie y pedía dos hojas de estilo a Google cada vez.
+* **Título por pestaña y favicon.** Con tres fichas abiertas, tres pestañas «Laplace».
+  La traza y la ficha llevan su propio nombre.
+* **La barra ya no se parte.** El proyecto va junto al logo como una ruta; las pestañas
+  se desplazan, con el borde difuminado para que se note; el doble botón Sencillo /
+  Avanzado es un interruptor. En móvil, dos filas y 87 px, antes tres y 125.
+* **Tres acciones a la vista.** El inicio enseña los tres problemas que más devuelven y
+  despliega el resto; lo que sólo cuesta tiempo va aparte, porque «531 ms» y «$1,21» no
+  se comparan. Las etiquetas de la tarjeta son texto con un punto de color: con borde y
+  fondo se leían como botones.
+* **La lista de trazas dice qué le preguntaron al agente.** Era la misma fila doce veces
+  con un hash distinto. `input_preview` sale de la entrada del span raíz: la primera
+  cadena con contenido, o el último mensaje del usuario, en una línea.
+* **La gráfica empieza en el primer dato.** Con once horas en un rango de siete días, dos
+  barras aplastadas contra el borde y veintiséis tramos de nada. Los vacíos del final se
+  quedan: «no ha llegado nada desde entonces» sí es información.
+* **Evaluaciones vacía es una lista de tres pasos** que se marcan solos, en vez de tres
+  párrafos que había que leer para saber por dónde empezar.
+
+El contraste del tema claro se ha comprobado recorriendo los textos de inicio, traza,
+ficha (en modo avanzado) y panel: nada por debajo de 3:1 salvo la barra decorativa de la
+ruta, que está oculta a los lectores de pantalla. El resto de pantallas no se ha medido.
+
+### D-126 — El SQL de nube de D-122 a D-125, ejecutado
+Las cuatro tandas anteriores se entregaron con el camino de la nube escrito y sin
+ejecutar, que es exactamente lo que D-112 llama «sin terminar». Con ClickHouse y Postgres
+levantados, la suite entera da **389 pasan y 4 saltadas** —las cuatro que necesitan una
+clave de proveedor—, y hay un fichero nuevo, `test_ajustes_nube.py`, que siembra los mismos
+spans en los dos almacenes y exige que digan lo mismo en todo lo nuevo: reparto por
+usuario, filtros por usuario y por paso, la pregunta de cada traza, el recálculo de una
+tarifa (que en ClickHouse depende de que reinsertar sustituya y no duplique), la
+retención, los ajustes en Postgres y el borrado de un proyecto sin tocar a otro. Se ha
+comprobado rompiendo a propósito el filtro por usuario de ClickHouse: la prueba se pone en
+rojo.
+
+Encima, un recorrido de punta a punta por la API con el backend en modo nube: tráfico
+real por OTLP, marcar un hallazgo, ficha, presupuesto, reparto, alertas, la lista de
+trazas y el borrado. Todo contestó lo que tenía que contestar a la primera. Que no hiciera
+falta arreglar nada no hace inútil la tanda: hasta hoy eso era una suposición.
+
+### D-127 — Cuentas: las personas entran, los agentes escriben con clave
+Hasta aquí la nube sólo sabía de claves, creadas por línea de comandos y pegadas en el
+navegador. Servía para que un cliente no leyera a otro y no servía para un equipo: nadie
+sabía quién había hecho qué, quitarle el acceso a una persona era rotar la clave de todos,
+y la primera pantalla de un producto de pago era «pega aquí tu clave».
+
+**Las cuentas no sustituyen a las claves**: una sesión acaba en la misma `Identity` del
+middleware que una clave, con los proyectos de sus organizaciones y su rol en cada uno. Ni
+una ruta de datos ha tenido que cambiar. Lo que sí ha cambiado:
+
+* **Toda escritura con sesión dice sobre qué proyecto es.** Una clave tiene un proyecto;
+  una persona, varios, y «su primer proyecto» —lo que hacían las rutas por id opaco— es
+  la forma de que un lector de A escriba en A porque es miembro de B. El middleware exige
+  el proyecto y mira el rol en ése; la interfaz lo manda siempre.
+* **La primera cuenta sale de un código que va al log**, no de quien primero llegue a la
+  URL. Adopta los proyectos que ya existían: sin dueño serían invisibles para todos.
+* **CSRF sin tokens**: toda escritura con cookie trae `X-Laplace`, que un formulario de
+  otro sitio no puede poner sin pasar por CORS. Se pide también al entrar, que es lo que
+  impide que otro sitio te meta en una cuenta suya.
+* **Sin dependencias**: `scrypt` de la biblioteca estándar, un almacén de cuentas único
+  para SQLite y Postgres (mismas consultas, otro marcador), y el freno de intentos en
+  memoria —su trabajo es hacer inútil probar contraseñas, no llevar un registro; eso lo
+  hace la auditoría—.
+* **La interfaz no ofrece lo que el rol no permite**, pero no es la protección: el
+  backend lo rechaza igual. Ante la duda deja escribir y que diga que no el backend; una
+  pantalla sin botones por un fallo de red sería peor.
+
+Tres fallos que sólo salieron ejecutando, y que por eso merecen línea: el admin de una
+organización cualquiera no podía crear el primer proyecto de la suya (el nombre nuevo
+venía en el cuerpo y el middleware lo rechazaba por no ser todavía de nadie); en Postgres
+la clave apunta a `projects` con clave foránea y en SQLite no, así que el almacén fallaba
+en uno y no en otro; y «último uso» de las claves se guardaba en una columna que nadie
+actualizaba. Los tres tienen prueba.
+
+`keys.py` decía que no debía existir un endpoint que emitiera credenciales porque la
+primera tenía que salir de algún sitio. Ahora sale del código de configuración, y crear
+claves pide sesión de admin. Queda fuera, a propósito: SSO y verificación de email.

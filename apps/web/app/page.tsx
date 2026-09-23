@@ -5,9 +5,10 @@ import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { BigMoney, FindingCard, GapBar, Readout } from "@/components/pieces";
 import { BackendDown, Cargando, NeedsKey, NoProject, NoTracesYet, NotYours, NothingToFix } from "@/components/states";
-import { getOverview, listProjects, parseDays } from "@/lib/api";
+import { getBudget, getOverview, listProjects, parseDays } from "@/lib/api";
+import { descargarCsv } from "@/lib/csv";
 import { duration, money, number, percent, spanLabel, tokens, windowLabel } from "@/lib/format";
-import type { Coverage, Overview } from "@/lib/types";
+import type { Budget, Coverage, Finding, Overview } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
 
 /**
@@ -24,9 +25,14 @@ function Contenido() {
 
   const estado = useApi(async () => {
     const projects = await listProjects();
-    if (projects.length === 0) return { project: "", overview: null };
+    if (projects.length === 0) return { project: "", overview: null, budget: null };
     const project = projects.find((p) => p.id === pedido)?.id ?? projects[0].id;
-    return { project, overview: await getOverview(project, days) };
+    const [overview, budget] = await Promise.all([
+      getOverview(project, days),
+      // El presupuesto es un añadido: si falla, el inicio sigue en pie sin él.
+      getBudget(project).catch(() => null),
+    ]);
+    return { project, overview, budget };
   }, [pedido, days]);
 
   if (estado.fase === "cargando") return <Cargando />;
@@ -35,7 +41,7 @@ function Contenido() {
   if (estado.fase === "sin-permiso") return <NotYours mensaje={estado.error.message} />;
   if (estado.fase === "error") return <BackendDown mensaje={estado.error.message} />;
 
-  const { project, overview } = estado.datos;
+  const { project, overview, budget } = estado.datos;
   if (!overview) return <NoProject />;
   if (overview.spans === 0) return <NoTracesYet project={project} />;
 
@@ -52,6 +58,11 @@ function Contenido() {
     ? overview.monthly_avoidable_usd!
     : overview.window_avoidable_usd;
   const ahorra = evitable > 0;
+  // Cuando el evitable se come casi todo el gasto, la pareja «X → Y» y la barra de
+  // reparto dejan de decir lo que parecen: una barra con un lado en cero no es una
+  // barra, y «puedes dejar de pagar tu agente entero» es la clase de cifra que hace
+  // que alguien cierre la pestaña. Se enseña el gasto y se explica lo que pasa.
+  const casiTodo = ahorra && total > 0 && evitable / total >= CASI_TODO_EVITABLE;
 
   const cobertura = overview.coverage;
 
@@ -85,7 +96,7 @@ function Contenido() {
             currency={overview.currency}
             label={overview.projected ? "te costará este mes" : "te ha costado hasta ahora"}
           />
-          {ahorra && (
+          {ahorra && !casiTodo && (
             <>
               <div className="arrow" aria-hidden>
                 →
@@ -101,7 +112,7 @@ function Contenido() {
         </div>
         )}
 
-        {ahorra && !overview.cost_unavailable && (
+        {ahorra && !overview.cost_unavailable && !casiTodo && (
           <GapBar
             necessary={necesario}
             avoidable={evitable}
@@ -109,7 +120,13 @@ function Contenido() {
           />
         )}
 
-        <Caveats overview={overview} ventana={ventana} />
+        {casiTodo && !overview.cost_unavailable && (
+          <CasiTodoEvitable overview={overview} total={total} evitable={evitable} />
+        )}
+
+        <Caveats overview={overview} ventana={ventana} casiTodo={casiTodo} />
+
+        <LineaPresupuesto budget={budget} query={query} />
 
         {/* Cuando la cobertura es buena no desaparece: se queda en una línea. Que el
             usuario sepa que esto se mide —y que hoy sale bien— es la mitad de lo que
@@ -156,24 +173,27 @@ function Contenido() {
         </NothingToFix>
       ) : (
         <section className="sec">
-          <h2>
-            {overview.findings.length === 1
-              ? "Una cosa que arreglar"
-              : `${overview.findings.length} cosas que arreglar`}
-          </h2>
+          <div className="sec-head">
+            <h2>
+              {overview.findings.length === 1
+                ? "Una cosa que arreglar"
+                : `${overview.findings.length} cosas que arreglar`}
+            </h2>
+            <button
+              type="button"
+              className="btn small"
+              onClick={() => exportarHallazgos(project, overview)}
+            >
+              Exportar CSV
+            </button>
+          </div>
           <p className="lead">
             De la que más dinero te devuelve a la que menos.{" "}
             {overview.projected
               ? `Las cifras son la proyección a 30 días de ${ventana}.`
               : `Las cifras son dinero ya gastado en ${ventana}.`}
           </p>
-          {overview.findings.map((finding) => (
-            <FindingCard
-              key={finding.id}
-              finding={finding}
-              href={`/problema${query}&id=${encodeURIComponent(finding.id)}`}
-            />
-          ))}
+          <ListaProblemas findings={overview.findings} query={query} />
           <p className="disclaimer">
             {overview.projected ? (
               <>
@@ -191,7 +211,201 @@ function Contenido() {
           </p>
         </section>
       )}
+
+      <Apartados findings={overview.set_aside} query={query} currency={overview.currency} />
     </main>
+  );
+}
+
+/**
+ * Los problemas, con las tres primeras acciones a la vista (D-125).
+ *
+ * Primero lo que cuesta dinero —o tokens, cuando no hay tarifa—, ordenado por lo que
+ * devuelve; las tres primeras se ven, el resto se despliega. Lo que sólo cuesta tiempo
+ * va en su propio bloque: mezclado con el dinero, «531 ms» competía con «$1,21» por la
+ * misma atención y no se comparan.
+ */
+const VISIBLES = 3;
+
+function ListaProblemas({ findings, query }: { findings: Finding[]; query: string }) {
+  const tiempo = findings.filter((f) => !f.costs_money && !f.window_waste_tokens);
+  const dinero = findings.filter((f) => !tiempo.includes(f));
+  const tarjeta = (f: Finding) => (
+    <FindingCard key={f.id} finding={f} href={`/problema${query}&id=${encodeURIComponent(f.id)}`} />
+  );
+  const resto = dinero.slice(VISIBLES);
+  return (
+    <>
+      {dinero.slice(0, VISIBLES).map(tarjeta)}
+      {resto.length > 0 && (
+        <details className="mas">
+          <summary>
+            {resto.length === 1 ? "Ver uno más" : `Ver ${resto.length} más`}
+          </summary>
+          {resto.map(tarjeta)}
+        </details>
+      )}
+      {tiempo.length > 0 && (
+        <details className="mas tiempo" open={dinero.length === 0}>
+          <summary>
+            {tiempo.length === 1
+              ? "Y uno que no cuesta dinero, sólo tiempo"
+              : `Y ${tiempo.length} que no cuestan dinero, sólo tiempo`}
+          </summary>
+          {tiempo.map(tarjeta)}
+        </details>
+      )}
+    </>
+  );
+}
+
+/**
+ * El presupuesto, en una línea, cuando hay uno puesto (D-123). Sin presupuesto, una
+ * invitación discreta: es la pregunta de quien paga y no se puede hacer si no se sabe
+ * que existe.
+ */
+function LineaPresupuesto({ budget, query }: { budget: Budget | null; query: string }) {
+  if (!budget) return null;
+  if (budget.monthly_usd === null) {
+    return (
+      <p className="budget-home muted">
+        <Link href={`/ajustes${query}`}>Ponle un presupuesto mensual</Link> y te avisamos
+        antes de pasarte.
+      </p>
+    );
+  }
+  const pct = Math.min(budget.ratio ?? 0, 1) * 100;
+  return (
+    <div className={`budget-home ${budget.status}`}>
+      <p>{budget.headline}</p>
+      <div className="sbar budget" role="img" aria-label={`${Math.round(pct)} por ciento del presupuesto`}>
+        <i style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Lo que el usuario ya ha resuelto: arreglado o ignorado (D-123).
+ *
+ * Plegado y al final. No desaparece del todo porque un ignorado es una decisión que se
+ * puede querer revisar, y un arreglado lleva la cifra que demuestra que sirvió.
+ */
+function Apartados({
+  findings,
+  query,
+  currency,
+}: {
+  findings: Finding[];
+  query: string;
+  currency: string;
+}) {
+  if (!findings || findings.length === 0) return null;
+  return (
+    <details className="apartados sec">
+      <summary>
+        {findings.length === 1
+          ? "Un problema marcado como arreglado o ignorado"
+          : `${findings.length} problemas marcados como arreglados o ignorados`}
+      </summary>
+      <ul>
+        {findings.map((f) => (
+          <li key={f.id}>
+            <span className={`chip ${f.state === "ignorado" ? "where" : "easy"}`}>
+              {f.state === "ignorado" ? "Ignorado" : "Arreglado"}
+            </span>{" "}
+            <Link href={`/problema${query}&id=${encodeURIComponent(f.id)}`}>{f.title}</Link>
+            {f.fix_check && <small>{f.fix_check.headline}</small>}
+            {f.state === "ignorado" && f.state_note && <small>«{f.state_note}»</small>}
+            {!f.fix_check && f.state === "ignorado" && f.costs_money && (
+              <small>{money(f.window_waste_usd, currency)} en el rango, que no cuentan como evitable.</small>
+            )}
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+function exportarHallazgos(project: string, overview: Overview) {
+  const filas = [...overview.findings, ...overview.set_aside].map((f) => [
+    f.title,
+    f.kind,
+    f.state || "abierto",
+    f.costs_money ? f.window_waste_usd : null,
+    f.costs_money ? f.monthly_saving_usd : null,
+    f.cost_is_floor ? "sí" : "no",
+    f.window_waste_tokens || null,
+    f.window_waste_ms ? f.window_waste_ms / 1000 : null,
+    f.scope_label,
+    f.difficulty_label,
+  ]);
+  descargarCsv(
+    `laplace-${project}-problemas`,
+    [
+      "Problema",
+      "Tipo",
+      "Estado",
+      "Ya gastado (USD)",
+      "Al mes (USD)",
+      "Es un suelo",
+      "Tokens de más",
+      "Espera evitable (s)",
+      "Ejecuciones afectadas",
+      "Arreglo",
+    ],
+    filas,
+  );
+}
+
+/**
+ * Por encima de esta parte del gasto señalada como evitable, el héroe deja de
+ * enseñar la pareja «X → Y» y la barra de reparto.
+ *
+ * No es un umbral cosmético. Con el 93 % evitable, la barra queda con un lado
+ * invisible y la segunda cifra grande dice, en letra de 54 px, que puedes dejar de
+ * pagar casi todo tu agente. Nadie se lo cree, y con razón: lo que suele haber detrás
+ * es un agente pequeño donde dos o tres pasos son la factura entera. El aviso de
+ * `savings_needs_caution` ya salta antes (al 60 %), pero va debajo de la cifra, y aquí
+ * pasa lo mismo que con el «$0» de D-073: el número se lee antes que el aviso.
+ */
+const CASI_TODO_EVITABLE = 0.9;
+
+/**
+ * Lo que va donde iría la barra de reparto cuando el reparto no reparte nada.
+ *
+ * Dice la cifra —no la esconde, está medida— y dice por qué no se la presentamos como
+ * una promesa. Es la misma regla que el resto del producto: una cifra se enseña con lo
+ * que haga falta para leerla bien.
+ */
+function CasiTodoEvitable({
+  overview,
+  total,
+  evitable,
+}: {
+  overview: Overview;
+  total: number;
+  evitable: number;
+}) {
+  return (
+    <div className="casitodo">
+      <p>
+        <strong>Casi todo lo que gastas está señalado aquí abajo:</strong>{" "}
+        {money(evitable, overview.currency)} de {money(total, overview.currency)} (
+        {Math.round((evitable / total) * 100)} %).
+      </p>
+      {/* La explicación sigue aquí, entera, pero plegada: delante tapaba la lista de
+          problemas, que es lo que se ha venido a ver (D-124). */}
+      <details className="porque">
+        <summary>¿Por qué no lo presentamos como ahorro?</summary>
+        <p>
+          Porque «puedes dejar de pagar tu agente» casi nunca es lo que significa. Lo que
+          suele haber detrás es un agente pequeño o recién estrenado donde dos o tres pasos
+          son prácticamente toda la factura, y arreglarlos cambia esos pasos, no el agente
+          entero. Mira el desglose de cada problema antes de contar con esta cifra.
+        </p>
+      </details>
+    </div>
   );
 }
 
@@ -271,67 +485,112 @@ function Señales({ cobertura }: { cobertura: Coverage }) {
  * el gasto, o cuando la proyección sale de unas horas de datos, se dice aquí mismo en
  * lugar de presentarlo como una promesa.
  */
-function Caveats({ overview, ventana }: { overview: Overview; ventana: string }) {
-  const avisos: React.ReactNode[] = [];
+function Caveats({
+  overview,
+  ventana,
+  casiTodo,
+}: {
+  overview: Overview;
+  ventana: string;
+  casiTodo: boolean;
+}) {
+  // Cada aviso es una línea que se lee siempre y un porqué que se despliega. Antes
+  // eran párrafos enteros, y en un móvil la primera pantalla no enseñaba ni un solo
+  // problema: el rigor tapaba lo que el rigor protege (D-124).
+  const avisos: { linea: React.ReactNode; porque: React.ReactNode }[] = [];
 
   if (overview.unknown_cost_spans > 0) {
-    avisos.push(
-      <>
-        <strong>Este total está incompleto.</strong> Hay {overview.unknown_cost_spans} pasos
-        cuyo modelo no está en nuestra tabla de precios, así que no sabemos cuánto cuestan y
-        no se suman: {overview.models_without_price.join(", ")}.
-      </>,
-    );
+    avisos.push({
+      linea: (
+        <>
+          <strong>Este total está incompleto:</strong> {number(overview.unknown_cost_spans)}{" "}
+          pasos sin tarifa ({overview.models_without_price.join(", ")}).
+        </>
+      ),
+      porque: (
+        <>
+          Su modelo no está en nuestra tabla de precios, así que no sabemos cuánto cuestan
+          y no se suman. Puedes ponerle precio en Ajustes, y se recalcula lo ya guardado.
+        </>
+      ),
+    });
   }
   if (overview.assumed_rate_spans > 0) {
-    avisos.push(
-      <>
-        En {overview.assumed_rate_spans}{" "}
-        {overview.assumed_rate_spans === 1 ? "paso no hemos podido" : "pasos no hemos podido"}{" "}
-        confirmar a qué tarifa se facturó —contexto largo, residencia de datos o modo
-        rápido son metros aparte que la respuesta del proveedor no siempre revela—, así
-        que <strong>hemos cobrado la estándar</strong>. Lo que ves es un suelo: el coste
-        real puede ser algo mayor, nunca menor. En cada paso, en modo avanzado, se dice
-        cuál es la duda.
-      </>,
-    );
+    avisos.push({
+      linea: (
+        <>
+          <strong>Es un suelo:</strong> en {number(overview.assumed_rate_spans)}{" "}
+          {overview.assumed_rate_spans === 1 ? "paso" : "pasos"} hemos cobrado la tarifa
+          estándar.
+        </>
+      ),
+      porque: (
+        <>
+          Contexto largo, residencia de datos o modo rápido son metros aparte que la
+          respuesta del proveedor no siempre revela. El coste real puede ser algo mayor,
+          nunca menor. En cada paso, en modo avanzado, se dice cuál es la duda.
+        </>
+      ),
+    });
   }
   if (overview.projected) {
-    avisos.push(
-      <>
-        La cifra del mes se proyecta desde <strong>{ventana}</strong> de datos, que es lo
-        que llevas enviando, no el rango que pide el selector. Gasto y ahorro salen de la
-        misma base: si cambia una, cambia la otra.
-      </>,
-    );
+    avisos.push({
+      linea: (
+        <>
+          Proyección desde <strong>{ventana}</strong> de datos.
+        </>
+      ),
+      porque: (
+        <>
+          Es lo que llevas enviando, no el rango que pide el selector. Gasto y ahorro salen
+          de la misma base: si cambia una, cambia la otra.
+        </>
+      ),
+    });
   } else {
-    avisos.push(
-      <>
-        <strong>Todavía no proyectamos el mes.</strong> Con {ventana} de datos, multiplicar
-        para llegar a 30 días da una cifra que no se sostiene: un pico de diez minutos se
-        convertiría en cientos de dólares. Lo que ves es dinero ya gastado, medido. En
-        cuanto tengas {spanLabel(overview.min_days_for_projection)} de datos aparece aquí
-        la previsión mensual.
-      </>,
-    );
+    avisos.push({
+      linea: (
+        <>
+          <strong>Dinero ya gastado, sin proyectar.</strong> La previsión mensual aparece
+          con {spanLabel(overview.min_days_for_projection)} de datos.
+        </>
+      ),
+      porque: (
+        <>
+          Con {ventana} de datos, multiplicar para llegar a 30 días da una cifra que no se
+          sostiene: un pico de diez minutos se convertiría en cientos de dólares.
+        </>
+      ),
+    });
   }
-  if (overview.savings_needs_caution) {
-    avisos.push(
-      <>
-        El ahorro estimado es el{" "}
-        <strong>{Math.round(overview.avoidable_ratio * 100)} %</strong> de lo que
-        gastas. Es mucho: suele pasar en agentes pequeños o recién estrenados, donde unos
-        pocos pasos dominan la factura. Antes de darlo por bueno, mira el desglose de cada
-        problema.
-      </>,
-    );
+  // Cuando el evitable es casi todo, esto ya lo dice el bloque de arriba. Decirlo dos
+  // veces en la misma pantalla no lo hace más creíble.
+  if (overview.savings_needs_caution && !casiTodo) {
+    avisos.push({
+      linea: (
+        <>
+          El ahorro estimado es el{" "}
+          <strong>{Math.round(overview.avoidable_ratio * 100)} %</strong> de lo que gastas.
+        </>
+      ),
+      porque: (
+        <>
+          Es mucho: suele pasar en agentes pequeños o recién estrenados, donde unos pocos
+          pasos dominan la factura. Antes de darlo por bueno, mira el desglose de cada
+          problema.
+        </>
+      ),
+    });
   }
 
   if (avisos.length === 0) return null;
   return (
-    <div className="caveats">
+    <div className="caveats compactos">
       {avisos.map((aviso, index) => (
-        <p key={index}>{aviso}</p>
+        <details key={index} className="porque">
+          <summary>{aviso.linea}</summary>
+          <p>{aviso.porque}</p>
+        </details>
       ))}
     </div>
   );

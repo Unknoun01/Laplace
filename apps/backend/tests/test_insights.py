@@ -760,3 +760,332 @@ def test_el_mapa_de_descuento_ignora_lo_que_no_puede_cruzar():
                       step_key="", extra_spans=2, extra_input_tokens=50),
     ]
     assert insights._duplicate_tokens(grupos) == {}
+
+
+# ---------------------------------------------------------------------------------
+# La quinta cara del doble conteo: el bucle contra el modelo caro
+# ---------------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def proyecto_con_bucle_y_modelo_caro(store: ClickHouseStore):
+    """Un paso que da vueltas Y usa un modelo con alternativa más barata.
+
+    Las dos reglas miran las mismas llamadas: la del bucle reclama las vueltas de más y
+    la del modelo caro reclama la diferencia de tarifa sobre TODOS los tokens del paso,
+    vueltas incluidas. El descuento que impide esto existe desde D-061, pero se
+    alimenta sólo de las repeticiones exactas: cuando la regla de bucles entró en D-109
+    nadie la enchufó, y es la quinta forma que encuentra este proyecto de contar dos
+    veces el mismo dinero.
+    """
+    from laplace_backend.ingest.otlp import loop_hash
+
+    project = f"test-bucle-caro-{uuid.uuid4().hex[:8]}"
+    spans: list[Span] = []
+    salida = [{"role": "assistant", "content": "SEGUIR"}]
+    for t in range(6):
+        trace = uuid.uuid4().hex
+        spans.append(_span(project, trace, f"a{t}".ljust(16, "0"), "agente", "agent", t * 60))
+        for i in range(5):
+            entrada = [{"role": "user", "content": f"Vuelta {i} de 5."}]
+            s = _span(
+                project,
+                trace,
+                f"b{t}{i}".ljust(16, "0"),
+                "chat gpt-5.6-terra",
+                "llm",
+                t * 60 + i,
+                parent=f"a{t}".ljust(16, "0"),
+                dedup_hash=f"entrada-{t}-{i}",
+                step_key="k-sondear",
+                step_label="sondear",
+                step_site="agente > sondear",
+                loop_hash=loop_hash("llm", "chat", entrada),
+                loop_out_hash=loop_hash("llm", "chat", salida, ignorar_numeros=False),
+            )
+            s.llm = _llm("gpt-5.6-terra", 400, 6, 0.0021)
+            s.llm.input_messages = entrada
+            s.llm.output_messages = salida
+            spans.append(s)
+    store.insert_spans(spans)
+    yield project
+    store.delete_project(project)
+
+
+def test_el_bucle_y_el_modelo_caro_no_reclaman_los_mismos_tokens(
+    store, window, proyecto_con_bucle_y_modelo_caro
+):
+    """La cifra exacta, no un tope contra el gasto.
+
+    `overview()` acota el evitable con `min(suma, gasto)`, así que un solape se
+    convierte en «puedes dejar de pagar el 100 %» y la pantalla lo enseña como una
+    buena noticia. Comprobar sólo `suma <= gasto` deja pasar el error mientras quepa
+    dentro, que es justo contra lo que avisa STATUS: aquí se comprueba que **el tope no
+    llega a morder**.
+    """
+    hallazgos = insights.detect(store, proyecto_con_bucle_y_modelo_caro, window)
+    tipos = {f.kind for f in hallazgos}
+    assert "bucle" in tipos, "sin bucle esta prueba no mira el solape"
+
+    resumen = store.summarize_window(proyecto_con_bucle_y_modelo_caro, window)
+    prometido = sum(f.window_waste_usd for f in hallazgos)
+    assert prometido <= resumen.total_cost_usd, (
+        f"se promete más ahorro ({prometido:.6f}) que gasto ({resumen.total_cost_usd:.6f}): "
+        "dos reglas están reclamando los mismos tokens"
+    )
+
+    vista = insights.overview(store, proyecto_con_bucle_y_modelo_caro, window)
+    assert vista.avoidable_ratio < 1.0, (
+        "el 100 % evitable sale del tope, no de los datos: el héroe promete que puedes "
+        "dejar de pagar tu agente entero"
+    )
+
+
+def test_las_vueltas_de_un_bucle_se_descuentan_del_uso_del_modelo(
+    store, window, proyecto_con_bucle_y_modelo_caro
+):
+    """Y el descuento es de tokens Y de llamadas, como el de la repetición.
+
+    Las llamadas importan por lo mismo que en D-061: la regla del contexto fijo cuenta
+    cuántas veces se reenvía el prompt, y prometer cachear llamadas que la otra regla ya
+    ha dado por eliminadas es prometer dos veces el mismo ahorro.
+    """
+    bucles = store.loop_groups(
+        proyecto_con_bucle_y_modelo_caro,
+        window,
+        min_vueltas=insights.MIN_VUELTAS_BUCLE,
+        max_salidas=insights.MAX_SALIDAS_BUCLE,
+    )
+    assert bucles, "la fixture tiene que producir un bucle"
+    duplicados = insights._duplicate_tokens(
+        store.repeated_groups(
+            proyecto_con_bucle_y_modelo_caro, window, min_repeats=insights.MIN_REPEATS
+        ),
+        bucles,
+    )
+    assert duplicados, "las vueltas de más tienen que entrar en el descuento"
+
+    usos = store.model_usage(proyecto_con_bucle_y_modelo_caro, window, min_calls=1)
+    uso = next(u for u in usos if u.key == "k-sondear")
+    neto = insights._without_duplicates(uso, duplicados)
+    assert neto.calls == uso.calls - bucles[0].extra_spans
+    assert neto.input_tokens == uso.input_tokens - bucles[0].extra_input_tokens
+
+
+# ---------------------------------------------------------------------------------
+# La cifra que se enseña tiene que ser la cifra con la que se decidió
+# ---------------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def proyecto_con_una_generacion_desbocada(store: ClickHouseStore):
+    """Un paso que contesta cuatro palabras salvo una vez, que se desboca.
+
+    Es el caso para el que se eligió la mediana: once llamadas de 6 tokens y una de
+    3.000 dejan la mediana en 6 y la media en 255. La regla decide con la mediana —por
+    eso dispara— y la tarjeta explicaba el porqué con la media, así que decía «responde
+    con 255 tokens de media, que es una respuesta muy breve». La frase que justifica el
+    hallazgo contradecía al hallazgo.
+    """
+    project = f"test-desbocada-{uuid.uuid4().hex[:8]}"
+    spans: list[Span] = []
+    for t in range(12):
+        trace = uuid.uuid4().hex
+        spans.append(_span(project, trace, f"r{t}".ljust(16, "0"), "agente", "agent", t * 30))
+        salida = 3_000 if t == 11 else 6
+        s = _span(
+            project,
+            trace,
+            f"s{t}".ljust(16, "0"),
+            "chat gpt-5.6-terra",
+            "llm",
+            t * 30 + 1,
+            parent=f"r{t}".ljust(16, "0"),
+            dedup_hash=f"etiqueta-{t}",
+            step_key="k-etiquetar",
+            step_label="etiquetar",
+            step_site="agente > etiquetar",
+        )
+        s.llm = _llm("gpt-5.6-terra", 300, salida, 0.0015)
+        spans.append(s)
+    store.insert_spans(spans)
+    yield project
+    store.delete_project(project)
+
+
+def test_la_tarjeta_explica_el_hallazgo_con_la_cifra_que_lo_disparo(
+    store, window, proyecto_con_una_generacion_desbocada
+):
+    """El principio de siempre: la cifra que se enseña es la que se usó.
+
+    La regla decide con la mediana de salida porque una generación desbocada mueve la
+    media de un paso que normalmente contesta tres palabras. Enseñar entonces la media
+    en la frase que justifica el hallazgo es enseñar un número que contradice la propia
+    decisión, y deja al lector sin forma de comprobarnos.
+    """
+    usos = store.model_usage(proyecto_con_una_generacion_desbocada, window, min_calls=1)
+    uso = next(u for u in usos if u.key == "k-etiquetar")
+    assert uso.p50_output_tokens <= 10, "la mediana tiene que ser la respuesta corta"
+    assert uso.avg_output_tokens > 100, "y la media, la que la desbocada contamina"
+
+    hallazgos = insights.detect(store, proyecto_con_una_generacion_desbocada, window)
+    caro = next(f for f in hallazgos if f.kind == "modelo_caro")
+    assert f"{uso.p50_output_tokens:.0f} tokens" in caro.summary, (
+        f"la tarjeta tiene que citar la mediana ({uso.p50_output_tokens:.0f}), no la "
+        f"media ({uso.avg_output_tokens:.0f}): {caro.summary}"
+    )
+    assert f"{uso.avg_output_tokens:.0f} tokens de media" not in caro.summary
+
+
+# ---------------------------------------------------------------------------------
+# Un bucle es un problema, aunque se vea desde dos alturas del árbol
+# ---------------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def proyecto_con_bucle_envuelto(store: ClickHouseStore):
+    """El mismo bucle visto dos veces: el paso que da vueltas y la llamada de dentro.
+
+    Un agente decorado con `@observe` envuelve cada paso en un span propio, así que un
+    bucle de seis vueltas produce **dos** grupos: el del envoltorio, que no gasta tokens
+    y sólo puede hablar de tiempo, y el de la llamada al modelo que lleva dentro, que sí
+    tiene dinero. Son el mismo problema y el inicio los enseñaba como dos tarjetas.
+    """
+    from laplace_backend.ingest.otlp import loop_hash
+
+    project = f"test-envuelto-{uuid.uuid4().hex[:8]}"
+    spans: list[Span] = []
+    salida = [{"role": "assistant", "content": "SEGUIR"}]
+    for t in range(6):
+        trace = uuid.uuid4().hex
+        raiz = f"a{t}".ljust(16, "0")
+        spans.append(_span(project, trace, raiz, "agente", "agent", t * 120))
+        for i in range(5):
+            entrada = [{"role": "user", "content": f"Vuelta {i} de 5."}]
+            envoltorio = f"w{t}{i}".ljust(16, "0")
+            # El paso decorado: no gasta tokens, sólo tiempo.
+            spans.append(
+                _span(
+                    project, trace, envoltorio, "consultar_manual", "chain",
+                    t * 120 + i * 2, parent=raiz, duration_ms=300.0,
+                    dedup_hash=f"env-{t}-{i}",
+                    loop_hash=loop_hash("chain", "consultar_manual", entrada),
+                    loop_out_hash=loop_hash(
+                        "chain", "consultar_manual", salida, ignorar_numeros=False
+                    ),
+                )
+            )
+            # Y la llamada al modelo de dentro, que es la que cuesta dinero.
+            dentro = _span(
+                project, trace, f"m{t}{i}".ljust(16, "0"), "chat gpt-5.6-terra", "llm",
+                t * 120 + i * 2 + 1, parent=envoltorio, duration_ms=280.0,
+                dedup_hash=f"mod-{t}-{i}",
+                step_key="k-manual", step_label="consultar_manual",
+                step_site="agente > consultar_manual",
+                loop_hash=loop_hash("llm", "chat", entrada),
+                loop_out_hash=loop_hash("llm", "chat", salida, ignorar_numeros=False),
+            )
+            dentro.llm = _llm("gpt-5.6-terra", 400, 6, 0.0021)
+            dentro.llm.input_messages = entrada
+            dentro.llm.output_messages = salida
+            spans.append(dentro)
+    store.insert_spans(spans)
+    yield project
+    store.delete_project(project)
+
+
+def test_un_bucle_envuelto_es_una_tarjeta_y_no_dos(store, window, proyecto_con_bucle_envuelto):
+    """El mismo bucle a dos alturas del árbol es un problema, no dos.
+
+    Y no se elige por la más grande: se queda la que **puede ponerle precio**, porque
+    «este bucle te cuesta 0,60 $» acciona y «este bucle te cuesta 2,4 s» acciona menos.
+    Que sean el mismo se sabe por las trazas, no por el parecido: el camino de llamada
+    del span de modelo termina en el paso que lo envuelve.
+    """
+    hallazgos = insights.detect(store, proyecto_con_bucle_envuelto, window)
+    bucles = [f for f in hallazgos if f.kind == "bucle"]
+    assert len(bucles) == 1, (
+        "el envoltorio y la llamada de dentro son el mismo bucle: "
+        f"{[f.title for f in bucles]}"
+    )
+    assert bucles[0].costs_money is True, "se queda la que puede poner precio"
+    assert bucles[0].window_waste_usd > 0
+
+
+def test_el_bucle_envuelto_sigue_teniendo_ficha(store, window, proyecto_con_bucle_envuelto):
+    """Descartar un grupo no puede dejar al que queda sin poder explicarse (D-113)."""
+    ventana_hallazgos = insights.detect(store, proyecto_con_bucle_envuelto, window)
+    for hallazgo in ventana_hallazgos:
+        assert (
+            insights.detail(store, proyecto_con_bucle_envuelto, window, hallazgo.id)
+            is not None
+        ), hallazgo.id
+
+
+@pytest.fixture(scope="module")
+def proyecto_con_envoltorio_que_no_cuadra(store: ClickHouseStore):
+    """Un paso que da vueltas en seis trazas y llama al modelo sólo en tres.
+
+    Es el contraejemplo de la guarda: el camino de llamada dice que el modelo se llama
+    desde ese paso, pero los dos bucles no cubren lo mismo, así que **no son el mismo
+    bucle** y descartar el envoltorio escondería las tres trazas en las que da vueltas
+    sin llegar a llamar al modelo.
+    """
+    from laplace_backend.ingest.otlp import loop_hash
+
+    project = f"test-descuadre-{uuid.uuid4().hex[:8]}"
+    spans: list[Span] = []
+    salida = [{"role": "assistant", "content": "SEGUIR"}]
+    for t in range(6):
+        trace = uuid.uuid4().hex
+        raiz = f"a{t}".ljust(16, "0")
+        spans.append(_span(project, trace, raiz, "agente", "agent", t * 120))
+        for i in range(5):
+            entrada = [{"role": "user", "content": f"Vuelta {i} de 5."}]
+            envoltorio = f"w{t}{i}".ljust(16, "0")
+            spans.append(
+                _span(
+                    project, trace, envoltorio, "revisar", "chain",
+                    t * 120 + i * 2, parent=raiz, duration_ms=300.0,
+                    dedup_hash=f"env-{t}-{i}",
+                    loop_hash=loop_hash("chain", "revisar", entrada),
+                    loop_out_hash=loop_hash("chain", "revisar", salida, ignorar_numeros=False),
+                )
+            )
+            if t >= 3:
+                continue  # en la mitad de las trazas el paso no llega a llamar al modelo
+            dentro = _span(
+                project, trace, f"m{t}{i}".ljust(16, "0"), "chat gpt-5.6-terra", "llm",
+                t * 120 + i * 2 + 1, parent=envoltorio, duration_ms=280.0,
+                dedup_hash=f"mod-{t}-{i}",
+                step_key="k-revisar", step_label="revisar",
+                step_site="agente > revisar",
+                loop_hash=loop_hash("llm", "chat", entrada),
+                loop_out_hash=loop_hash("llm", "chat", salida, ignorar_numeros=False),
+            )
+            dentro.llm = _llm("gpt-5.6-terra", 400, 6, 0.0021)
+            dentro.llm.input_messages = entrada
+            dentro.llm.output_messages = salida
+            spans.append(dentro)
+    store.insert_spans(spans)
+    yield project
+    store.delete_project(project)
+
+
+def test_un_envoltorio_que_no_cubre_lo_mismo_no_se_descarta(
+    store, window, proyecto_con_envoltorio_que_no_cuadra
+):
+    """La guarda que impide que «el camino coincide» se convierta en «es el mismo».
+
+    Sin ella, bastaría con que un paso llame alguna vez al modelo para que su bucle
+    desapareciera detrás del de dentro, y con él las trazas en las que da vueltas sin
+    llegar a llamarlo. Sería el patrón que este proyecto ya prohibió en el panel:
+    rellenar con algo que correlaciona (D-078).
+    """
+    hallazgos = insights.detect(store, proyecto_con_envoltorio_que_no_cuadra, window)
+    bucles = [f for f in hallazgos if f.kind == "bucle"]
+    assert len(bucles) == 2, (
+        "cubren trazas distintas, así que son dos bucles: "
+        f"{[f.title for f in bucles]}"
+    )
+    assert {f.costs_money for f in bucles} == {True, False}

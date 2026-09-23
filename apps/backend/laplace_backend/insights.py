@@ -17,15 +17,19 @@ Tres principios que condicionan todo lo de aquí:
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
+from dataclasses import dataclass, replace
+from datetime import datetime
 from typing import Any, Literal
 
 from laplace.schema import Span
 from pydantic import BaseModel, Field
 
+from . import cifras
 from .coverage import Coverage
 from .coverage import build as build_coverage
 from .dinero import motivo_sin_dinero
+from .pasos import SEPARADOR as SEPARADOR_DE_CAMINO
+from .pasos import identificador
 from .pricing import get_price_table
 from .storage.base import LoopGroup, ModelUsage, RepeatedGroup, Window, WindowSummary
 
@@ -81,6 +85,30 @@ class FixStep(BaseModel):
     advanced: bool = False
 
 
+class FixCheck(BaseModel):
+    """Antes y después de marcar un hallazgo como arreglado (D-123).
+
+    Todo por ejecución y no en totales: si después de marcarlo hay la mitad de tráfico,
+    el total baja solo y parecería un arreglo que no ha ocurrido.
+    """
+
+    marked_at: datetime
+    #: `usd`, `tokens` o `ms`: lo mismo que el hallazgo enseña en su tarjeta.
+    unit: str = "usd"
+    runs_before: int = 0
+    runs_after: int = 0
+    #: `None` cuando esa ventana no tiene ejecuciones: no es cero, es que no hay datos.
+    before_per_run: float | None = None
+    after_per_run: float | None = None
+    #: Lo que ya no se ha gastado desde que se marcó, al ritmo de antes. `None` sin base.
+    saved: float | None = None
+    #: `pendiente` (pocas ejecuciones), `arreglado`, `mejor` o `sigue`.
+    verdict: str = "pendiente"
+    headline: str = ""
+    #: Si el dinero de antes era un suelo, lo ahorrado también lo es.
+    cost_is_floor: bool = False
+
+
 class Finding(BaseModel):
     """Un hallazgo, tal y como aparece en la lista del inicio."""
 
@@ -89,6 +117,10 @@ class Finding(BaseModel):
     #: Título en lenguaje llano, sujeto "tu agente". Sin jerga.
     title: str
     summary: str
+    #: Una frase, para la tarjeta del inicio. El título ya dice qué pasa y la cifra
+    #: cuánto cuesta: esto dice lo único que falta para decidir si abrirlo (D-124). El
+    #: resumen entero sigue en la ficha y en modo avanzado.
+    lead: str = ""
 
     #: Lo desperdiciado dentro de la ventana analizada (dinero real, ya gastado).
     window_waste_usd: float = 0.0
@@ -123,6 +155,16 @@ class Finding(BaseModel):
 
     tech: list[TechItem] = Field(default_factory=list)
     sample_trace_id: str = ""
+    #: Identidad del paso implicado. Es con lo que la ficha filtra «las trazas
+    #: afectadas»: el título no sirve, porque lleva el llamante o una pista del prompt.
+    step_key: str = ""
+
+    #: Lo que el usuario ha dicho de él: `arreglado`, `ignorado`, o `reaparecido`
+    #: cuando lo marcó como arreglado y sigue saliendo igual. Vacío si nada (D-123).
+    state: str = ""
+    state_at: datetime | None = None
+    state_note: str = ""
+    fix_check: FixCheck | None = None
 
 
 class FindingDetail(Finding):
@@ -208,6 +250,9 @@ class Overview(BaseModel):
     savings_needs_caution: bool = False
 
     findings: list[Finding] = Field(default_factory=list)
+    #: Los que el usuario ha marcado como arreglados o ignorados. No suman al evitable:
+    #: el evitable es lo que todavía se puede hacer, y éstos ya tienen respuesta.
+    set_aside: list[Finding] = Field(default_factory=list)
 
     #: Cuánto de este proyecto entendemos. Va en el Overview y no en una pantalla
     #: aparte a propósito: si la cobertura es baja, hay que enterarse **antes** de leer
@@ -281,19 +326,15 @@ def _scope_label(affected: int, total: int) -> str:
 
 
 def _miles(n: float) -> str:
-    """12345 -> «12.345». Separador de millar español.
-
-    Existe porque el atajo anterior —formatear en inglés y luego hacer
-    `.replace(",", ".")` sobre la frase entera— también convertía en puntos las comas
-    del texto, y partía las oraciones por la mitad.
-    """
-    return f"{n:,.0f}".replace(",", ".")
+    """12345 -> «12.345». Alias de `cifras.miles`, que es quien sabe hacerlo."""
+    return cifras.miles(n)
 
 
 def _seconds(ms: float) -> str:
+    """Una espera, con coma española: «4,6 s», nunca «4.6 s» (D-120)."""
     if ms < 1000:
-        return f"{ms:.0f} ms"
-    return f"{ms / 1000:.1f} s"
+        return f"{_miles(round(ms))} ms"
+    return f"{cifras.decimal(ms / 1000)} s"
 
 
 def span_label(days: float) -> str:
@@ -314,14 +355,13 @@ def span_label(days: float) -> str:
 
 
 def _money(value: float) -> str:
-    """Un importe pequeño escrito de forma legible. Los de un hallazgo suelen ser
-    céntimos, y `$0.00` se lee como cero cuando no lo es."""
-    return f"${value:.4f}" if value < 0.01 else f"${value:.2f}"
+    """Un importe, escrito por el único sitio que sabe escribir números (D-120)."""
+    return cifras.dinero(value)
 
 
 def _decimal(value: float) -> str:
     """Un decimal, coma española, y sin el «,0» que sobra en «7,0 días»."""
-    return f"{value:.1f}".removesuffix(".0").replace(".", ",")
+    return cifras.decimal(value)
 
 
 def window_label(days: float) -> str:
@@ -423,6 +463,13 @@ def _repetition_finding(
         kind="repeticion",
         title=f"Tu agente repite «{group.name}» hasta {group.max_per_trace} veces seguidas",
         summary=resumen,
+        lead=(
+            "Con los mismos datos cada vez: la primera ya trae la respuesta."
+            if cuesta
+            else f"Con los mismos datos cada vez. Gasta {_miles(tokens_de_mas)} tokens de más."
+            if sin_tarifa
+            else "Con los mismos datos cada vez. No gasta tokens, pero añade espera."
+        ),
         window_waste_usd=group.extra_cost_usd,
         monthly_saving_usd=monthly,
         observed_days=days,
@@ -446,6 +493,7 @@ def _repetition_finding(
             TechItem(label="trazas", value=str(group.traces)),
         ],
         sample_trace_id=group.sample_trace_id,
+        step_key=group.step_key,
     )
 
 
@@ -499,7 +547,7 @@ def _repetition_detail(
             code=(
                 "from functools import lru_cache\n\n"
                 "@lru_cache(maxsize=256)\n"
-                f"def {group.name}(...):\n"
+                f"def {identificador(group.name)}(...):\n"
                 "    ..."
             ),
         ),
@@ -516,9 +564,10 @@ def _repetition_detail(
 
     if cuesta:
         detalle.savings_calculation = (
-            f"{group.extra_spans} pasos de más en {group.traces} trazas durante "
-            f"{window_label(finding.observed_days)}, que suman ${group.extra_cost_usd:.6f} de "
-            f"coste ya gastado.{_projection_sentence(finding)} Sólo cuenta las ocurrencias "
+            f"{_miles(group.extra_spans)} pasos de más en {_miles(group.traces)} trazas durante "
+            f"{window_label(finding.observed_days)}, que suman "
+            f"{cifras.dinero_exacto(group.extra_cost_usd)} de coste ya gastado."
+            f"{_projection_sentence(finding)} Sólo cuenta las ocurrencias "
             f"posteriores a la primera de cada traza; la primera es trabajo legítimo."
         )
         detalle.savings_note = (
@@ -532,7 +581,8 @@ def _repetition_detail(
         )
     else:
         detalle.savings_calculation = (
-            f"{group.extra_spans} pasos de más en {group.traces} trazas. Estos pasos no "
+            f"{_miles(group.extra_spans)} pasos de más en {_miles(group.traces)} trazas. "
+            f"Estos pasos no "
             f"consumen tokens, así que el ahorro en dinero es cero: lo que se recupera es "
             f"tiempo, {_seconds(group.extra_duration_ms)} en la ventana analizada. Si en tu "
             f"agente cada vuelta arrastrase una llamada al modelo, aparecería además como un "
@@ -583,6 +633,7 @@ def _loop_finding(
         id=f"bucle:{group.loop_hash}",
         kind="bucle",
         title=f"«{group.name}» da hasta {group.max_per_trace} vueltas sin avanzar",
+        lead="Cada vuelta cambia un número y la respuesta no cambia: sale por el tope.",
         summary=(
             f"En una misma ejecución, tu agente llama a «{group.name}» hasta "
             f"{group.max_per_trace} veces seguidas. Las llamadas sólo se diferencian en "
@@ -617,7 +668,134 @@ def _loop_finding(
             TechItem(label="trazas", value=str(group.traces)),
         ],
         sample_trace_id=group.sample_trace_id,
+        step_key=group.step_key,
     )
+
+
+def _loop_detail(
+    finding: Finding, group: LoopGroup, evidence: list[Span], query: str
+) -> FindingDetail:
+    """La ficha de un bucle.
+
+    No existía. La regla entró por `detect()` y nunca salió por `detail()`, así que el
+    hallazgo que más dinero devolvía del proyecto de demo llevaba a un 404 que el
+    usuario leía como «enhorabuena, ya no lo tienes» (D-113).
+    """
+    cuesta = group.extra_cost_usd > 0
+    detalle = FindingDetail(**finding.model_dump())
+
+    salidas = (
+        "sólo sale un resultado distinto"
+        if group.distinct_outputs <= 1
+        else f"sólo salen {group.distinct_outputs} resultados distintos"
+    )
+    detalle.what_happens = (
+        f"Dentro de una misma ejecución, «{group.name}» se llama hasta "
+        f"{group.max_per_trace} veces. Las entradas no son idénticas —se diferencian en "
+        f"algún número: un contador de intentos, una página, una hora—, pero entre las "
+        f"{_miles(group.total_spans)} llamadas de la ventana {salidas}. Muchas "
+        f"vueltas y casi ningún resultado nuevo es la definición medible de dar vueltas "
+        f"sin avanzar."
+    )
+    detalle.why = (
+        "El agente tiene una condición de salida que no se cumple nunca, o que depende de "
+        "algo que no está mirando. Como en cada vuelta cambia un número, cree que está "
+        "haciendo algo nuevo: pregunta otra vez, recibe la misma respuesta y vuelve a "
+        "empezar hasta agotar el tope de intentos.\n\n"
+        "Es el hermano difícil de la repetición exacta y por eso se detecta aparte: una "
+        "repetición se ve comparando entradas idénticas, y aquí no hay dos entradas "
+        "idénticas. Lo que delata al bucle no es la entrada, es que la salida no cambia."
+    )
+    detalle.detection_explanation = (
+        f"Regla activa: **{MIN_VUELTAS_BUCLE} o más llamadas del mismo paso dentro de una "
+        f"traza, con entradas distintas y como mucho {MAX_SALIDAS_BUCLE} salidas "
+        f"distintas**. El `laplace.loop_hash` lo calcula la ingesta como el `dedup_hash` "
+        f"pero **ignorando los números** de la entrada, que es lo que hace visible un "
+        f"bucle con contador; el hash de salida no los ignora, porque ahí un número que "
+        f"cambia sí es avance. Exigir entradas distintas es lo que impide que esta regla "
+        f"y la de repetición cuenten el mismo dinero dos veces."
+    )
+    detalle.detection_query = query.strip()
+
+    detalle.fix_steps = [
+        FixStep(
+            title="Revisa la condición de salida",
+            body=(
+                "Es lo primero que hay que mirar: el bucle sale por el tope de intentos, no "
+                "porque haya terminado. Casi siempre falta comprobar el caso en el que la "
+                "respuesta ya es la definitiva."
+            ),
+            code=(
+                f"for intento in range(MAX_INTENTOS):\n"
+                f"    respuesta = {identificador(group.name)}(...)\n"
+                f"    if respuesta == anterior:      # no avanza: no insistas\n"
+                f"        break\n"
+                f"    anterior = respuesta"
+            ),
+        ),
+        FixStep(
+            title="Corta cuando la respuesta se repite",
+            body=(
+                "Aunque la condición de salida esté bien, si dos vueltas seguidas devuelven "
+                "lo mismo no hay nada que ganar con una tercera."
+            ),
+        ),
+        FixStep(
+            title="Y deja el tope puesto",
+            body=(
+                "El tope de intentos no sobra: es lo que ha impedido que esto fuera una "
+                "cascada en vez de seis vueltas. Bájalo a lo que de verdad tenga sentido."
+            ),
+            advanced=True,
+        ),
+    ]
+
+    vueltas = (
+        f"{group.extra_spans} vueltas de más en {group.traces} "
+        f"{'traza' if group.traces == 1 else 'trazas'} durante "
+        f"{window_label(finding.observed_days)}"
+    )
+    if cuesta:
+        detalle.savings_calculation = (
+            f"{vueltas}, que suman {cifras.dinero_exacto(group.extra_cost_usd)} de coste "
+            f"ya gastado."
+            f"{_projection_sentence(finding)} Sólo cuenta a partir de la segunda vuelta de "
+            f"cada traza: la primera es trabajo legítimo."
+        )
+        detalle.savings_note = (
+            "El dinero ya gastado está medido, no estimado: es la suma del coste de las "
+            "vueltas que sobran. Lo estimado es la proyección a un mes, que sale de "
+            "suponer que el ritmo se mantiene."
+            if finding.monthly_saving_usd is not None
+            else "El dinero ya gastado está medido, no estimado: es la suma del coste de "
+            "las vueltas que sobran. Lo que todavía no podemos decirte es a cuánto va el "
+            "mes."
+        )
+    elif finding.window_waste_tokens > 0:
+        detalle.savings_calculation = (
+            f"{vueltas}, que mueven {_miles(finding.window_waste_tokens)} tokens y "
+            f"{_seconds(group.extra_duration_ms)} de espera. Cuánto dinero es, no lo "
+            f"sabemos: {group.model or 'ese modelo'} no está en la tabla de precios, y un "
+            f"número inventado aquí sería peor que ninguno."
+        )
+        detalle.savings_note = (
+            "Los tokens y el tiempo están medidos; el dinero no se puede calcular sin "
+            "tarifa. Si ese modelo empieza a tener precio conocido, esta misma cifra "
+            "aparecerá en dólares sin que cambies nada."
+        )
+    else:
+        detalle.savings_calculation = (
+            f"{vueltas}. Estas vueltas no consumen tokens, así que el ahorro en dinero es "
+            f"cero: lo que se recupera es tiempo, {_seconds(group.extra_duration_ms)} en la "
+            f"ventana analizada."
+        )
+        detalle.savings_note = (
+            "Este problema no te cuesta dinero, te cuesta espera. Arreglarlo hace que tu "
+            "agente responda antes."
+        )
+
+    detalle.evidence = evidence
+    return detalle
 
 
 # ---------------------------------------------------------------------------------
@@ -640,6 +818,23 @@ MIN_VECES_MAS_LENTO = 1.8
 MIN_CALLS_MODELO_RAPIDO = 5
 
 
+def _salida_tipica(usage: ModelUsage) -> float:
+    """La salida de una llamada normal de ese paso: la mediana, con la media de reserva.
+
+    Es **la misma cifra con la que decide la regla**, y por eso vive aquí y no escrita a
+    mano en cada frase. La tarjeta explicaba el hallazgo con la media mientras la
+    decisión usaba la mediana, así que un paso con una generación desbocada —once
+    llamadas de 6 tokens y una de 3.000— disparaba por la mediana y después decía
+    «responde con 256 tokens de media, que es una respuesta muy breve». La frase que
+    justifica el hallazgo contradecía al hallazgo, y dejaba al lector sin forma de
+    comprobarnos (D-118).
+
+    La media sigue estando, en modo avanzado y al lado de la mediana: ver las dos juntas
+    es justo lo que enseña que ese paso tiene una cola larga.
+    """
+    return usage.p50_output_tokens or usage.avg_output_tokens
+
+
 def _modelo_mas_rapido(usos: list[ModelUsage], excepto: str) -> tuple[str, float] | None:
     """El modelo con menos milisegundos por llamada entre los que ya usa el proyecto.
 
@@ -660,10 +855,23 @@ def _modelo_mas_rapido(usos: list[ModelUsage], excepto: str) -> tuple[str, float
     return modelo, sum(medias) / len(medias)
 
 
+#: Por qué esta regla no puede hablar de dinero. Son dos motivos **opuestos** y durante
+#: cuatro tandas se contaron como uno: el modelo no está en la tabla (un hueco nuestro)
+#: o está y ya es el más barato que conocemos (una respuesta). Decir lo primero cuando
+#: pasa lo segundo es afirmar que no conocemos una tarifa que pintamos en las otras diez
+#: pantallas, y quien lo lea deja de creerse la tabla entera (D-114).
+MotivoSinDinero = Literal["sin_tarifa", "sin_alternativa"]
+
+
 def _modelo_caro_sin_tarifa(
-    usage: ModelUsage, otros: list[ModelUsage], summary: WindowSummary, days: float
+    usage: ModelUsage,
+    otros: list[ModelUsage],
+    summary: WindowSummary,
+    days: float,
+    *,
+    motivo: MotivoSinDinero,
 ) -> Finding | None:
-    """La misma regla cuando no hay tabla de precios: se mide en tiempo, no en dinero.
+    """La misma regla cuando no hay dinero que prometer: se mide en tiempo.
 
     Un modelo local no tiene tarifa y nunca la tendrá, así que la versión de dinero de
     esta regla no puede disparar jamás: quien use Ollama —un estudiante, cualquiera
@@ -671,7 +879,8 @@ def _modelo_caro_sin_tarifa(
     es el tiempo y los tokens, y con eso se puede decir algo cierto: este paso responde
     cuatro palabras y lo hace con el modelo que más tarda de los que ya usas.
 
-    Lo que **no** se dice es cuánto dinero ahorraría, porque no se sabe.
+    Lo que **no** se dice es cuánto dinero ahorraría. `motivo` dice por qué, y los dos
+    valores llevan a frases distintas porque son cosas distintas.
     """
     # La MEDIANA de salida, no la media: una generación desbocada mueve la media de un
     # paso que normalmente contesta tres palabras, y esta regla decide con ese número.
@@ -687,21 +896,39 @@ def _modelo_caro_sin_tarifa(
         return None
 
     ahorro_ms = (ms_actual - ms_rapido) * usage.calls
+
+    if motivo == "sin_tarifa":
+        porque = (
+            f" Cuánto dinero, no lo sabemos: {usage.model} no tiene tarifa conocida."
+        )
+        sin_dinero = f"{usage.model} no está en la tabla de precios"
+    else:
+        porque = (
+            f" Cuánto dinero te ahorraría, no lo sabemos: {usage.model} ya es el más barato "
+            f"de los que conocemos, así que no hay con qué comparar su precio. Lo que sí "
+            f"está medido es el tiempo."
+        )
+        sin_dinero = (
+            f"{usage.model} ya es el más barato de la tabla: no hay precio con el que "
+            f"comparar, así que aquí sólo se puede afirmar el tiempo"
+        )
+
     return Finding(
         id=f"modelo_caro:{usage.key}:{usage.model}",
         kind="modelo_caro",
         title=f"Un paso muy corto se lo lleva el modelo más lento: «{usage.name}»",
+        lead=f"{nombre_rapido}, que ya usas, respondería lo mismo en menos tiempo.",
         summary=(
             f"«{usage.name}» responde con {salida:.0f} tokens en una llamada normal y usa "
-            f"{usage.model}, que en tu propio tráfico tarda {ms_actual / ms_rapido:.1f} veces "
+            f"{usage.model}, que en tu propio tráfico tarda "
+            f"{cifras.decimal(ms_actual / ms_rapido)} veces "
             f"más por llamada que {nombre_rapido}, un modelo que ya usas. Cambiarlo te "
-            f"ahorraría {_seconds(ahorro_ms)} en esta ventana. Cuánto dinero, no lo sabemos: "
-            f"{usage.model} no tiene tarifa conocida."
+            f"ahorraría {_seconds(ahorro_ms)} en esta ventana.{porque}"
         ),
         window_waste_usd=0.0,
         window_waste_ms=ahorro_ms,
         window_waste_tokens=usage.output_tokens,
-        cost_unavailable=f"{usage.model} no está en la tabla de precios",
+        cost_unavailable=sin_dinero,
         monthly_saving_usd=None,
         observed_days=days,
         costs_money=False,
@@ -713,10 +940,14 @@ def _modelo_caro_sin_tarifa(
             TechItem(label="paso", value=usage.name),
             TechItem(label="modelo", value=f"{usage.model} → {nombre_rapido}"),
             TechItem(label="llamadas", value=str(usage.calls)),
+            TechItem(
+                label="salida mediana", value=f"{_salida_tipica(usage):.0f} tok"
+            ),
             TechItem(label="salida media", value=f"{usage.avg_output_tokens:.0f} tok"),
             TechItem(label="ms por llamada", value=f"{ms_actual:.0f} vs {ms_rapido:.0f}"),
         ],
         sample_trace_id=usage.sample_trace_id,
+        step_key=usage.key,
     )
 
 
@@ -730,8 +961,12 @@ def _expensive_model_finding(
     table = get_price_table()
     price = table.lookup(usage.model)
     if price is None or not price.alternative:
-        # Sin tarifa no hay dinero que prometer, pero sigue habiendo algo que decir.
-        return _modelo_caro_sin_tarifa(usage, otros or [], summary, days)
+        # Sin dinero que prometer sigue habiendo algo que decir, pero el motivo no es el
+        # mismo en los dos casos y durante cuatro tandas se dijo el primero para los dos
+        # (D-114): que el modelo no esté en la tabla es un hueco nuestro; que no tenga
+        # alternativa es que ya es el más barato que conocemos, y eso es una respuesta.
+        motivo: MotivoSinDinero = "sin_tarifa" if price is None else "sin_alternativa"
+        return _modelo_caro_sin_tarifa(usage, otros or [], summary, days, motivo=motivo)
     cheaper = table.lookup(price.alternative)
     if cheaper is None:
         return None
@@ -759,10 +994,11 @@ def _expensive_model_finding(
         id=f"modelo_caro:{usage.key}:{usage.model}",
         kind="modelo_caro",
         title=f"Usas el modelo caro para un paso muy corto: «{usage.name}»",
+        lead=f"Con {price.alternative}, el mismo trabajo costaría {veces_txt} menos.",
         summary=(
-            f"Ese paso responde con {usage.avg_output_tokens:.0f} tokens de media, que es una "
-            f"respuesta muy breve. Con {price.alternative} en lugar de {usage.model}, el mismo "
-            f"trabajo costaría {veces_txt} menos."
+            f"Ese paso responde con {_salida_tipica(usage):.0f} tokens en una llamada normal, "
+            f"que es una respuesta muy breve. Con {price.alternative} en lugar de "
+            f"{usage.model}, el mismo trabajo costaría {veces_txt} menos."
         ),
         window_waste_usd=ahorro,
         monthly_saving_usd=_to_monthly(ahorro, base),
@@ -775,10 +1011,84 @@ def _expensive_model_finding(
             TechItem(label="paso", value=usage.name),
             TechItem(label="modelo", value=f"{usage.model} → {price.alternative}"),
             TechItem(label="llamadas", value=str(usage.calls)),
+            TechItem(
+                label="salida mediana", value=f"{_salida_tipica(usage):.0f} tok"
+            ),
             TechItem(label="salida media", value=f"{usage.avg_output_tokens:.0f} tok"),
         ],
         sample_trace_id=usage.sample_trace_id,
+        step_key=usage.key,
     )
+
+
+def _modelo_lento_detail(
+    finding: Finding, usage: ModelUsage, query: str
+) -> FindingDetail:
+    """La ficha del camino por tiempo de la regla del modelo caro.
+
+    Aquí no hay dinero que prometer: o el modelo no está en la tabla, o está y ya es el
+    más barato que conocemos. Lo que sí está medido es el tiempo, y la ficha habla de
+    eso y sólo de eso. El motivo concreto lo trae `finding.cost_unavailable`, que desde
+    D-114 dice cuál de los dos es.
+    """
+    rapido = next(
+        (t.value.split("→")[-1].strip() for t in finding.tech if t.label == "modelo"), ""
+    )
+    detalle = FindingDetail(**finding.model_dump())
+
+    detalle.what_happens = (
+        f"El paso «{usage.name}» ha hecho {_miles(usage.calls)} llamadas a {usage.model} en la "
+        f"ventana analizada, y responde con {_salida_tipica(usage):.0f} tokens en una normal: "
+        f"una etiqueta o una frase corta, no un texto elaborado. En tu propio tráfico hay "
+        f"un modelo que tarda bastante menos por llamada."
+    )
+    detalle.why = (
+        "Un paso que sólo tiene que decidir entre unas pocas opciones no necesita el "
+        "modelo más capaz, y el más capaz suele ser también el más lento. Cuando un "
+        "agente crece, todos los pasos heredan el modelo con el que se empezó a "
+        "probar.\n\n"
+        f"{finding.cost_unavailable.capitalize()}, así que aquí no te prometemos dinero: "
+        f"te enseñamos el tiempo, que está medido llamada a llamada."
+    )
+    detalle.detection_explanation = (
+        f"Regla activa: **un paso `llm` cuya salida mediana es de "
+        f"{MAX_SALIDA_TRIVIAL_SIN_TARIFA} tokens o menos y que tarda al menos "
+        f"{MIN_VECES_MAS_LENTO} veces más por llamada que otro modelo que ya usas** —con "
+        f"{MIN_CALLS_MODELO_RAPIDO} llamadas como mínimo, para que la comparación no salga "
+        f"de una muestra suelta. Se comparan **medianas**, no medias: una generación "
+        f"desbocada mueve la media de un paso que normalmente contesta tres palabras. La "
+        f"alternativa sale de tu propio tráfico, nunca de una lista nuestra de modelos."
+    )
+    detalle.detection_query = query.strip()
+
+    detalle.fix_steps = [
+        FixStep(
+            title=f"Prueba ese paso con {rapido}" if rapido else "Prueba con el otro modelo",
+            body=(
+                "Es un cambio de una palabra y afecta sólo a ese paso. Lo proponemos porque "
+                "ya lo usas en otro sitio, no porque lo hayamos elegido nosotros."
+            ),
+            code=f'model="{rapido}"  # antes: "{usage.model}"' if rapido else None,
+        ),
+        FixStep(
+            title="Comprueba que la calidad aguanta",
+            body=(
+                "Un modelo más rápido no siempre decide igual. Pasa unos cuantos casos "
+                "reales por los dos y compáralos en Evaluaciones antes de dejarlo fijo."
+            ),
+        ),
+    ]
+    detalle.savings_calculation = (
+        f"{_miles(usage.calls)} llamadas en {window_label(finding.observed_days)}, a "
+        f"{_seconds(usage.p50_duration_ms)} de mediana cada una. Con el modelo rápido de tu "
+        f"tráfico se recuperan {_seconds(finding.window_waste_ms)} en esta ventana. No hay "
+        f"cifra en dólares y no la inventamos: {finding.cost_unavailable}."
+    )
+    detalle.savings_note = (
+        "El tiempo está medido, no estimado. Lo que no se puede afirmar aquí es el dinero, "
+        "y por eso no aparece ninguno."
+    )
+    return detalle
 
 
 def _expensive_model_detail(
@@ -787,12 +1097,21 @@ def _expensive_model_detail(
     table = get_price_table()
     price = table.lookup(usage.model)
     cheaper = table.lookup(price.alternative) if price and price.alternative else None
+
+    # La regla tiene dos caminos y esta ficha sólo sabía contar el primero. Por el
+    # segundo —cuando no hay precio con el que comparar y lo que se mide es tiempo— la
+    # página decía «Cambia el modelo de ese paso a None» y afirmaba una alternativa más
+    # barata que no existe. Un tipo de hallazgo con dos caminos son dos fichas (D-114).
+    if cheaper is None:
+        return _modelo_lento_detail(finding, usage, query)
+
     detalle = FindingDetail(**finding.model_dump())
 
     detalle.what_happens = (
-        f"El paso «{usage.name}» ha hecho {usage.calls} llamadas a {usage.model} en la ventana "
-        f"analizada. La respuesta media es de {usage.avg_output_tokens:.0f} tokens, que es lo "
-        f"que ocupa una etiqueta o una frase corta, no un texto elaborado."
+        f"El paso «{usage.name}» ha hecho {_miles(usage.calls)} llamadas a {usage.model} "
+        f"en la ventana "
+        f"analizada. Una llamada normal responde con {_salida_tipica(usage):.0f} tokens, que es "
+        f"lo que ocupa una etiqueta o una frase corta, no un texto elaborado."
     )
     detalle.why = (
         "Los modelos grandes se pagan sobre todo por lo que escriben. Cuando un paso sólo "
@@ -836,8 +1155,8 @@ def _expensive_model_detail(
             f"${price.input}/1M entrada y ${price.output}/1M salida. Con "
             f"{price.alternative}: ${cheaper.input}/1M y "
             f"${cheaper.output}/1M. La diferencia sobre esos mismos tokens es "
-            f"${finding.window_waste_usd:.6f} en {window_label(finding.observed_days)}."
-            f"{_projection_sentence(finding)}"
+            f"{cifras.dinero_exacto(finding.window_waste_usd)} en "
+            f"{window_label(finding.observed_days)}.{_projection_sentence(finding)}"
         )
     detalle.savings_note = (
         "El ahorro es aritmética sobre los tokens que ya has gastado. Lo que no podemos "
@@ -885,6 +1204,11 @@ def _cheaper_model_if_recommended(usage: ModelUsage) -> str | None:
         cached_input_tokens=usage.cached_input_tokens,
     )
     return price.alternative if actual.total_usd > alternativo.total_usd else None
+
+
+def _coste_de_escribir(price: Any, tokens: int) -> float:
+    """El sobreprecio de escribir esos tokens en caché, sobre la tarifa de entrada."""
+    return tokens * max(price.cache_write - price.input, 0.0) / _MILLION
 
 
 def _cache_arithmetic(usage: ModelUsage) -> tuple[int, int, float] | None:
@@ -1025,13 +1349,15 @@ def _fixed_context_finding(
         id=f"contexto_fijo:{usage.key}:{usage.model}",
         kind="contexto_fijo",
         title=(
-            f"Reenvías las mismas {_miles(usage.min_input_tokens)} palabras en cada llamada"
+            f"Reenvías los mismos {_miles(usage.min_input_tokens)} tokens en cada llamada"
         ),
         summary=(
             f"Todas las llamadas del paso «{usage.name}» empiezan con al menos "
             f"{_miles(usage.min_input_tokens)} tokens idénticos: instrucciones, ejemplos o "
-            f"catálogo que no cambian. Los envías {usage.calls} veces. {de_cache}{precio}"
+            f"catálogo que no cambian. Los envías {_miles(usage.calls)} veces. "
+            f"{de_cache}{precio}"
         ),
+        lead="Instrucciones o catálogo que no cambian, y se pagan enteros en cada llamada.",
         window_waste_usd=ahorro,
         window_waste_tokens=sin_cachear,
         cost_unavailable=(
@@ -1054,6 +1380,7 @@ def _fixed_context_finding(
             TechItem(label="sin cachear", value=f"{sin_cachear} tok ({parte:.0%})"),
         ],
         sample_trace_id=usage.sample_trace_id,
+        step_key=usage.key,
     )
 
 
@@ -1066,8 +1393,9 @@ def _fixed_context_detail(
     detalle = FindingDetail(**finding.model_dump())
 
     detalle.what_happens = (
-        f"En las {usage.calls} llamadas del paso «{usage.name}», la más corta ya lleva "
-        f"{usage.min_input_tokens} tokens de entrada. Ese suelo es la parte que no cambia "
+        f"En las {_miles(usage.calls)} llamadas del paso «{usage.name}», la más corta ya lleva "
+        f"{_miles(usage.min_input_tokens)} tokens de entrada. Ese suelo es la parte que no "
+        f"cambia "
         f"nunca: las instrucciones y los ejemplos que van pegados a cada petición."
     )
     detalle.why = (
@@ -1116,7 +1444,7 @@ def _fixed_context_detail(
         escritura_txt = (
             f" Menos {_miles(escrituras)} tokens de escritura de caché a "
             f"${price.cache_write}/1M (una por ejecución), que sobre la tarifa de entrada "
-            f"cuestan ${escrituras * max(price.cache_write - price.input, 0.0) / 1_000_000:.6f}."
+            f"cuestan {cifras.dinero_exacto(_coste_de_escribir(price, escrituras))}."
             if price.cache_write is not None
             else " Este proveedor no cobra aparte por escribir en caché."
         )
@@ -1125,8 +1453,8 @@ def _fixed_context_detail(
             f"{usage.calls - max(usage.traces, 1)} llamadas que ya encontrarían la caché "
             f"caliente = {_miles(lecturas)} tokens que pasarían de ${price.input}/1M a "
             f"${price.cached_input}/1M.{escritura_txt} Neto: "
-            f"${finding.window_waste_usd:.6f} en {window_label(finding.observed_days)}."
-            f"{_projection_sentence(finding)}"
+            f"{cifras.dinero_exacto(finding.window_waste_usd)} en "
+            f"{window_label(finding.observed_days)}.{_projection_sentence(finding)}"
         )
     if encadenado:
         detalle.savings_calculation += (
@@ -1147,12 +1475,63 @@ def _fixed_context_detail(
 # ---------------------------------------------------------------------------------
 
 
+def _sin_envoltorios(loops: list[LoopGroup]) -> list[LoopGroup]:
+    """Un bucle visto desde dos alturas del árbol es un problema, no dos.
+
+    Un agente decorado envuelve cada paso en un span propio, así que seis vueltas
+    producen dos grupos: el del envoltorio —que no gasta tokens y sólo puede hablar de
+    tiempo— y el de la llamada al modelo de dentro, que sí tiene dinero. El inicio los
+    enseñaba como dos tarjetas, y después de D-115 con títulos distintos pero contando
+    lo mismo: de diez cosas que arreglar, cuatro eran dos.
+
+    **Que sean el mismo se sabe por los datos, no por el parecido.** El camino de
+    llamada del span de modelo termina en el paso que lo envuelve —eso lo escribe el
+    SDK, no lo deducimos— y además los dos tienen que cubrir las mismas trazas con las
+    mismas vueltas. Si cualquiera de las dos cosas falla, son bucles distintos y se
+    quedan los dos: ante la duda, enseñar de más, que es lo que ya hacíamos.
+
+    Se queda el de dentro porque es el que **puede ponerle precio**: «este bucle te
+    cuesta 0,60 $» acciona, y «te cuesta 2,4 s» acciona menos. Se pierden los pocos
+    milisegundos del envoltorio alrededor de la llamada, que es el lado bueno por el que
+    equivocarse (D-119).
+
+    Lo que esto **no** toca: un bucle de herramientas sin llamada al modelo dentro no
+    tiene quien lo sustituya, así que sigue saliendo con su tiempo, que es la promesa de
+    no inventar dinero donde no lo hay.
+    """
+    # Los pasos desde los que se llama a un modelo en bucle, con sus trazas y vueltas.
+    envueltos: dict[str, list[LoopGroup]] = {}
+    for grupo in loops:
+        if grupo.span_type != "llm" or not grupo.site:
+            continue
+        llamante = grupo.site.split(SEPARADOR_DE_CAMINO)[-1].strip()
+        if llamante:
+            envueltos.setdefault(llamante, []).append(grupo)
+
+    def es_envoltorio(grupo: LoopGroup) -> bool:
+        if grupo.span_type == "llm":
+            return False
+        # `step_key` de un span sin identidad de paso cae a su nombre, que es lo que
+        # escribe el SDK en el camino del hijo. Se compara con eso y no con `name`,
+        # que para entonces puede llevar ya el llamante pegado (D-115).
+        dentro = envueltos.get(grupo.step_key.strip())
+        if not dentro:
+            return False
+        return any(
+            hijo.traces == grupo.traces and hijo.extra_spans == grupo.extra_spans
+            for hijo in dentro
+        )
+
+    return [grupo for grupo in loops if not es_envoltorio(grupo)]
+
+
 def _duplicate_tokens(
     groups: list[RepeatedGroup],
+    loops: list[LoopGroup] | None = None,
 ) -> dict[tuple[str, str], tuple[int, int, int]]:
-    """Lo que la regla de repetición ya reclama, por (paso, modelo).
+    """Lo que las reglas de repetición y de bucle ya reclaman, por (paso, modelo).
 
-    Dos cuidados que este mapa ha necesitado aprender por las malas:
+    Tres cuidados que este mapa ha necesitado aprender por las malas:
 
     1. **Se cruza por `step_key`, no por nombre.** Desde que las reglas agrupan por
        paso, cruzar por el nombre del span dejaría el descuento sin pareja y el ahorro
@@ -1160,9 +1539,19 @@ def _duplicate_tokens(
     2. **Se acumula, no se sobrescribe.** Un mismo paso genera un `dedup_hash` distinto
        por cada entrada repetida, así que varios grupos caen en la misma clave. El
        diccionario por comprensión que había antes se quedaba sólo con el último.
+    3. **Los bucles cuentan igual que las repeticiones.** La regla de bucles entró en
+       D-109 y nadie la enchufó aquí, así que la del modelo caro volvía a reclamar la
+       diferencia de tarifa sobre las vueltas que el bucle ya daba por eliminadas. En el
+       proyecto de demo eso prometía un 117 % de la factura, y el `min(suma, gasto)` de
+       `overview()` lo convertía en un «puedes dejar de pagarlo todo» que la pantalla
+       enseñaba como una buena noticia. Quinta cara del mismo fallo (D-117).
+
+    Un bucle y una repetición exacta del mismo paso no se pisan entre sí: la consulta de
+    bucles exige entradas distintas y la de repetición exige la misma. Por eso se suman
+    los dos sin miedo a descontar de más.
     """
     total: dict[tuple[str, str], tuple[int, int, int]] = {}
-    for group in groups:
+    for group in [*groups, *(loops or [])]:
         if group.span_type != "llm" or not group.model or not group.step_key:
             continue
         clave = (group.step_key, group.model)
@@ -1221,16 +1610,19 @@ def detect(store: Any, project_id: str, window: Window) -> list[Finding]:
 
     # Los bucles van aparte de las repeticiones exactas y no se solapan con ellas: la
     # consulta exige entradas distintas, que es justo lo que la regla 1 no mira.
-    for bucle in store.loop_groups(
-        project_id, window, min_vueltas=MIN_VUELTAS_BUCLE, max_salidas=MAX_SALIDAS_BUCLE
-    ):
+    bucles = _sin_envoltorios(
+        store.loop_groups(
+            project_id, window, min_vueltas=MIN_VUELTAS_BUCLE, max_salidas=MAX_SALIDAS_BUCLE
+        )
+    )
+    for bucle in bucles:
         findings.append(_loop_finding(bucle, summary, dias, base))
 
     # Las reglas no pueden solaparse: si una llamada al modelo se repite, la regla de
     # repetición ya cuenta el 100% de las copias sobrantes. Contarlas otra vez en la
     # regla del modelo caro inflaría el ahorro total, que es el número que vendemos.
     # Se descuentan los tokens duplicados antes de evaluar el resto de reglas.
-    duplicados = _duplicate_tokens(grupos)
+    duplicados = _duplicate_tokens(grupos, bucles)
 
     usos = store.model_usage(project_id, window, min_calls=1)
     for uso in usos:
@@ -1261,7 +1653,12 @@ def detect(store: Any, project_id: str, window: Window) -> list[Finding]:
 
 
 def overview(
-    store: Any, project_id: str, window: Window, *, has_managed_prompts: bool = False
+    store: Any,
+    project_id: str,
+    window: Window,
+    *,
+    has_managed_prompts: bool = False,
+    states: dict[str, dict[str, Any]] | None = None,
 ) -> Overview:
     """El héroe del inicio: coste actual, coste evitable y métricas.
 
@@ -1271,6 +1668,11 @@ def overview(
     """
     summary = store.summarize_window(project_id, window)
     findings = detect(store, project_id, window)
+    apartados: list[Finding] = []
+    if states:
+        from .seguimiento import aplicar_estados
+
+        findings, apartados = aplicar_estados(store, project_id, findings, states)
     cobertura = build_coverage(
         store.coverage(project_id, window), has_managed_prompts=has_managed_prompts
     )
@@ -1328,8 +1730,92 @@ def overview(
         p95_duration_ms=summary.p95_duration_ms,
         cost_per_trace_usd=(summary.total_cost_usd / summary.traces) if summary.traces else 0.0,
         findings=findings,
+        set_aside=apartados,
         coverage=cobertura,
     )
+
+
+def _detalle_repeticion(
+    store: Any, project_id: str, window: Window, key: str, ctx: _Contexto
+) -> FindingDetail | None:
+    for group in store.repeated_groups(project_id, window, min_repeats=MIN_REPEATS):
+        if group.step_key != key:
+            continue
+        finding = _repetition_finding(group, ctx.summary, ctx.dias, ctx.base)
+        evidencia = store.sample_repetition(project_id, window, group.dedup_hash)
+        return _repetition_detail(finding, group, evidencia, store.repeated_groups_sql)
+    return None
+
+
+def _detalle_bucle(
+    store: Any, project_id: str, window: Window, key: str, ctx: _Contexto
+) -> FindingDetail | None:
+    for group in _sin_envoltorios(
+        store.loop_groups(
+            project_id, window, min_vueltas=MIN_VUELTAS_BUCLE, max_salidas=MAX_SALIDAS_BUCLE
+        )
+    ):
+        if group.loop_hash != key:
+            continue
+        finding = _loop_finding(group, ctx.summary, ctx.dias, ctx.base)
+        evidencia = store.sample_loop(project_id, window, group.loop_hash)
+        return _loop_detail(finding, group, evidencia, store.loop_groups_sql)
+    return None
+
+
+def _detalle_modelo(
+    store: Any, project_id: str, window: Window, key: str, ctx: _Contexto
+) -> FindingDetail | None:
+    """Las reglas 2 y 3 comparten búsqueda: las dos cuelgan de un (paso, modelo)."""
+    step_key, _, model = key.rpartition(":")
+    duplicados = _duplicate_tokens(
+        store.repeated_groups(project_id, window, min_repeats=MIN_REPEATS),
+        _sin_envoltorios(
+            store.loop_groups(
+                project_id, window, min_vueltas=MIN_VUELTAS_BUCLE, max_salidas=MAX_SALIDAS_BUCLE
+            )
+        ),
+    )
+    for bruto in store.model_usage(project_id, window, min_calls=1):
+        if bruto.key != step_key or bruto.model != model:
+            continue
+        uso = _without_duplicates(bruto, duplicados)
+        if ctx.kind == "modelo_caro":
+            todos = store.model_usage(project_id, window, min_calls=1)
+            finding = _expensive_model_finding(uso, ctx.summary, ctx.dias, ctx.base, otros=todos)
+            consulta = store.model_usage_sql
+            return _expensive_model_detail(finding, uso, consulta) if finding else None
+        finding = _fixed_context_finding(uso, ctx.summary, ctx.dias, ctx.base)
+        return _fixed_context_detail(finding, uso, store.model_usage_sql) if finding else None
+    return None
+
+
+@dataclass
+class _Contexto:
+    """Lo que toda ficha necesita saber de la ventana, calculado una sola vez."""
+
+    kind: str
+    summary: WindowSummary
+    dias: float
+    base: float | None
+
+
+#: De qué tipo de hallazgo sabe hacer ficha cada función. No es una lista decorativa:
+#: `DETAILED_KINDS` sale de aquí y `test_catalogo_hallazgos` exige que coincida con
+#: `FindingKind`, así que una regla nueva que se añada a `detect()` y no a esta tabla
+#: pone la suite en rojo el mismo día. Antes no había nada que lo exigiera, y la regla
+#: de bucles vivió cuatro tandas sin ficha: su hallazgo más caro llevaba a un 404 que
+#: el usuario leía como «enhorabuena» (D-113).
+_DETALLADORES = {
+    "repeticion": _detalle_repeticion,
+    "bucle": _detalle_bucle,
+    "modelo_caro": _detalle_modelo,
+    "contexto_fijo": _detalle_modelo,
+}
+
+#: Los tipos que `detail()` sabe reconstruir. Derivado, nunca escrito a mano: una lista
+#: escrita a mano se queda desfasada afirmando que cubre algo que no cubre.
+DETAILED_KINDS = frozenset(_DETALLADORES)
 
 
 def detail(store: Any, project_id: str, window: Window, finding_id: str) -> FindingDetail | None:
@@ -1339,34 +1825,15 @@ def detail(store: Any, project_id: str, window: Window, finding_id: str) -> Find
     nada: se vuelve a calcular sobre la misma ventana y se busca el que coincide.
     """
     kind, _, key = finding_id.partition(":")
+    detallador = _DETALLADORES.get(kind)
+    if detallador is None:
+        return None
+
     summary = store.summarize_window(project_id, window)
-    dias = observed_days(summary, window)
-    base = _projection_base(summary, window)
-
-    if kind == "repeticion":
-        for group in store.repeated_groups(project_id, window, min_repeats=MIN_REPEATS):
-            if group.step_key != key:
-                continue
-            finding = _repetition_finding(group, summary, dias, base)
-            evidencia = store.sample_repetition(project_id, window, group.dedup_hash)
-            return _repetition_detail(finding, group, evidencia, store.repeated_groups_sql)
-        return None
-
-    if kind in ("modelo_caro", "contexto_fijo"):
-        step_key, _, model = key.rpartition(":")
-        duplicados = _duplicate_tokens(
-            store.repeated_groups(project_id, window, min_repeats=MIN_REPEATS)
-        )
-        for bruto in store.model_usage(project_id, window, min_calls=1):
-            if bruto.key != step_key or bruto.model != model:
-                continue
-            uso = _without_duplicates(bruto, duplicados)
-            if kind == "modelo_caro":
-                finding = _expensive_model_finding(uso, summary, dias, base)
-                consulta = store.model_usage_sql
-                return _expensive_model_detail(finding, uso, consulta) if finding else None
-            finding = _fixed_context_finding(uso, summary, dias, base)
-            return _fixed_context_detail(finding, uso, store.model_usage_sql) if finding else None
-        return None
-
-    return None
+    ctx = _Contexto(
+        kind=kind,
+        summary=summary,
+        dias=observed_days(summary, window),
+        base=_projection_base(summary, window),
+    )
+    return detallador(store, project_id, window, key, ctx)

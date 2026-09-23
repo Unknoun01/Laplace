@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { annotate, deleteAnnotation } from "@/lib/api";
+import { usePermisos } from "@/lib/permisos";
 import { money } from "@/lib/format";
 import type { Annotation } from "@/lib/types";
 
@@ -32,6 +33,8 @@ export function Verdicts({
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState("");
   const [comentario, setComentario] = useState(humana?.comment ?? "");
+  // Un lector ve el veredicto pero no puede ponerlo (D-127).
+  const { escribir } = usePermisos(projectId);
   const [abierto, setAbierto] = useState(false);
 
   async function marcar(verdict: "pass" | "fail") {
@@ -41,7 +44,7 @@ export function Verdicts({
       // Volver a pulsar el mismo veredicto lo quita: marcar por error no puede ser
       // irreversible, y un botón que sólo suma acaba con todo marcado.
       if (humana?.verdict === verdict) {
-        await deleteAnnotation(humana.id);
+        await deleteAnnotation(humana.id, projectId);
         onChange?.(annotations.filter((a) => a.id !== humana.id));
       } else {
         const nueva = await annotate({
@@ -66,8 +69,8 @@ export function Verdicts({
           type="button"
           className={`vbtn pass${humana?.verdict === "pass" ? " on" : ""}`}
           onClick={() => marcar("pass")}
-          disabled={guardando}
-          title="Marcar esta ejecución como buena"
+          disabled={guardando || !escribir}
+          title={escribir ? "Marcar esta ejecución como buena" : "Tu rol sólo permite ver"}
         >
           Bien
         </button>
@@ -75,8 +78,8 @@ export function Verdicts({
           type="button"
           className={`vbtn fail${humana?.verdict === "fail" ? " on" : ""}`}
           onClick={() => marcar("fail")}
-          disabled={guardando}
-          title="Marcar esta ejecución como mala"
+          disabled={guardando || !escribir}
+          title={escribir ? "Marcar esta ejecución como mala" : "Tu rol sólo permite ver"}
         >
           Mal
         </button>

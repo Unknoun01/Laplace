@@ -19,6 +19,7 @@ from laplace.schema import Annotation, Dataset, DatasetItem, EvalRun, EvalRunIte
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
+from .auth import identity_of
 from .evals import Comparison, RunSummary, compare, summarize_run
 from .judge import JudgeConfig, JudgeUnavailable, build_prompt, judge_trace
 from .storage.base import TraceFilter
@@ -36,6 +37,14 @@ def _store(request: Request) -> Any:
 
 def _meta(request: Request) -> Any:
     return request.app.state.metadata
+
+
+def _alcance(request: Request) -> str | None:
+    """El proyecto al que acotar un acceso que va por id opaco (D-121)."""
+    # Con cuentas, una identidad tiene varios proyectos y «el suyo» ya no es uno: el
+    # proyecto viene en la petición, y el middleware ya ha comprobado que puede tocarlo
+    # (D-127). Sin él, lo de siempre.
+    return identity_of(request).scope(request.query_params.get("project_id"))
 
 
 def _guard(fn, *args, **kwargs):
@@ -95,7 +104,7 @@ async def create_annotation(request: Request, body: AnnotationIn) -> Annotation:
 @router.delete("/annotations/{annotation_id}")
 async def delete_annotation(request: Request, annotation_id: str) -> dict[str, bool]:
     borrada = await run_in_threadpool(
-        _guard, _meta(request).delete_annotation, annotation_id
+        _guard, _meta(request).delete_annotation, annotation_id, _alcance(request)
     )
     if not borrada:
         raise HTTPException(status_code=404, detail="esa anotación ya no existe")
@@ -260,8 +269,10 @@ async def create_dataset(request: Request, body: DatasetIn) -> Dataset:
         status=body.filter.get("status") or None,
         session_id=body.filter.get("session_id") or None,
         search=body.filter.get("search") or None,
+        step_key=body.filter.get("step_key") or None,
         span_type=body.filter.get("span_type") or None,
         model=body.filter.get("model") or None,
+        min_cost_usd=_parse_float(body.filter.get("min_cost_usd")),
         sort=body.filter.get("sort") or "recent",
     )
     store = _store(request)
@@ -300,6 +311,14 @@ async def create_dataset(request: Request, body: DatasetIn) -> Dataset:
     return await run_in_threadpool(_guard, _meta(request).create_dataset, dataset, casos)
 
 
+def _parse_float(value: Any) -> float | None:
+    try:
+        numero = float(value)
+    except (TypeError, ValueError):
+        return None
+    return numero if numero > 0 else None
+
+
 def _parse_dt(value: Any) -> datetime | None:
     if not value:
         return None
@@ -330,7 +349,9 @@ async def get_dataset(request: Request, dataset_id: str) -> dict[str, Any]:
 
 @router.delete("/datasets/{dataset_id}")
 async def delete_dataset(request: Request, dataset_id: str) -> dict[str, bool]:
-    borrado = await run_in_threadpool(_guard, _meta(request).delete_dataset, dataset_id)
+    borrado = await run_in_threadpool(
+        _guard, _meta(request).delete_dataset, dataset_id, _alcance(request)
+    )
     if not borrado:
         raise HTTPException(status_code=404, detail="ese conjunto no existe")
     return {"deleted": True}

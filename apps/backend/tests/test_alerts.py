@@ -215,7 +215,7 @@ def test_el_mensaje_agrupa_todo_el_proyecto_y_lleva_dinero_y_enlace():
     )
     assert texto.count("•") == 2, "un mensaje por proyecto, no uno por hallazgo"
     assert "Modelo caro" in texto and "Contexto" in texto
-    assert "$5.00" in texto
+    assert "$5,00" in texto, "coma decimal española, como todo el producto (D-120)"
     assert "http://laplace.local/problema?id=a" in texto
     assert "al mes" in texto
 
@@ -231,7 +231,7 @@ def test_una_cifra_no_fiable_se_anuncia_como_suelo_y_nunca_como_total():
     decision = decide(vista, AJUSTES, {}, AHORA)
     texto = compose(vista, decision, AJUSTES, {})
 
-    assert "al menos $5.00" in texto
+    assert "al menos $5,00" in texto
     assert "suelo" in texto
     assert "mayor, nunca menor" in texto
 
@@ -481,3 +481,68 @@ def test_los_dos_almacenes_deciden_lo_mismo(tmp_path):
         assert aqui.due, "sin hallazgos la comparación no comprueba nada"
     finally:
         nube.delete_project(project)
+
+
+# ---------------------------------------------------------------------------------
+# Canales desde la interfaz, estados y presupuesto (D-123)
+# ---------------------------------------------------------------------------------
+
+
+def _runner_con_metadatos(tmp_path):
+    import sys
+    from pathlib import Path
+
+    from laplace_backend.storage.metadata import SQLiteMetadataStore
+
+    sys.path.insert(0, str(Path(__file__).parent))
+    from test_sqlite_store import _agente, _repartir
+
+    db = tmp_path / "laplace.db"
+    store = SQLiteStore(db)
+    store.migrate()
+    store.insert_spans(_repartir(_agente("ui"), dias=0.5))
+    meta = SQLiteMetadataStore(db)
+    meta.migrate()
+    # Sin LAPLACE_ALERTS_ENABLED: el canal se pone desde la interfaz.
+    settings = Settings(store="sqlite", sqlite_path=str(db), alerts_min_usd=0.0)
+    notificador = NotificadorFalso()
+    runner = AlertRunner(
+        store, AlertConfig(settings), MemoryAlertState(), notificador, metadata=meta
+    )
+    return runner, notificador, meta
+
+
+def test_un_canal_puesto_en_la_interfaz_basta_para_avisar(tmp_path):
+    runner, notificador, meta = _runner_con_metadatos(tmp_path)
+    assert runner.evaluate("ui").due == [], "sin canal no se avisa, como siempre"
+
+    meta.set_setting("ui", "alerts", {"webhook_url": "https://hooks.slack.com/services/T/B/x"})
+    decision = runner.evaluate("ui")
+    assert decision.due, decision.reason
+    assert len(notificador.enviados) == 1
+
+
+def test_lo_ignorado_no_alerta(tmp_path):
+    runner, notificador, meta = _runner_con_metadatos(tmp_path)
+    meta.set_setting("ui", "alerts", {"webhook_url": "https://hooks.slack.com/services/T/B/x"})
+    for f in runner.evaluate("ui", dry_run=True).due:
+        meta.set_setting("ui", f"finding:{f.id}", {"status": "ignorado", "at": "2026-01-01"})
+    assert runner.evaluate("ui").due == []
+    assert notificador.enviados == []
+
+
+def test_el_presupuesto_avisa_una_vez_por_umbral_y_mes(tmp_path):
+    runner, notificador, meta = _runner_con_metadatos(tmp_path)
+    meta.set_setting(
+        "ui",
+        "alerts",
+        {"webhook_url": "https://hooks.slack.com/services/T/B/x", "muted_kinds": [
+            "repeticion", "bucle", "modelo_caro", "contexto_fijo"]},
+    )
+    meta.set_setting("ui", "budget", {"monthly_usd": 0.000001})
+
+    primera = runner.evaluate("ui")
+    assert primera.budget_notice and "Presupuesto" in notificador.enviados[0][1]
+    segunda = runner.evaluate("ui")
+    assert segunda.budget_notice == ""
+    assert len(notificador.enviados) == 1

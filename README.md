@@ -32,10 +32,11 @@ trazas.
 
 ## Las dos mitades de la interfaz
 
-El mismo producto sirve a dos públicos con un botón. En **Diagnóstico** se habla en
+El mismo producto sirve a dos públicos con un interruptor. En modo **Sencillo** se habla en
 cristiano y manda el dinero; en **Avanzado** aparece la capa técnica: la consulta que
 disparó cada alerta, los atributos de cada span, el árbol completo y la exportación en
-JSON. El modo es global y se recuerda.
+JSON. El modo es global y se recuerda. Hay tema claro y oscuro: sigue al sistema, y en
+Ajustes se puede fijar uno.
 
 - **Diagnóstico** (`/`) — cuánto te cuesta el agente, cuánto puedes dejar de pagar, y
   las cosas que arreglar ordenadas por dinero recuperable. Encabezado, cuando hace falta,
@@ -48,9 +49,12 @@ JSON. El modo es global y se recuerda.
   y qué costó y qué acertó cada una sobre el tráfico que la usó.
 - **Problema** (`/problemas/…`) — qué pasa, por qué, cómo se ha detectado, cómo se
   arregla y cuánto te ahorras, con el cálculo detrás.
-- **Trazas** (`/trazas`) — exploración libre: filtros, búsqueda y orden por coste.
-- **Traza** (`/trazas/…`) — el árbol navegable, con coste por rama y repeticiones
-  marcadas.
+- **Trazas** (`/trazas`) — exploración libre: filtros, búsqueda y orden por coste,
+  exportar a CSV y guardar lo filtrado como conjunto de casos.
+- **Traza** (`/trazas/…`) — el árbol navegable, con coste por rama, repeticiones
+  marcadas y los problemas detectados que pasan en esa ejecución.
+- **Ajustes** (`/ajustes`) — presupuesto mensual, alertas (Slack, webhook y correo),
+  tarifas propias, equivalente en euros y borrado del proyecto.
 
 ## Qué detecta hoy
 
@@ -111,6 +115,38 @@ después se ignoran todas:
 
 `GET /api/alerts` enseña la configuración en vigor y qué saltaría ahora mismo, sin mandar
 nada.
+
+## Después de ver un problema: arreglarlo y comprobarlo
+
+Cada ficha termina con dos botones: **«Lo he arreglado: compruébalo»** y **«No es un
+problema para mí»**. Marcar guarda el momento, y a partir de ahí se compara lo que costaba
+cada ejecución antes con lo que cuesta después:
+
+> En las 42 ejecuciones desde que lo marcaste no ha vuelto a aparecer. Antes se iban
+> $0,2016 por ejecución: a ese ritmo, llevas $8,47 sin gastar.
+
+Por ejecución y no en totales, porque con menos tráfico después el total baja solo. Con
+menos de cinco ejecuciones después no se dice nada. Y si sigue saliendo igual, **vuelve a
+la lista** como reaparecido aunque esté marcado: fiarse de lo que dice el usuario sin
+mirar sería esconder justo el caso que importa. Lo arreglado y lo ignorado no cuentan en
+el evitable del inicio ni mandan alertas.
+
+Para un modelo caro, la ficha lleva además a Evaluaciones: guarda las ejecuciones reales
+de ese paso como conjunto de casos y da la línea para lanzarlas con el modelo barato,
+porque el ahorro está medido y la calidad no.
+
+## Presupuesto, alertas y quién gasta
+
+**Presupuesto mensual** sobre el mes natural, en Ajustes. El inicio dice cuánto llevas y,
+con un día de datos del mes, a cuánto cerrarás; avisa al 80 % y al 100 %, una vez cada uno.
+
+**Alertas desde la interfaz**, por proyecto: Slack, un webhook cualquiera (Teams, Discord,
+n8n…) y correo. Las URL de webhook son secretos y la API no las devuelve nunca enteras; el
+servidor de correo va en el entorno (`LAPLACE_SMTP_*`). Hay un botón de mensaje de prueba.
+
+**Quién gasta más**, en el Panel: el gasto por usuario y por sesión, con lo que cuesta cada
+ejecución y enlace a sus trazas. Sale de `laplace.set_context(user_id=…, session_id=…)`,
+y lo que no dice de quién es se cuenta aparte.
 
 ## Vigilar sin convertirse en un Grafana peor
 
@@ -255,24 +291,47 @@ encontrado nada que arreglar, pero no hemos podido mirarlo todo»**.
 ## Quién puede leer y quién puede escribir
 
 El **modo local no tiene cuentas por diseño**: es un proceso en tu portátil con tus
-trazas. La **instalación de nube exige clave de API** en todo lo que toca datos, y eso no
-depende de que cada endpoint se acuerde de comprobarlo: hay un middleware que deniega por
-defecto y una lista blanca de una sola entrada (`/health`). Una ruta nueva nace protegida.
+trazas. La **instalación de nube pide entrar** en todo lo que toca datos, y eso no depende
+de que cada endpoint se acuerde de comprobarlo: hay un middleware que deniega por defecto y
+una lista blanca de una sola entrada (`/health`). Una ruta nueva nace protegida.
+
+**Personas: cuentas, organizaciones y roles.** Al arrancar por primera vez, el servidor
+escribe en su log un código de un solo uso; con él se crea en `/configurar` la primera
+cuenta, que administra la instalación y se queda con los proyectos que ya tengan datos.
+
+```bash
+docker compose logs backend | grep configurar
+```
+
+Desde ahí, todo se hace en **Organización**: invitar por enlace (y por correo, si hay
+`LAPLACE_SMTP_*`), cambiar roles, quitar a alguien —que cierra sus sesiones al momento—,
+y un registro de actividad. Cuatro roles:
+
+| Rol | Puede |
+|-----|-------|
+| lector | ver |
+| miembro | además anotar ejecuciones, marcar problemas, prompts y conjuntos |
+| admin | además miembros, claves, alertas, presupuesto y borrar proyectos |
+| propietario | además hacer y deshacer propietarios; la organización nunca se queda sin uno |
+
+Contraseñas con `scrypt`; sesión en cookie `httpOnly` guardada como hash, que caduca a los
+30 días; cambiar la contraseña cierra las demás sesiones; cinco intentos fallidos frenan
+un cuarto de hora; y toda escritura con sesión lleva una cabecera propia que un
+formulario de otro sitio no puede poner.
+
+**Agentes: claves de API.** Se crean en Organización → Claves, por proyecto, con
+caducidad opcional y fecha de último uso; escribir un nombre de proyecto nuevo lo crea a
+nombre de la organización. La clave se enseña una vez: sólo se guarda su SHA-256. Va en
+`Authorization: Bearer` y nunca en la URL, porque lo que va en la URL acaba en los logs de
+cualquier proxy. Ata el proyecto en los dos sentidos: **con esa clave sólo se escriben
+spans de ese proyecto** —si llegan de otro se rechaza el lote y se dice— y **sólo se leen
+sus trazas**. Para scripts sigue existiendo la línea de comandos:
 
 ```bash
 docker compose exec backend python -m laplace_backend.keys create --project mi-agente
-docker compose exec backend python -m laplace_backend.keys create --project '*'   # el operador
 ```
 
-La clave se enseña una vez: sólo se guarda su SHA-256. Va en `Authorization: Bearer` y
-nunca en la URL, porque lo que va en la URL acaba en los logs de cualquier proxy. Ata el
-proyecto en los dos sentidos: **con esa clave sólo se escriben spans de ese proyecto**
-—si llegan de otro se rechaza el lote y se dice, en vez de reetiquetarlo en silencio— y
-**sólo se leen sus trazas**, incluida la lista de proyectos, que si no sería un directorio
-de los clientes de la instalación.
-
-Lo que **no** es: no hay cuentas, ni login, ni organizaciones, ni roles. Es el mínimo para
-que los datos de un cliente no los lea otro. El sistema de identidades sigue pendiente.
+Lo que todavía **no** hay: entrar con Google/GitHub (SSO) ni verificación de email.
 
 ## Los precios
 
@@ -287,7 +346,17 @@ tarifa promocional (campo `expires`) ha vencido, y otro cuando aparece en las tr
 modelo que no está en la tabla.
 
 Un modelo sin tarifa **no** cuesta cero: se marca como desconocido y la interfaz avisa de
-que el total está incompleto.
+que el total está incompleto. Se le puede poner precio desde **Ajustes**, y entonces se
+recalcula también lo ya guardado, no sólo lo que llegue después.
+
+Para ponerle precio a un modelo que no está en la tabla —o a uno con tarifa negociada—
+sin tocar el paquete instalado, escribe tus tarifas en un JSON propio con el mismo
+formato y arranca Laplace con `LAPLACE_PRICES_EXTRA` apuntando a él. Sus entradas se
+suman a la tabla y, si coinciden, mandan:
+
+```json
+{"models": {"mi-modelo": {"input": 1.0, "output": 4.0}}}
+```
 
 ### La entrada no se cobra a una sola tarifa
 
@@ -323,11 +392,16 @@ pip install "laplace-trace[ui]"
 laplace ui
 ```
 
-Se abre el navegador. Para ver qué detecta antes de instrumentar nada:
+Se abre el navegador. Para ver qué detecta antes de instrumentar nada, pulsa **«Cargar
+datos de ejemplo»** en la pantalla vacía, o desde la terminal:
 
 ```bash
 laplace demo          # trazas simuladas, en un proyecto aparte
 ```
+
+Las trazas se guardan para siempre salvo que se arranque con `LAPLACE_RETENTION_DAYS`, y
+un proyecto entero —trazas, anotaciones, conjuntos, prompts y ajustes— se borra desde
+Ajustes.
 
 Y para que aparezcan las tuyas, una línea en tu agente:
 

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass
 from datetime import date
@@ -177,12 +178,31 @@ class PriceTable:
 
     @classmethod
     def load(cls, path: Path | None = None) -> PriceTable:
+        # Las tarifas propias sólo se aplican a la tabla del producto: una prueba que
+        # carga su propio fichero tiene que leer exactamente ese fichero.
+        propias = path is None
         path = path or _PRICES_PATH
         try:
             raw: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001
             logger.exception("no se pudo leer la tabla de precios en %s", path)
             return cls({}, "desconocida", {})
+
+        # Las tarifas propias: un modelo que no está en la tabla, o uno con precio
+        # negociado. Sin esto, la única salida para quien instala con pip era editar
+        # un fichero dentro de su site-packages.
+        raw_models: dict[str, Any] = dict(raw.get("models") or {})
+        extra = os.environ.get("LAPLACE_PRICES_EXTRA", "").strip() if propias else ""
+        if extra:
+            try:
+                propio = json.loads(Path(extra).expanduser().read_text(encoding="utf-8"))
+                raw_models.update(propio.get("models") or {})
+            except Exception:  # noqa: BLE001
+                logger.exception("no se pudo leer LAPLACE_PRICES_EXTRA en %s", extra)
+        # Y las que se ponen desde la interfaz, que mandan sobre todo lo anterior: son
+        # lo último que alguien ha dicho a propósito sobre ese modelo (D-123).
+        if propias:
+            raw_models.update(_custom)
 
         models = {
             name: ModelPrice(
@@ -204,7 +224,7 @@ class PriceTable:
                 source=entry.get("source", ""),
                 note=entry.get("note", ""),
             )
-            for name, entry in (raw.get("models") or {}).items()
+            for name, entry in raw_models.items()
         }
         sources = {
             key: Source(
@@ -466,6 +486,9 @@ def _opt(value: Any) -> float | None:
 
 
 _table: PriceTable | None = None
+#: Tarifas propias guardadas desde la interfaz: modelo → entrada con el formato de la
+#: tabla. Viven en la base de metadatos; aquí sólo la copia en memoria.
+_custom: dict[str, dict[str, Any]] = {}
 
 
 def get_price_table() -> PriceTable:
@@ -480,3 +503,17 @@ def reload_price_table() -> PriceTable:
     global _table
     _table = PriceTable.load()
     return _table
+
+
+def set_custom_prices(models: dict[str, dict[str, Any]]) -> PriceTable:
+    """Sustituye las tarifas propias y recarga la tabla."""
+    global _custom
+    _custom = {
+        nombre: {**entrada, "source": entrada.get("source") or "propia"}
+        for nombre, entrada in models.items()
+    }
+    return reload_price_table()
+
+
+def custom_prices() -> dict[str, dict[str, Any]]:
+    return dict(_custom)

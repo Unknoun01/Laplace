@@ -35,6 +35,7 @@ import json
 import logging
 import secrets
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -51,6 +52,23 @@ KEY_PREFIX = "lp_"
 #: `/health` queda fuera porque lo llama el orquestador antes de que nadie tenga clave,
 #: y porque no dice nada de nadie: responde si el proceso está vivo.
 PUBLIC_PATHS = frozenset({"/health"})
+
+#: Las rutas de entrar: tienen que atender a quien todavía no tiene sesión. Cada una
+#: decide por su cuenta qué puede hacer un anónimo —entrar, aceptar una invitación,
+#: configurar la instalación con su código— y ninguna devuelve datos de proyectos (D-127).
+AUTH_PREFIX = "/api/auth/"
+
+#: Escrituras que piden ser admin de la organización del proyecto, además de miembro.
+#: Lo que cambia quién recibe avisos, cuánto se puede gastar o borra datos de todos no es
+#: cosa de cualquiera que pueda anotar una traza (D-127).
+ADMIN_WRITES = (
+    ("DELETE", "/api/projects"),
+    ("PUT", "/api/budget"),
+    ("PUT", "/api/alert-settings"),
+    ("POST", "/api/alert-settings/test"),
+)
+
+_ESCRITURAS = ("POST", "PUT", "PATCH", "DELETE")
 
 #: Lo que exige credencial. El resto —la interfaz estática— no toca datos.
 GUARDED_PREFIXES = ("/api", "/v1/traces")
@@ -83,6 +101,14 @@ class Identity:
     projects: frozenset[str] = field(default_factory=frozenset)
     #: True cuando no se ha verificado nada porque la instalación es abierta.
     anonymous: bool = False
+    #: Una persona con sesión, y no una clave (D-127). Vacío para claves y modo abierto.
+    user_id: str = ""
+    email: str = ""
+    #: Su rol en cada proyecto que ve. Sólo existe para personas: una clave no tiene
+    #: rol, tiene un proyecto, y su alcance ya lo acota eso.
+    roles: dict[str, str] = field(default_factory=dict)
+    #: Entró por cookie: sus escrituras piden la cabecera anti-CSRF.
+    by_cookie: bool = False
 
     @classmethod
     def open(cls) -> Identity:
@@ -182,6 +208,9 @@ def resolve(metadata: Any, key: str) -> Identity:
         raise AuthError(401, "credencial inválida")
     if fila.get("revoked_at"):
         raise AuthError(401, "esa clave está revocada")
+    caduca = fila.get("expires_at")
+    if caduca and str(caduca) <= datetime.now(timezone.utc).isoformat():
+        raise AuthError(401, "esa clave ha caducado: crea otra en la pantalla de la organización")
     return Identity(
         key_id=fila["id"],
         name=fila.get("name") or fila["id"],
@@ -212,10 +241,22 @@ class AuthMiddleware(BaseHTTPMiddleware):
     obvias, y dejar abierta la escritura que alguien añadió el martes.
     """
 
-    def __init__(self, app: Any, *, required: bool, metadata_getter: Any) -> None:
+    def __init__(
+        self,
+        app: Any,
+        *,
+        required: bool,
+        metadata_getter: Any,
+        cuentas_getter: Any = None,
+    ) -> None:
         super().__init__(app)
         self._required = required
         self._metadata = metadata_getter
+        self._cuentas = cuentas_getter or (lambda: None)
+        #: Cuándo se apuntó por última vez el uso de cada clave. Se apunta como mucho
+        #: cada cinco minutos: «último uso» sirve para saber si una clave está muerta, y
+        #: no merece una escritura en cada petición de ingesta.
+        self._usos: dict[str, float] = {}
 
     async def dispatch(self, request: Request, call_next: Any) -> Any:
         ruta = request.url.path
@@ -232,8 +273,21 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         try:
-            identidad = await self._identify(request)
-            await self._check_scope(request, identidad)
+            if ruta.startswith(AUTH_PREFIX):
+                # Quien viene a entrar no tiene sesión todavía: se le identifica si puede
+                # y, si no, pasa como anónimo. La ruta decide.
+                identidad = await self._identify_optional(request)
+                self._check_csrf(request, identidad, siempre=True)
+            else:
+                identidad = await self._identify(request)
+                self._check_csrf(request, identidad)
+                # Las rutas de la organización van por organización, no por proyecto:
+                # crear la clave de un proyecto nuevo lleva en el cuerpo un proyecto que
+                # todavía no es de nadie. Comprueban el rol en la organización ellas
+                # mismas (`_exigir_org`), y a una clave de API no la atienden.
+                if not ruta.startswith("/api/org"):
+                    await self._check_scope(request, identidad)
+                    await self._check_role(request, identidad)
         except AuthError as exc:
             # 401 lleva `WWW-Authenticate` porque es lo que dice el estándar y lo que
             # hace que un cliente sepa que le falta credencial y no que se ha roto algo.
@@ -249,13 +303,100 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if not self._required:
             return Identity.open()
         clave = bearer_from(request)
-        if not clave:
-            raise AuthError(
-                401,
-                "falta la clave de API. Mándala en la cabecera "
-                "«Authorization: Bearer lp_…»",
+        if clave:
+            identidad = resolve(self._metadata(), clave)
+            await self._apuntar_uso(identidad.key_id)
+            return identidad
+        sesion = identity_from_session(self._cuentas(), request)
+        if sesion is not None:
+            return sesion
+        raise AuthError(
+            401,
+            "inicia sesión, o manda una clave de API en la cabecera "
+            "«Authorization: Bearer lp_…»",
+        )
+
+    async def _apuntar_uso(self, key_id: str) -> None:
+        import time
+
+        from starlette.concurrency import run_in_threadpool
+
+        cuentas = self._cuentas()
+        ahora = time.monotonic()
+        if cuentas is None or not key_id or ahora - self._usos.get(key_id, -1e9) < 300:
+            return
+        self._usos[key_id] = ahora
+        try:
+            await run_in_threadpool(cuentas.usar_clave, key_id)
+        except Exception:  # noqa: BLE001 - apuntar el uso no puede tumbar la petición
+            logger.warning("no se pudo apuntar el uso de la clave %s", key_id, exc_info=True)
+
+    async def _identify_optional(self, request: Request) -> Identity:
+        try:
+            return await self._identify(request)
+        except AuthError as exc:
+            if exc.status == 503:
+                raise
+            return Identity(name="anónimo")
+
+    def _check_csrf(self, request: Request, identidad: Identity, *, siempre: bool = False) -> None:
+        """Una escritura que viaja con cookie tiene que traer la cabecera propia.
+
+        Un formulario de otro sitio puede mandar la cookie —el navegador la adjunta—, pero
+        no puede poner una cabecera sin pasar por CORS, que sólo abre a nuestro origen.
+        En las rutas de entrar se pide siempre: es lo que impide que otro sitio te meta
+        en una cuenta suya con un formulario escondido (D-127).
+        """
+        if request.method not in _ESCRITURAS:
+            return
+        if not (identidad.by_cookie or siempre):
+            return
+        if not request.headers.get("x-laplace"):
+            raise AuthError(403, "falta la cabecera X-Laplace en una escritura con sesión")
+
+    async def _check_role(self, request: Request, identidad: Identity) -> None:
+        """Lo que puede escribir una persona depende de su rol en ese proyecto.
+
+        Lector: nada. Miembro: anotar, marcar, prompts, conjuntos. Admin: además alertas,
+        presupuesto y borrar. Una escritura con sesión tiene que decir sobre qué proyecto
+        es —en la URL o en el cuerpo—: sin eso no hay rol que mirar, y adivinarlo con «su
+        primer proyecto» es la forma de que un lector de A escriba en A porque es miembro
+        de B.
+        """
+        if not identidad.user_id or request.method not in _ESCRITURAS:
+            return
+        # La organización no va por proyecto: sus rutas comprueban el rol en esa
+        # organización con `_exigir_org` (api_cuentas.py).
+        if request.url.path.startswith("/api/org"):
+            return
+        from .cuentas import rol_suficiente
+
+        proyecto = request.query_params.get("project_id")
+        if not proyecto and request.method in ("POST", "PUT", "PATCH"):
+            try:
+                datos = json.loads(await request.body() or b"{}")
+                if isinstance(datos, dict) and isinstance(datos.get("project_id"), str):
+                    proyecto = datos["project_id"]
+            except (ValueError, UnicodeDecodeError):
+                pass
+        if identidad.sees_everything:
+            return
+        if not proyecto:
+            raise AuthError(400, "esta escritura tiene que decir sobre qué proyecto es")
+        rol = identidad.roles.get(proyecto)
+        necesita = (
+            "admin"
+            if any(
+                request.method == metodo and request.url.path.startswith(ruta)
+                for metodo, ruta in ADMIN_WRITES
             )
-        return resolve(self._metadata(), clave)
+            else "miembro"
+        )
+        if not rol_suficiente(rol, necesita):
+            raise AuthError(
+                403,
+                f"tu rol en este proyecto no permite esto: hace falta ser {necesita}",
+            )
 
     async def _check_scope(self, request: Request, identidad: Identity) -> None:
         if identidad.sees_everything:
@@ -279,6 +420,32 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 return  # no es JSON (OTLP va en protobuf y se comprueba en la ingesta)
             if isinstance(datos, dict) and isinstance(datos.get("project_id"), str):
                 identidad.require(datos["project_id"])
+
+
+def identity_from_session(cuentas: Any, request: Request) -> Identity | None:
+    """De la cookie de sesión a una identidad, o `None` si no hay sesión válida."""
+    from .cuentas import COOKIE
+
+    token = request.cookies.get(COOKIE)
+    if not token or cuentas is None:
+        return None
+    try:
+        usuario = cuentas.usuario_de_sesion(token)
+        if usuario is None:
+            return None
+        roles = {} if usuario.is_admin else cuentas.roles_por_proyecto(usuario.id)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("no se pudo verificar la sesión")
+        raise AuthError(503, "no se puede verificar la sesión ahora mismo") from exc
+    return Identity(
+        name=usuario.email,
+        user_id=usuario.id,
+        email=usuario.email,
+        # El administrador de la instalación ve todos los proyectos, como la clave '*'.
+        projects=frozenset({ALL_PROJECTS}) if usuario.is_admin else frozenset(roles),
+        roles=roles,
+        by_cookie=True,
+    )
 
 
 def identity_of(request: Request) -> Identity:
