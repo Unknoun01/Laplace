@@ -47,8 +47,8 @@ function Contenido() {
   const user = params.get("user") ?? "";
   const cursor = params.get("cursor") ?? "";
 
-  const estado = useApi(async () => {
-    const projects = await listProjects();
+  const estado = useApi(async (senal) => {
+    const projects = await listProjects(senal);
     if (projects.length === 0) return null;
     const project = projects.find((p) => p.id === pedido)?.id ?? projects[0].id;
     const minCost = Number(minCostRaw);
@@ -66,9 +66,9 @@ function Contenido() {
         min_cost_usd: Number.isFinite(minCost) && minCost > 0 ? minCost : undefined,
         session_id: session || undefined,
         user_id: user || undefined,
-      }),
+      }, senal),
       // Sólo para poblar el desplegable de modelos del modo avanzado.
-      getOverview(project, days).catch(() => null),
+      getOverview(project, days, senal).catch(() => null),
     ]);
     return { project, page, overview };
   }, [pedido, days, sort, q, step, status, type, model, minCostRaw, session, user, cursor]);

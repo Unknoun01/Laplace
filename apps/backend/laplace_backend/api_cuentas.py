@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hmac
 import logging
+import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -101,6 +102,10 @@ def _ip(request: Request) -> str:
     saltos = [h.strip() for h in request.headers.get("x-forwarded-for", "").split(",")]
     saltos = [h for h in saltos if h]
     return saltos[-1] if saltos else directa
+
+
+#: Para gastar el código de configuración una sola vez (ver `setup`).
+_CERROJO_SETUP = threading.Lock()
 
 
 def _local(request: Request) -> bool:
@@ -213,9 +218,24 @@ async def setup(request: Request, response: Response, body: SetupIn) -> dict[str
     cuentas = _cuentas(request)
     if await run_in_threadpool(cuentas.hay_usuarios):
         raise HTTPException(status_code=409, detail="esta instalación ya está configurada")
-    esperado = getattr(request.app.state, "setup_token", "") or ""
-    if not esperado or not hmac.compare_digest(body.token.strip(), esperado):
-        raise HTTPException(status_code=403, detail="ese código de configuración no vale")
+    # El código se gasta aquí, antes de crear nada, y bajo cerrojo: dos peticiones a la
+    # vez con el código bueno ya no crean dos administradores (D-131). Si algo falla más
+    # abajo se devuelve, para no dejar la instalación sin forma de configurarse.
+    with _CERROJO_SETUP:
+        esperado = getattr(request.app.state, "setup_token", "") or ""
+        if not esperado or not hmac.compare_digest(body.token.strip(), esperado):
+            raise HTTPException(status_code=403, detail="ese código de configuración no vale")
+        request.app.state.setup_token = ""
+    try:
+        return await _configurar_instalacion(request, response, body, cuentas)
+    except BaseException:
+        request.app.state.setup_token = esperado
+        raise
+
+
+async def _configurar_instalacion(
+    request: Request, response: Response, body: SetupIn, cuentas: Any
+) -> dict[str, Any]:
     motivo = validar_contrasena(body.password)
     if motivo:
         raise HTTPException(status_code=400, detail=motivo)
@@ -232,7 +252,6 @@ async def setup(request: Request, response: Response, body: SetupIn) -> dict[str
         return usuario, cuentas.abrir_sesion(usuario.id, request.headers.get("user-agent", ""))
 
     usuario, token = await run_in_threadpool(crear)
-    request.app.state.setup_token = ""
     _poner_cookie(request, response, token)
     logger.warning("instalación configurada — primera cuenta %s", usuario.email)
     return {"ok": True, "email": usuario.email}

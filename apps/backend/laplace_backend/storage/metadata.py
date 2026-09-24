@@ -22,6 +22,8 @@ import json
 import logging
 import sqlite3
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
@@ -485,12 +487,22 @@ class SQLiteMetadataStore:
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path).expanduser()
 
-    def _conn(self) -> sqlite3.Connection:
+    @contextmanager
+    def _conn(self) -> Iterator[sqlite3.Connection]:
+        """Una conexión que se cierra al salir del `with` (D-131).
+
+        `with sqlite3.connect(...)` confirma la transacción pero **no cierra**: la
+        conexión quedaba viva hasta que el recolector pasara, que en Windows es tener el
+        fichero abierto y desde Python 3.13 un aviso por cada una.
+        """
         self._path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self._path, timeout=30.0, isolation_level=None)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode = WAL")
-        return conn
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode = WAL")
+            yield conn
+        finally:
+            conn.close()
 
     def migrate(self) -> None:
         with self._conn() as conn:

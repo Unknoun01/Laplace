@@ -2164,3 +2164,33 @@ salvo partir `insights`, que la tiene en las pruebas que ya había y que no han 
   ficheros hermanos (`detalle.tsx`, `alertas.tsx`, `listado.tsx`…), también con un
   script que no toca su código. Se comprobó con `tsc --noUnusedLocals` y recorriendo cada
   pantalla en el navegador con datos que pasan por lo movido.
+
+### D-131 — P3: lo menor, que también se equivocaba en silencio
+La auditoría original llegaba a P2. Esto es lo menor que se vio por el camino y no entró:
+nada permitía leer datos ajenos, pero cada punto era una forma de equivocarse sin que
+nada lo dijera. Pruebas en `test_auditoria_p3.py`.
+
+* **`/docs` y `/openapi.json`, sólo en local.** No cuelgan de `/api`, así que el
+  middleware no los tocaba, y en la nube enseñaban a cualquiera el mapa de la API.
+* **Con varios proyectos hay que decir cuál.** Una persona de una organización con varios
+  proyectos que no mandaba `project_id` recibía el primero por orden alfabético: la misma
+  petición contestaba de un proyecto u otro según cómo se llamaran. Ahora es un 400 que lo
+  dice. Una clave, que tiene un solo proyecto, sigue sin tener que decirlo.
+* **El destinatario de las alertas se valida.** Bastaba una `@`: un salto de línea dentro
+  de una cabecera de correo es la forma de añadir cabeceras propias, y una coma daba para
+  cien destinos. Ahora hay formato, sin saltos de línea y como mucho cinco. Y si queda uno
+  malo guardado de antes, el envío lo dice en vez de reventar el ciclo de alertas —esto lo
+  encontró la prueba: el error saltaba al construir la cabecera, antes del `try`—.
+* **El apunte de «último uso» de las claves no crece sin fin**: se barre al pasar de diez
+  mil.
+* **Las conexiones SQLite se cierran.** `with sqlite3.connect()` confirma pero no cierra;
+  en Windows eso es un fichero abierto hasta que pase el recolector, y desde Python 3.13
+  un aviso por conexión.
+* **Cambiar de filtros cancela lo que estaba en vuelo.** `useApi` pasa una señal a su
+  carga y las lecturas la reciben. Se intentó primero sin tocar las funciones —una señal
+  «en el ambiente» que `get` recogía al empezar— y la prueba en el navegador enseñó que no
+  llegaba: casi todas las pantallas piden antes los proyectos, y en el navegador nada
+  sobrevive a un `await`. Va explícita.
+* **El código de configuración se gasta una vez**, bajo cerrojo, antes de crear nada: dos
+  peticiones a la vez ya no crean dos administradores. Si la configuración falla después
+  —una contraseña corta—, el código se devuelve.

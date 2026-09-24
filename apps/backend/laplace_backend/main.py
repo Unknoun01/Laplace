@@ -298,11 +298,18 @@ async def lifespan(app: FastAPI):
             cerrar_todos()
 
 
+# `/docs` y `/openapi.json` sólo en modo local (D-131). En la nube quedaban fuera del
+# middleware —no cuelgan de /api— y enseñaban a cualquiera el mapa entero de la API: cada
+# ruta, cada parámetro y cada modelo. Quien la opera la tiene en el código y en local.
+_documentar = not get_settings().auth_enforced
 app = FastAPI(
     title="Laplace",
     description="Observabilidad y optimización de agentes de IA: ingesta OTLP y lectura de trazas.",
     version="0.1.0",
     lifespan=lifespan,
+    docs_url="/docs" if _documentar else None,
+    redoc_url="/redoc" if _documentar else None,
+    openapi_url="/openapi.json" if _documentar else None,
 )
 
 app.add_middleware(

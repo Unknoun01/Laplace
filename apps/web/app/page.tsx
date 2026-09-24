@@ -24,14 +24,14 @@ function Contenido() {
   const pedido = params.get("project") ?? "";
   const days = parseDays(params.get("days") ?? undefined);
 
-  const estado = useApi(async () => {
-    const projects = await listProjects();
+  const estado = useApi(async (senal) => {
+    const projects = await listProjects(senal);
     if (projects.length === 0) return { project: "", overview: null, budget: null };
     const project = projects.find((p) => p.id === pedido)?.id ?? projects[0].id;
     const [overview, budget] = await Promise.all([
-      getOverview(project, days),
+      getOverview(project, days, senal),
       // El presupuesto es un añadido: si falla, el inicio sigue en pie sin él.
-      getBudget(project).catch(() => null),
+      getBudget(project, senal).catch(() => null),
     ]);
     return { project, overview, budget };
   }, [pedido, days]);

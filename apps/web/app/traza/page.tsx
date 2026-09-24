@@ -24,12 +24,12 @@ function Contenido() {
   const days = parseDays(params.get("days") ?? undefined);
   const proyecto = params.get("project") ?? "";
 
-  const estado = useApi(async () => {
-    const trace = await getTrace(traceId, proyecto || undefined);
+  const estado = useApi(async (senal) => {
+    const trace = await getTrace(traceId, proyecto || undefined, senal);
     // Los problemas del proyecto, para decir cuáles pasan en esta ejecución. Si fallan,
     // la traza se enseña igual: es un añadido, no lo que se ha venido a ver.
     const project = proyecto || trace?.summary.project_id || "";
-    const overview = trace && project ? await getOverview(project, days).catch(() => null) : null;
+    const overview = trace && project ? await getOverview(project, days, senal).catch(() => null) : null;
     return { trace, findings: [...(overview?.findings ?? []), ...(overview?.set_aside ?? [])] };
   }, [traceId, proyecto, days]);
   useTitulo(estado.fase === "listo" ? estado.datos.trace?.summary.root_name : null);

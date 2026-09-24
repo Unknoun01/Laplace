@@ -31,6 +31,8 @@ import socket
 import sqlite3
 import urllib.error
 import urllib.request
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
@@ -243,11 +245,16 @@ class SQLiteAlertState:
         with self._conn() as conn:
             conn.execute(_STATE_DDL_SQLITE)
 
-    def _conn(self) -> sqlite3.Connection:
+    @contextmanager
+    def _conn(self) -> Iterator[sqlite3.Connection]:
+        """Una conexión que se cierra al salir del `with` (D-131)."""
         conn = sqlite3.connect(self._path, timeout=30.0, isolation_level=None)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode = WAL")
-        return conn
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode = WAL")
+            yield conn
+        finally:
+            conn.close()
 
     def read(self, project_id: str) -> dict[str, AlertRecord]:
         with self._conn() as conn:
@@ -829,12 +836,14 @@ class EmailNotifier:
                 "hay un correo de alertas puesto pero no hay servidor: falta LAPLACE_SMTP_HOST"
             )
             return False
-        mensaje = EmailMessage()
-        mensaje["From"] = self._s.smtp_from or self._s.smtp_user
-        mensaje["To"] = to
-        mensaje["Subject"] = subject
-        mensaje.set_content(text)
         try:
+            # Dentro del `try`: es al poner la cabecera cuando `email` rechaza un salto de
+            # línea, no al enviar.
+            mensaje = EmailMessage()
+            mensaje["From"] = self._s.smtp_from or self._s.smtp_user
+            mensaje["To"] = to
+            mensaje["Subject"] = subject
+            mensaje.set_content(text)
             with smtplib.SMTP(self._s.smtp_host, self._s.smtp_port, timeout=15) as smtp:
                 if self._s.smtp_starttls:
                     smtp.starttls()
@@ -842,7 +851,9 @@ class EmailNotifier:
                     smtp.login(self._s.smtp_user, self._s.smtp_password)
                 smtp.send_message(mensaje)
             return True
-        except (OSError, smtplib.SMTPException) as exc:
+        except (OSError, smtplib.SMTPException, ValueError) as exc:
+            # ValueError: una cabecera que `email` rechaza (un destinatario guardado antes
+            # de que se validara). Se dice y se sigue con los demás canales (D-131).
             logger.warning("no se ha podido mandar el correo de alertas: %s", exc)
             return False
 

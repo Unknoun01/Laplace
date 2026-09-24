@@ -106,14 +106,21 @@ export class ApiError extends Error {
 
 type Params = Record<string, string | number | undefined>;
 
-async function get<T>(path: string, params?: Params): Promise<T> {
+/**
+ * `senal` cancela la petición (D-131). Las lecturas con las que las pantallas se cargan
+ * la reciben de `useApi`, que la dispara al cambiar de filtros o salir de la pantalla:
+ * así el backend deja de trabajar en consultas que ya nadie va a mirar. Va explícita y
+ * no «en el ambiente» porque en el navegador no hay forma de que sobreviva a un `await`,
+ * y casi todas las pantallas piden primero los proyectos y después lo pesado.
+ */
+async function get<T>(path: string, params?: Params, senal?: AbortSignal): Promise<T> {
   await migrarClaveAntigua();
   const url = new URL(path, API_URL || window.location.origin);
   for (const [key, value] of Object.entries(params ?? {})) {
     if (value !== undefined && value !== "") url.searchParams.set(key, String(value));
   }
 
-  const response = await fetch(url, { cache: "no-store", headers: cabeceras() });
+  const response = await fetch(url, { cache: "no-store", headers: cabeceras(), signal: senal });
   if (!response.ok) {
     // El detalle del backend explica el 401 y el 403 («esta clave no tiene acceso a ese
     // proyecto»), que es justo lo que hay que leer para arreglarlo.
@@ -145,24 +152,30 @@ export function parseDays(raw: string | undefined): number {
 
 // ---------------------------------------------------------------------------------
 
-export function getOverview(projectId: string, days: number): Promise<Overview> {
-  return get<Overview>("/api/overview", { project_id: projectId, days });
+export function getOverview(
+  projectId: string,
+  days: number,
+  senal?: AbortSignal,
+): Promise<Overview> {
+  return get<Overview>("/api/overview", { project_id: projectId, days }, senal);
 }
 
-export function getPanel(projectId: string, days: number): Promise<Panel> {
-  return get<Panel>("/api/panel", { project_id: projectId, days });
+export function getPanel(projectId: string, days: number, senal?: AbortSignal): Promise<Panel> {
+  return get<Panel>("/api/panel", { project_id: projectId, days }, senal);
 }
 
 export async function getFinding(
   findingId: string,
   projectId: string,
   days: number,
+  senal?: AbortSignal,
 ): Promise<FindingDetail | null> {
   try {
-    return await get<FindingDetail>(`/api/findings/${encodeURI(findingId)}`, {
-      project_id: projectId,
-      days,
-    });
+    return await get<FindingDetail>(
+      `/api/findings/${encodeURI(findingId)}`,
+      { project_id: projectId, days },
+      senal,
+    );
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) return null;
     throw error;
@@ -189,23 +202,27 @@ export interface TraceQuery {
   limit?: number;
 }
 
-export function listTraces(query: TraceQuery = {}): Promise<TraceListPage> {
-  return get<TraceListPage>("/api/traces", { limit: 50, ...query });
+export function listTraces(query: TraceQuery = {}, senal?: AbortSignal): Promise<TraceListPage> {
+  return get<TraceListPage>("/api/traces", { limit: 50, ...query }, senal);
 }
 
-export async function getTrace(traceId: string, projectId?: string): Promise<Trace | null> {
+export async function getTrace(
+  traceId: string,
+  projectId?: string,
+  senal?: AbortSignal,
+): Promise<Trace | null> {
   try {
     // El proyecto va siempre que se sepa: un identificador de traza es único dentro
     // de un proyecto, no entre proyectos.
-    return await get<Trace>(`/api/traces/${traceId}`, { project_id: projectId });
+    return await get<Trace>(`/api/traces/${traceId}`, { project_id: projectId }, senal);
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) return null;
     throw error;
   }
 }
 
-export async function listProjects(): Promise<ProjectStats[]> {
-  const data = await get<{ projects: ProjectStats[] }>("/api/projects");
+export async function listProjects(senal?: AbortSignal): Promise<ProjectStats[]> {
+  const data = await get<{ projects: ProjectStats[] }>("/api/projects", undefined, senal);
   return data.projects;
 }
 
@@ -432,16 +449,16 @@ export function clearFindingState(projectId: string, findingId: string): Promise
   return send(`/api/finding-state?${q}`, "DELETE");
 }
 
-export function getBudget(projectId: string): Promise<Budget> {
-  return get<Budget>("/api/budget", { project_id: projectId });
+export function getBudget(projectId: string, senal?: AbortSignal): Promise<Budget> {
+  return get<Budget>("/api/budget", { project_id: projectId }, senal);
 }
 
 export function setBudget(projectId: string, monthlyLimit: number | null): Promise<Budget> {
   return send<Budget>("/api/budget", "PUT", { project_id: projectId, monthly_limit: monthlyLimit });
 }
 
-export function getAlertSettings(projectId: string): Promise<AlertSettings> {
-  return get<AlertSettings>("/api/alert-settings", { project_id: projectId });
+export function getAlertSettings(projectId: string, senal?: AbortSignal): Promise<AlertSettings> {
+  return get<AlertSettings>("/api/alert-settings", { project_id: projectId }, senal);
 }
 
 export function setAlertSettings(
@@ -471,8 +488,8 @@ export function getBreakdown(
   return get<Breakdown>("/api/breakdown", { project_id: projectId, days, by });
 }
 
-export function getCustomPrices(): Promise<CustomPrices> {
-  return get<CustomPrices>("/api/pricing/custom");
+export function getCustomPrices(senal?: AbortSignal): Promise<CustomPrices> {
+  return get<CustomPrices>("/api/pricing/custom", undefined, senal);
 }
 
 export function setCustomPrice(input: {
@@ -488,8 +505,8 @@ export function deleteCustomPrice(model: string): Promise<{ repriced_spans: numb
   return send(`/api/pricing/custom?model=${encodeURIComponent(model)}`, "DELETE");
 }
 
-export function getInstance(): Promise<Instance> {
-  return get<Instance>("/api/instance");
+export function getInstance(senal?: AbortSignal): Promise<Instance> {
+  return get<Instance>("/api/instance", undefined, senal);
 }
 
 export function loadDemo(): Promise<{ project_id: string; traces: number }> {

@@ -35,6 +35,8 @@ import sqlite3
 import threading
 import time
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -703,11 +705,16 @@ class SQLiteCuentas(CuentasStore):
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path).expanduser()
 
-    def _conn(self) -> Any:
+    @contextmanager
+    def _conn(self) -> Iterator[Any]:
+        """Una conexión que se cierra al salir del `with` (D-131)."""
         self._path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self._path, timeout=30.0, isolation_level=None)
-        conn.execute("PRAGMA journal_mode = WAL")
-        return conn
+        try:
+            conn.execute("PRAGMA journal_mode = WAL")
+            yield conn
+        finally:
+            conn.close()
 
 
 class PostgresCuentas(CuentasStore):

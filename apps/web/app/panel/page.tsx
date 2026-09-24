@@ -26,11 +26,11 @@ function Contenido() {
   const pedido = params.get("project") ?? "";
   const days = parseDays(params.get("days") ?? undefined);
 
-  const estado = useApi(async () => {
-    const projects = await listProjects();
+  const estado = useApi(async (senal) => {
+    const projects = await listProjects(senal);
     if (projects.length === 0) return { project: "", panel: null };
     const project = projects.find((p) => p.id === pedido)?.id ?? projects[0].id;
-    return { project, panel: await getPanel(project, days) };
+    return { project, panel: await getPanel(project, days, senal) };
   }, [pedido, days]);
 
   if (estado.fase === "cargando") return <Cargando />;

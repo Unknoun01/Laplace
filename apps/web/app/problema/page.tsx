@@ -25,12 +25,12 @@ function Contenido() {
   const days = parseDays(params.get("days") ?? undefined);
   const permisos = usePermisos(pedido);
 
-  const estado = useApi(async () => {
-    const projects = await listProjects();
+  const estado = useApi(async (senal) => {
+    const projects = await listProjects(senal);
     const project = projects.find((p) => p.id === pedido)?.id ?? projects[0]?.id ?? "";
-    const finding = await getFinding(findingId, project, days);
+    const finding = await getFinding(findingId, project, days, senal);
     const trace = finding?.sample_trace_id
-      ? await getTrace(finding.sample_trace_id, project)
+      ? await getTrace(finding.sample_trace_id, project, senal)
       : null;
     return { project, finding, trace };
   }, [findingId, pedido, days]);

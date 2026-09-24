@@ -160,6 +160,33 @@ _CAMPOS_ALERTA = (
 )
 
 
+#: Destinatarios por proyecto. Un aviso de gasto no es una lista de correo, y sin tope
+#: el botón de «probar» servía para mandar correos desde nuestro servidor a quien fuera.
+MAX_DESTINATARIOS = 5
+
+
+def motivo_correo_invalido(valor: str) -> str:
+    """Por qué no vale este destinatario de alertas, o cadena vacía si vale (D-131).
+
+    Antes bastaba con una `@`: un salto de línea pasaba, y dentro de una cabecera de
+    correo es la forma de añadir cabeceras propias; y una coma daba para cien destinos.
+    """
+    from email.utils import getaddresses
+
+    if any(c in valor for c in "\r\n\0"):
+        return "la dirección de correo no puede llevar saltos de línea"
+    direcciones = [d for _, d in getaddresses([valor]) if d]
+    if not direcciones:
+        return "esa dirección de correo no es válida"
+    if len(direcciones) > MAX_DESTINATARIOS:
+        return f"como mucho {MAX_DESTINATARIOS} destinatarios"
+    for d in direcciones:
+        usuario, arroba, dominio = d.rpartition("@")
+        if not arroba or not usuario or "." not in dominio or " " in d:
+            return f"«{d}» no es una dirección de correo válida"
+    return ""
+
+
 def _oculto(url: str) -> str:
     """De una URL secreta, sólo el host: basta para reconocerla y no sirve para usarla."""
     from urllib.parse import urlparse
@@ -231,8 +258,11 @@ async def put_alert_settings(request: Request, body: AlertSettingsIn) -> dict[st
             detail="eso no parece un webhook de Slack; ponlo como webhook genérico",
         )
     correo = (cambios.get("email_to") or "").strip()
-    if correo and "@" not in correo:
-        raise HTTPException(status_code=400, detail="esa dirección de correo no es válida")
+    if correo:
+        motivo = motivo_correo_invalido(correo)
+        if motivo:
+            raise HTTPException(status_code=400, detail=motivo)
+        cambios["email_to"] = correo
     nuevo = {**actual, **{k: v for k, v in cambios.items() if k in _CAMPOS_ALERTA}}
     await run_in_threadpool(_guard, meta.set_setting, body.project_id, CLAVE_AJUSTES, nuevo)
     return await run_in_threadpool(_vista_alertas, request, body.project_id)

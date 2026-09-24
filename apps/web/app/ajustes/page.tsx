@@ -33,15 +33,15 @@ function Contenido() {
   const pedido = params.get("project") ?? "";
   const permisos = usePermisos(pedido);
 
-  const estado = useApi(async () => {
-    const projects = await listProjects();
+  const estado = useApi(async (senal) => {
+    const projects = await listProjects(senal);
     if (projects.length === 0) return null;
     const project = projects.find((p) => p.id === pedido)?.id ?? projects[0].id;
     const [budget, alertas, precios, instancia] = await Promise.all([
-      getBudget(project),
-      getAlertSettings(project),
-      getCustomPrices(),
-      getInstance(),
+      getBudget(project, senal),
+      getAlertSettings(project, senal),
+      getCustomPrices(senal),
+      getInstance(senal),
     ]);
     return { project, budget, alertas, precios, instancia };
   }, [pedido]);
