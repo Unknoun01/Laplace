@@ -582,9 +582,14 @@ class SQLiteStore:
         clauses: list[str] = []
         params: dict[str, Any] = {}
 
+        # Las subconsultas de ids van acotadas al proyecto igual que la de fuera. Sin
+        # esto, cada filtro recorría los spans de todos los proyectos para quedarse con
+        # los de uno: el coste de filtrar crecía con la instalación, no con el proyecto.
+        acotar = ""
         if filters.project_id:
             clauses.append("project_id = :project_id")
             params["project_id"] = filters.project_id
+            acotar = " AND project_id = :project_id"
         if filters.since is not None:
             clauses.append("start_time >= :since")
             params["since"] = _iso(filters.since)
@@ -596,24 +601,27 @@ class SQLiteStore:
         # Se filtran trazas, igual que el modelo (D-123).
         if filters.session_id:
             clauses.append(
-                "trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE session_id = :session_id)"
+                "trace_id IN (SELECT DISTINCT trace_id FROM spans "
+                f"WHERE session_id = :session_id{acotar})"
             )
             params["session_id"] = filters.session_id
         if filters.user_id:
             clauses.append(
-                "trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE user_id = :user_id)"
+                "trace_id IN (SELECT DISTINCT trace_id FROM spans "
+                f"WHERE user_id = :user_id{acotar})"
             )
             params["user_id"] = filters.user_id
         if filters.model:
             # El modelo es de un span, no de la traza: se filtra por trazas que lo usan.
             clauses.append(
-                "trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE request_model = :model)"
+                "trace_id IN (SELECT DISTINCT trace_id FROM spans "
+                f"WHERE request_model = :model{acotar})"
             )
             params["model"] = filters.model
 
         # El estado es una propiedad de la traza entera: «ok» significa que ninguno de
         # sus spans falló, así que va por exclusión.
-        fallidas = "SELECT DISTINCT trace_id FROM spans WHERE status = 'error'"
+        fallidas = f"SELECT DISTINCT trace_id FROM spans WHERE status = 'error'{acotar}"
         if filters.status == "error":
             clauses.append(f"trace_id IN ({fallidas})")
         elif filters.status == "ok":
@@ -627,13 +635,21 @@ class SQLiteStore:
             sub.append("(CASE WHEN step_key != '' THEN step_key ELSE name END) = :paso")
             params["paso"] = filters.step_key
         if filters.search:
-            sub.append("(instr(lower(name), lower(:search)) > 0 OR trace_id LIKE :prefijo)")
+            sub.append(
+                "(instr(lower(name), lower(:search)) > 0 OR trace_id LIKE :prefijo ESCAPE '\\')"
+            )
             params["search"] = filters.search
-            params["prefijo"] = f"{filters.search}%"
+            # El texto se busca tal cual: un `%` o un `_` escritos por el usuario no son
+            # comodines. Sin escapar, buscar «_» encontraba todas las trazas.
+            literal = (
+                filters.search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            )
+            params["prefijo"] = f"{literal}%"
         if sub:
             clauses.append(
                 "trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE "
                 + " AND ".join(sub)
+                + acotar
                 + ")"
             )
 
@@ -1194,6 +1210,27 @@ class SQLiteStore:
         self._conn.commit()
 
     # -- tarifas propias, reparto por usuario y retención (D-123) -------------------
+
+    def unpriced_models(self, project_ids: list[str] | None, window: Window) -> list[str]:
+        """Modelos con llamadas sin tarifa en la ventana, de esos proyectos (`None`: todos).
+
+        Una consulta para todos los proyectos. La pantalla de tarifas lo sacaba antes de
+        `summarize_window`, proyecto a proyecto y sobre 90 días: dos agregaciones enteras
+        por proyecto para quedarse con una lista de nombres.
+        """
+        if project_ids is not None and not project_ids:
+            return []
+        params: dict[str, Any] = {"since": _iso(window.since), "until": _iso(window.until)}
+        donde = (
+            "cost_unknown = 1 AND request_model != '' "
+            "AND start_time >= :since AND start_time <= :until"
+        )
+        if project_ids is not None:
+            marcas = ", ".join(f":p{i}" for i in range(len(project_ids)))
+            params.update({f"p{i}": p for i, p in enumerate(project_ids)})
+            donde += f" AND project_id IN ({marcas})"
+        filas = self._query(f"SELECT DISTINCT request_model AS m FROM spans WHERE {donde}", params)
+        return sorted(f["m"] for f in filas)
 
     def spans_by_model(self, model: str) -> list[Span]:
         """Todas las llamadas a un modelo, de todos los proyectos. Para el recálculo."""

@@ -502,11 +502,39 @@ class CuentasStore:
         f = filas[0]
         return {"org_id": f[0], "org_name": f[1], "email": f[2], "role": f[3]}
 
-    def aceptar(self, token: str) -> None:
-        self._ejecutar(
-            "UPDATE invitations SET accepted_at = ? WHERE token_hash = ?",
-            (_iso(_ahora()), hash_token(token)),
+    def aceptar(self, token: str) -> bool:
+        """Gasta la invitación. `False` si ya estaba gastada o ha caducado.
+
+        La condición va en la propia escritura: comprobar antes y marcar después dejaba
+        que dos aceptaciones simultáneas del mismo enlace pasaran las dos.
+        """
+        return (
+            self._ejecutar(
+                "UPDATE invitations SET accepted_at = ? "
+                "WHERE token_hash = ? AND accepted_at IS NULL AND expires_at > ?",
+                (_iso(_ahora()), hash_token(token), _iso(_ahora())),
+            )
+            > 0
         )
+
+    def rol_en(self, org_id: str, user_id: str) -> str | None:
+        filas = self._filas(
+            "SELECT role FROM memberships WHERE org_id = ? AND user_id = ?", (org_id, user_id)
+        )
+        return filas[0][0] if filas else None
+
+    def purgar_caducadas(self) -> int:
+        """Borra sesiones caducadas e invitaciones vencidas sin aceptar.
+
+        No afecta a nada que funcione —las dos ya se ignoraban al leer—, pero sin esto
+        las tablas sólo crecían: cada entrada deja una sesión de 30 días para siempre.
+        """
+        ahora = _iso(_ahora())
+        sesiones = self._ejecutar("DELETE FROM sessions WHERE expires_at <= ?", (ahora,))
+        invitaciones = self._ejecutar(
+            "DELETE FROM invitations WHERE accepted_at IS NULL AND expires_at <= ?", (ahora,)
+        )
+        return sesiones + invitaciones
 
     def invitaciones(self, org_id: str) -> list[dict[str, str]]:
         filas = self._filas(
@@ -638,9 +666,11 @@ class PostgresCuentas(CuentasStore):
         self._dsn = dsn
 
     def _conn(self) -> Any:
-        import psycopg
+        # El mismo pool que los metadatos: cada petición con sesión lee la sesión y los
+        # roles, y abrir dos conexiones nuevas por petición era lo más caro de entrar.
+        from .storage._pg import conexion
 
-        return psycopg.connect(self._dsn, autocommit=True)
+        return conexion(self._dsn)
 
     def _migrar_claves(self) -> None:
         for columna in ("expires_at", "last_used_at", "created_by"):

@@ -23,6 +23,12 @@ import type { TraceSummary } from "./types";
  */
 export const LIVE_INTERVAL_MS = 5000;
 
+/**
+ * Cuántas trazas se guardan en la lista en vivo. Con el modo encendido toda una tarde,
+ * la lista crecía sin fin y cada vuelta recorría y pintaba miles de filas.
+ */
+export const LIVE_MAX_TRACES = 500;
+
 export interface Live {
   /** Las trazas a pintar: las nuevas delante, las de la carga inicial detrás. */
   traces: TraceSummary[];
@@ -60,6 +66,8 @@ export function useLive(
   const enVuelo = useRef(false);
   const fn = useRef(recargar);
   fn.current = recargar;
+  const actuales = useRef(traces);
+  actuales.current = traces;
 
   useEffect(() => {
     if (!activo) return;
@@ -73,20 +81,25 @@ export function useLive(
         if (!vigente) return;
         setFallando(false);
         setUltima(new Date());
+        // Las nuevas se calculan contra la lista que hay ahora, **fuera** del
+        // actualizador. Dentro, `setNuevas` y `setRecibidas` eran efectos en una función
+        // que React puede llamar dos veces (StrictMode lo hace en desarrollo), y el
+        // contador de recibidas se duplicaba.
+        const conocidas = new Set(actuales.current.map((t) => t.trace_id));
+        const entrantes = frescas.filter((t) => !conocidas.has(t.trace_id));
+        const porId = new Map(frescas.map((t) => [t.trace_id, t]));
         setTraces((previas) => {
-          const conocidas = new Set(previas.map((t) => t.trace_id));
-          const entrantes = frescas.filter((t) => !conocidas.has(t.trace_id));
-          if (entrantes.length === 0) {
-            // Aunque no haya trazas nuevas, las que ya estaban pueden haber crecido:
-            // una ejecución en curso suma pasos y coste después de aparecer.
-            const porId = new Map(frescas.map((t) => [t.trace_id, t]));
-            return previas.map((t) => porId.get(t.trace_id) ?? t);
-          }
+          // Aunque no haya trazas nuevas, las que ya estaban pueden haber crecido: una
+          // ejecución en curso suma pasos y coste después de aparecer.
+          const puestas = previas.map((t) => porId.get(t.trace_id) ?? t);
+          const yaEstan = new Set(previas.map((t) => t.trace_id));
+          const delante = entrantes.filter((t) => !yaEstan.has(t.trace_id));
+          return [...delante, ...puestas].slice(0, LIVE_MAX_TRACES);
+        });
+        if (entrantes.length > 0) {
           setNuevas(new Set(entrantes.map((t) => t.trace_id)));
           setRecibidas((n) => n + entrantes.length);
-          const porId = new Map(frescas.map((t) => [t.trace_id, t]));
-          return [...entrantes, ...previas.map((t) => porId.get(t.trace_id) ?? t)];
-        });
+        }
       } catch {
         if (vigente) setFallando(true);
       } finally {

@@ -2075,3 +2075,58 @@ cada uno deja su prueba en `test_auditoria_p1.py`, escrita como el ataque que er
 La lectura de conjunto es la de siempre en este proyecto: la regla no se cumple porque se
 recuerde. La comprobación de rutas nuevas ya existía (D-097); faltaba la misma idea para
 la propiedad de los objetos y para la paridad de los almacenes.
+
+### D-129 — La deuda de la auditoría: lo que escala, lo que se reparte y lo que se ve
+La otra mitad de la auditoría de septiembre. D-128 cerró lo que se podía explotar; esto
+es lo que no rompía nada hoy y rompería con volumen, con dos procesos o con el tiempo.
+Cada punto tiene su prueba en `test_auditoria_p2.py`.
+
+**Rendimiento.** Las subconsultas de los filtros de la lista de trazas no llevaban
+proyecto, y la clave de ClickHouse empieza por él: cada filtro leía la instalación
+entera. Ahora van acotadas, en los dos almacenes. La pantalla de tarifas hacía dos
+agregaciones de 90 días **por proyecto** para sacar nombres de modelos: ahora es una
+consulta (`unpriced_models`). La lista de tiradas pedía su contexto tirada a tirada:
+ahora una vez. El juez hace hasta cuatro trazas a la vez, en orden. Postgres va con pool
+(`storage/_pg.py`): antes cada operación abría su conexión, y cada petición con sesión,
+dos. Las llamadas a la base que quedaban dentro de handlers `async` salen del bucle.
+
+**Varios procesos.** El bucle de alertas corría en cada worker y en cada réplica, y dos
+que evaluaban a la vez avisaban los dos. Ahora cada vuelta pide un candado consultivo de
+Postgres y la hace uno. La retención en ClickHouse deja de ser un `DELETE` diario y pasa a
+ser un TTL de la tabla, que se pone y se quita según `LAPLACE_RETENTION_DAYS`.
+
+**Lo que se quedaba a medias.** Borrar un proyecto borra primero los metadatos (claves
+incluidas, en una transacción) y después las trazas: al revés, un fallo dejaba claves
+vivas escribiendo en un proyecto sin trazas. Aceptar una invitación la gasta en la misma
+escritura que comprueba que no estaba gastada, y no baja de rol a quien ya era más.
+Entrar barre sesiones e invitaciones caducadas. Los textos libres de la API tienen tope.
+
+**El SDK.** Tras un fallo, `get_prompt()` no vuelve a preguntar en diez segundos: sirve
+la copia o la reserva sin esperar. Al caducar la copia pregunta un solo hilo.
+
+**Contratos.** El protocolo `SpanStore` no recogía seis métodos que las rutas llaman en
+los dos almacenes: la misma clase de hueco que dejó la nube en 500 (D-128). Ahora están, y
+una prueba exige que todo método público común a los dos esté en el protocolo con la
+misma firma. Y hay integración continua (`.github/workflows/ci.yml`), con ClickHouse y
+Postgres de verdad: las pruebas «de nube» dejan de saltarse.
+
+**Despliegue.** El backend corre sin root. ClickHouse y Postgres se publican sólo en
+127.0.0.1. `.dockerignore` deja fuera la interfaz exportada, que se colaba en la imagen y
+se servía vieja. Toda respuesta lleva `nosniff`, `frame-ancestors 'none'`,
+`X-Frame-Options` y `Referrer-Policy`, desde el backend y desde Next; Next deja de decir
+que es Next.
+
+**Next 16.** La 14.2 ya no recibe parches y arrastraba avisos que tocan a esta app —el de
+*request smuggling* en `rewrites`, que es justo cómo habla la interfaz con el backend—.
+Next 16 admite React 18, así que el salto fue pequeño. Dos cosas que sólo salieron
+mirando la pantalla: precarga las páginas con `HEAD`, que el servidor de ficheros del
+modo local no aceptaba, y su export deja los segmentos en `__next.trazas/__PAGE__.txt`
+aunque el navegador los pide como `__next.trazas.__PAGE__.txt`. Las dos se resuelven en
+`main.py`.
+
+**Queda, a propósito:** partir `insights.py` y las páginas de más de 600 líneas (es
+trabajo de refactor, no de auditoría, y sin cambio de comportamiento que probar); retirar
+la clave de API de `localStorage` ahora que hay sesiones (cambia cómo entra quien usa
+clave); llevar el freno de intentos a la base para que no se multiplique por procesos;
+fijar la IP al conectar con un webhook (DNS rebinding, D-128); y delimitar mejor el
+contenido de las trazas en el prompt del juez.

@@ -77,7 +77,7 @@ class FindingStateIn(BaseModel):
     project_id: str
     finding_id: str
     status: str = Field(pattern="^(arreglado|ignorado)$")
-    note: str = ""
+    note: str = Field(default="", max_length=2000)
 
 
 @router.post("/finding-state")
@@ -196,15 +196,15 @@ async def get_alert_settings(request: Request, project_id: str) -> dict[str, Any
 class AlertSettingsIn(BaseModel):
     project_id: str
     #: Un campo ausente no se toca; una cadena vacía quita ese canal.
-    webhook_url: str | None = None
-    generic_webhook_url: str | None = None
-    email_to: str | None = None
+    webhook_url: str | None = Field(default=None, max_length=2000)
+    generic_webhook_url: str | None = Field(default=None, max_length=2000)
+    email_to: str | None = Field(default=None, max_length=254)
     #: Umbral en dólares ya gastados. Se guarda como `min_usd`, que es como lo llama el
     #: resto de las alertas; aquí no lleva el sufijo por lo mismo que `BudgetIn`.
     threshold: float | None = Field(default=None, ge=0)
     quiet_hours: float | None = Field(default=None, ge=0)
     muted: bool | None = None
-    muted_kinds: list[str] | None = None
+    muted_kinds: list[str] | None = Field(default=None, max_length=50)
 
 
 @router.put("/alert-settings")
@@ -242,15 +242,9 @@ async def put_alert_settings(request: Request, body: AlertSettingsIn) -> dict[st
 async def test_alert(request: Request, project_id: str) -> dict[str, Any]:
     """Manda un mensaje de prueba por los canales puestos. Es la única forma de saber
     que el webhook está bien antes de que haga falta de verdad."""
-    runner = request.app.state.alerts
-    ajustes = runner.config_for(project_id)
-    if not ajustes.enabled:
+    llegado = await run_in_threadpool(request.app.state.alerts.send_test, project_id)
+    if llegado is None:
         raise HTTPException(status_code=400, detail="no hay ningún canal puesto, o está silenciado")
-    texto = (
-        f"*Laplace · «{project_id}»* — mensaje de prueba. Si lo lees, las alertas de este "
-        "proyecto llegan aquí."
-    )
-    llegado = await run_in_threadpool(runner._enviar, ajustes, texto)
     return {"delivered": llegado}
 
 
@@ -348,17 +342,17 @@ def _guardar_tarifas(meta: Any, modelos: dict[str, dict[str, Any]]) -> None:
 async def get_custom_prices(request: Request) -> dict[str, Any]:
     """Las tarifas propias y los modelos vistos que siguen sin tarifa."""
     identidad = identity_of(request)
-    sin_tarifa: set[str] = set()
-    for p in await run_in_threadpool(_store(request).list_projects):
-        if not identidad.allows(p.project_id):
-            continue
-        resumen = await run_in_threadpool(
-            _store(request).summarize_window, p.project_id, _ventana(90)
-        )
-        sin_tarifa.update(resumen.models_without_price)
+    if identidad.sees_everything:
+        proyectos = None
+    else:
+        todos = await run_in_threadpool(_store(request).list_projects)
+        proyectos = identidad.visible([p.project_id for p in todos])
+    sin_tarifa = await run_in_threadpool(
+        _store(request).unpriced_models, proyectos, _ventana(90)
+    )
     return {
         "models": custom_prices(),
-        "unpriced": sorted(sin_tarifa),
+        "unpriced": sin_tarifa,
         "editable": identidad.sees_everything,
     }
 
@@ -435,8 +429,22 @@ async def delete_project(request: Request, project_id: str, confirm: str) -> dic
     """
     if confirm != project_id:
         raise HTTPException(status_code=400, detail="confirm tiene que repetir el proyecto")
-    await run_in_threadpool(_store(request).delete_project, project_id)
+    # Primero lo mutable, claves incluidas, y en una transacción; después las trazas.
+    # Al revés, si fallaba lo segundo quedaba un proyecto sin trazas pero con sus claves
+    # vivas escribiendo en él. Así, si falla lo primero no se ha borrado nada, y si falla
+    # lo segundo ya no entra tráfico nuevo y repetir la petición termina el trabajo.
     await run_in_threadpool(_guard, _meta(request).delete_project_data, project_id)
+    try:
+        await run_in_threadpool(_store(request).delete_project, project_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("borrado de %s a medias: faltan las trazas", project_id)
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "se han borrado los ajustes, prompts, conjuntos y claves, pero no las "
+                "trazas. Repite el borrado para terminarlo."
+            ),
+        ) from exc
     # Con cuentas, el proyecto deja de ser de su organización y queda escrito quién lo
     # borró (D-127). En local no hay ni una cosa ni la otra.
     cuentas = getattr(request.app.state, "cuentas", None)

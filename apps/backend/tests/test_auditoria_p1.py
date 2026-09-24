@@ -487,8 +487,14 @@ def test_con_postgres_caído_al_arrancar_no_se_instala_el_almacén_nulo():
     assert isinstance(almacen, PostgresMetadataStore)
     assert not isinstance(almacen, NullMetadataStore)
     # Mientras no está, lo dice como «no hay dónde», que las rutas convierten en 503.
-    with pytest.raises(MetadataUnavailable):
-        almacen.api_key_by_hash("x")
+    try:
+        with pytest.raises(MetadataUnavailable):
+            almacen.api_key_by_hash("x")
+    finally:
+        # El pool de ese DSN seguiría reintentando contra un puerto cerrado.
+        from laplace_backend.storage._pg import cerrar_todos
+
+        cerrar_todos()
 
 
 def test_la_preparación_de_metadatos_se_reintenta_hasta_que_sale():

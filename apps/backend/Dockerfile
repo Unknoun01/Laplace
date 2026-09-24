@@ -13,6 +13,11 @@ COPY apps/backend /app/apps/backend
 RUN pip install --no-cache-dir /app/packages/sdk-python \
  && pip install --no-cache-dir "/app/apps/backend[cloud]"
 
+# Sin root: el proceso sólo necesita leer su código y escuchar en un puerto alto. Si
+# algún día alguien consigue ejecutar algo dentro, que no sea como root del contenedor.
+RUN useradd --system --uid 10001 --no-create-home laplace
+USER laplace
+
 EXPOSE 8000
 
 HEALTHCHECK --interval=10s --timeout=3s --retries=10 \

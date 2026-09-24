@@ -593,5 +593,36 @@ class SpanStore(Protocol):
     def coverage(self, project_id: str, window: Window) -> CoverageFacts:
         """Cuántas llamadas de la ventana entiende Laplace, y cuántas no."""
 
+    # Lo que añadieron D-117 y D-123 sin pasar por aquí. Las rutas lo llaman en los dos
+    # almacenes, así que es parte del contrato; `test_auditoria_p2` compara las firmas.
+
+    def loop_groups(
+        self,
+        project_id: str,
+        window: Window,
+        *,
+        min_vueltas: int = 4,
+        max_salidas: int = 2,
+        limit: int = 20,
+    ) -> list[LoopGroup]:
+        """Pasos que se repiten con la misma entrada sin avanzar (D-117)."""
+
+    def cost_by(
+        self, project_id: str, window: Window, dimension: str, limit: int = 20
+    ) -> list[CostGroup]:
+        """Gasto agrupado por usuario o por sesión."""
+
+    def unpriced_models(self, project_ids: list[str] | None, window: Window) -> list[str]:
+        """Modelos con llamadas sin tarifa en la ventana; `None` son todos los proyectos."""
+
+    def spans_by_model(self, model: str) -> list[Span]:
+        """Todas las llamadas a un modelo, de todos los proyectos. Para recalcular coste."""
+
+    def delete_project(self, project_id: str) -> None:
+        """Borra todos los spans de un proyecto."""
+
+    def delete_before(self, cutoff: datetime) -> int:
+        """Borra los spans que empezaron antes de `cutoff`. La retención en SQLite."""
+
     def health(self) -> bool:
         """True si el almacén responde."""

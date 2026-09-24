@@ -1,4 +1,4 @@
-"""Tope al tamaño del cuerpo de las peticiones.
+"""Tope al tamaño del cuerpo de las peticiones, y cabeceras de seguridad.
 
 Ni Uvicorn ni Starlette ponen uno, y aquí importa: la ingesta acepta lotes de spans de
 cualquier clave de cualquier proyecto, el middleware de autenticación lee el cuerpo de
@@ -80,3 +80,36 @@ class LimiteCuerpo:
         except _Demasiado:
             if not empezada:
                 await _responder_413(send, self.maximo)
+
+
+#: Cabeceras de seguridad de toda respuesta, API e interfaz local. Ninguna cambia lo que
+#: se ve: dicen al navegador que no adivine tipos, que no deje meter la página en un
+#: iframe ajeno —las pantallas de borrar un proyecto o crear claves son un blanco de
+#: clickjacking— y que no mande la URL entera a otros sitios.
+CABECERAS_SEGURIDAD = (
+    (b"x-content-type-options", b"nosniff"),
+    (b"x-frame-options", b"DENY"),
+    (b"content-security-policy", b"frame-ancestors 'none'"),
+    (b"referrer-policy", b"strict-origin-when-cross-origin"),
+)
+
+
+class CabecerasSeguridad:
+    """Añade `CABECERAS_SEGURIDAD` a cada respuesta que no las traiga ya."""
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def enviar(mensaje: Any) -> None:
+            if mensaje["type"] == "http.response.start":
+                puestas = {nombre.lower() for nombre, _ in mensaje.get("headers", [])}
+                extra = [(n, v) for n, v in CABECERAS_SEGURIDAD if n not in puestas]
+                mensaje = {**mensaje, "headers": [*mensaje.get("headers", []), *extra]}
+            await send(mensaje)
+
+        await self.app(scope, receive, enviar)

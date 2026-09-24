@@ -313,9 +313,9 @@ class PostgresAlertState:
             )
 
     def _connect(self) -> Any:
-        import psycopg
+        from .storage._pg import conexion
 
-        return psycopg.connect(self._dsn, autocommit=True)
+        return conexion(self._dsn)
 
     def read(self, project_id: str) -> dict[str, AlertRecord]:
         with self._connect() as conn:
@@ -813,6 +813,7 @@ class AlertRunner:
         metadata: Any = None,
         webhook: WebhookNotifier | None = None,
         email: EmailNotifier | None = None,
+        turno: Any = None,
     ) -> None:
         self._store = store
         self._config = config
@@ -823,6 +824,25 @@ class AlertRunner:
         self._metadata = metadata
         self._webhook = webhook or WebhookNotifier()
         self._email = email
+        #: Quién hace esta vuelta cuando hay varios procesos: una función que devuelve un
+        #: gestor de contexto con `True` si le toca a éste. Sin ella, siempre le toca (un
+        #: solo proceso, o el modo local).
+        self._turno = turno
+
+    def evaluate_all_if_mine(self) -> list[Decision]:
+        """`evaluate_all`, pero sólo si esta vuelta le toca a este proceso.
+
+        Con varios workers o réplicas cada uno tiene su bucle, y sin turno cada uno
+        mandaba las mismas alertas: la marca de «ya avisado» se guarda después de
+        enviar, así que dos procesos que evalúan a la vez avisan los dos.
+        """
+        if self._turno is None:
+            return self.evaluate_all()
+        with self._turno() as mio:
+            if not mio:
+                logger.debug("las alertas de esta vuelta las evalúa otro proceso")
+                return []
+            return self.evaluate_all()
 
     def _desde_interfaz(self, project_id: str) -> dict[str, Any]:
         if self._metadata is None:
@@ -840,6 +860,24 @@ class AlertRunner:
     @property
     def email_ready(self) -> bool:
         return self._email is not None and self._email.configured
+
+    @property
+    def mailer(self) -> EmailNotifier | None:
+        """El correo de la instalación, para quien tenga que mandar algo que no es una
+        alerta (las invitaciones). `None` si no hay servidor configurado."""
+        return self._email if self.email_ready else None
+
+    def send_test(self, project_id: str) -> bool | None:
+        """Un mensaje de prueba por los canales del proyecto. `None` si no tiene ninguno
+        puesto o está silenciado; si no, si ha llegado por alguno."""
+        ajustes = self.config_for(project_id)
+        if not ajustes.enabled:
+            return None
+        texto = (
+            f"*Laplace · «{project_id}»* — mensaje de prueba. Si lo lees, las alertas de "
+            "este proyecto llegan aquí."
+        )
+        return self._enviar(ajustes, texto)
 
     def _enviar(self, ajustes: ProjectAlertConfig, texto: str) -> bool:
         """Por cada canal puesto. Cuenta como enviado si ha llegado por alguno."""
@@ -981,7 +1019,7 @@ async def alert_loop(runner: AlertRunner, interval_seconds: int) -> None:
     while True:
         try:
             await asyncio.sleep(interval_seconds)
-            await asyncio.to_thread(runner.evaluate_all)
+            await asyncio.to_thread(runner.evaluate_all_if_mine)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001

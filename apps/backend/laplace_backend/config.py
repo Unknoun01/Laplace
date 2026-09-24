@@ -16,14 +16,16 @@ class Settings(BaseSettings):
     #: Fichero del modo local. `laplace ui` lo pone en `~/.laplace/laplace.db`.
     sqlite_path: str = "laplace.db"
 
-    clickhouse_host: str = "localhost"
+    #: 127.0.0.1 y no `localhost`: compose publica las bases sólo en IPv4 de loopback, y
+    #: `localhost` prueba antes `::1`, que no contesta, y tarda segundos en caer a IPv4.
+    clickhouse_host: str = "127.0.0.1"
     clickhouse_port: int = 8123
     clickhouse_user: str = "laplace"
     clickhouse_password: str = "laplace"
     clickhouse_database: str = "laplace"
     clickhouse_secure: bool = False
 
-    postgres_dsn: str = "postgresql://laplace:laplace@localhost:5433/laplace"
+    postgres_dsn: str = "postgresql://laplace:laplace@127.0.0.1:5433/laplace"
     #: Postgres sólo guarda metadatos y las tablas reservadas de Fases 3-4. Si no está
     #: disponible, la ingesta y la lectura de trazas siguen funcionando.
     postgres_enabled: bool = True

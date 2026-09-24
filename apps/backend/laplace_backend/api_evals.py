@@ -10,6 +10,7 @@ el SDK dentro del proceso del usuario y aquí se recibe el parte (D-086).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -37,6 +38,11 @@ def _store(request: Request) -> Any:
 
 def _meta(request: Request) -> Any:
     return request.app.state.metadata
+
+
+#: Cuántas trazas se juzgan a la vez. Suficiente para que doscientas no tarden
+#: doscientas veces una llamada, y lejos del límite de peticiones de cualquier proveedor.
+JUDGE_CONCURRENCY = 4
 
 
 def _alcance(request: Request) -> str | None:
@@ -88,9 +94,9 @@ class AnnotationIn(BaseModel):
     trace_id: str
     span_id: str | None = None
     verdict: str = Field(pattern="^(pass|fail|unknown)$")
-    comment: str | None = None
-    label: str | None = None
-    author: str | None = None
+    comment: str | None = Field(default=None, max_length=5000)
+    label: str | None = Field(default=None, max_length=120)
+    author: str | None = Field(default=None, max_length=120)
 
 
 @router.post("/annotations", response_model=Annotation)
@@ -159,7 +165,7 @@ async def list_annotations(
 class JudgeIn(BaseModel):
     project_id: str
     #: Trazas sueltas, o todas las de una tirada.
-    trace_ids: list[str] = Field(default_factory=list)
+    trace_ids: list[str] = Field(default_factory=list, max_length=1000)
     run_id: str | None = None
 
 
@@ -222,24 +228,31 @@ async def run_judge(request: Request, body: JudgeIn) -> dict[str, Any]:
         )
 
     store = _store(request)
-    hechas: list[Annotation] = []
-    fallos: list[dict[str, str]] = []
-    for trace_id in ids:
-        spans = await run_in_threadpool(store.get_trace_spans, trace_id, body.project_id)
-        if not spans:
-            # Ni se juzga ni se guarda: o no existe, o es de otro proyecto.
-            fallos.append({"trace_id": trace_id, "error": "traza no encontrada en este proyecto"})
-            continue
-        try:
-            anotacion = await run_in_threadpool(
-                judge_trace, config, trace_id, spans, esperados.get(trace_id)
+    # Varias trazas a la vez, con tope. De una en una, doscientas llamadas a un modelo
+    # dentro de una petición HTTP pasaban de cualquier timeout de proxy; sin tope, se
+    # dispararía el límite de peticiones del proveedor. El orden del resultado es el de
+    # la petición, se terminen como se terminen.
+    cupo = asyncio.Semaphore(JUDGE_CONCURRENCY)
+
+    async def juzgar(trace_id: str) -> Annotation | dict[str, str]:
+        async with cupo:
+            spans = await run_in_threadpool(store.get_trace_spans, trace_id, body.project_id)
+            if not spans:
+                # Ni se juzga ni se guarda: o no existe, o es de otro proyecto.
+                return {"trace_id": trace_id, "error": "traza no encontrada en este proyecto"}
+            try:
+                anotacion = await run_in_threadpool(
+                    judge_trace, config, trace_id, spans, esperados.get(trace_id)
+                )
+            except JudgeUnavailable as exc:
+                return {"trace_id": trace_id, "error": str(exc)}
+            return await run_in_threadpool(
+                _guard, meta.save_annotation, body.project_id, anotacion
             )
-        except JudgeUnavailable as exc:
-            fallos.append({"trace_id": trace_id, "error": str(exc)})
-            continue
-        hechas.append(
-            await run_in_threadpool(_guard, meta.save_annotation, body.project_id, anotacion)
-        )
+
+    resultados = await asyncio.gather(*(juzgar(t) for t in ids))
+    hechas = [r for r in resultados if isinstance(r, Annotation)]
+    fallos = [r for r in resultados if isinstance(r, dict)]
 
     coste = sum(a.judge.cost_usd for a in hechas if a.judge)
     incompleto = any(a.judge.cost_unknown for a in hechas if a.judge)
@@ -282,8 +295,8 @@ class DatasetIn(BaseModel):
     """
 
     project_id: str
-    name: str
-    description: str = ""
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=2000)
     #: El mismo filtro que la lista de trazas. Se guarda tal cual para poder enseñarlo.
     filter: dict[str, Any] = Field(default_factory=dict)
     limit: int = Field(default=50, ge=1, le=500)
@@ -397,9 +410,9 @@ class RunIn(BaseModel):
 
     project_id: str
     dataset_id: str
-    variant: str
-    notes: str = ""
-    items: list[EvalRunItem] = Field(default_factory=list)
+    variant: str = Field(min_length=1, max_length=120)
+    notes: str = Field(default="", max_length=2000)
+    items: list[EvalRunItem] = Field(default_factory=list, max_length=5000)
 
 
 @router.post("/runs", response_model=EvalRun)
@@ -429,9 +442,11 @@ async def list_runs(
     nombres = {
         d.id: d.name for d in await run_in_threadpool(meta.list_datasets, project_id)
     }
+    # El contexto de todas las tiradas de una vez: tres consultas en total y no tres
+    # por tirada. Va indexado por traza, así que cada resumen coge lo suyo.
+    anotaciones, costes, prompts = await _context_for(request, project_id, *tiradas)
     resumenes: list[RunSummary] = []
     for tirada in tiradas:
-        anotaciones, costes, prompts = await _context_for(request, project_id, tirada)
         resumenes.append(
             summarize_run(
                 tirada,

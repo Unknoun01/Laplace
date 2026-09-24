@@ -30,7 +30,6 @@ from ..config import Settings
 from .metadata import (
     ANNOTATION_COLUMNS,
     ANNOTATION_READ,
-    MetadataUnavailable,
     NullMetadataStore,
     annotation_from_row,
     annotation_values,
@@ -117,15 +116,11 @@ class PostgresMetadataStore:
         # Import perezoso: `psycopg` es una dependencia opcional (extra `cloud`). En
         # modo local no hay Postgres, y exigir el driver para abrir la interfaz en el
         # portátil sería cobrar por algo que no se usa (D-068).
-        import psycopg
+        # Del pool del proceso (`_pg.py`). «No conecto» sale como `MetadataUnavailable`,
+        # que las rutas traducen a 503 con su motivo en vez de un 500 con la traza.
+        from ._pg import conexion
 
-        # «No conecto» se dice como lo que es: no hay dónde guardar, que las rutas ya
-        # traducen a 503 con su motivo, en vez de un 500 con la traza de psycopg. Y con
-        # tope: sin él, un Postgres que no contesta cuelga el hilo el tiempo del sistema.
-        try:
-            return psycopg.connect(self._dsn, autocommit=True, connect_timeout=5)
-        except psycopg.OperationalError as exc:
-            raise MetadataUnavailable(f"postgres no responde: {exc}") from exc
+        return conexion(self._dsn)
 
     def migrate(self) -> None:
         with self._connect() as conn:

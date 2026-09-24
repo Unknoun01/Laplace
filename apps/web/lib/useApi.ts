@@ -35,8 +35,16 @@ export function useApi<T>(cargar: () => Promise<T>, deps: unknown[]): Estado<T> 
       .catch((error: Error) => {
         if (!vigente) return;
         // Distinguir «no hay backend» de «el backend ha dicho que no» es la diferencia
-        // entre una pantalla que ayuda y una que sólo dice que algo ha fallado.
-        if (!(error instanceof ApiError)) return setEstado({ fase: "sin-backend" });
+        // entre una pantalla que ayuda y una que sólo dice que algo ha fallado. «No hay
+        // backend» es sólo un fallo de red (`TypeError` de fetch); una respuesta que no
+        // se entiende, o un error de la propia pantalla, es un error, no una caída.
+        if (!(error instanceof ApiError)) {
+          return setEstado(
+            error instanceof TypeError && /fetch|network|load failed/i.test(error.message)
+              ? { fase: "sin-backend" }
+              : { fase: "error", error },
+          );
+        }
         // 401 y 403 no son «el backend ha fallado»: son «te falta una clave» y «esa
         // clave no es de este proyecto», y cada una tiene su pantalla y su salida.
         if (error.status === 401) return setEstado({ fase: "sin-clave", error });

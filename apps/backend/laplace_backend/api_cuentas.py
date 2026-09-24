@@ -279,6 +279,12 @@ async def login(request: Request, response: Response, body: LoginIn) -> dict[str
     token = await run_in_threadpool(
         cuentas.abrir_sesion, usuario.id, request.headers.get("user-agent", "")
     )
+    # Entrar es un buen momento para barrer lo caducado: pasa a menudo, pero no en cada
+    # petición, y no hace falta otro bucle en segundo plano para esto.
+    try:
+        await run_in_threadpool(cuentas.purgar_caducadas)
+    except Exception:  # noqa: BLE001 - barrer no puede impedir entrar
+        logger.warning("no se pudieron purgar las sesiones caducadas", exc_info=True)
     for org in await run_in_threadpool(cuentas.orgs_de, usuario.id):
         await run_in_threadpool(cuentas.anotar, org["id"], usuario.id, "login", "", ip)
     _poner_cookie(request, response, token)
@@ -303,9 +309,11 @@ class PasswordIn(BaseModel):
 async def change_password(request: Request, body: PasswordIn) -> dict[str, Any]:
     """Cambiar la contraseña cierra las demás sesiones: si alguien la sabía, deja de
     servirle también la sesión que ya tuviera abierta."""
-    usuario = _usuario(request)
+    usuario = await run_in_threadpool(_usuario, request)
     cuentas = _cuentas(request)
-    if not comprobar_contrasena(body.current, await run_in_threadpool(cuentas.hash_de, usuario.id)):
+    guardado = await run_in_threadpool(cuentas.hash_de, usuario.id)
+    # scrypt tarda décimas de segundo a propósito: fuera del bucle de eventos.
+    if not await run_in_threadpool(comprobar_contrasena, body.current, guardado):
         raise HTTPException(status_code=403, detail="la contraseña actual no es ésa")
     motivo = validar_contrasena(body.new)
     if motivo:
@@ -319,7 +327,7 @@ async def change_password(request: Request, body: PasswordIn) -> dict[str, Any]:
 
 @router.post("/auth/logout-all")
 async def logout_all(request: Request, response: Response) -> dict[str, Any]:
-    usuario = _usuario(request)
+    usuario = await run_in_threadpool(_usuario, request)
     cerradas = await run_in_threadpool(_cuentas(request).cerrar_todas, usuario.id)
     response.delete_cookie(COOKIE, path="/")
     return {"ok": True, "closed_sessions": cerradas}
@@ -377,13 +385,21 @@ async def accept(request: Request, response: Response, body: AcceptIn) -> dict[s
             cuentas.crear_usuario, info["email"], body.name, body.password
         )
 
-    def unir() -> str:
-        cuentas.poner_miembro(info["org_id"], usuario.id, info["role"])
-        cuentas.aceptar(body.token)
+    def unir() -> str | None:
+        # Primero se gasta la invitación, y sólo si era la primera vez se hace miembro.
+        if not cuentas.aceptar(body.token):
+            return None
+        # Una invitación no baja a nadie de rol: si ya era admin de esa organización y
+        # acepta un enlace de lector, se queda admin.
+        actual = cuentas.rol_en(info["org_id"], usuario.id)
+        if not rol_suficiente(actual, info["role"]):
+            cuentas.poner_miembro(info["org_id"], usuario.id, info["role"])
         cuentas.anotar(info["org_id"], usuario.id, "aceptar_invitacion", info["role"], _ip(request))
         return cuentas.abrir_sesion(usuario.id, request.headers.get("user-agent", ""))
 
     token = await run_in_threadpool(unir)
+    if token is None:
+        raise HTTPException(status_code=404, detail="esa invitación no existe o ha caducado")
     _poner_cookie(request, response, token)
     return {"ok": True, "org_name": info["org_name"]}
 
@@ -399,7 +415,11 @@ async def get_org(request: Request, org_id: str) -> dict[str, Any]:
     usuario = await run_in_threadpool(_exigir_org, request, org_id, "lector")
     cuentas = _cuentas(request)
     rol = next(
-        (o["role"] for o in cuentas.orgs_de(usuario.id) if o["id"] == org_id),
+        (
+            o["role"]
+            for o in await run_in_threadpool(cuentas.orgs_de, usuario.id)
+            if o["id"] == org_id
+        ),
         "propietario" if usuario.is_admin else "lector",
     )
     salida: dict[str, Any] = {
@@ -445,8 +465,8 @@ async def invite(request: Request, body: InviteIn) -> dict[str, Any]:
     # Por correo si la instalación tiene servidor; si no, el enlace se enseña para
     # mandarlo a mano. El enlace sólo sale en esta respuesta: se guarda su hash.
     enviado = False
-    notificador = getattr(request.app.state.alerts, "_email", None)
-    if notificador is not None and notificador.configured:
+    notificador = request.app.state.alerts.mailer
+    if notificador is not None:
         nombre = await run_in_threadpool(cuentas.nombre_org, body.org_id)
         enviado = await run_in_threadpool(
             notificador.send,
@@ -510,7 +530,7 @@ async def set_role(request: Request, body: MemberIn) -> dict[str, Any]:
 async def remove_member(request: Request, org_id: str, user_id: str) -> dict[str, Any]:
     """Quitar a alguien, o irse uno mismo. Cierra sus sesiones: si no, seguiría viendo
     los datos hasta que caducara la cookie."""
-    yo = _usuario(request)
+    yo = await run_in_threadpool(_usuario, request)
     necesita = "lector" if user_id == yo.id else "admin"
     await run_in_threadpool(_exigir_org, request, org_id, necesita)
     cuentas = _cuentas(request)

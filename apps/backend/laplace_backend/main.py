@@ -21,7 +21,7 @@ from .api_evals import router as evals_router
 from .api_prompts import router as prompts_router
 from .auth import AuthMiddleware
 from .config import Settings, get_settings
-from .limites import LimiteCuerpo
+from .limites import CabecerasSeguridad, LimiteCuerpo
 from .storage.base import SpanStore
 
 logger = logging.getLogger("laplace")
@@ -59,6 +59,11 @@ def build_metadata(settings: Settings):
     return build_metadata_store(settings)
 
 
+#: Identificador del candado consultivo de Postgres para el bucle de alertas. Arbitrario,
+#: pero fijo: todos los procesos de una instalación tienen que pedir el mismo.
+CANDADO_ALERTAS = 0x4C41504C  # «LAPL»
+
+
 def build_alerts(settings: Settings, store, metadata=None):
     """El evaluador de alertas.
 
@@ -83,10 +88,20 @@ def build_alerts(settings: Settings, store, metadata=None):
             "las alertas van sin enlace: falta LAPLACE_ALERTS_BASE_URL con la raíz "
             "pública de la interfaz"
         )
+    # En la nube puede haber varios procesos: el turno lo reparte un candado de Postgres
+    # para que cada vuelta la haga uno. En local hay uno solo y no hace falta.
+    turno = None
+    if settings.store != "sqlite" and settings.postgres_enabled:
+        from functools import partial
+
+        from .storage._pg import turno_exclusivo
+
+        turno = partial(turno_exclusivo, settings.postgres_dsn, CANDADO_ALERTAS)
     return AlertRunner(
         store,
         config,
         build_alert_state(settings),
+        turno=turno,
         metadata=metadata,
         webhook=WebhookNotifier(permitir_local=settings.store == "sqlite"),
         email=EmailNotifier(settings),
@@ -257,10 +272,19 @@ async def lifespan(app: FastAPI):
             settings.alerts_min_usd,
             settings.alerts_quiet_hours,
         )
-    if settings.retention_days > 0:
+    # En ClickHouse, la retención es un TTL de la tabla (lo aplica el propio motor en sus
+    # fusiones); en SQLite, un borrado diario. Se aplica también con 0, para quitar un
+    # TTL puesto antes: la variable manda.
+    if hasattr(app.state.store, "apply_retention"):
+        try:
+            await asyncio.to_thread(app.state.store.apply_retention, settings.retention_days)
+        except Exception:  # noqa: BLE001
+            logger.exception("no se pudo aplicar la retención a la tabla de spans")
+    elif settings.retention_days > 0:
         tareas.append(
             asyncio.create_task(retention_loop(app.state.store, settings.retention_days))
         )
+    if settings.retention_days > 0:
         logger.info("retención activa — se guardan %d días", settings.retention_days)
 
     try:
@@ -268,6 +292,10 @@ async def lifespan(app: FastAPI):
     finally:
         for tarea in tareas:
             tarea.cancel()
+        if settings.store != "sqlite":
+            from .storage._pg import cerrar_todos
+
+            cerrar_todos()
 
 
 app = FastAPI(
@@ -299,6 +327,7 @@ app.add_middleware(
 # El último que se añade es el más externo: el tope al cuerpo corta antes de que la
 # autenticación ni nadie lea una petición enorme.
 app.add_middleware(LimiteCuerpo, maximo=get_settings().max_body_bytes)
+app.add_middleware(CabecerasSeguridad)
 
 # Los routers van ANTES del comodín de la interfaz: FastAPI resuelve por orden de
 # registro, y un `/{ruta:path}` declarado primero se comería `/api` y `/health`.
@@ -389,7 +418,28 @@ def _log_ui_dir() -> None:
         )
 
 
-@app.get("/{ruta:path}", include_in_schema=False)
+def _segmento_next(ruta: str) -> str:
+    """Dónde deja el export de Next 16 el fichero de un segmento que se pide con puntos.
+
+    Al precargar una página, el navegador pide `trazas/__next.trazas.__PAGE__.txt`, pero
+    el export lo escribe en `trazas/__next.trazas/__PAGE__.txt`: los puntos tras el
+    prefijo son directorios. Next sirviéndose a sí mismo lo resuelve; un servidor de
+    ficheros no, y cada enlace visible dejaba un 404. Para lo demás devuelve la ruta tal
+    cual, que ya se ha probado arriba.
+    """
+    carpeta, _, nombre = ruta.rpartition("/")
+    if not (nombre.startswith("__next.") and nombre.endswith(".txt")):
+        return ruta
+    partes = nombre[len("__next.") : -len(".txt")].split(".")
+    if len(partes) < 2:
+        return ruta
+    anidado = f"__next.{partes[0]}/" + "/".join(partes[1:]) + ".txt"
+    return f"{carpeta}/{anidado}" if carpeta else anidado
+
+
+# `HEAD` además de `GET`: Next 16 comprueba con `HEAD` las páginas que va a precargar al
+# pasar por un enlace, y sin él cada enlace visible dejaba un 405 en la consola.
+@app.api_route("/{ruta:path}", methods=["GET", "HEAD"], include_in_schema=False)
 def interfaz(ruta: str) -> Response:
     """Sirve la interfaz estática desde el mismo origen que la API.
 
@@ -416,6 +466,7 @@ def interfaz(ruta: str) -> Response:
         raiz / limpia if limpia else raiz / "index.html",
         raiz / limpia / "index.html" if limpia else raiz / "index.html",
         raiz / f"{limpia}.html" if limpia else raiz / "index.html",
+        raiz / _segmento_next(limpia),
     ):
         # Nunca salir de la carpeta de la interfaz, pase lo que pase con la ruta.
         try:

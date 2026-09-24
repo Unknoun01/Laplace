@@ -9,5 +9,10 @@
 **/.pytest_cache
 **/.ruff_cache
 
+# La interfaz exportada dentro del paquete de Python la genera scripts/build_ui.py para
+# publicar. Si se colaba en la imagen, el backend servía esa copia vieja al arrancar.
+packages/sdk-python/laplace/ui
+apps/web/out
+
 # El frontend lee la API desde el servidor; en Docker se inyecta por compose.
 **/.env.local
