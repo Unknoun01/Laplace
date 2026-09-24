@@ -2194,3 +2194,32 @@ nada lo dijera. Pruebas en `test_auditoria_p3.py`.
 * **El código de configuración se gasta una vez**, bajo cerrojo, antes de crear nada: dos
   peticiones a la vez ya no crean dos administradores. Si la configuración falla después
   —una contraseña corta—, el código se devuelve.
+
+## 2026-09-24 — Revisión de diseño del inicio
+
+### D-132 — Escalas cerradas, contraste AA y el inicio en dos columnas
+La identidad sigue siendo la del mock de D-031 (fondo tinta, iris de marca, ámbar para lo
+que se tira, verde azulado para lo que se ahorra, IBM Plex), pero sus tokens no bastaban:
+
+* **Contraste.** `--ink-3`, el gris de todo el texto secundario de 12–13 px, daba 3,6:1
+  sobre `--panel`, por debajo del 4,5:1 de AA; `--ink-4` se usaba como texto con 2,1:1.
+  La paleta se reajusta sin cambiar de tono: `--ink-3` pasa de 5:1 en los dos temas y
+  `--ink-4` de 3:1, que queda para separadores y lo decorativo.
+* **Escalas.** Había veintiún tamaños de letra (12, 12,5, 13, 13,5, 14, 14,5…) y paddings
+  a ojo. Ahora `--fs-*` en pasos enteros, `--sp-*` sobre 4 px y dos radios (`--r-sm` 4 px,
+  `--r` 6 px). El CSS existente se pasó a la escala con un script: los medios píxeles
+  van al entero de arriba, así que ningún texto encoge.
+* **`--dim` no existía** y lo usaba la explicación de «sin dinero».
+* **El inicio en dos columnas.** A 1440 px la columna de lectura dejaba un tercio de
+  pantalla vacío a la derecha. Ahora el presupuesto, la cobertura y las métricas van en
+  un carril que se queda fijo mientras se baja por la lista; en estrecho cae debajo del
+  héroe, donde estaba. La cobertura mala sigue arriba del todo, antes que el dinero
+  (D-096), y los avisos siguen pegados a la cifra.
+* **El h1 era el título más pequeño de la pantalla** (15 px, gris), por debajo del de
+  cada tarjeta. Ahora es el título y la ventana va debajo.
+* **Tarjetas.** Llevan su puesto y una barra con lo que valen frente a la primera: tres
+  importes en ámbar del mismo tamaño no dejaban ver que uno vale treinta veces otro. El
+  «Ver cómo arreglarlo» se ve siempre; sólo al pasar el ratón no se sabía que la tarjeta
+  llevaba a algún sitio.
+
+El resto de pantallas hereda paleta, escala y radios, pero conserva su maquetación.

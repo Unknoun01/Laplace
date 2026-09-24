@@ -55,6 +55,30 @@ export function Cargando() {
   );
 }
 
+/** El esqueleto del inicio, con su carril: del mismo tamaño para que nada salte. */
+export function CargandoDiagnostico() {
+  return (
+    <main className="diag">
+      <section className="hero">
+        <span className="sk" style={{ width: 280, height: 29 }} />
+        <span className="sk" style={{ width: 160, height: 14, margin: "8px 0 24px" }} />
+        <div className="pair">
+          <span className="sk" style={{ width: 190, height: 53 }} />
+          <span className="sk" style={{ width: 190, height: 53 }} />
+        </div>
+        <span className="sk" style={{ height: 8, marginTop: 24 }} />
+      </section>
+      <aside className="diag-rail">
+        <span className="sk" style={{ height: 96 }} />
+        <span className="sk" style={{ height: 72 }} />
+      </aside>
+      <div className="diag-lista">
+        <CardsSkeleton />
+      </div>
+    </main>
+  );
+}
+
 export function NoProject() {
   return (
     <div className="state">

@@ -73,7 +73,19 @@ export function GapBar({
  * mes proyectado; cuando no, es el dinero ya gastado en la ventana observada, y lo
  * pone. Una cifra sin periodo se lee como el periodo que le convenga al lector.
  */
-export function FindingCard({ finding, href }: { finding: Finding; href: string }) {
+export function FindingCard({
+  finding,
+  href,
+  rank,
+  share,
+}: {
+  finding: Finding;
+  href: string;
+  /** Puesto en la lista ordenada por dinero; sin él, la tarjeta no lo enseña. */
+  rank?: number;
+  /** Lo que vale frente al mayor de la lista, de 0 a 1 (D-132). */
+  share?: number;
+}) {
   const flojo = !finding.costs_money;
   const proyecta = finding.monthly_saving_usd !== null;
   // Sin tarifa no hay dinero que enseñar, pero sí tokens: son datos medidos. Enseñar
@@ -82,6 +94,11 @@ export function FindingCard({ finding, href }: { finding: Finding; href: string 
 
   return (
     <Link href={href} className={`card${flojo ? " low" : ""}${finding.state ? ` st-${finding.state}` : ""}`}>
+      {rank !== undefined && (
+        <span className="rank" aria-label={`Puesto ${rank}`}>
+          {rank}
+        </span>
+      )}
       <div className="card-top">
         <h3>{finding.title}</h3>
         <div
@@ -123,6 +140,11 @@ export function FindingCard({ finding, href }: { finding: Finding; href: string 
         <p className="estado arreglado">
           <strong>Marcado como arreglado.</strong> {finding.fix_check.headline}
         </p>
+      )}
+      {share !== undefined && (
+        <div className="peso" aria-hidden>
+          <i style={{ width: `${Math.round(share * 100)}%` }} />
+        </div>
       )}
       <footer>
         {/* Texto con un punto de color, no una caja: con borde y fondo se leían como

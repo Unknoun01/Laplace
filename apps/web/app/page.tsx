@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { BigMoney, FindingCard, GapBar, Readout } from "@/components/pieces";
-import { BackendDown, Cargando, NeedsKey, NoProject, NoTracesYet, NotYours, NothingToFix } from "@/components/states";
+import { BackendDown, CargandoDiagnostico, NeedsKey, NoProject, NoTracesYet, NotYours, NothingToFix } from "@/components/states";
 import { getBudget, getOverview, listProjects, parseDays } from "@/lib/api";
 import { descargarCsv } from "@/lib/csv";
 import { duration, money, number, percent, spanLabel, tokens, windowLabel } from "@/lib/format";
@@ -36,7 +36,7 @@ function Contenido() {
     return { project, overview, budget };
   }, [pedido, days]);
 
-  if (estado.fase === "cargando") return <Cargando />;
+  if (estado.fase === "cargando") return <CargandoDiagnostico />;
   if (estado.fase === "sin-backend") return <BackendDown />;
   if (estado.fase === "sin-clave") return <NeedsKey mensaje={estado.error.message} />;
   if (estado.fase === "sin-permiso") return <NotYours mensaje={estado.error.message} />;
@@ -68,19 +68,19 @@ function Contenido() {
   const cobertura = overview.coverage;
 
   return (
-    <main className="reading">
+    <main className="diag">
       {/* Si no entendemos bien este proyecto, se dice ANTES que el dinero. Leer un
           ahorro sin saber que está calculado sobre la mitad de las llamadas es peor
           que no leerlo (D-096). */}
       {cobertura?.prominent && <CoberturaBloque cobertura={cobertura} />}
 
       <section className="hero">
-        <h1>
-          Tu agente «{project}»,{" "}
+        <h1>Tu agente «{project}»</h1>
+        <p className="hero-sub">
           {overview.projected
-            ? `al ritmo de ${ventana}`
-            : `en ${spanLabel(overview.observed_days)} de datos`}
-        </h1>
+            ? `Al ritmo de ${ventana}`
+            : `En ${spanLabel(overview.observed_days)} de datos`}
+        </p>
 
         {/* Sin una sola tarifa conocida no hay cifra que enseñar. Un «$0» grande con el
             aviso debajo se lee como «no cuesta nada», que es lo contrario de lo que
@@ -126,15 +126,26 @@ function Contenido() {
         )}
 
         <Caveats overview={overview} ventana={ventana} casiTodo={casiTodo} />
+      </section>
 
+      {/* El contexto que matiza la cifra, en su carril (D-132). En estrecho cae justo
+          debajo del héroe, que es donde estaba. */}
+      <aside className="diag-rail" aria-label="Contexto">
         <LineaPresupuesto budget={budget} query={query} />
 
         {/* Cuando la cobertura es buena no desaparece: se queda en una línea. Que el
             usuario sepa que esto se mide —y que hoy sale bien— es la mitad de lo que
             hace creíble el aviso el día que salga mal. */}
-        {cobertura && !cobertura.prominent && <CoberturaLinea cobertura={cobertura} />}
+        {cobertura && !cobertura.prominent && (
+          <div className="rail-block">
+            <h2>Cobertura</h2>
+            <CoberturaLinea cobertura={cobertura} />
+          </div>
+        )}
 
-        <Readout
+        <div className="rail-block pro">
+          <h2>Métricas</h2>
+          <Readout
           items={[
             [duration(overview.p95_duration_ms), "Latencia p95"],
             [percent(overview.error_rate), "Ejecuciones con error"],
@@ -148,9 +159,11 @@ function Contenido() {
             ],
             [spanLabel(overview.observed_days), "Datos observados"],
           ]}
-        />
-      </section>
+          />
+        </div>
+      </aside>
 
+      <div className="diag-lista">
       {overview.findings.length === 0 ? (
         <NothingToFix
           aviso={
@@ -214,6 +227,7 @@ function Contenido() {
       )}
 
       <Apartados findings={overview.set_aside} query={query} currency={overview.currency} />
+      </div>
     </main>
   );
 }
@@ -231,19 +245,33 @@ const VISIBLES = 3;
 function ListaProblemas({ findings, query }: { findings: Finding[]; query: string }) {
   const tiempo = findings.filter((f) => !f.costs_money && !f.window_waste_tokens);
   const dinero = findings.filter((f) => !tiempo.includes(f));
-  const tarjeta = (f: Finding) => (
-    <FindingCard key={f.id} finding={f} href={`/problema${query}&id=${encodeURIComponent(f.id)}`} />
-  );
+  // El peso se compara con la misma cifra que enseña la tarjeta, y sólo entre las que
+  // tienen precio: tokens y dinero no van en la misma barra.
+  const importe = (f: Finding) =>
+    f.costs_money ? f.monthly_saving_usd ?? f.window_waste_usd : null;
+  const mayor = Math.max(0, ...dinero.map((f) => importe(f) ?? 0));
+  const tarjeta = (f: Finding, puesto?: number) => {
+    const valor = importe(f);
+    return (
+      <FindingCard
+        key={f.id}
+        finding={f}
+        href={`/problema${query}&id=${encodeURIComponent(f.id)}`}
+        rank={puesto}
+        share={valor !== null && mayor > 0 ? valor / mayor : undefined}
+      />
+    );
+  };
   const resto = dinero.slice(VISIBLES);
   return (
     <>
-      {dinero.slice(0, VISIBLES).map(tarjeta)}
+      {dinero.slice(0, VISIBLES).map((f, i) => tarjeta(f, i + 1))}
       {resto.length > 0 && (
         <details className="mas">
           <summary>
             {resto.length === 1 ? "Ver uno más" : `Ver ${resto.length} más`}
           </summary>
-          {resto.map(tarjeta)}
+          {resto.map((f, i) => tarjeta(f, VISIBLES + i + 1))}
         </details>
       )}
       {tiempo.length > 0 && (
@@ -253,7 +281,7 @@ function ListaProblemas({ findings, query }: { findings: Finding[]; query: strin
               ? "Y uno que no cuesta dinero, sólo tiempo"
               : `Y ${tiempo.length} que no cuestan dinero, sólo tiempo`}
           </summary>
-          {tiempo.map(tarjeta)}
+          {tiempo.map((f) => tarjeta(f))}
         </details>
       )}
     </>
@@ -269,18 +297,24 @@ function LineaPresupuesto({ budget, query }: { budget: Budget | null; query: str
   if (!budget) return null;
   if (budget.monthly_usd === null) {
     return (
-      <p className="budget-home muted">
-        <Link href={`/ajustes${query}`}>Ponle un presupuesto mensual</Link> y te avisamos
-        antes de pasarte.
-      </p>
+      <div className="rail-block">
+        <h2>Presupuesto</h2>
+        <p className="budget-home muted">
+          <Link href={`/ajustes${query}`}>Ponle un presupuesto mensual</Link> y te avisamos
+          antes de pasarte.
+        </p>
+      </div>
     );
   }
   const pct = Math.min(budget.ratio ?? 0, 1) * 100;
   return (
-    <div className={`budget-home ${budget.status}`}>
-      <p>{budget.headline}</p>
-      <div className="sbar budget" role="img" aria-label={`${Math.round(pct)} por ciento del presupuesto`}>
-        <i style={{ width: `${pct}%` }} />
+    <div className="rail-block">
+      <h2>Presupuesto</h2>
+      <div className={`budget-home ${budget.status}`}>
+        <p>{budget.headline}</p>
+        <div className="sbar budget" role="img" aria-label={`${Math.round(pct)} por ciento del presupuesto`}>
+          <i style={{ width: `${pct}%` }} />
+        </div>
       </div>
     </div>
   );
@@ -367,7 +401,7 @@ function exportarHallazgos(project: string, overview: Overview) {
  */
 export default function DiagnosticoPage() {
   return (
-    <Suspense fallback={<Cargando />}>
+    <Suspense fallback={<CargandoDiagnostico />}>
       <Contenido />
     </Suspense>
   );
