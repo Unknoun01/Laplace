@@ -2059,9 +2059,18 @@ cada uno deja su prueba en `test_auditoria_p1.py`, escrita como el ataque que er
   públicas al enviar, y una redirección no se sigue. En local sigue valiendo la propia
   máquina. Queda, anotada, la ventana entre resolver y conectar.
 * **`X-Forwarded-For` se creía siempre**, y el freno de intentos por IP no frenaba. Sólo
-  se cree a los proxies de `LAPLACE_TRUSTED_PROXIES` (IP, rango o nombre: en compose es
-  `web`, que es por donde entra la interfaz). Aceptar una invitación con una cuenta que ya
-  existe prueba una contraseña, y ahora lleva el mismo freno que entrar.
+  se cree a los proxies de `LAPLACE_TRUSTED_PROXIES` (IP, rango o nombre), vacío por
+  defecto. Se probó poner `web` en compose y **no vale**: levantado el stack, Next
+  reenvía la cabecera del navegador tal cual y no añade la IP real, así que un login con
+  «X-Forwarded-For: 6.6.6.6» quedaba auditado desde 6.6.6.6. Y sin creerla, todos los
+  usuarios llegaban con la IP de `web`: cinco fallos de cualquiera bloqueaban el login de
+  todos durante un cuarto de hora (también comprobado; pasaba ya antes de la auditoría).
+  La salida es una puerta delante de Next, `entrada` (Caddy, `deploy/Caddyfile`), que
+  reescribe la cabecera con la IP de la conexión; `web` deja de publicar su puerto y el
+  backend se fía de `web`. Probado con el stack levantado: la cabecera inventada se
+  descarta, y cinco fallos desde un cliente lo bloquean a él y no a otro. Aceptar una
+  invitación con una cuenta que ya existe prueba una contraseña, y ahora lleva el mismo
+  freno que entrar.
 
 La lectura de conjunto es la de siempre en este proyecto: la regla no se cumple porque se
 recuerde. La comprobación de rutas nuevas ya existía (D-097); faltaba la misma idea para

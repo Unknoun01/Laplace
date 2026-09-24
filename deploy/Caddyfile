@@ -1,0 +1,21 @@
+# La puerta de entrada de la interfaz en docker compose (D-128).
+#
+# Existe por una sola razón: que el backend sepa la IP de quien entra. Next reenvía el
+# X-Forwarded-For que mande el navegador tal cual y no añade la IP real, así que sin
+# nada delante esa cabecera la escribe el cliente, y el freno de intentos por IP o se
+# salta (si se cree la cabecera) o trata a todos los usuarios como uno (si no se cree).
+#
+# Aquí la cabecera se REESCRIBE con la IP de la conexión: lo que mande el navegador se
+# descarta. El backend sólo se la cree a `web` (LAPLACE_TRUSTED_PROXIES), y `web` ya no
+# publica su puerto, así que el único camino hasta Next es éste.
+#
+# En producción con HTTPS: cambia `:3000` por tu dominio y Caddy saca el certificado.
+# Si hay otro balanceador delante de Caddy, declara sus IPs con `trusted_proxies` en el
+# bloque global, o Caddy seguirá tomando la del balanceador como la del cliente.
+
+:3000 {
+	reverse_proxy web:3000 {
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+}

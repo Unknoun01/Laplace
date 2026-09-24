@@ -46,9 +46,10 @@ class Settings(BaseSettings):
     #: hasta `OTLP_EXPANSION` veces esto (ver `ingest/otlp.py`).
     max_body_mb: int = 32
     #: Proxies de los que se cree `X-Forwarded-For` y `X-Forwarded-Proto`, separados por
-    #: comas: IPs, rangos CIDR o nombres de host (`web` en docker compose). Vacío: no se
-    #: cree a nadie y cuenta la IP de la conexión. Sin esto, cualquiera ponía la cabecera
-    #: y se saltaba el freno de intentos por IP.
+    #: comas: IPs, rangos CIDR o nombres de host. Vacío: no se cree a nadie y cuenta la IP
+    #: de la conexión. Sin esto, cualquiera ponía la cabecera y se saltaba el freno de
+    #: intentos por IP. Next no vale como proxy de confianza por sí solo: reenvía la
+    #: cabecera del navegador sin tocarla. En compose va Caddy delante (deploy/Caddyfile).
     trusted_proxies: str = ""
 
     #: Aplica las migraciones de ClickHouse y Postgres al arrancar. En un despliegue

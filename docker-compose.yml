@@ -56,10 +56,11 @@ services:
       LAPLACE_CLICKHOUSE_DATABASE: laplace
       LAPLACE_POSTGRES_DSN: postgresql://laplace:laplace@postgres:5432/laplace
       LAPLACE_CORS_ORIGINS: http://localhost:3000
-      # La interfaz llega al backend a través de Next (contenedor `web`), así que la IP
-      # de quien entra viene en X-Forwarded-For. Sólo se cree a ese contenedor: sin esto,
-      # todos los usuarios compartirían la IP de `web` y el freno de intentos por IP.
-      # Si pones otro proxy delante (nginx, un balanceador), añádelo aquí.
+      # De qué proxies se cree X-Forwarded-For: de `web`, por donde entra la interfaz.
+      # Es seguro sólo porque delante de Next está `entrada` (Caddy), que REESCRIBE la
+      # cabecera con la IP real, y porque `web` no publica su puerto. Next por sí solo
+      # reenvía la cabecera del navegador tal cual: sin Caddy, creer a `web` era creer al
+      # cliente (comprobado, D-128). Si quitas `entrada`, deja esto vacío.
       LAPLACE_TRUSTED_PROXIES: "${LAPLACE_TRUSTED_PROXIES:-web}"
       # Tope de una petición, en MiB. Un lote OTLP normal son unos pocos megas.
       LAPLACE_MAX_BODY_MB: "${LAPLACE_MAX_BODY_MB:-32}"
@@ -103,10 +104,25 @@ services:
       # backend (ver `rewrites` en next.config.mjs). Así la interfaz no lleva ninguna
       # URL incrustada en el build y no hay CORS que abrir (D-069).
       LAPLACE_API_URL: http://backend:8000
-    ports:
-      - "3000:3000"
+    # Sin puerto publicado a propósito: a Next sólo se llega por `entrada`. Si Next fuera
+    # alcanzable directamente, cualquiera podría mandarle un X-Forwarded-For inventado
+    # que el backend, que se fía de `web`, se creería.
+    expose:
+      - "3000"
     depends_on:
       - backend
+
+  entrada:
+    # La puerta de la interfaz: reescribe X-Forwarded-For con la IP real para que el
+    # freno de intentos y la auditoría vean a cada usuario (ver deploy/Caddyfile).
+    image: caddy:2-alpine
+    container_name: laplace-entrada
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - web
 
 volumes:
   clickhouse-data:
