@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
+import { IBM_Plex_Mono, Inter } from "next/font/google";
 import { Suspense } from "react";
 import { TopBar } from "@/components/TopBar";
 import "./globals.css";
@@ -11,9 +11,10 @@ import "./globals.css";
  * nadie— pedía dos hojas de estilo a Google cada vez que se abría, y sin conexión se
  * pintaba con la del sistema.
  */
-const sans = IBM_Plex_Sans({
+// Inter para el texto, Plex Mono para las cifras (D-133).
+const sans = Inter({
   subsets: ["latin"],
-  weight: ["400", "500", "600"],
+  weight: ["400", "500", "600", "700"],
   variable: "--font-sans",
   display: "swap",
 });

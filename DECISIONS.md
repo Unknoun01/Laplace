@@ -2223,3 +2223,25 @@ que se tira, verde azulado para lo que se ahorra, IBM Plex), pero sus tokens no 
   llevaba a algún sitio.
 
 El resto de pantallas hereda paleta, escala y radios, pero conserva su maquetación.
+
+## 2026-09-24 — Rediseño visual: cristal y dos temas
+
+### D-133 — Glassmorphism, «Rose Gold & Amanecer» en claro y «Tech Abisal» en oscuro
+Sustituye la paleta de D-031/D-132 (no las escalas). Las clases y la maquetación no
+cambian: cambia de dónde salen los colores.
+
+* **Nueve variables base por tema** (`--bg-gradient-*`, `--text`, `--muted`, `--glass`,
+  `--line`, `--accent-1..3`, `--glow-color`), copiadas tal cual del encargo. El claro va
+  por defecto; el oscuro sigue a `prefers-color-scheme` y a `data-theme`, así que el
+  selector de Ajustes (D-125) funciona igual que antes.
+* **Los tokens de siempre son alias** (`--ink` → `--text`, `--panel` → `--glass`,
+  `--hair` → `--line`, `--iris`/`--teal`/`--amber` → acentos 1/2/3) y los tintes de
+  estado se derivan con `color-mix`. Ningún componente tuvo que cambiar de clase.
+* **Contraste.** En claro los acentos puros dan unos 2:1 sobre el cristal y `--muted`
+  3,9:1: valen para rellenos —barras, bordes, resplandores—, no para letra. Como texto se
+  oscurecen hacia `--text` hasta pasar AA (D-132). En oscuro se usan puros.
+* **Cristal.** Héroe, tarjetas, carril, estados y paneles: fondo `--glass`,
+  `backdrop-filter: blur(15px)`, borde `--line` y radios 12/18/24. Detrás, dos
+  resplandores (`filter: blur(55px)`) como pseudo-elementos de `.shell`, sin marcado nuevo.
+* **Tipografía.** Inter para el texto; IBM Plex Mono se queda para las cifras. La cifra del
+  héroe sube a 88 px (`--fs-hero`) con tracking negativo y baja con el ancho.

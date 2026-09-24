@@ -1,28 +1,143 @@
 /* Sistema de diseño de Laplace.
  *
- * Los tokens y las clases base salen del mock de referencia y son cerrados: ni otra
- * paleta, ni otra tipografía, ni otro radio. D-132 los reajustó para contraste AA y
- * añadió las escalas (`--fs-*`, `--sp-*`, `--r-*`); lo nuevo se escribe con ellas, sin
- * píxeles sueltos. Lo añadido aquí (explorador, estados, panel de span) usa exactamente
- * el mismo lenguaje.
+ * Glassmorphism con dos temas (D-133): claro «Rose Gold & Amanecer» por defecto y
+ * oscuro «Tech Abisal». Las variables base de cada tema son las nueve de abajo y se
+ * copian tal cual; todo lo demás —los tokens de siempre (`--ink`, `--panel`, `--amber`…)
+ * y los tintes de estado— se deriva de ellas, así que las clases no cambian.
+ *
+ * Siguen valiendo las escalas de D-132 (`--fs-*`, `--sp-*`, `--r-*`): lo nuevo se
+ * escribe con ellas, sin píxeles sueltos.
  */
 
 :root {
-  --ground: #0b1017;
-  --panel: #121a24;
-  --panel-2: #18222e;
-  --hair: #243242;
-  --hair-soft: #1a2532;
-  --ink: #e8eef6;
-  --ink-2: #a8b7c9;
-  --ink-3: #8496ab;
-  --iris: #8299f7;
-  --amber: #eaab43;
+  /* MODO CLARO: Rose Gold & Amanecer (Por defecto) */
+  --bg-gradient-start: #fff0f0; /* Rosa amanecer suave */
+  --bg-gradient-mid: #ffe4e1;   /* Rose gold bruma */
+  --bg-gradient-end: #fdf5e6;   /* Destello cálido */
+  --text: #2d2424;              /* Gris cálido oscuro para legibilidad */
+  --muted: #8b7373;             /* Texto secundario cálido */
+  --glass: rgba(255, 255, 255, 0.45); /* Cristal esmerilado blanco */
+  --line: rgba(255, 255, 255, 0.8);   /* Bordes definidos para contraste */
+  --accent-1: #c07c7c;          /* Rose Gold principal */
+  --accent-2: #ff9e7d;          /* Coral amanecer */
+  --accent-3: #d4af37;          /* Dorado suave */
+  --glow-color: rgba(255, 158, 125, 0.25); /* Resplandor coral */
+
+  /* Derivados del claro. Los acentos puros dan 2:1 sobre el cristal: sirven para
+     rellenos (barras, bordes, resplandores), no para letra. Como texto van oscurecidos
+     hacia `--text` hasta pasar AA, igual que `--muted` (D-132, D-133). */
+  --glass-strong: rgba(255, 250, 249, 0.88);
+  --line-soft: rgba(255, 255, 255, 0.55);
+  --line-strong: rgba(192, 124, 124, 0.35);
+  --ink-2: color-mix(in srgb, var(--text) 55%, var(--muted));
+  --ink-3: color-mix(in srgb, var(--muted) 78%, var(--text));
+  --ink-4: var(--muted);
+  --iris: color-mix(in srgb, var(--accent-1) 72%, var(--text));
+  --teal: color-mix(in srgb, var(--accent-2) 62%, #5a1a08);
+  --amber: color-mix(in srgb, var(--accent-3) 58%, #3a2400);
+  --rose: #b93344;
+  --rose-ink: #9a2a37;
+  --on-iris: var(--text);
+  --shadow: 0 10px 30px rgba(192, 124, 124, 0.14);
+  --flash: rgba(255, 158, 125, 0.18);
+  color-scheme: light;
+}
+
+/* MODO OSCURO: Tech Glass original. Sigue al sistema salvo que se haya elegido un tema
+   en Ajustes, que se guarda en `data-theme` y manda en los dos sentidos (D-125). */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg-gradient-start: #182c55;
+    --bg-gradient-mid: #09111d;
+    --bg-gradient-end: #060a10;
+    --text: #eef4ff;
+    --muted: #91a1b5;
+    --glass: rgba(255, 255, 255, 0.04);
+    --line: rgba(255, 255, 255, 0.09);
+    --accent-1: #8b87ff;        /* Violeta */
+    --accent-2: #5de0cc;        /* Cian */
+    --accent-3: #f4bd61;        /* Ámbar */
+    --glow-color: rgba(118, 111, 255, 0.15); /* Resplandor violeta */
+
+    --glass-strong: rgba(12, 20, 34, 0.92);
+    --line-soft: rgba(255, 255, 255, 0.06);
+    --line-strong: rgba(255, 255, 255, 0.18);
+    --ink-2: color-mix(in srgb, var(--text) 60%, var(--muted));
+    --ink-3: var(--muted);
+    --ink-4: color-mix(in srgb, var(--muted) 60%, var(--bg-gradient-mid));
+    --iris: var(--accent-1);
+    --teal: var(--accent-2);
+    --amber: var(--accent-3);
+    --rose: #ee7d87;
+    --rose-ink: #f0b8bd;
+    --on-iris: #0b1020;
+    --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+    --flash: rgba(93, 224, 204, 0.16);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg-gradient-start: #182c55;
+  --bg-gradient-mid: #09111d;
+  --bg-gradient-end: #060a10;
+  --text: #eef4ff;
+  --muted: #91a1b5;
+  --glass: rgba(255, 255, 255, 0.04);
+  --line: rgba(255, 255, 255, 0.09);
+  --accent-1: #8b87ff;
+  --accent-2: #5de0cc;
+  --accent-3: #f4bd61;
+  --glow-color: rgba(118, 111, 255, 0.15);
+
+  --glass-strong: rgba(12, 20, 34, 0.92);
+  --line-soft: rgba(255, 255, 255, 0.06);
+  --line-strong: rgba(255, 255, 255, 0.18);
+  --ink-2: color-mix(in srgb, var(--text) 60%, var(--muted));
+  --ink-3: var(--muted);
+  --ink-4: color-mix(in srgb, var(--muted) 60%, var(--bg-gradient-mid));
+  --iris: var(--accent-1);
+  --teal: var(--accent-2);
+  --amber: var(--accent-3);
   --rose: #ee7d87;
-  --teal: #52bcab;
-  --chain: #5a6c83;
-  /* Escalas (D-132). Tipografía en pasos enteros, espaciado sobre 4 px y dos radios:
-     nada de 12,5 ni 13,5 px, que es como se llegó a veintiún tamaños distintos. */
+  --rose-ink: #f0b8bd;
+  --on-iris: #0b1020;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  --flash: rgba(93, 224, 204, 0.16);
+  color-scheme: dark;
+}
+
+/* Los tokens de siempre, ahora como alias de los de arriba: valen para los dos temas y
+   ninguna clase tuvo que cambiar de nombre. */
+:root {
+  --ground: var(--bg-gradient-mid);
+  --panel: var(--glass);
+  --panel-2: color-mix(in srgb, var(--glass), var(--text) 5%);
+  --hair: var(--line);
+  --hair-soft: var(--line-soft);
+  --hair-strong: var(--line-strong);
+  --ink: var(--text);
+  --dim: var(--ink-2);
+  --chain: var(--ink-4);
+  --violet: var(--accent-1);
+  --blue: color-mix(in srgb, var(--accent-1) 50%, var(--accent-2));
+  --iris-hover: color-mix(in srgb, var(--accent-1) 85%, var(--accent-2));
+  /* Tintes de estado: el color sobre el cristal, sin hex por tema. */
+  --amber-line: color-mix(in srgb, var(--accent-3) 45%, transparent);
+  --amber-bg: color-mix(in srgb, var(--accent-3) 12%, transparent);
+  --teal-line: color-mix(in srgb, var(--accent-2) 45%, transparent);
+  --teal-bg: color-mix(in srgb, var(--accent-2) 12%, transparent);
+  --iris-line: color-mix(in srgb, var(--accent-1) 45%, transparent);
+  --iris-bg: color-mix(in srgb, var(--accent-1) 12%, transparent);
+  --violet-line: var(--iris-line);
+  --violet-bg: var(--iris-bg);
+  --rose-line: color-mix(in srgb, var(--rose) 40%, transparent);
+  --rose-bg: color-mix(in srgb, var(--rose) 10%, transparent);
+  --rose-bg-hover: color-mix(in srgb, var(--rose) 16%, transparent);
+  --code-bg: color-mix(in srgb, var(--bg-gradient-end) 70%, transparent);
+  --code-ink: var(--ink-2);
+  --blur: blur(15px);
+
+  /* Escalas (D-132). Tipografía en pasos enteros, espaciado sobre 4 px. */
   --fs-2xs: 11px;
   --fs-xs: 12px;
   --fs-sm: 13px;
@@ -34,6 +149,7 @@
   --fs-3xl: 32px;
   --fs-4xl: 40px;
   --fs-display: 56px;
+  --fs-hero: 88px;
   --sp-1: 4px;
   --sp-2: 8px;
   --sp-3: 12px;
@@ -43,116 +159,15 @@
   --sp-8: 32px;
   --sp-10: 40px;
   --sp-12: 48px;
-  --r-sm: 4px;
-  --r: 6px;
+  /* Radios del cristal: 12 para controles y bloques, 18 para tarjetas, 24 para el
+     héroe. `--r-sm` queda para barras y píldoras pequeñas. */
+  --r-sm: 6px;
+  --r: 12px;
+  --r-lg: 18px;
+  --r-xl: 24px;
   --r-pill: 999px;
   --mono: var(--font-mono), "IBM Plex Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
-  --sans: var(--font-sans), "IBM Plex Sans", system-ui, -apple-system, sans-serif;
-
-  /* Derivados: bordes y fondos tintados de cada color de estado. Tokens y no hex
-     sueltos para que el tema claro sea redefinir la paleta y nada más (D-125). */
-  --dim: var(--ink-2);
-  --ink-4: #5f7187;
-  --hair-strong: #34485e;
-  --amber-line: #5c4620;
-  --amber-bg: #1c160a;
-  --teal-line: #2a4e48;
-  --teal-bg: #0f1d1b;
-  --rose-line: #5a2f36;
-  --rose-bg: #1d0f11;
-  --rose-bg-hover: #2a1418;
-  --rose-ink: #f0b8bd;
-  --iris-line: #33407a;
-  --iris-bg: #111631;
-  --iris-hover: #98abf9;
-  --on-iris: #0b1020;
-  --violet: #6b5fa8;
-  --violet-line: #3a3350;
-  --violet-bg: #171429;
-  --blue: #4a86b8;
-  --code-bg: #0a0f15;
-  --code-ink: #c6d5e6;
-  --flash: rgba(79, 179, 164, 0.16);
-  color-scheme: dark;
-}
-
-/* Tema claro (D-125). Sigue al sistema salvo que se haya elegido uno en Ajustes, que se
-   guarda en `data-theme` y manda en los dos sentidos. */
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) {
-  --ground: #f6f7f9;
-  --panel: #ffffff;
-  --panel-2: #eef1f5;
-  --hair: #dce2e9;
-  --hair-soft: #e8ecf1;
-  --ink: #131c26;
-  --ink-2: #3a4857;
-  --ink-3: #586878;
-  --ink-4: #7d8a98;
-  --iris: #3f58cf;
-  --amber: #935d06;
-  --rose: #b93344;
-  --teal: #17776a;
-  --chain: #8795a6;
-  --hair-strong: #c2cbd6;
-  --amber-line: #e6c98f;
-  --amber-bg: #fdf6e6;
-  --teal-line: #a7d6cd;
-  --teal-bg: #eaf6f3;
-  --rose-line: #eeb6be;
-  --rose-bg: #fdeef0;
-  --rose-bg-hover: #fae0e4;
-  --rose-ink: #9a2a37;
-  --iris-line: #b8c3f2;
-  --iris-bg: #eef1fd;
-  --iris-hover: #334bba;
-  --on-iris: #ffffff;
-  --violet: #6b5fa8;
-  --violet-line: #d3cdee;
-  --violet-bg: #f4f1fc;
-  --blue: #3772a8;
-  --code-bg: #f2f4f7;
-  --code-ink: #1d2834;
-  --flash: rgba(27, 125, 110, 0.12);
-  color-scheme: light;
-  }
-}
-:root[data-theme="light"] {
-  --ground: #f6f7f9;
-  --panel: #ffffff;
-  --panel-2: #eef1f5;
-  --hair: #dce2e9;
-  --hair-soft: #e8ecf1;
-  --ink: #131c26;
-  --ink-2: #3a4857;
-  --ink-3: #586878;
-  --ink-4: #7d8a98;
-  --iris: #3f58cf;
-  --amber: #935d06;
-  --rose: #b93344;
-  --teal: #17776a;
-  --chain: #8795a6;
-  --hair-strong: #c2cbd6;
-  --amber-line: #e6c98f;
-  --amber-bg: #fdf6e6;
-  --teal-line: #a7d6cd;
-  --teal-bg: #eaf6f3;
-  --rose-line: #eeb6be;
-  --rose-bg: #fdeef0;
-  --rose-bg-hover: #fae0e4;
-  --rose-ink: #9a2a37;
-  --iris-line: #b8c3f2;
-  --iris-bg: #eef1fd;
-  --iris-hover: #334bba;
-  --on-iris: #ffffff;
-  --violet: #6b5fa8;
-  --violet-line: #d3cdee;
-  --violet-bg: #f4f1fc;
-  --blue: #3772a8;
-  --code-bg: #f2f4f7;
-  --code-ink: #1d2834;
-  --flash: rgba(27, 125, 110, 0.12);
-  color-scheme: light;
+  --sans: var(--font-sans), "Inter", system-ui, -apple-system, sans-serif;
 }
 
 
@@ -165,8 +180,11 @@ body {
   padding: 0;
 }
 body {
-  background: var(--ground);
-  color: var(--ink);
+  min-height: 100vh;
+  background: radial-gradient(circle at 20% 0, var(--bg-gradient-start) 0, var(--bg-gradient-mid) 35%, var(--bg-gradient-end) 100%);
+  background-attachment: fixed;
+  background-color: var(--bg-gradient-mid);
+  color: var(--text);
   font-family: var(--sans);
   font-size: var(--fs-base);
   line-height: 1.5;
@@ -229,7 +247,9 @@ body[data-mode="pro"] .simple-only {
   border-bottom: 1px solid var(--hair);
   position: sticky;
   top: 0;
-  background: var(--ground);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
   z-index: 20;
 }
 .mark {
@@ -292,7 +312,7 @@ body[data-mode="pro"] .simple-only {
 }
 .ctx.proyecto option,
 .pick .ctx option {
-  background: var(--panel);
+  background: var(--ground);
   color: var(--ink);
 }
 .switch {
@@ -405,8 +425,11 @@ body[data-mode="pro"] .simple-only {
 
 /* ---------- héroe ---------- */
 .hero {
-  padding: 34px 0 28px;
-  border-bottom: 1px solid var(--hair);
+  margin-top: var(--sp-6);
+  padding: var(--sp-8);
+  background: var(--glass);
+  border: 1px solid var(--line);
+  border-radius: var(--r-xl);
 }
 .hero h1 {
   font-size: var(--fs-base);
@@ -424,7 +447,7 @@ body[data-mode="pro"] .simple-only {
   font-family: var(--mono);
   font-size: var(--fs-display);
   font-weight: 500;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.05em;
   line-height: 0.95;
 }
 .big.good {
@@ -475,8 +498,8 @@ body[data-mode="pro"] .simple-only {
   background: var(--hair-strong);
 }
 .gapbar .save {
-  background: var(--amber);
-  opacity: 0.85;
+  background: linear-gradient(90deg, var(--accent-3), color-mix(in srgb, var(--accent-3) 70%, var(--accent-2)));
+  opacity: 0.9;
 }
 .gaplbl {
   display: flex;
@@ -587,15 +610,15 @@ body[data-mode="pro"] .simple-only {
   text-decoration: none;
   background: var(--panel);
   border: 1px solid var(--hair);
-  border-left: 2px solid var(--amber);
-  border-radius: var(--r);
+  border-left: 2px solid var(--accent-3);
+  border-radius: var(--r-lg);
   padding: 18px 20px;
   margin-bottom: 12px;
 }
 .card:hover {
   background: var(--panel-2);
   border-color: var(--hair-strong);
-  border-left-color: var(--amber);
+  border-left-color: var(--accent-3);
 }
 .card.low {
   border-left-color: var(--hair-strong);
@@ -1112,14 +1135,14 @@ code {
   border-color: var(--hair-strong);
 }
 .btn.primary {
-  background: var(--iris);
-  border-color: var(--iris);
+  background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+  border-color: transparent;
   color: var(--on-iris);
   font-weight: 500;
 }
 .btn.primary:hover {
-  background: var(--iris-hover);
-  border-color: var(--iris-hover);
+  background: linear-gradient(135deg, var(--iris-hover), var(--accent-2));
+  border-color: transparent;
 }
 .btn.small {
   font-size: var(--fs-sm);
@@ -1302,9 +1325,9 @@ code {
 }
 .pane {
   border: 1px solid var(--hair);
-  border-radius: var(--r);
+  border-radius: var(--r-lg);
   overflow: hidden;
-  background: var(--ground);
+  background: var(--glass);
 }
 .pane > header {
   display: flex;
@@ -1420,7 +1443,7 @@ code {
 /* ---------- estados ---------- */
 .state {
   border: 1px solid var(--hair);
-  border-radius: var(--r);
+  border-radius: var(--r-lg);
   background: var(--panel);
   padding: 40px 28px;
   margin: 32px 0;
@@ -2297,7 +2320,7 @@ tr.nueva td {
 .sbar i {
   display: block;
   height: 100%;
-  background: var(--teal);
+  background: var(--accent-2);
 }
 .senales li.malo .sbar i,
 .senales li.flojo .sbar i {
@@ -2861,14 +2884,14 @@ ol.pasos .cuerpo pre {
   right: 0;
   top: 38px;
   min-width: 230px;
-  background: var(--panel);
+  background: var(--glass-strong);
   border: 1px solid var(--hair);
   border-radius: var(--r);
   padding: 10px;
   display: grid;
   gap: 4px;
   z-index: 30;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow);
 }
 .usuario-menu p {
   margin: 0 0 6px;
@@ -2942,7 +2965,8 @@ fieldset.sin-marco:disabled {
 }
 .diag > .hero {
   grid-area: hero;
-  padding: var(--sp-8) 0 var(--sp-8);
+  margin-top: var(--sp-8);
+  padding: var(--sp-8) var(--sp-8) var(--sp-8);
 }
 .diag > .diag-lista {
   grid-area: lista;
@@ -2952,7 +2976,8 @@ fieldset.sin-marco:disabled {
   grid-area: rail;
   position: sticky;
   top: 70px;
-  padding-top: var(--sp-8);
+  /* Pegado a 70 px, con esto el primer bloque queda a la altura del héroe. */
+  padding-top: var(--sp-4);
   display: grid;
   gap: var(--sp-3);
 }
@@ -2975,13 +3000,18 @@ fieldset.sin-marco:disabled {
 .diag .pair {
   gap: var(--sp-8);
 }
+.diag .big {
+  font-size: clamp(var(--fs-4xl), 6.2vw, var(--fs-hero));
+  letter-spacing: -0.055em;
+  line-height: 0.9;
+}
 .diag .pair-lbl {
-  margin-top: var(--sp-2);
+  margin-top: var(--sp-3);
   color: var(--ink-3);
 }
 .diag .gapbar {
   height: 8px;
-  margin-top: var(--sp-6);
+  margin-top: var(--sp-8);
   border-radius: var(--r-pill);
   gap: 2px;
   background: transparent;
@@ -2996,9 +3026,9 @@ fieldset.sin-marco:disabled {
 /* Carril de contexto: bloques con su nombre, del mismo peso entre sí. */
 .rail-block {
   background: var(--panel);
-  border: 1px solid var(--hair-soft);
-  border-radius: var(--r);
-  padding: var(--sp-4);
+  border: 1px solid var(--hair);
+  border-radius: var(--r-lg);
+  padding: var(--sp-5);
 }
 .rail-block > h2 {
   margin: 0 0 var(--sp-2);
@@ -3051,8 +3081,8 @@ fieldset.sin-marco:disabled {
   padding: var(--sp-5) var(--sp-6) var(--sp-5) var(--sp-5);
   margin-bottom: var(--sp-3);
   border: 1px solid var(--hair);
-  border-radius: var(--r);
-  transition: border-color 0.15s, background 0.15s, transform 0.15s;
+  border-radius: var(--r-lg);
+  transition: border-color 0.15s, background 0.15s, transform 0.15s, box-shadow 0.15s;
 }
 .diag .card > :not(.rank) {
   grid-column: 2;
@@ -3060,6 +3090,7 @@ fieldset.sin-marco:disabled {
 .diag .card:hover {
   border-color: var(--hair-strong);
   background: var(--panel-2);
+  box-shadow: var(--shadow);
 }
 @media (prefers-reduced-motion: no-preference) {
   .diag .card:hover {
@@ -3116,7 +3147,7 @@ fieldset.sin-marco:disabled {
   height: 100%;
   min-width: 4px;
   border-radius: var(--r-pill);
-  background: var(--amber);
+  background: linear-gradient(90deg, var(--accent-1), var(--accent-3));
 }
 .diag .card footer {
   margin-top: var(--sp-3);
@@ -3140,6 +3171,7 @@ fieldset.sin-marco:disabled {
   }
   .diag > .hero {
     padding-bottom: var(--sp-6);
+    margin-bottom: var(--sp-4);
   }
   .diag-rail {
     position: static;
@@ -3151,8 +3183,8 @@ fieldset.sin-marco:disabled {
   .diag .hero h1 {
     font-size: var(--fs-xl);
   }
-  .diag .big {
-    font-size: var(--fs-4xl);
+  .diag > .hero {
+    padding: var(--sp-6) var(--sp-5);
   }
   .diag .card {
     grid-template-columns: minmax(0, 1fr);
@@ -3174,4 +3206,59 @@ fieldset.sin-marco:disabled {
   .diag .card .price small {
     text-align: left;
   }
+}
+
+/* ---------------------------------------------------------------------------
+   Cristal (D-133). Todo contenedor lleva el cristal esmerilado: fondo `--glass`, borde
+   `--line` y el desenfoque de lo que tiene detrás. Detrás de la página, dos
+   resplandores ambientales —amanecer coral en claro, violeta en oscuro— que el cristal
+   difumina.
+   --------------------------------------------------------------------------- */
+.hero,
+.card,
+.rail-block,
+.state,
+.pane,
+.verdict,
+.mcard,
+.cobertura,
+.auth-card,
+.diff,
+.fuente,
+.live,
+.caveats,
+.usuario-menu {
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+}
+body {
+  overflow-x: clip;
+}
+.shell {
+  position: relative;
+  isolation: isolate;
+}
+.shell::before,
+.shell::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: 50%;
+  background: var(--glow-color);
+  filter: blur(55px);
+}
+/* Uno detrás del héroe y otro, menor, detrás del carril de contexto. */
+.shell::before {
+  top: 90px;
+  left: 4%;
+  width: min(520px, 60%);
+  height: 320px;
+}
+.shell::after {
+  top: 140px;
+  right: 6%;
+  width: min(300px, 40%);
+  height: 260px;
+  background: color-mix(in srgb, var(--glow-color), var(--accent-3) 12%);
 }
