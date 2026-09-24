@@ -171,18 +171,18 @@ def preparar_cuentas(app: FastAPI, settings: Settings) -> None:
     """
     import secrets
 
-    from .cuentas import Frenos
+    from .cuentas import FrenosEnBase
     from .cuentas import build as build_cuentas
 
-    # Los frenos no se rehacen si esto se reintenta: se perderían los intentos contados.
-    if getattr(app.state, "frenos", None) is None:
-        app.state.frenos = Frenos()
     app.state.setup_token = ""
     app.state.cuentas = build_cuentas(settings) if settings.auth_enforced else None
     if app.state.cuentas is None:
         return
     try:
         app.state.cuentas.migrate()
+        # Con base de cuentas, los intentos se cuentan en ella: todos los procesos ven
+        # los mismos (D-130). Hasta aquí seguía el freno en memoria del arranque.
+        app.state.frenos = FrenosEnBase(app.state.cuentas)
         if app.state.cuentas.hay_usuarios():
             return
     except Exception:  # noqa: BLE001

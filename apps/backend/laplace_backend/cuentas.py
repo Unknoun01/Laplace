@@ -46,6 +46,10 @@ logger = logging.getLogger("laplace.cuentas")
 ROLES = ("lector", "miembro", "admin", "propietario")
 
 COOKIE = "laplace_session"
+#: La clave de API de quien entra a la interfaz con clave y no con cuenta (D-130). En una
+#: cookie `httpOnly` y no en `localStorage`: JavaScript no puede leerla, así que un fallo
+#: de XSS no se lleva una credencial que no caduca.
+COOKIE_CLAVE = "laplace_key"
 #: La cabecera que toda escritura con cookie tiene que traer (ver la cabecera del módulo).
 CABECERA_CSRF = "x-laplace"
 DURACION_SESION = timedelta(days=30)
@@ -140,9 +144,9 @@ def normalizar_email(email: str) -> str:
 class Frenos:
     """Intentos fallidos de entrar, por email y por IP, en memoria (D-127).
 
-    En memoria y no en la base: se pierden al reiniciar, y está bien, porque su trabajo
-    es que probar contraseñas a mano sea inútil, no llevar un registro. El registro lo
-    lleva la auditoría.
+    Es el freno de un solo proceso: el de las pruebas y el de antes de que haya base de
+    cuentas. Con cuentas se usa `FrenosEnBase` (D-130), porque en memoria cada worker
+    llevaba su cuenta y con cuatro el tope de cinco intentos era de veinte.
     """
 
     def __init__(self, maximo: int = 5, ventana: float = 900.0) -> None:
@@ -169,6 +173,43 @@ class Frenos:
         with self._lock:
             for c in claves:
                 self._fallos.pop(c, None)
+
+
+class FrenosEnBase:
+    """Los mismos frenos que `Frenos`, contados en la base de cuentas (D-130).
+
+    Todos los procesos de la instalación ven los mismos intentos, y sobreviven a un
+    reinicio: reiniciar ya no es una forma de volver a tener cinco intentos. Mismos
+    métodos que `Frenos`, así que las rutas no distinguen cuál tienen.
+    """
+
+    def __init__(self, cuentas: CuentasStore, maximo: int = 5, ventana: float = 900.0) -> None:
+        self._cuentas = cuentas
+        self._maximo = maximo
+        self._ventana = timedelta(seconds=ventana)
+
+    def bloqueado(self, *claves: str) -> bool:
+        if not claves:
+            return False
+        desde = _iso(_ahora() - self._ventana)
+        marcas = ", ".join("?" for _ in claves)
+        filas = self._cuentas._filas(
+            f"SELECT clave, COUNT(*) FROM login_failures "
+            f"WHERE clave IN ({marcas}) AND at > ? GROUP BY clave",
+            (*claves, desde),
+        )
+        return any(int(n) >= self._maximo for _, n in filas)
+
+    def fallo(self, *claves: str) -> None:
+        ahora = _iso(_ahora())
+        for c in claves:
+            self._cuentas._ejecutar(
+                "INSERT INTO login_failures (clave, at) VALUES (?, ?)", (c, ahora)
+            )
+
+    def limpiar(self, *claves: str) -> None:
+        for c in claves:
+            self._cuentas._ejecutar("DELETE FROM login_failures WHERE clave = ?", (c,))
 
 
 # ---------------------------------------------------------------------------------
@@ -241,6 +282,13 @@ CREATE TABLE IF NOT EXISTS audit_log (
     ip          TEXT NOT NULL DEFAULT '',
     at          TEXT NOT NULL
 );
+-- Intentos fallidos de entrar, por email y por IP (D-130). En la base y no en memoria:
+-- con varios procesos, cada uno llevaba su cuenta y el tope se multiplicaba por ellos.
+CREATE TABLE IF NOT EXISTS login_failures (
+    clave  TEXT NOT NULL,
+    at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS login_failures_idx ON login_failures (clave, at);
 CREATE INDEX IF NOT EXISTS audit_org_idx ON audit_log (org_id, at);
 CREATE INDEX IF NOT EXISTS sessions_user_idx ON sessions (user_id);
 """
@@ -534,7 +582,10 @@ class CuentasStore:
         invitaciones = self._ejecutar(
             "DELETE FROM invitations WHERE accepted_at IS NULL AND expires_at <= ?", (ahora,)
         )
-        return sesiones + invitaciones
+        # Los intentos fallidos sólo cuentan un cuarto de hora; un día de margen sobra.
+        viejos = _iso(_ahora() - timedelta(days=1))
+        intentos = self._ejecutar("DELETE FROM login_failures WHERE at <= ?", (viejos,))
+        return sesiones + invitaciones + intentos
 
     def invitaciones(self, org_id: str) -> list[dict[str, str]]:
         filas = self._filas(

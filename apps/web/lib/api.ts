@@ -37,43 +37,61 @@ const API_URL =
   typeof window === "undefined" ? (process.env.LAPLACE_API_URL ?? "http://localhost:8000") : "";
 
 /**
- * La clave de API, si esta instalación pide una.
+ * Entrar con clave de API, para quien no tiene cuenta (D-130).
  *
- * Vive en `localStorage` y no en una cookie por una razón concreta: en modo local no
- * hay clave ninguna y la interfaz es la misma, así que meter sesiones y cookies en el
- * camino habría convertido `laplace ui` —un proceso de Python en un portátil— en algo
- * con login. Lo que hay es más humilde y suficiente: si el backend contesta 401, la
- * pantalla pide la clave y se guarda en el navegador de quien la escribió (D-097).
+ * La clave se manda una vez al backend, que la comprueba y la deja en una cookie
+ * `httpOnly`: la interfaz no la guarda en ningún sitio que JavaScript pueda leer. Antes
+ * vivía en `localStorage` y viajaba en cada petición; cualquier XSS se la llevaba, y una
+ * clave de API no caduca como una sesión.
  */
-const CLAVE = "laplace.api_key";
-
-export function getApiKey(): string {
-  if (typeof window === "undefined") return "";
-  try {
-    return window.localStorage.getItem(CLAVE) ?? "";
-  } catch {
-    return "";
-  }
+export async function entrarConClave(clave: string): Promise<void> {
+  await send<{ ok: boolean }>("/api/auth/key", "POST", { key: clave.trim() });
 }
 
-export function setApiKey(valor: string): void {
-  try {
-    if (valor) window.localStorage.setItem(CLAVE, valor.trim());
-    else window.localStorage.removeItem(CLAVE);
-  } catch {
-    /* navegador con almacenamiento bloqueado: la clave dura lo que la pestaña */
-  }
+/** Deja de usar la clave en este navegador. */
+export async function olvidarClave(): Promise<void> {
+  await send<{ ok: boolean }>("/api/auth/key", "DELETE");
 }
 
-/** Cabeceras de una petición. La clave va donde dice el estándar, nunca en la URL. */
+/**
+ * Los navegadores que ya tenían la clave en `localStorage` la pasan a la cookie una sola
+ * vez y la borran de ahí. Si la clave ya no vale, se borra igual: no hay razón para
+ * seguir guardando en claro una credencial que el backend rechaza.
+ */
+const CLAVE_ANTIGUA = "laplace.api_key";
+let migracion: Promise<void> | null = null;
+
+function migrarClaveAntigua(): Promise<void> {
+  if (typeof window === "undefined") return Promise.resolve();
+  if (migracion) return migracion;
+  let antigua = "";
+  try {
+    antigua = window.localStorage.getItem(CLAVE_ANTIGUA) ?? "";
+    window.localStorage.removeItem(CLAVE_ANTIGUA);
+  } catch {
+    /* almacenamiento bloqueado: no hay nada que migrar */
+  }
+  migracion = antigua
+    ? fetch(new URL("/api/auth/key", API_URL || window.location.origin), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Laplace": "1" },
+        body: JSON.stringify({ key: antigua }),
+        cache: "no-store",
+      }).then(
+        () => undefined,
+        () => undefined,
+      )
+    : Promise.resolve();
+  return migracion;
+}
+
+/** Cabeceras de una petición. La credencial va en cookie; aquí sólo lo anti-CSRF. */
 function cabeceras(extra?: Record<string, string>): Record<string, string> {
-  const clave = getApiKey();
   return {
     ...(extra ?? {}),
-    // Toda petición la lleva: el backend la exige en las escrituras con sesión, y un
+    // Toda petición la lleva: el backend la exige en las escrituras con cookie, y un
     // formulario de otro sitio no puede ponerla sin pasar por CORS (D-127).
     "X-Laplace": "1",
-    ...(clave ? { Authorization: `Bearer ${clave}` } : {}),
   };
 }
 
@@ -89,6 +107,7 @@ export class ApiError extends Error {
 type Params = Record<string, string | number | undefined>;
 
 async function get<T>(path: string, params?: Params): Promise<T> {
+  await migrarClaveAntigua();
   const url = new URL(path, API_URL || window.location.origin);
   for (const [key, value] of Object.entries(params ?? {})) {
     if (value !== undefined && value !== "") url.searchParams.set(key, String(value));
@@ -210,6 +229,7 @@ export function windowStart(days: number): string {
 // ---------------------------------------------------------------------------------
 
 async function send<T>(path: string, method: string, body?: unknown): Promise<T> {
+  if (path !== "/api/auth/key") await migrarClaveAntigua();
   const url = new URL(path, API_URL || window.location.origin);
   const response = await fetch(url, {
     method,

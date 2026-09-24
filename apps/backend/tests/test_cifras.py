@@ -18,7 +18,9 @@ esté bonito, es que no vuelva a haber dos.
 
 from __future__ import annotations
 
+import importlib
 import inspect
+import pkgutil
 import re
 from pathlib import Path
 
@@ -74,7 +76,17 @@ def test_una_cifra_de_dinero_nunca_lleva_punto_decimal():
 
 
 #: Los módulos que escriben frases con cifras dentro para que las lea una persona.
-MODULOS_CON_TEXTO = (insights, alerts, panel, prompts)
+#: `insights` es un paquete (D-130): se miran todos sus módulos, no sólo `__init__`, que
+#: no tiene código y dejaría al guardia sin mirar ninguna regla.
+MODULOS_CON_TEXTO = (
+    *(
+        importlib.import_module(f"{insights.__name__}.{m.name}")
+        for m in pkgutil.iter_modules(insights.__path__)
+    ),
+    alerts,
+    panel,
+    prompts,
+)
 
 
 def test_nadie_mas_formatea_dinero_por_su_cuenta():

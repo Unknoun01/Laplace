@@ -22,6 +22,7 @@ sitio —SQLite en local, Postgres en la nube—, exactamente como el resto del 
 from __future__ import annotations
 
 import asyncio
+import http.client
 import ipaddress
 import json
 import logging
@@ -626,7 +627,7 @@ class WebhookNotifier:
         self._permitir_local = permitir_local
 
     def send(self, url: str, text: str, project_id: str) -> bool:
-        motivo = destino_inseguro(url, permitir_local=self._permitir_local)
+        motivo, ips = resolver_destino(url, permitir_local=self._permitir_local)
         if motivo:
             logger.error("webhook de %s rechazado, no se manda nada: %s", project_id, motivo)
             return False
@@ -634,15 +635,14 @@ class WebhookNotifier:
             {"text": text, "content": text, "project": project_id, "source": "laplace"},
             ensure_ascii=False,
         ).encode("utf-8")
-        peticion = urllib.request.Request(  # noqa: S310 - el esquema se valida arriba
-            url, data=cuerpo, headers={"Content-Type": "application/json"}, method="POST"
-        )
         try:
-            with _SIN_REDIRECCIONES.open(peticion, timeout=self._timeout) as respuesta:
-                return 200 <= respuesta.status < 300
-        except urllib.error.URLError as exc:
+            estado = post_a_ip(url, ips, cuerpo, timeout=self._timeout)
+        except OSError as exc:
             logger.warning("no se ha podido avisar al webhook: %s", exc)
             return False
+        if 300 <= estado < 400:
+            logger.warning("el webhook redirige a otro sitio (%s); no se sigue", estado)
+        return 200 <= estado < 300
 
 
 # ---------------------------------------------------------------------------------
@@ -659,8 +659,10 @@ class WebhookNotifier:
 #    públicas. Es lo que para a un nombre público que apunta a una IP interna.
 # 3. Las redirecciones no se siguen. Un webhook contesta; no manda a otro sitio.
 #
-# Queda la ventana entre resolver y conectar (DNS rebinding); cerrarla exige fijar la IP
-# en la conexión, y se anota como mejora.
+# 4. Se conecta a la IP que se ha comprobado, no al nombre otra vez (D-130). Si no, entre
+#    comprobar y conectar el DNS podía cambiar de respuesta —DNS rebinding— y la segunda
+#    resolución llevaba a la red interna. El nombre se sigue usando para TLS (SNI y
+#    certificado) y para la cabecera Host, así que el otro lado no nota nada.
 # ---------------------------------------------------------------------------------
 
 
@@ -712,28 +714,102 @@ def webhook_valido(url: str, *, permitir_local: bool = False) -> bool:
     return ip is None or ip.is_global
 
 
-def destino_inseguro(url: str, *, permitir_local: bool = False) -> str:
-    """El motivo por el que no se manda a esa URL, o cadena vacía si se puede.
+def resolver_destino(url: str, *, permitir_local: bool = False) -> tuple[str, list[str]]:
+    """`(motivo, ips)`: por qué no se manda a esa URL, o las IPs comprobadas.
 
-    Es la comprobación de enviar: repite la de forma y resuelve el nombre.
+    Es la comprobación de enviar: repite la de forma, resuelve el nombre una sola vez y
+    exige que **todas** sus direcciones sean públicas. Las IPs que devuelve son las que
+    hay que usar al conectar (`post_a_ip`): volver a resolver abriría la ventana del
+    rebinding. Son todas y no la primera porque un nombre con IPv6 e IPv4 puede no
+    escuchar en la primera, y quedarse con ella era no llegar.
     """
     from urllib.parse import urlparse
 
     if not webhook_valido(url, permitir_local=permitir_local):
-        return "tiene que ser https hacia un host público"
+        return "tiene que ser https hacia un host público", []
     partes = urlparse(url)
     host = partes.hostname or ""
-    if permitir_local and _es_local(host):
-        return ""
+    puerto = partes.port or (443 if partes.scheme == "https" else 80)
     try:
-        infos = socket.getaddrinfo(host, partes.port or 443, proto=socket.IPPROTO_TCP)
+        infos = socket.getaddrinfo(host, puerto, proto=socket.IPPROTO_TCP)
     except OSError as exc:
-        return f"no se puede resolver {host}: {exc}"
-    for info in infos:
-        ip = _ip_literal(str(info[4][0]).split("%")[0])
+        return f"no se puede resolver {host}: {exc}", []
+    direcciones = list(dict.fromkeys(str(info[4][0]).split("%")[0] for info in infos))
+    if not direcciones:
+        return f"{host} no resuelve a ninguna dirección", []
+    if permitir_local and _es_local(host):
+        return "", direcciones
+    for direccion in direcciones:
+        ip = _ip_literal(direccion)
         if ip is None or not ip.is_global:
-            return f"{host} resuelve a una dirección no pública ({info[4][0]})"
-    return ""
+            return f"{host} resuelve a una dirección no pública ({direccion})", []
+    return "", direcciones
+
+
+def destino_inseguro(url: str, *, permitir_local: bool = False) -> str:
+    """El motivo por el que no se manda a esa URL, o cadena vacía si se puede."""
+    return resolver_destino(url, permitir_local=permitir_local)[0]
+
+
+def _conectar(ips: list[str], puerto: int, timeout: float | None) -> socket.socket:
+    """La primera de `ips` que conteste. Sólo éstas: son las que se han comprobado."""
+    ultimo: OSError | None = None
+    for ip in ips:
+        try:
+            return socket.create_connection((ip, puerto), timeout)
+        except OSError as exc:
+            ultimo = exc
+    raise ultimo or OSError("no hay ninguna dirección a la que conectar")
+
+
+class _HTTPSaIP(http.client.HTTPSConnection):
+    """HTTPS contra IPs fijas, con el nombre original para SNI y el certificado."""
+
+    def __init__(self, host: str, ips: list[str], **kwargs: Any) -> None:
+        super().__init__(host, **kwargs)
+        self._ips = ips
+
+    def connect(self) -> None:
+        crudo = _conectar(self._ips, self.port, self.timeout)
+        self.sock = self._context.wrap_socket(crudo, server_hostname=self.host)
+
+
+class _HTTPaIP(http.client.HTTPConnection):
+    """HTTP contra IPs fijas. Sólo se usa en modo local, contra la propia máquina."""
+
+    def __init__(self, host: str, ips: list[str], **kwargs: Any) -> None:
+        super().__init__(host, **kwargs)
+        self._ips = ips
+
+    def connect(self) -> None:
+        self.sock = _conectar(self._ips, self.port, self.timeout)
+
+
+def post_a_ip(url: str, ips: str | list[str], cuerpo: bytes, *, timeout: float) -> int:
+    """POST de JSON a `url` conectando a `ips`, en orden. Devuelve el código de estado.
+
+    No sigue redirecciones —`http.client` no las sigue nunca—: una respuesta 3xx vuelve
+    como tal y quien llama decide. El nombre de la URL va en `Host` y en el TLS.
+    """
+    from urllib.parse import urlparse
+
+    partes = urlparse(url)
+    clase = _HTTPSaIP if partes.scheme == "https" else _HTTPaIP
+    lista = [ips] if isinstance(ips, str) else list(ips)
+    conexion = clase(partes.hostname or "", lista, port=partes.port, timeout=timeout)
+    ruta = partes.path or "/"
+    if partes.query:
+        ruta += f"?{partes.query}"
+    try:
+        conexion.request(
+            "POST",
+            ruta,
+            body=cuerpo,
+            headers={"Content-Type": "application/json", "User-Agent": "laplace-alertas"},
+        )
+        return conexion.getresponse().status
+    finally:
+        conexion.close()
 
 
 class EmailNotifier:

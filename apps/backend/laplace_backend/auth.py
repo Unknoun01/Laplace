@@ -310,6 +310,17 @@ class AuthMiddleware(BaseHTTPMiddleware):
         sesion = identity_from_session(self._cuentas(), request)
         if sesion is not None:
             return sesion
+        # La clave que la interfaz dejó en su cookie al entrar con clave (D-130). Es la
+        # misma clave de siempre, así que se valida igual; lo único distinto es que viaja
+        # en una cookie, y por eso sus escrituras piden la cabecera anti-CSRF.
+        from .cuentas import COOKIE_CLAVE
+
+        en_cookie = request.cookies.get(COOKIE_CLAVE, "").strip()
+        if en_cookie:
+            identidad = resolve(self._metadata(), en_cookie)
+            identidad.by_cookie = True
+            await self._apuntar_uso(identidad.key_id)
+            return identidad
         raise AuthError(
             401,
             "inicia sesión, o manda una clave de API en la cabecera "

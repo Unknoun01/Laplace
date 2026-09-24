@@ -2130,3 +2130,37 @@ la clave de API de `localStorage` ahora que hay sesiones (cambia cómo entra qui
 clave); llevar el freno de intentos a la base para que no se multiplique por procesos;
 fijar la IP al conectar con un webhook (DNS rebinding, D-128); y delimitar mejor el
 contenido de las trazas en el prompt del juez.
+
+### D-130 — Lo que D-129 dejó anotado, hecho
+Los cinco pendientes de la auditoría. Tienen prueba en `test_auditoria_pendientes.py`,
+salvo partir `insights`, que la tiene en las pruebas que ya había y que no han cambiado.
+
+* **Webhooks a IP fija.** El nombre se resuelve una vez, se comprueba que todas sus
+  direcciones son públicas y se conecta a ésas, con el nombre en SNI y en `Host`. Entre
+  comprobar y conectar ya no hay una segunda resolución que pueda llevar a la red
+  interna. Una cosa que salió probando: quedarse con la primera dirección no vale, porque
+  un nombre con IPv6 e IPv4 puede no escuchar en la primera; se prueban todas las
+  comprobadas, en orden, como hacía `urllib`.
+* **El freno de intentos, en la base de cuentas.** En memoria, cada worker llevaba su
+  cuenta y el tope se multiplicaba por procesos; y reiniciar lo ponía a cero. La tabla
+  `login_failures` es de todos, y entrar barre lo que tiene más de un día.
+* **El juez distingue sus instrucciones de lo que evalúa.** El contenido de la traza va
+  entre `<dato>…</dato>`, el prompt de sistema dice que es dato y no instrucciones, y
+  cualquier forma de la etiqueta escrita dentro se neutraliza. El prompt pasa a `v2`: dos
+  veredictos de prompts distintos no se comparan.
+* **La clave de API fuera del alcance de JavaScript.** Quien entra a la interfaz con clave
+  la manda una vez a `POST /api/auth/key`, que la comprueba y la deja en una cookie
+  `httpOnly`. Sus escrituras piden la cabecera anti-CSRF, como las de sesión. Los
+  navegadores que la tenían en `localStorage` la pasan a la cookie una sola vez y la
+  borran de ahí. `Authorization: Bearer` sigue siendo lo de los agentes y las
+  herramientas: esto cambia sólo lo que guarda el navegador.
+* **`insights` es un paquete**: `modelos` (tipos, umbrales y redacción), una regla por
+  módulo (`repeticion`, `bucle`, `modelo_caro`, `contexto_fijo`) y `motor`. Se partió con
+  un script que no cambia ni una línea de lógica; el `__init__` reexporta todo, así que
+  ninguna importación de fuera cambió. El guardia de `test_cifras` que busca dinero
+  formateado a mano mira ahora todos los módulos del paquete: si hubiera seguido
+  mirando sólo `__init__`, habría dejado de vigilar las reglas sin fallar.
+* **Ninguna página pasa de 500 líneas.** Los componentes que ya existían se movieron a
+  ficheros hermanos (`detalle.tsx`, `alertas.tsx`, `listado.tsx`…), también con un
+  script que no toca su código. Se comprobó con `tsc --noUnusedLocals` y recorriendo cada
+  pantalla en el navegador con datos que pasan por lo movido.

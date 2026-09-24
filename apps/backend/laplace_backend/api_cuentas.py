@@ -25,9 +25,11 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from .auth import identity_of
+from .auth import AuthError, identity_of
+from .auth import resolve as resolver_clave
 from .cuentas import (
     COOKIE,
+    COOKIE_CLAVE,
     DURACION_SESION,
     ROLES,
     comprobar_contrasena,
@@ -255,7 +257,7 @@ async def login(request: Request, response: Response, body: LoginIn) -> dict[str
     email = normalizar_email(body.email)
     ip = _ip(request)
     claves = (f"email:{email}", f"ip:{ip}")
-    if frenos.bloqueado(*claves):
+    if await run_in_threadpool(frenos.bloqueado, *claves):
         raise HTTPException(
             status_code=429,
             detail="demasiados intentos fallidos. Espera un cuarto de hora y vuelve a probar",
@@ -271,11 +273,11 @@ async def login(request: Request, response: Response, body: LoginIn) -> dict[str
 
     usuario = await run_in_threadpool(comprobar)
     if usuario is None:
-        frenos.fallo(*claves)
+        await run_in_threadpool(frenos.fallo, *claves)
         await run_in_threadpool(cuentas.anotar, "", "", "login_fallido", email, ip)
         raise HTTPException(status_code=401, detail="email o contraseña incorrectos")
 
-    frenos.limpiar(f"email:{email}")
+    await run_in_threadpool(frenos.limpiar, f"email:{email}")
     token = await run_in_threadpool(
         cuentas.abrir_sesion, usuario.id, request.headers.get("user-agent", "")
     )
@@ -297,6 +299,47 @@ async def logout(request: Request, response: Response) -> dict[str, Any]:
     if token and not _local(request):
         await run_in_threadpool(_cuentas(request).cerrar_sesion, token)
     response.delete_cookie(COOKIE, path="/")
+    response.delete_cookie(COOKIE_CLAVE, path="/")
+    return {"ok": True}
+
+
+class KeySessionIn(BaseModel):
+    key: str = Field(min_length=1, max_length=200)
+
+
+@router.post("/auth/key")
+async def key_session(request: Request, response: Response, body: KeySessionIn) -> dict[str, Any]:
+    """Entrar a la interfaz con una clave de API en vez de con cuenta (D-130).
+
+    La clave se comprueba aquí y se deja en una cookie `httpOnly`; la interfaz no la
+    guarda en ningún sitio que JavaScript pueda leer. Antes vivía en `localStorage` y
+    viajaba en `Authorization` desde el navegador: cualquier XSS se la llevaba, y una
+    clave de API no caduca como una sesión.
+    """
+    clave = body.key.strip()
+    try:
+        identidad = await run_in_threadpool(resolver_clave, request.app.state.metadata, clave)
+    except AuthError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+    segura = request.url.scheme == "https" or (
+        _por_proxy(request) and request.headers.get("x-forwarded-proto", "") == "https"
+    )
+    response.set_cookie(
+        COOKIE_CLAVE,
+        clave,
+        max_age=int(DURACION_SESION.total_seconds()),
+        httponly=True,
+        secure=segura,
+        samesite="lax",
+        path="/",
+    )
+    return {"ok": True, "projects": sorted(identidad.projects)}
+
+
+@router.delete("/auth/key")
+async def forget_key(response: Response) -> dict[str, Any]:
+    """Deja de usar la clave en este navegador."""
+    response.delete_cookie(COOKIE_CLAVE, path="/")
     return {"ok": True}
 
 
@@ -368,14 +411,14 @@ async def accept(request: Request, response: Response, body: AcceptIn) -> dict[s
         # sin él, un enlace de invitación era un sitio donde probarlas sin límite.
         frenos = request.app.state.frenos
         claves = (f"email:{info['email']}", f"ip:{_ip(request)}")
-        if frenos.bloqueado(*claves):
+        if await run_in_threadpool(frenos.bloqueado, *claves):
             raise HTTPException(
                 status_code=429,
                 detail="demasiados intentos fallidos. Espera un cuarto de hora y vuelve a probar",
             )
         usuario, guardado = existente
         if not await run_in_threadpool(comprobar_contrasena, body.password, guardado):
-            frenos.fallo(*claves)
+            await run_in_threadpool(frenos.fallo, *claves)
             raise HTTPException(status_code=403, detail="la contraseña de tu cuenta no es ésa")
     else:
         motivo = validar_contrasena(body.password)
