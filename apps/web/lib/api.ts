@@ -37,43 +37,61 @@ const API_URL =
   typeof window === "undefined" ? (process.env.LAPLACE_API_URL ?? "http://localhost:8000") : "";
 
 /**
- * La clave de API, si esta instalación pide una.
+ * Entrar con clave de API, para quien no tiene cuenta (D-130).
  *
- * Vive en `localStorage` y no en una cookie por una razón concreta: en modo local no
- * hay clave ninguna y la interfaz es la misma, así que meter sesiones y cookies en el
- * camino habría convertido `laplace ui` —un proceso de Python en un portátil— en algo
- * con login. Lo que hay es más humilde y suficiente: si el backend contesta 401, la
- * pantalla pide la clave y se guarda en el navegador de quien la escribió (D-097).
+ * La clave se manda una vez al backend, que la comprueba y la deja en una cookie
+ * `httpOnly`: la interfaz no la guarda en ningún sitio que JavaScript pueda leer. Antes
+ * vivía en `localStorage` y viajaba en cada petición; cualquier XSS se la llevaba, y una
+ * clave de API no caduca como una sesión.
  */
-const CLAVE = "laplace.api_key";
-
-export function getApiKey(): string {
-  if (typeof window === "undefined") return "";
-  try {
-    return window.localStorage.getItem(CLAVE) ?? "";
-  } catch {
-    return "";
-  }
+export async function entrarConClave(clave: string): Promise<void> {
+  await send<{ ok: boolean }>("/api/auth/key", "POST", { key: clave.trim() });
 }
 
-export function setApiKey(valor: string): void {
-  try {
-    if (valor) window.localStorage.setItem(CLAVE, valor.trim());
-    else window.localStorage.removeItem(CLAVE);
-  } catch {
-    /* navegador con almacenamiento bloqueado: la clave dura lo que la pestaña */
-  }
+/** Deja de usar la clave en este navegador. */
+export async function olvidarClave(): Promise<void> {
+  await send<{ ok: boolean }>("/api/auth/key", "DELETE");
 }
 
-/** Cabeceras de una petición. La clave va donde dice el estándar, nunca en la URL. */
+/**
+ * Los navegadores que ya tenían la clave en `localStorage` la pasan a la cookie una sola
+ * vez y la borran de ahí. Si la clave ya no vale, se borra igual: no hay razón para
+ * seguir guardando en claro una credencial que el backend rechaza.
+ */
+const CLAVE_ANTIGUA = "laplace.api_key";
+let migracion: Promise<void> | null = null;
+
+function migrarClaveAntigua(): Promise<void> {
+  if (typeof window === "undefined") return Promise.resolve();
+  if (migracion) return migracion;
+  let antigua = "";
+  try {
+    antigua = window.localStorage.getItem(CLAVE_ANTIGUA) ?? "";
+    window.localStorage.removeItem(CLAVE_ANTIGUA);
+  } catch {
+    /* almacenamiento bloqueado: no hay nada que migrar */
+  }
+  migracion = antigua
+    ? fetch(new URL("/api/auth/key", API_URL || window.location.origin), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Laplace": "1" },
+        body: JSON.stringify({ key: antigua }),
+        cache: "no-store",
+      }).then(
+        () => undefined,
+        () => undefined,
+      )
+    : Promise.resolve();
+  return migracion;
+}
+
+/** Cabeceras de una petición. La credencial va en cookie; aquí sólo lo anti-CSRF. */
 function cabeceras(extra?: Record<string, string>): Record<string, string> {
-  const clave = getApiKey();
   return {
     ...(extra ?? {}),
-    // Toda petición la lleva: el backend la exige en las escrituras con sesión, y un
+    // Toda petición la lleva: el backend la exige en las escrituras con cookie, y un
     // formulario de otro sitio no puede ponerla sin pasar por CORS (D-127).
     "X-Laplace": "1",
-    ...(clave ? { Authorization: `Bearer ${clave}` } : {}),
   };
 }
 
@@ -88,13 +106,21 @@ export class ApiError extends Error {
 
 type Params = Record<string, string | number | undefined>;
 
-async function get<T>(path: string, params?: Params): Promise<T> {
+/**
+ * `senal` cancela la petición (D-131). Las lecturas con las que las pantallas se cargan
+ * la reciben de `useApi`, que la dispara al cambiar de filtros o salir de la pantalla:
+ * así el backend deja de trabajar en consultas que ya nadie va a mirar. Va explícita y
+ * no «en el ambiente» porque en el navegador no hay forma de que sobreviva a un `await`,
+ * y casi todas las pantallas piden primero los proyectos y después lo pesado.
+ */
+async function get<T>(path: string, params?: Params, senal?: AbortSignal): Promise<T> {
+  await migrarClaveAntigua();
   const url = new URL(path, API_URL || window.location.origin);
   for (const [key, value] of Object.entries(params ?? {})) {
     if (value !== undefined && value !== "") url.searchParams.set(key, String(value));
   }
 
-  const response = await fetch(url, { cache: "no-store", headers: cabeceras() });
+  const response = await fetch(url, { cache: "no-store", headers: cabeceras(), signal: senal });
   if (!response.ok) {
     // El detalle del backend explica el 401 y el 403 («esta clave no tiene acceso a ese
     // proyecto»), que es justo lo que hay que leer para arreglarlo.
@@ -126,24 +152,30 @@ export function parseDays(raw: string | undefined): number {
 
 // ---------------------------------------------------------------------------------
 
-export function getOverview(projectId: string, days: number): Promise<Overview> {
-  return get<Overview>("/api/overview", { project_id: projectId, days });
+export function getOverview(
+  projectId: string,
+  days: number,
+  senal?: AbortSignal,
+): Promise<Overview> {
+  return get<Overview>("/api/overview", { project_id: projectId, days }, senal);
 }
 
-export function getPanel(projectId: string, days: number): Promise<Panel> {
-  return get<Panel>("/api/panel", { project_id: projectId, days });
+export function getPanel(projectId: string, days: number, senal?: AbortSignal): Promise<Panel> {
+  return get<Panel>("/api/panel", { project_id: projectId, days }, senal);
 }
 
 export async function getFinding(
   findingId: string,
   projectId: string,
   days: number,
+  senal?: AbortSignal,
 ): Promise<FindingDetail | null> {
   try {
-    return await get<FindingDetail>(`/api/findings/${encodeURI(findingId)}`, {
-      project_id: projectId,
-      days,
-    });
+    return await get<FindingDetail>(
+      `/api/findings/${encodeURI(findingId)}`,
+      { project_id: projectId, days },
+      senal,
+    );
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) return null;
     throw error;
@@ -170,23 +202,27 @@ export interface TraceQuery {
   limit?: number;
 }
 
-export function listTraces(query: TraceQuery = {}): Promise<TraceListPage> {
-  return get<TraceListPage>("/api/traces", { limit: 50, ...query });
+export function listTraces(query: TraceQuery = {}, senal?: AbortSignal): Promise<TraceListPage> {
+  return get<TraceListPage>("/api/traces", { limit: 50, ...query }, senal);
 }
 
-export async function getTrace(traceId: string, projectId?: string): Promise<Trace | null> {
+export async function getTrace(
+  traceId: string,
+  projectId?: string,
+  senal?: AbortSignal,
+): Promise<Trace | null> {
   try {
     // El proyecto va siempre que se sepa: un identificador de traza es único dentro
     // de un proyecto, no entre proyectos.
-    return await get<Trace>(`/api/traces/${traceId}`, { project_id: projectId });
+    return await get<Trace>(`/api/traces/${traceId}`, { project_id: projectId }, senal);
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) return null;
     throw error;
   }
 }
 
-export async function listProjects(): Promise<ProjectStats[]> {
-  const data = await get<{ projects: ProjectStats[] }>("/api/projects");
+export async function listProjects(senal?: AbortSignal): Promise<ProjectStats[]> {
+  const data = await get<{ projects: ProjectStats[] }>("/api/projects", undefined, senal);
   return data.projects;
 }
 
@@ -210,6 +246,7 @@ export function windowStart(days: number): string {
 // ---------------------------------------------------------------------------------
 
 async function send<T>(path: string, method: string, body?: unknown): Promise<T> {
+  if (path !== "/api/auth/key") await migrarClaveAntigua();
   const url = new URL(path, API_URL || window.location.origin);
   const response = await fetch(url, {
     method,
@@ -251,10 +288,15 @@ export function deleteAnnotation(id: string, projectId: string): Promise<{ delet
   );
 }
 
-export async function annotationsFor(traceIds: string[]): Promise<Record<string, Annotation[]>> {
+/** Con el proyecto: el backend acota las anotaciones a él y no devuelve las de otros. */
+export async function annotationsFor(
+  traceIds: string[],
+  projectId: string,
+): Promise<Record<string, Annotation[]>> {
   if (traceIds.length === 0) return {};
   const data = await get<{ annotations: Record<string, Annotation[]> }>("/api/annotations", {
     trace_ids: traceIds.join(","),
+    project_id: projectId,
   });
   return data.annotations;
 }
@@ -407,16 +449,16 @@ export function clearFindingState(projectId: string, findingId: string): Promise
   return send(`/api/finding-state?${q}`, "DELETE");
 }
 
-export function getBudget(projectId: string): Promise<Budget> {
-  return get<Budget>("/api/budget", { project_id: projectId });
+export function getBudget(projectId: string, senal?: AbortSignal): Promise<Budget> {
+  return get<Budget>("/api/budget", { project_id: projectId }, senal);
 }
 
 export function setBudget(projectId: string, monthlyLimit: number | null): Promise<Budget> {
   return send<Budget>("/api/budget", "PUT", { project_id: projectId, monthly_limit: monthlyLimit });
 }
 
-export function getAlertSettings(projectId: string): Promise<AlertSettings> {
-  return get<AlertSettings>("/api/alert-settings", { project_id: projectId });
+export function getAlertSettings(projectId: string, senal?: AbortSignal): Promise<AlertSettings> {
+  return get<AlertSettings>("/api/alert-settings", { project_id: projectId }, senal);
 }
 
 export function setAlertSettings(
@@ -446,8 +488,8 @@ export function getBreakdown(
   return get<Breakdown>("/api/breakdown", { project_id: projectId, days, by });
 }
 
-export function getCustomPrices(): Promise<CustomPrices> {
-  return get<CustomPrices>("/api/pricing/custom");
+export function getCustomPrices(senal?: AbortSignal): Promise<CustomPrices> {
+  return get<CustomPrices>("/api/pricing/custom", undefined, senal);
 }
 
 export function setCustomPrice(input: {
@@ -463,8 +505,8 @@ export function deleteCustomPrice(model: string): Promise<{ repriced_spans: numb
   return send(`/api/pricing/custom?model=${encodeURIComponent(model)}`, "DELETE");
 }
 
-export function getInstance(): Promise<Instance> {
-  return get<Instance>("/api/instance");
+export function getInstance(senal?: AbortSignal): Promise<Instance> {
+  return get<Instance>("/api/instance", undefined, senal);
 }
 
 export function loadDemo(): Promise<{ project_id: string; traces: number }> {

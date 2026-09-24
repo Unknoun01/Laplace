@@ -2,7 +2,14 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { type Me, getApiKey, getInstance, getMe, loadDemo, setApiKey } from "@/lib/api";
+import {
+  type Me,
+  entrarConClave,
+  getInstance,
+  getMe,
+  loadDemo,
+  olvidarClave,
+} from "@/lib/api";
 
 /**
  * El endpoint al que apuntar el SDK: el origen desde el que se está sirviendo esta
@@ -195,7 +202,8 @@ export function NothingToFix({
  * la gente pegue el primero que encuentra.
  */
 export function NeedsKey({ mensaje }: { mensaje?: string }) {
-  const [valor, setValor] = useState(getApiKey());
+  const [valor, setValor] = useState("");
+  const [fallo, setFallo] = useState("");
   const [me, setMe] = useState<Me | null>(null);
 
   // Con cuentas (D-127), quien llega sin sesión no tiene por qué saber qué es una clave
@@ -220,7 +228,7 @@ export function NeedsKey({ mensaje }: { mensaje?: string }) {
       <p>
         {mensaje && mensaje !== "credencial inválida"
           ? mensaje
-          : "La clave va en cada petición y se guarda sólo en este navegador. Si no tienes una, la crea quien administra esta organización, en Organización → Claves."}
+          : "Si no tienes una, la crea quien administra esta organización, en Organización → Claves."}
       </p>
       <div className="actions">
         <input
@@ -235,8 +243,10 @@ export function NeedsKey({ mensaje }: { mensaje?: string }) {
           type="button"
           className="btn primary"
           onClick={() => {
-            setApiKey(valor);
-            window.location.reload();
+            setFallo("");
+            entrarConClave(valor)
+              .then(() => window.location.reload())
+              .catch((e: Error) => setFallo(e.message));
           }}
         >
           Guardar y entrar
@@ -245,10 +255,11 @@ export function NeedsKey({ mensaje }: { mensaje?: string }) {
           Entrar con tu cuenta
         </a>
       </div>
+      {fallo && <p className="disclaimer">{fallo}</p>}
       <p className="disclaimer">
-        Se guarda en el almacenamiento de este navegador, no se manda a ningún sitio más
-        que a este Laplace, y va en la cabecera <code>Authorization</code> y nunca en la
-        URL —lo que va en la URL acaba en los logs de cualquier proxy por el que pase—.
+        Se comprueba y se guarda en una cookie que sólo ve este Laplace: ni la página ni
+        ningún script pueden leerla, y nunca va en la URL —lo que va en la URL acaba en
+        los logs de cualquier proxy por el que pase—.
       </p>
     </div>
   );
@@ -265,8 +276,7 @@ export function NotYours({ mensaje }: { mensaje?: string }) {
           type="button"
           className="btn"
           onClick={() => {
-            setApiKey("");
-            window.location.reload();
+            olvidarClave().finally(() => window.location.reload());
           }}
         >
           Usar otra clave

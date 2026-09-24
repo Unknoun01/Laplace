@@ -22,12 +22,17 @@ sitio —SQLite en local, Postgres en la nube—, exactamente como el resto del 
 from __future__ import annotations
 
 import asyncio
+import http.client
+import ipaddress
 import json
 import logging
 import smtplib
+import socket
 import sqlite3
 import urllib.error
 import urllib.request
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
@@ -240,11 +245,16 @@ class SQLiteAlertState:
         with self._conn() as conn:
             conn.execute(_STATE_DDL_SQLITE)
 
-    def _conn(self) -> sqlite3.Connection:
+    @contextmanager
+    def _conn(self) -> Iterator[sqlite3.Connection]:
+        """Una conexión que se cierra al salir del `with` (D-131)."""
         conn = sqlite3.connect(self._path, timeout=30.0, isolation_level=None)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode = WAL")
-        return conn
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode = WAL")
+            yield conn
+        finally:
+            conn.close()
 
     def read(self, project_id: str) -> dict[str, AlertRecord]:
         with self._conn() as conn:
@@ -311,9 +321,9 @@ class PostgresAlertState:
             )
 
     def _connect(self) -> Any:
-        import psycopg
+        from .storage._pg import conexion
 
-        return psycopg.connect(self._dsn, autocommit=True)
+        return conexion(self._dsn)
 
     def read(self, project_id: str) -> dict[str, AlertRecord]:
         with self._connect() as conn:
@@ -603,7 +613,7 @@ class SlackNotifier:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(peticion, timeout=self._timeout) as respuesta:  # noqa: S310
+            with _SIN_REDIRECCIONES.open(peticion, timeout=self._timeout) as respuesta:
                 return 200 <= respuesta.status < 300
         except urllib.error.URLError as exc:
             logger.warning("no se ha podido avisar a Slack: %s", exc)
@@ -617,37 +627,196 @@ class WebhookNotifier:
     redactado y el proyecto, que es lo mínimo para enrutarlo al otro lado.
     """
 
-    def __init__(self, timeout: float = 10.0) -> None:
+    def __init__(self, timeout: float = 10.0, *, permitir_local: bool = False) -> None:
         self._timeout = timeout
+        #: Sólo en modo local: ahí el webhook de un n8n en el portátil es legítimo, y
+        #: la máquina es de quien lo configura.
+        self._permitir_local = permitir_local
 
     def send(self, url: str, text: str, project_id: str) -> bool:
-        if not webhook_valido(url):
-            logger.error("el webhook no es https ni apunta a esta máquina; no se manda nada")
+        motivo, ips = resolver_destino(url, permitir_local=self._permitir_local)
+        if motivo:
+            logger.error("webhook de %s rechazado, no se manda nada: %s", project_id, motivo)
             return False
         cuerpo = json.dumps(
             {"text": text, "content": text, "project": project_id, "source": "laplace"},
             ensure_ascii=False,
         ).encode("utf-8")
-        peticion = urllib.request.Request(  # noqa: S310 - el esquema se valida arriba
-            url, data=cuerpo, headers={"Content-Type": "application/json"}, method="POST"
-        )
         try:
-            with urllib.request.urlopen(peticion, timeout=self._timeout) as respuesta:  # noqa: S310
-                return 200 <= respuesta.status < 300
-        except urllib.error.URLError as exc:
+            estado = post_a_ip(url, ips, cuerpo, timeout=self._timeout)
+        except OSError as exc:
             logger.warning("no se ha podido avisar al webhook: %s", exc)
             return False
+        if 300 <= estado < 400:
+            logger.warning("el webhook redirige a otro sitio (%s); no se sigue", estado)
+        return 200 <= estado < 300
 
 
-def webhook_valido(url: str) -> bool:
+# ---------------------------------------------------------------------------------
+# A dónde se puede mandar (SSRF)
+#
+# La URL de un webhook la pone quien administra un proyecto, y quien la usa es el
+# servidor, desde dentro de la red del despliegue. Sin comprobar, un webhook
+# `https://10.0.0.5/…`, `https://clickhouse/…` o uno público que redirige a
+# `http://169.254.169.254/…` convertía el botón de «probar» en una forma de tocar
+# servicios internos, con `delivered` de oráculo. Tres barreras:
+#
+# 1. Al guardar, sin red: https, con host, y que no sea una IP privada ni «localhost».
+# 2. Al enviar: el nombre se resuelve y **todas** sus direcciones tienen que ser
+#    públicas. Es lo que para a un nombre público que apunta a una IP interna.
+# 3. Las redirecciones no se siguen. Un webhook contesta; no manda a otro sitio.
+#
+# 4. Se conecta a la IP que se ha comprobado, no al nombre otra vez (D-130). Si no, entre
+#    comprobar y conectar el DNS podía cambiar de respuesta —DNS rebinding— y la segunda
+#    resolución llevaba a la red interna. El nombre se sigue usando para TLS (SNI y
+#    certificado) y para la cabecera Host, así que el otro lado no nota nada.
+# ---------------------------------------------------------------------------------
+
+
+class _NoSeguirRedirecciones(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+        raise urllib.error.HTTPError(
+            req.full_url,
+            code,
+            f"el webhook redirige a otro sitio ({newurl}); no se sigue",
+            headers,
+            fp,
+        )
+
+
+_SIN_REDIRECCIONES = urllib.request.build_opener(_NoSeguirRedirecciones)
+
+_NOMBRES_LOCALES = ("localhost", "localhost.localdomain", "ip6-localhost")
+
+
+def _ip_literal(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    try:
+        return ipaddress.ip_address(host.strip("[]"))
+    except ValueError:
+        return None
+
+
+def _es_local(host: str) -> bool:
+    ip = _ip_literal(host)
+    return host.lower() in _NOMBRES_LOCALES or (ip is not None and ip.is_loopback)
+
+
+def webhook_valido(url: str, *, permitir_local: bool = False) -> bool:
+    """La comprobación de guardar: de forma, sin tocar la red.
+
+    En modo local se admite además `http(s)` contra la propia máquina. En la nube, sólo
+    https hacia un host que no sea, a la vista, interno.
+    """
     from urllib.parse import urlparse
 
     partes = urlparse(url)
-    if not partes.hostname:
+    host = partes.hostname or ""
+    if not host or partes.scheme not in ("http", "https"):
         return False
-    if partes.scheme == "https":
+    if permitir_local and _es_local(host):
         return True
-    return partes.scheme == "http" and partes.hostname in ("localhost", "127.0.0.1", "::1")
+    if partes.scheme != "https" or host.lower() in _NOMBRES_LOCALES:
+        return False
+    ip = _ip_literal(host)
+    return ip is None or ip.is_global
+
+
+def resolver_destino(url: str, *, permitir_local: bool = False) -> tuple[str, list[str]]:
+    """`(motivo, ips)`: por qué no se manda a esa URL, o las IPs comprobadas.
+
+    Es la comprobación de enviar: repite la de forma, resuelve el nombre una sola vez y
+    exige que **todas** sus direcciones sean públicas. Las IPs que devuelve son las que
+    hay que usar al conectar (`post_a_ip`): volver a resolver abriría la ventana del
+    rebinding. Son todas y no la primera porque un nombre con IPv6 e IPv4 puede no
+    escuchar en la primera, y quedarse con ella era no llegar.
+    """
+    from urllib.parse import urlparse
+
+    if not webhook_valido(url, permitir_local=permitir_local):
+        return "tiene que ser https hacia un host público", []
+    partes = urlparse(url)
+    host = partes.hostname or ""
+    puerto = partes.port or (443 if partes.scheme == "https" else 80)
+    try:
+        infos = socket.getaddrinfo(host, puerto, proto=socket.IPPROTO_TCP)
+    except OSError as exc:
+        return f"no se puede resolver {host}: {exc}", []
+    direcciones = list(dict.fromkeys(str(info[4][0]).split("%")[0] for info in infos))
+    if not direcciones:
+        return f"{host} no resuelve a ninguna dirección", []
+    if permitir_local and _es_local(host):
+        return "", direcciones
+    for direccion in direcciones:
+        ip = _ip_literal(direccion)
+        if ip is None or not ip.is_global:
+            return f"{host} resuelve a una dirección no pública ({direccion})", []
+    return "", direcciones
+
+
+def destino_inseguro(url: str, *, permitir_local: bool = False) -> str:
+    """El motivo por el que no se manda a esa URL, o cadena vacía si se puede."""
+    return resolver_destino(url, permitir_local=permitir_local)[0]
+
+
+def _conectar(ips: list[str], puerto: int, timeout: float | None) -> socket.socket:
+    """La primera de `ips` que conteste. Sólo éstas: son las que se han comprobado."""
+    ultimo: OSError | None = None
+    for ip in ips:
+        try:
+            return socket.create_connection((ip, puerto), timeout)
+        except OSError as exc:
+            ultimo = exc
+    raise ultimo or OSError("no hay ninguna dirección a la que conectar")
+
+
+class _HTTPSaIP(http.client.HTTPSConnection):
+    """HTTPS contra IPs fijas, con el nombre original para SNI y el certificado."""
+
+    def __init__(self, host: str, ips: list[str], **kwargs: Any) -> None:
+        super().__init__(host, **kwargs)
+        self._ips = ips
+
+    def connect(self) -> None:
+        crudo = _conectar(self._ips, self.port, self.timeout)
+        self.sock = self._context.wrap_socket(crudo, server_hostname=self.host)
+
+
+class _HTTPaIP(http.client.HTTPConnection):
+    """HTTP contra IPs fijas. Sólo se usa en modo local, contra la propia máquina."""
+
+    def __init__(self, host: str, ips: list[str], **kwargs: Any) -> None:
+        super().__init__(host, **kwargs)
+        self._ips = ips
+
+    def connect(self) -> None:
+        self.sock = _conectar(self._ips, self.port, self.timeout)
+
+
+def post_a_ip(url: str, ips: str | list[str], cuerpo: bytes, *, timeout: float) -> int:
+    """POST de JSON a `url` conectando a `ips`, en orden. Devuelve el código de estado.
+
+    No sigue redirecciones —`http.client` no las sigue nunca—: una respuesta 3xx vuelve
+    como tal y quien llama decide. El nombre de la URL va en `Host` y en el TLS.
+    """
+    from urllib.parse import urlparse
+
+    partes = urlparse(url)
+    clase = _HTTPSaIP if partes.scheme == "https" else _HTTPaIP
+    lista = [ips] if isinstance(ips, str) else list(ips)
+    conexion = clase(partes.hostname or "", lista, port=partes.port, timeout=timeout)
+    ruta = partes.path or "/"
+    if partes.query:
+        ruta += f"?{partes.query}"
+    try:
+        conexion.request(
+            "POST",
+            ruta,
+            body=cuerpo,
+            headers={"Content-Type": "application/json", "User-Agent": "laplace-alertas"},
+        )
+        return conexion.getresponse().status
+    finally:
+        conexion.close()
 
 
 class EmailNotifier:
@@ -667,12 +836,14 @@ class EmailNotifier:
                 "hay un correo de alertas puesto pero no hay servidor: falta LAPLACE_SMTP_HOST"
             )
             return False
-        mensaje = EmailMessage()
-        mensaje["From"] = self._s.smtp_from or self._s.smtp_user
-        mensaje["To"] = to
-        mensaje["Subject"] = subject
-        mensaje.set_content(text)
         try:
+            # Dentro del `try`: es al poner la cabecera cuando `email` rechaza un salto de
+            # línea, no al enviar.
+            mensaje = EmailMessage()
+            mensaje["From"] = self._s.smtp_from or self._s.smtp_user
+            mensaje["To"] = to
+            mensaje["Subject"] = subject
+            mensaje.set_content(text)
             with smtplib.SMTP(self._s.smtp_host, self._s.smtp_port, timeout=15) as smtp:
                 if self._s.smtp_starttls:
                     smtp.starttls()
@@ -680,7 +851,9 @@ class EmailNotifier:
                     smtp.login(self._s.smtp_user, self._s.smtp_password)
                 smtp.send_message(mensaje)
             return True
-        except (OSError, smtplib.SMTPException) as exc:
+        except (OSError, smtplib.SMTPException, ValueError) as exc:
+            # ValueError: una cabecera que `email` rechaza (un destinatario guardado antes
+            # de que se validara). Se dice y se sigue con los demás canales (D-131).
             logger.warning("no se ha podido mandar el correo de alertas: %s", exc)
             return False
 
@@ -727,6 +900,7 @@ class AlertRunner:
         metadata: Any = None,
         webhook: WebhookNotifier | None = None,
         email: EmailNotifier | None = None,
+        turno: Any = None,
     ) -> None:
         self._store = store
         self._config = config
@@ -737,6 +911,25 @@ class AlertRunner:
         self._metadata = metadata
         self._webhook = webhook or WebhookNotifier()
         self._email = email
+        #: Quién hace esta vuelta cuando hay varios procesos: una función que devuelve un
+        #: gestor de contexto con `True` si le toca a éste. Sin ella, siempre le toca (un
+        #: solo proceso, o el modo local).
+        self._turno = turno
+
+    def evaluate_all_if_mine(self) -> list[Decision]:
+        """`evaluate_all`, pero sólo si esta vuelta le toca a este proceso.
+
+        Con varios workers o réplicas cada uno tiene su bucle, y sin turno cada uno
+        mandaba las mismas alertas: la marca de «ya avisado» se guarda después de
+        enviar, así que dos procesos que evalúan a la vez avisan los dos.
+        """
+        if self._turno is None:
+            return self.evaluate_all()
+        with self._turno() as mio:
+            if not mio:
+                logger.debug("las alertas de esta vuelta las evalúa otro proceso")
+                return []
+            return self.evaluate_all()
 
     def _desde_interfaz(self, project_id: str) -> dict[str, Any]:
         if self._metadata is None:
@@ -754,6 +947,24 @@ class AlertRunner:
     @property
     def email_ready(self) -> bool:
         return self._email is not None and self._email.configured
+
+    @property
+    def mailer(self) -> EmailNotifier | None:
+        """El correo de la instalación, para quien tenga que mandar algo que no es una
+        alerta (las invitaciones). `None` si no hay servidor configurado."""
+        return self._email if self.email_ready else None
+
+    def send_test(self, project_id: str) -> bool | None:
+        """Un mensaje de prueba por los canales del proyecto. `None` si no tiene ninguno
+        puesto o está silenciado; si no, si ha llegado por alguno."""
+        ajustes = self.config_for(project_id)
+        if not ajustes.enabled:
+            return None
+        texto = (
+            f"*Laplace · «{project_id}»* — mensaje de prueba. Si lo lees, las alertas de "
+            "este proyecto llegan aquí."
+        )
+        return self._enviar(ajustes, texto)
 
     def _enviar(self, ajustes: ProjectAlertConfig, texto: str) -> bool:
         """Por cada canal puesto. Cuenta como enviado si ha llegado por alguno."""
@@ -895,7 +1106,7 @@ async def alert_loop(runner: AlertRunner, interval_seconds: int) -> None:
     while True:
         try:
             await asyncio.sleep(interval_seconds)
-            await asyncio.to_thread(runner.evaluate_all)
+            await asyncio.to_thread(runner.evaluate_all_if_mine)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001

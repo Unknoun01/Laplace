@@ -2022,3 +2022,175 @@ actualizaba. Los tres tienen prueba.
 `keys.py` decía que no debía existir un endpoint que emitiera credenciales porque la
 primera tenía que salir de algún sitio. Ahora sale del código de configuración, y crear
 claves pide sesión de admin. Queda fuera, a propósito: SSO y verificación de email.
+
+### D-128 — La auditoría de septiembre: nueve costuras, y una red por cada una
+Una auditoría de todo el código encontró nueve fallos críticos. Ninguno estaba en lo que
+las pruebas recorrían; todos, en lo que quedaba entre dos piezas. Se arreglan juntos y
+cada uno deja su prueba en `test_auditoria_p1.py`, escrita como el ataque que era.
+
+* **Fugas entre proyectos.** `/api/alerts` sin `project_id` listaba todos los proyectos de
+  la instalación. Y lo que se pide por id —conjuntos, tiradas, anotaciones— no se
+  comprobaba contra la identidad: con un id ajeno se leían casos de otro cliente, se
+  comparaban sus tiradas o se colgaban veredictos de sus trazas (pisando el suyo, porque
+  la anotación se reescribe por traza, fuente y autor). Regla: **lo que se busca por id se
+  compara con la identidad, y si no es suyo contesta 404**, como si no existiera.
+* **Una clave de proyecto no gobierna el proyecto.** `_check_role` sólo miraba a las
+  personas, así que la clave de ingesta —la que vive en el entorno de los agentes, que es
+  donde se filtra— podía borrar el proyecto o mandar sus alertas a otro sitio. Lo de admin
+  pide ahora una persona con ese rol o la clave de instalación. Anotar y escribir datos,
+  no: eso sigue siendo cosa de la clave.
+* **La nube reventaba en cuatro rutas.** Postgres y el almacén nulo no aceptaban el
+  alcance que las rutas les pasan desde D-121 (`get_prompt(id, proyecto)` y compañía):
+  `TypeError` en la ficha de un prompt, al desplegar, al borrar. Las rutas se prueban
+  contra SQLite y nadie lo vio. La red es una prueba que compara la firma de cada método
+  del protocolo en las tres implementaciones.
+* **Un Postgres lento al arrancar dejaba la instalación muerta.** Se instalaba el almacén
+  nulo para siempre, y como el nulo no puede verificar claves, todo —la ingesta incluida—
+  era 503 hasta reiniciar. Ahora se queda el de Postgres, que se recupera solo, y las
+  migraciones, las tarifas y las cuentas se reintentan en segundo plano.
+* **El SDK no mandaba la clave** al pedir prompts ni al registrar tiradas. En la nube,
+  `get_prompt()` servía en silencio el texto de reserva. Ahora manda las mismas cabeceras
+  que el exportador de spans, y espera 5 s y no 30: va en el camino de cada petición.
+* **Sin tope al tamaño de lo que entra.** Ni el cuerpo ni el gzip descomprimido tenían
+  límite, y el proceso es de todos. `LAPLACE_MAX_BODY_MB` (32 por defecto) se aplica en un
+  middleware ASGI que corta antes de que nadie lea, y el gzip se descomprime con tope.
+* **SSRF por el webhook de alertas.** Cualquier https valía, y las redirecciones se
+  seguían. Ahora el host tiene que ser público al guardar y resolver a direcciones
+  públicas al enviar, y una redirección no se sigue. En local sigue valiendo la propia
+  máquina. Queda, anotada, la ventana entre resolver y conectar.
+* **`X-Forwarded-For` se creía siempre**, y el freno de intentos por IP no frenaba. Sólo
+  se cree a los proxies de `LAPLACE_TRUSTED_PROXIES` (IP, rango o nombre), vacío por
+  defecto. Se probó poner `web` en compose y **no vale**: levantado el stack, Next
+  reenvía la cabecera del navegador tal cual y no añade la IP real, así que un login con
+  «X-Forwarded-For: 6.6.6.6» quedaba auditado desde 6.6.6.6. Y sin creerla, todos los
+  usuarios llegaban con la IP de `web`: cinco fallos de cualquiera bloqueaban el login de
+  todos durante un cuarto de hora (también comprobado; pasaba ya antes de la auditoría).
+  La salida es una puerta delante de Next, `entrada` (Caddy, `deploy/Caddyfile`), que
+  reescribe la cabecera con la IP de la conexión; `web` deja de publicar su puerto y el
+  backend se fía de `web`. Probado con el stack levantado: la cabecera inventada se
+  descarta, y cinco fallos desde un cliente lo bloquean a él y no a otro. Aceptar una
+  invitación con una cuenta que ya existe prueba una contraseña, y ahora lleva el mismo
+  freno que entrar.
+
+La lectura de conjunto es la de siempre en este proyecto: la regla no se cumple porque se
+recuerde. La comprobación de rutas nuevas ya existía (D-097); faltaba la misma idea para
+la propiedad de los objetos y para la paridad de los almacenes.
+
+### D-129 — La deuda de la auditoría: lo que escala, lo que se reparte y lo que se ve
+La otra mitad de la auditoría de septiembre. D-128 cerró lo que se podía explotar; esto
+es lo que no rompía nada hoy y rompería con volumen, con dos procesos o con el tiempo.
+Cada punto tiene su prueba en `test_auditoria_p2.py`.
+
+**Rendimiento.** Las subconsultas de los filtros de la lista de trazas no llevaban
+proyecto, y la clave de ClickHouse empieza por él: cada filtro leía la instalación
+entera. Ahora van acotadas, en los dos almacenes. La pantalla de tarifas hacía dos
+agregaciones de 90 días **por proyecto** para sacar nombres de modelos: ahora es una
+consulta (`unpriced_models`). La lista de tiradas pedía su contexto tirada a tirada:
+ahora una vez. El juez hace hasta cuatro trazas a la vez, en orden. Postgres va con pool
+(`storage/_pg.py`): antes cada operación abría su conexión, y cada petición con sesión,
+dos. Las llamadas a la base que quedaban dentro de handlers `async` salen del bucle.
+
+**Varios procesos.** El bucle de alertas corría en cada worker y en cada réplica, y dos
+que evaluaban a la vez avisaban los dos. Ahora cada vuelta pide un candado consultivo de
+Postgres y la hace uno. La retención en ClickHouse deja de ser un `DELETE` diario y pasa a
+ser un TTL de la tabla, que se pone y se quita según `LAPLACE_RETENTION_DAYS`.
+
+**Lo que se quedaba a medias.** Borrar un proyecto borra primero los metadatos (claves
+incluidas, en una transacción) y después las trazas: al revés, un fallo dejaba claves
+vivas escribiendo en un proyecto sin trazas. Aceptar una invitación la gasta en la misma
+escritura que comprueba que no estaba gastada, y no baja de rol a quien ya era más.
+Entrar barre sesiones e invitaciones caducadas. Los textos libres de la API tienen tope.
+
+**El SDK.** Tras un fallo, `get_prompt()` no vuelve a preguntar en diez segundos: sirve
+la copia o la reserva sin esperar. Al caducar la copia pregunta un solo hilo.
+
+**Contratos.** El protocolo `SpanStore` no recogía seis métodos que las rutas llaman en
+los dos almacenes: la misma clase de hueco que dejó la nube en 500 (D-128). Ahora están, y
+una prueba exige que todo método público común a los dos esté en el protocolo con la
+misma firma. Y hay integración continua (`.github/workflows/ci.yml`), con ClickHouse y
+Postgres de verdad: las pruebas «de nube» dejan de saltarse.
+
+**Despliegue.** El backend corre sin root. ClickHouse y Postgres se publican sólo en
+127.0.0.1. `.dockerignore` deja fuera la interfaz exportada, que se colaba en la imagen y
+se servía vieja. Toda respuesta lleva `nosniff`, `frame-ancestors 'none'`,
+`X-Frame-Options` y `Referrer-Policy`, desde el backend y desde Next; Next deja de decir
+que es Next.
+
+**Next 16.** La 14.2 ya no recibe parches y arrastraba avisos que tocan a esta app —el de
+*request smuggling* en `rewrites`, que es justo cómo habla la interfaz con el backend—.
+Next 16 admite React 18, así que el salto fue pequeño. Dos cosas que sólo salieron
+mirando la pantalla: precarga las páginas con `HEAD`, que el servidor de ficheros del
+modo local no aceptaba, y su export deja los segmentos en `__next.trazas/__PAGE__.txt`
+aunque el navegador los pide como `__next.trazas.__PAGE__.txt`. Las dos se resuelven en
+`main.py`.
+
+**Queda, a propósito:** partir `insights.py` y las páginas de más de 600 líneas (es
+trabajo de refactor, no de auditoría, y sin cambio de comportamiento que probar); retirar
+la clave de API de `localStorage` ahora que hay sesiones (cambia cómo entra quien usa
+clave); llevar el freno de intentos a la base para que no se multiplique por procesos;
+fijar la IP al conectar con un webhook (DNS rebinding, D-128); y delimitar mejor el
+contenido de las trazas en el prompt del juez.
+
+### D-130 — Lo que D-129 dejó anotado, hecho
+Los cinco pendientes de la auditoría. Tienen prueba en `test_auditoria_pendientes.py`,
+salvo partir `insights`, que la tiene en las pruebas que ya había y que no han cambiado.
+
+* **Webhooks a IP fija.** El nombre se resuelve una vez, se comprueba que todas sus
+  direcciones son públicas y se conecta a ésas, con el nombre en SNI y en `Host`. Entre
+  comprobar y conectar ya no hay una segunda resolución que pueda llevar a la red
+  interna. Una cosa que salió probando: quedarse con la primera dirección no vale, porque
+  un nombre con IPv6 e IPv4 puede no escuchar en la primera; se prueban todas las
+  comprobadas, en orden, como hacía `urllib`.
+* **El freno de intentos, en la base de cuentas.** En memoria, cada worker llevaba su
+  cuenta y el tope se multiplicaba por procesos; y reiniciar lo ponía a cero. La tabla
+  `login_failures` es de todos, y entrar barre lo que tiene más de un día.
+* **El juez distingue sus instrucciones de lo que evalúa.** El contenido de la traza va
+  entre `<dato>…</dato>`, el prompt de sistema dice que es dato y no instrucciones, y
+  cualquier forma de la etiqueta escrita dentro se neutraliza. El prompt pasa a `v2`: dos
+  veredictos de prompts distintos no se comparan.
+* **La clave de API fuera del alcance de JavaScript.** Quien entra a la interfaz con clave
+  la manda una vez a `POST /api/auth/key`, que la comprueba y la deja en una cookie
+  `httpOnly`. Sus escrituras piden la cabecera anti-CSRF, como las de sesión. Los
+  navegadores que la tenían en `localStorage` la pasan a la cookie una sola vez y la
+  borran de ahí. `Authorization: Bearer` sigue siendo lo de los agentes y las
+  herramientas: esto cambia sólo lo que guarda el navegador.
+* **`insights` es un paquete**: `modelos` (tipos, umbrales y redacción), una regla por
+  módulo (`repeticion`, `bucle`, `modelo_caro`, `contexto_fijo`) y `motor`. Se partió con
+  un script que no cambia ni una línea de lógica; el `__init__` reexporta todo, así que
+  ninguna importación de fuera cambió. El guardia de `test_cifras` que busca dinero
+  formateado a mano mira ahora todos los módulos del paquete: si hubiera seguido
+  mirando sólo `__init__`, habría dejado de vigilar las reglas sin fallar.
+* **Ninguna página pasa de 500 líneas.** Los componentes que ya existían se movieron a
+  ficheros hermanos (`detalle.tsx`, `alertas.tsx`, `listado.tsx`…), también con un
+  script que no toca su código. Se comprobó con `tsc --noUnusedLocals` y recorriendo cada
+  pantalla en el navegador con datos que pasan por lo movido.
+
+### D-131 — P3: lo menor, que también se equivocaba en silencio
+La auditoría original llegaba a P2. Esto es lo menor que se vio por el camino y no entró:
+nada permitía leer datos ajenos, pero cada punto era una forma de equivocarse sin que
+nada lo dijera. Pruebas en `test_auditoria_p3.py`.
+
+* **`/docs` y `/openapi.json`, sólo en local.** No cuelgan de `/api`, así que el
+  middleware no los tocaba, y en la nube enseñaban a cualquiera el mapa de la API.
+* **Con varios proyectos hay que decir cuál.** Una persona de una organización con varios
+  proyectos que no mandaba `project_id` recibía el primero por orden alfabético: la misma
+  petición contestaba de un proyecto u otro según cómo se llamaran. Ahora es un 400 que lo
+  dice. Una clave, que tiene un solo proyecto, sigue sin tener que decirlo.
+* **El destinatario de las alertas se valida.** Bastaba una `@`: un salto de línea dentro
+  de una cabecera de correo es la forma de añadir cabeceras propias, y una coma daba para
+  cien destinos. Ahora hay formato, sin saltos de línea y como mucho cinco. Y si queda uno
+  malo guardado de antes, el envío lo dice en vez de reventar el ciclo de alertas —esto lo
+  encontró la prueba: el error saltaba al construir la cabecera, antes del `try`—.
+* **El apunte de «último uso» de las claves no crece sin fin**: se barre al pasar de diez
+  mil.
+* **Las conexiones SQLite se cierran.** `with sqlite3.connect()` confirma pero no cierra;
+  en Windows eso es un fichero abierto hasta que pase el recolector, y desde Python 3.13
+  un aviso por conexión.
+* **Cambiar de filtros cancela lo que estaba en vuelo.** `useApi` pasa una señal a su
+  carga y las lecturas la reciben. Se intentó primero sin tocar las funciones —una señal
+  «en el ambiente» que `get` recogía al empezar— y la prueba en el navegador enseñó que no
+  llegaba: casi todas las pantallas piden antes los proyectos, y en el navegador nada
+  sobrevive a un `await`. Va explícita.
+* **El código de configuración se gasta una vez**, bajo cerrojo, antes de crear nada: dos
+  peticiones a la vez ya no crean dos administradores. Si la configuración falla después
+  —una contraseña corta—, el código se devuelve.

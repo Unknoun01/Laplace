@@ -44,6 +44,20 @@ def endpoint(explicit: str | None = None) -> str:
     return str(base).rstrip("/")
 
 
+def _cabeceras(con_cuerpo: bool) -> dict[str, str]:
+    """Las mismas que el exportador de spans: la clave de `laplace.init()` y las propias.
+
+    Antes no se mandaba ninguna. En local no se nota —no se pide clave—, pero en la nube
+    `get_prompt()` recibía siempre un 401 y servía **en silencio** el texto de reserva:
+    lo que se desplegaba desde la pestaña Prompts no llegaba nunca al agente.
+    """
+    config = get_config()
+    cabeceras = dict(config.export_headers()) if config is not None else {}
+    if con_cuerpo:
+        cabeceras["Content-Type"] = "application/json"
+    return cabeceras
+
+
 def request(
     url: str, *, method: str = "GET", payload: Any = None, timeout: float = 30.0
 ) -> Any:
@@ -52,7 +66,7 @@ def request(
     peticion = urllib.request.Request(  # noqa: S310 - la URL la da quien instrumenta
         url,
         data=datos,
-        headers={"Content-Type": "application/json"} if datos else {},
+        headers=_cabeceras(datos is not None),
         method=method,
     )
     try:

@@ -70,6 +70,9 @@ ADMIN_WRITES = (
 
 _ESCRITURAS = ("POST", "PUT", "PATCH", "DELETE")
 
+#: Cuántas claves se recuerdan como «usada hace poco» antes de barrer las viejas.
+_MAX_USOS_RECORDADOS = 10_000
+
 #: Lo que exige credencial. El resto —la interfaz estática— no toca datos.
 GUARDED_PREFIXES = ("/api", "/v1/traces")
 
@@ -144,7 +147,14 @@ class Identity:
             return project_id
         if self.sees_everything:
             return None
-        return next(iter(sorted(self.projects)), None)
+        if len(self.projects) > 1:
+            # Una persona de una organización con varios proyectos (D-127). Antes se
+            # escogía el primero por orden alfabético, en silencio: la misma petición
+            # contestaba con datos de un proyecto u otro según cómo se llamaran (D-131).
+            raise AuthError(
+                400, "tienes acceso a varios proyectos: di cuál con ?project_id="
+            )
+        return next(iter(self.projects), None)
 
     def visible(self, project_ids: list[str]) -> list[str]:
         return [p for p in project_ids if self.allows(p)]
@@ -310,6 +320,17 @@ class AuthMiddleware(BaseHTTPMiddleware):
         sesion = identity_from_session(self._cuentas(), request)
         if sesion is not None:
             return sesion
+        # La clave que la interfaz dejó en su cookie al entrar con clave (D-130). Es la
+        # misma clave de siempre, así que se valida igual; lo único distinto es que viaja
+        # en una cookie, y por eso sus escrituras piden la cabecera anti-CSRF.
+        from .cuentas import COOKIE_CLAVE
+
+        en_cookie = request.cookies.get(COOKIE_CLAVE, "").strip()
+        if en_cookie:
+            identidad = resolve(self._metadata(), en_cookie)
+            identidad.by_cookie = True
+            await self._apuntar_uso(identidad.key_id)
+            return identidad
         raise AuthError(
             401,
             "inicia sesión, o manda una clave de API en la cabecera "
@@ -326,6 +347,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if cuentas is None or not key_id or ahora - self._usos.get(key_id, -1e9) < 300:
             return
         self._usos[key_id] = ahora
+        if len(self._usos) > _MAX_USOS_RECORDADOS:
+            # Sólo sirve para no escribir en cada petición; olvidar los viejos es gratis
+            # (como mucho, una escritura de más). Sin esto crecía con cada clave vista.
+            viejos = [k for k, t in self._usos.items() if ahora - t >= 300]
+            for k in viejos:
+                del self._usos[k]
         try:
             await run_in_threadpool(cuentas.usar_clave, key_id)
         except Exception:  # noqa: BLE001 - apuntar el uso no puede tumbar la petición
@@ -363,11 +390,29 @@ class AuthMiddleware(BaseHTTPMiddleware):
         primer proyecto» es la forma de que un lector de A escriba en A porque es miembro
         de B.
         """
-        if not identidad.user_id or request.method not in _ESCRITURAS:
+        if request.method not in _ESCRITURAS:
             return
         # La organización no va por proyecto: sus rutas comprueban el rol en esa
         # organización con `_exigir_org` (api_cuentas.py).
         if request.url.path.startswith("/api/org"):
+            return
+        es_de_admin = any(
+            request.method == metodo and request.url.path.startswith(ruta)
+            for metodo, ruta in ADMIN_WRITES
+        )
+        if not identidad.user_id:
+            # Una clave de proyecto escribe datos —spans, anotaciones, tiradas—, pero no
+            # gobierna el proyecto. Esas claves viven en el entorno de los agentes de los
+            # clientes, que es donde se filtran; con una de ellas se podía borrar el
+            # proyecto entero o mandar sus alertas a otro sitio. Lo de admin pide una
+            # persona con ese rol o la clave de instalación (y el modo local, que es
+            # abierto a propósito, la tiene).
+            if es_de_admin and not identidad.sees_everything:
+                raise AuthError(
+                    403,
+                    "esto lo hace una persona con rol de admin desde la interfaz, no una "
+                    "clave de API de proyecto",
+                )
             return
         from .cuentas import rol_suficiente
 
@@ -384,14 +429,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if not proyecto:
             raise AuthError(400, "esta escritura tiene que decir sobre qué proyecto es")
         rol = identidad.roles.get(proyecto)
-        necesita = (
-            "admin"
-            if any(
-                request.method == metodo and request.url.path.startswith(ruta)
-                for metodo, ruta in ADMIN_WRITES
-            )
-            else "miembro"
-        )
+        necesita = "admin" if es_de_admin else "miembro"
         if not rol_suficiente(rol, necesita):
             raise AuthError(
                 403,

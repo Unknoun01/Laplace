@@ -10,6 +10,7 @@ el SDK dentro del proceso del usuario y aquí se recibe el parte (D-086).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -39,12 +40,28 @@ def _meta(request: Request) -> Any:
     return request.app.state.metadata
 
 
+#: Cuántas trazas se juzgan a la vez. Suficiente para que doscientas no tarden
+#: doscientas veces una llamada, y lejos del límite de peticiones de cualquier proveedor.
+JUDGE_CONCURRENCY = 4
+
+
 def _alcance(request: Request) -> str | None:
     """El proyecto al que acotar un acceso que va por id opaco (D-121)."""
     # Con cuentas, una identidad tiene varios proyectos y «el suyo» ya no es uno: el
     # proyecto viene en la petición, y el middleware ya ha comprobado que puede tocarlo
     # (D-127). Sin él, lo de siempre.
     return identity_of(request).scope(request.query_params.get("project_id"))
+
+
+def _de_otro(request: Request, project_id: str) -> bool:
+    """Si un objeto encontrado por id es de un proyecto que quien llama no ve.
+
+    Los ids de conjuntos y tiradas son opacos pero no secretos: salen en URLs, en
+    capturas y en la memoria de quien dejó el equipo. Lo que se busca por id se comprueba
+    contra la identidad, y se contesta 404 igual que si no existiera, para no decir qué
+    ids existen en otros proyectos.
+    """
+    return not identity_of(request).allows(project_id)
 
 
 def _guard(fn, *args, **kwargs):
@@ -77,14 +94,21 @@ class AnnotationIn(BaseModel):
     trace_id: str
     span_id: str | None = None
     verdict: str = Field(pattern="^(pass|fail|unknown)$")
-    comment: str | None = None
-    label: str | None = None
-    author: str | None = None
+    comment: str | None = Field(default=None, max_length=5000)
+    label: str | None = Field(default=None, max_length=120)
+    author: str | None = Field(default=None, max_length=120)
 
 
 @router.post("/annotations", response_model=Annotation)
 async def create_annotation(request: Request, body: AnnotationIn) -> Annotation:
     """Marca una traza como buena o mala. Siempre con fuente humana."""
+    # La traza tiene que ser del proyecto. Sin esto, desde un proyecto se colgaban
+    # veredictos de trazas ajenas —y como la anotación se reescribe por traza, fuente y
+    # autor, se podía pisar el veredicto que ya tenía su dueño—.
+    if not await run_in_threadpool(
+        _store(request).get_trace_spans, body.trace_id, body.project_id
+    ):
+        raise HTTPException(status_code=404, detail="esa traza no está en este proyecto")
     anotacion = Annotation(
         id=new_id("an"),
         trace_id=body.trace_id,
@@ -113,11 +137,19 @@ async def delete_annotation(request: Request, annotation_id: str) -> dict[str, b
 
 @router.get("/annotations")
 async def list_annotations(
-    request: Request, trace_ids: str = Query(..., description="ids separados por coma")
+    request: Request,
+    trace_ids: str = Query(..., description="ids separados por coma"),
+    project_id: str | None = None,
 ) -> dict[str, Any]:
-    """Anotaciones de varias trazas de una vez: lo usa el explorador para marcar filas."""
+    """Anotaciones de varias trazas de una vez: lo usa el explorador para marcar filas.
+
+    Acotadas al proyecto: sin eso, cualquiera con una credencial leía las anotaciones de
+    cualquier traza de la instalación sabiendo su id.
+    """
     ids = [t for t in trace_ids.split(",") if t]
-    porciones = await run_in_threadpool(_meta(request).annotations_for, ids)
+    porciones = await run_in_threadpool(
+        _meta(request).annotations_for, ids, _alcance(request)
+    )
     return {
         "annotations": {
             k: [a.model_dump(mode="json") for a in v] for k, v in porciones.items()
@@ -133,7 +165,7 @@ async def list_annotations(
 class JudgeIn(BaseModel):
     project_id: str
     #: Trazas sueltas, o todas las de una tirada.
-    trace_ids: list[str] = Field(default_factory=list)
+    trace_ids: list[str] = Field(default_factory=list, max_length=1000)
     run_id: str | None = None
 
 
@@ -171,7 +203,7 @@ async def run_judge(request: Request, body: JudgeIn) -> dict[str, Any]:
     esperados: dict[str, Any] = {}
     if body.run_id:
         tirada = await run_in_threadpool(meta.get_run, body.run_id)
-        if tirada is None:
+        if tirada is None or tirada.project_id != body.project_id:
             raise HTTPException(status_code=404, detail="esa tirada no existe")
         ids = [i.trace_id for i in tirada.items if not i.failed]
         casos = {
@@ -196,20 +228,31 @@ async def run_judge(request: Request, body: JudgeIn) -> dict[str, Any]:
         )
 
     store = _store(request)
-    hechas: list[Annotation] = []
-    fallos: list[dict[str, str]] = []
-    for trace_id in ids:
-        spans = await run_in_threadpool(store.get_trace_spans, trace_id, body.project_id)
-        try:
-            anotacion = await run_in_threadpool(
-                judge_trace, config, trace_id, spans, esperados.get(trace_id)
+    # Varias trazas a la vez, con tope. De una en una, doscientas llamadas a un modelo
+    # dentro de una petición HTTP pasaban de cualquier timeout de proxy; sin tope, se
+    # dispararía el límite de peticiones del proveedor. El orden del resultado es el de
+    # la petición, se terminen como se terminen.
+    cupo = asyncio.Semaphore(JUDGE_CONCURRENCY)
+
+    async def juzgar(trace_id: str) -> Annotation | dict[str, str]:
+        async with cupo:
+            spans = await run_in_threadpool(store.get_trace_spans, trace_id, body.project_id)
+            if not spans:
+                # Ni se juzga ni se guarda: o no existe, o es de otro proyecto.
+                return {"trace_id": trace_id, "error": "traza no encontrada en este proyecto"}
+            try:
+                anotacion = await run_in_threadpool(
+                    judge_trace, config, trace_id, spans, esperados.get(trace_id)
+                )
+            except JudgeUnavailable as exc:
+                return {"trace_id": trace_id, "error": str(exc)}
+            return await run_in_threadpool(
+                _guard, meta.save_annotation, body.project_id, anotacion
             )
-        except JudgeUnavailable as exc:
-            fallos.append({"trace_id": trace_id, "error": str(exc)})
-            continue
-        hechas.append(
-            await run_in_threadpool(_guard, meta.save_annotation, body.project_id, anotacion)
-        )
+
+    resultados = await asyncio.gather(*(juzgar(t) for t in ids))
+    hechas = [r for r in resultados if isinstance(r, Annotation)]
+    fallos = [r for r in resultados if isinstance(r, dict)]
 
     coste = sum(a.judge.cost_usd for a in hechas if a.judge)
     incompleto = any(a.judge.cost_unknown for a in hechas if a.judge)
@@ -252,8 +295,8 @@ class DatasetIn(BaseModel):
     """
 
     project_id: str
-    name: str
-    description: str = ""
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=2000)
     #: El mismo filtro que la lista de trazas. Se guarda tal cual para poder enseñarlo.
     filter: dict[str, Any] = Field(default_factory=dict)
     limit: int = Field(default=50, ge=1, le=500)
@@ -338,7 +381,7 @@ async def list_datasets(request: Request, project_id: str) -> dict[str, Any]:
 async def get_dataset(request: Request, dataset_id: str) -> dict[str, Any]:
     meta = _meta(request)
     conjunto = await run_in_threadpool(meta.get_dataset, dataset_id)
-    if conjunto is None:
+    if conjunto is None or _de_otro(request, conjunto.project_id):
         raise HTTPException(status_code=404, detail="ese conjunto no existe")
     casos = await run_in_threadpool(meta.list_dataset_items, dataset_id)
     return {
@@ -367,15 +410,16 @@ class RunIn(BaseModel):
 
     project_id: str
     dataset_id: str
-    variant: str
-    notes: str = ""
-    items: list[EvalRunItem] = Field(default_factory=list)
+    variant: str = Field(min_length=1, max_length=120)
+    notes: str = Field(default="", max_length=2000)
+    items: list[EvalRunItem] = Field(default_factory=list, max_length=5000)
 
 
 @router.post("/runs", response_model=EvalRun)
 async def create_run(request: Request, body: RunIn) -> EvalRun:
     meta = _meta(request)
-    if await run_in_threadpool(meta.get_dataset, body.dataset_id) is None:
+    conjunto = await run_in_threadpool(meta.get_dataset, body.dataset_id)
+    if conjunto is None or conjunto.project_id != body.project_id:
         raise HTTPException(status_code=404, detail="ese conjunto no existe")
     tirada = EvalRun(
         id=new_id("run"),
@@ -398,9 +442,11 @@ async def list_runs(
     nombres = {
         d.id: d.name for d in await run_in_threadpool(meta.list_datasets, project_id)
     }
+    # El contexto de todas las tiradas de una vez: tres consultas en total y no tres
+    # por tirada. Va indexado por traza, así que cada resumen coge lo suyo.
+    anotaciones, costes, prompts = await _context_for(request, project_id, *tiradas)
     resumenes: list[RunSummary] = []
     for tirada in tiradas:
-        anotaciones, costes, prompts = await _context_for(request, project_id, tirada)
         resumenes.append(
             summarize_run(
                 tirada,
@@ -421,7 +467,7 @@ async def _context_for(request: Request, project_id: str, *tiradas: EvalRun):
     cada lado, que es lo primero que se pregunta cuando el resultado sorprende (D-094).
     """
     ids = [i.trace_id for t in tiradas for i in t.items]
-    anotaciones = await run_in_threadpool(_meta(request).annotations_for, ids)
+    anotaciones = await run_in_threadpool(_meta(request).annotations_for, ids, project_id)
     costes = await run_in_threadpool(_store(request).costs_for_traces, project_id, ids)
     prompts = await run_in_threadpool(
         _store(request).prompt_versions_by_trace, project_id, ids
@@ -444,7 +490,12 @@ async def compare_runs(
     meta = _meta(request)
     run_a = await run_in_threadpool(meta.get_run, a)
     run_b = await run_in_threadpool(meta.get_run, b)
-    if run_a is None or run_b is None:
+    if (
+        run_a is None
+        or run_b is None
+        or run_a.project_id != project_id
+        or run_b.project_id != project_id
+    ):
         raise HTTPException(status_code=404, detail="alguna de las dos tiradas no existe")
     if run_a.dataset_id != run_b.dataset_id:
         raise HTTPException(

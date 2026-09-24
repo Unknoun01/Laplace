@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hmac
 import logging
+import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -25,9 +26,11 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from .auth import identity_of
+from .auth import AuthError, identity_of
+from .auth import resolve as resolver_clave
 from .cuentas import (
     COOKIE,
+    COOKIE_CLAVE,
     DURACION_SESION,
     ROLES,
     comprobar_contrasena,
@@ -48,11 +51,61 @@ def _cuentas(request: Request) -> Any:
     return cuentas
 
 
+def es_proxy_de_confianza(ip: str, confiables: frozenset[str]) -> bool:
+    """Si `ip` es uno de los proxies declarados: una IP, un rango CIDR o un nombre.
+
+    El nombre sirve para `docker compose`, donde la IP del contenedor `web` cambia en
+    cada arranque pero su nombre no. Se resuelve en cada consulta: sólo se pregunta al
+    entrar, aceptar una invitación o anotar en la auditoría, no en cada petición.
+    """
+    import ipaddress
+    import socket
+
+    try:
+        direccion = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    for entrada in confiables:
+        try:
+            if direccion in ipaddress.ip_network(entrada, strict=False):
+                return True
+            continue
+        except ValueError:
+            pass
+        try:
+            resueltas = {i[4][0] for i in socket.getaddrinfo(entrada, None)}
+        except OSError:
+            continue
+        if ip in resueltas:
+            return True
+    return False
+
+
+def _por_proxy(request: Request) -> bool:
+    """Si la conexión viene de un proxy declarado en `LAPLACE_TRUSTED_PROXIES`.
+
+    Sólo entonces se cree a las cabeceras `X-Forwarded-*`. Antes se creían siempre, y
+    cualquiera podía poner una IP distinta en cada intento: el freno por IP no frenaba y
+    la auditoría apuntaba la IP que el atacante quisiera.
+    """
+    directa = request.client.host if request.client else ""
+    confiables = request.app.state.settings.trusted_proxy_list
+    return bool(directa and confiables) and es_proxy_de_confianza(directa, confiables)
+
+
 def _ip(request: Request) -> str:
-    reenviada = request.headers.get("x-forwarded-for", "")
-    return (reenviada.split(",")[0].strip() if reenviada else "") or (
-        request.client.host if request.client else ""
-    )
+    directa = request.client.host if request.client else ""
+    if not _por_proxy(request):
+        return directa
+    # El último salto es el que añadió nuestro proxy; los anteriores los pone el cliente
+    # y pueden ser cualquier cosa.
+    saltos = [h.strip() for h in request.headers.get("x-forwarded-for", "").split(",")]
+    saltos = [h for h in saltos if h]
+    return saltos[-1] if saltos else directa
+
+
+#: Para gastar el código de configuración una sola vez (ver `setup`).
+_CERROJO_SETUP = threading.Lock()
 
 
 def _local(request: Request) -> bool:
@@ -61,7 +114,7 @@ def _local(request: Request) -> bool:
 
 def _poner_cookie(request: Request, response: Response, token: str) -> None:
     segura = request.url.scheme == "https" or (
-        request.headers.get("x-forwarded-proto", "") == "https"
+        _por_proxy(request) and request.headers.get("x-forwarded-proto", "") == "https"
     )
     response.set_cookie(
         COOKIE,
@@ -165,9 +218,24 @@ async def setup(request: Request, response: Response, body: SetupIn) -> dict[str
     cuentas = _cuentas(request)
     if await run_in_threadpool(cuentas.hay_usuarios):
         raise HTTPException(status_code=409, detail="esta instalación ya está configurada")
-    esperado = getattr(request.app.state, "setup_token", "") or ""
-    if not esperado or not hmac.compare_digest(body.token.strip(), esperado):
-        raise HTTPException(status_code=403, detail="ese código de configuración no vale")
+    # El código se gasta aquí, antes de crear nada, y bajo cerrojo: dos peticiones a la
+    # vez con el código bueno ya no crean dos administradores (D-131). Si algo falla más
+    # abajo se devuelve, para no dejar la instalación sin forma de configurarse.
+    with _CERROJO_SETUP:
+        esperado = getattr(request.app.state, "setup_token", "") or ""
+        if not esperado or not hmac.compare_digest(body.token.strip(), esperado):
+            raise HTTPException(status_code=403, detail="ese código de configuración no vale")
+        request.app.state.setup_token = ""
+    try:
+        return await _configurar_instalacion(request, response, body, cuentas)
+    except BaseException:
+        request.app.state.setup_token = esperado
+        raise
+
+
+async def _configurar_instalacion(
+    request: Request, response: Response, body: SetupIn, cuentas: Any
+) -> dict[str, Any]:
     motivo = validar_contrasena(body.password)
     if motivo:
         raise HTTPException(status_code=400, detail=motivo)
@@ -184,7 +252,6 @@ async def setup(request: Request, response: Response, body: SetupIn) -> dict[str
         return usuario, cuentas.abrir_sesion(usuario.id, request.headers.get("user-agent", ""))
 
     usuario, token = await run_in_threadpool(crear)
-    request.app.state.setup_token = ""
     _poner_cookie(request, response, token)
     logger.warning("instalación configurada — primera cuenta %s", usuario.email)
     return {"ok": True, "email": usuario.email}
@@ -209,7 +276,7 @@ async def login(request: Request, response: Response, body: LoginIn) -> dict[str
     email = normalizar_email(body.email)
     ip = _ip(request)
     claves = (f"email:{email}", f"ip:{ip}")
-    if frenos.bloqueado(*claves):
+    if await run_in_threadpool(frenos.bloqueado, *claves):
         raise HTTPException(
             status_code=429,
             detail="demasiados intentos fallidos. Espera un cuarto de hora y vuelve a probar",
@@ -225,14 +292,20 @@ async def login(request: Request, response: Response, body: LoginIn) -> dict[str
 
     usuario = await run_in_threadpool(comprobar)
     if usuario is None:
-        frenos.fallo(*claves)
+        await run_in_threadpool(frenos.fallo, *claves)
         await run_in_threadpool(cuentas.anotar, "", "", "login_fallido", email, ip)
         raise HTTPException(status_code=401, detail="email o contraseña incorrectos")
 
-    frenos.limpiar(f"email:{email}")
+    await run_in_threadpool(frenos.limpiar, f"email:{email}")
     token = await run_in_threadpool(
         cuentas.abrir_sesion, usuario.id, request.headers.get("user-agent", "")
     )
+    # Entrar es un buen momento para barrer lo caducado: pasa a menudo, pero no en cada
+    # petición, y no hace falta otro bucle en segundo plano para esto.
+    try:
+        await run_in_threadpool(cuentas.purgar_caducadas)
+    except Exception:  # noqa: BLE001 - barrer no puede impedir entrar
+        logger.warning("no se pudieron purgar las sesiones caducadas", exc_info=True)
     for org in await run_in_threadpool(cuentas.orgs_de, usuario.id):
         await run_in_threadpool(cuentas.anotar, org["id"], usuario.id, "login", "", ip)
     _poner_cookie(request, response, token)
@@ -245,6 +318,47 @@ async def logout(request: Request, response: Response) -> dict[str, Any]:
     if token and not _local(request):
         await run_in_threadpool(_cuentas(request).cerrar_sesion, token)
     response.delete_cookie(COOKIE, path="/")
+    response.delete_cookie(COOKIE_CLAVE, path="/")
+    return {"ok": True}
+
+
+class KeySessionIn(BaseModel):
+    key: str = Field(min_length=1, max_length=200)
+
+
+@router.post("/auth/key")
+async def key_session(request: Request, response: Response, body: KeySessionIn) -> dict[str, Any]:
+    """Entrar a la interfaz con una clave de API en vez de con cuenta (D-130).
+
+    La clave se comprueba aquí y se deja en una cookie `httpOnly`; la interfaz no la
+    guarda en ningún sitio que JavaScript pueda leer. Antes vivía en `localStorage` y
+    viajaba en `Authorization` desde el navegador: cualquier XSS se la llevaba, y una
+    clave de API no caduca como una sesión.
+    """
+    clave = body.key.strip()
+    try:
+        identidad = await run_in_threadpool(resolver_clave, request.app.state.metadata, clave)
+    except AuthError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail) from exc
+    segura = request.url.scheme == "https" or (
+        _por_proxy(request) and request.headers.get("x-forwarded-proto", "") == "https"
+    )
+    response.set_cookie(
+        COOKIE_CLAVE,
+        clave,
+        max_age=int(DURACION_SESION.total_seconds()),
+        httponly=True,
+        secure=segura,
+        samesite="lax",
+        path="/",
+    )
+    return {"ok": True, "projects": sorted(identidad.projects)}
+
+
+@router.delete("/auth/key")
+async def forget_key(response: Response) -> dict[str, Any]:
+    """Deja de usar la clave en este navegador."""
+    response.delete_cookie(COOKIE_CLAVE, path="/")
     return {"ok": True}
 
 
@@ -257,9 +371,11 @@ class PasswordIn(BaseModel):
 async def change_password(request: Request, body: PasswordIn) -> dict[str, Any]:
     """Cambiar la contraseña cierra las demás sesiones: si alguien la sabía, deja de
     servirle también la sesión que ya tuviera abierta."""
-    usuario = _usuario(request)
+    usuario = await run_in_threadpool(_usuario, request)
     cuentas = _cuentas(request)
-    if not comprobar_contrasena(body.current, await run_in_threadpool(cuentas.hash_de, usuario.id)):
+    guardado = await run_in_threadpool(cuentas.hash_de, usuario.id)
+    # scrypt tarda décimas de segundo a propósito: fuera del bucle de eventos.
+    if not await run_in_threadpool(comprobar_contrasena, body.current, guardado):
         raise HTTPException(status_code=403, detail="la contraseña actual no es ésa")
     motivo = validar_contrasena(body.new)
     if motivo:
@@ -273,7 +389,7 @@ async def change_password(request: Request, body: PasswordIn) -> dict[str, Any]:
 
 @router.post("/auth/logout-all")
 async def logout_all(request: Request, response: Response) -> dict[str, Any]:
-    usuario = _usuario(request)
+    usuario = await run_in_threadpool(_usuario, request)
     cerradas = await run_in_threadpool(_cuentas(request).cerrar_todas, usuario.id)
     response.delete_cookie(COOKIE, path="/")
     return {"ok": True, "closed_sessions": cerradas}
@@ -310,8 +426,18 @@ async def accept(request: Request, response: Response, body: AcceptIn) -> dict[s
 
     existente = await run_in_threadpool(cuentas.usuario_por_email, info["email"])
     if existente is not None:
+        # Aquí también se prueba una contraseña, así que lleva el mismo freno que entrar:
+        # sin él, un enlace de invitación era un sitio donde probarlas sin límite.
+        frenos = request.app.state.frenos
+        claves = (f"email:{info['email']}", f"ip:{_ip(request)}")
+        if await run_in_threadpool(frenos.bloqueado, *claves):
+            raise HTTPException(
+                status_code=429,
+                detail="demasiados intentos fallidos. Espera un cuarto de hora y vuelve a probar",
+            )
         usuario, guardado = existente
-        if not comprobar_contrasena(body.password, guardado):
+        if not await run_in_threadpool(comprobar_contrasena, body.password, guardado):
+            await run_in_threadpool(frenos.fallo, *claves)
             raise HTTPException(status_code=403, detail="la contraseña de tu cuenta no es ésa")
     else:
         motivo = validar_contrasena(body.password)
@@ -321,13 +447,21 @@ async def accept(request: Request, response: Response, body: AcceptIn) -> dict[s
             cuentas.crear_usuario, info["email"], body.name, body.password
         )
 
-    def unir() -> str:
-        cuentas.poner_miembro(info["org_id"], usuario.id, info["role"])
-        cuentas.aceptar(body.token)
+    def unir() -> str | None:
+        # Primero se gasta la invitación, y sólo si era la primera vez se hace miembro.
+        if not cuentas.aceptar(body.token):
+            return None
+        # Una invitación no baja a nadie de rol: si ya era admin de esa organización y
+        # acepta un enlace de lector, se queda admin.
+        actual = cuentas.rol_en(info["org_id"], usuario.id)
+        if not rol_suficiente(actual, info["role"]):
+            cuentas.poner_miembro(info["org_id"], usuario.id, info["role"])
         cuentas.anotar(info["org_id"], usuario.id, "aceptar_invitacion", info["role"], _ip(request))
         return cuentas.abrir_sesion(usuario.id, request.headers.get("user-agent", ""))
 
     token = await run_in_threadpool(unir)
+    if token is None:
+        raise HTTPException(status_code=404, detail="esa invitación no existe o ha caducado")
     _poner_cookie(request, response, token)
     return {"ok": True, "org_name": info["org_name"]}
 
@@ -343,7 +477,11 @@ async def get_org(request: Request, org_id: str) -> dict[str, Any]:
     usuario = await run_in_threadpool(_exigir_org, request, org_id, "lector")
     cuentas = _cuentas(request)
     rol = next(
-        (o["role"] for o in cuentas.orgs_de(usuario.id) if o["id"] == org_id),
+        (
+            o["role"]
+            for o in await run_in_threadpool(cuentas.orgs_de, usuario.id)
+            if o["id"] == org_id
+        ),
         "propietario" if usuario.is_admin else "lector",
     )
     salida: dict[str, Any] = {
@@ -389,8 +527,8 @@ async def invite(request: Request, body: InviteIn) -> dict[str, Any]:
     # Por correo si la instalación tiene servidor; si no, el enlace se enseña para
     # mandarlo a mano. El enlace sólo sale en esta respuesta: se guarda su hash.
     enviado = False
-    notificador = getattr(request.app.state.alerts, "_email", None)
-    if notificador is not None and notificador.configured:
+    notificador = request.app.state.alerts.mailer
+    if notificador is not None:
         nombre = await run_in_threadpool(cuentas.nombre_org, body.org_id)
         enviado = await run_in_threadpool(
             notificador.send,
@@ -454,7 +592,7 @@ async def set_role(request: Request, body: MemberIn) -> dict[str, Any]:
 async def remove_member(request: Request, org_id: str, user_id: str) -> dict[str, Any]:
     """Quitar a alguien, o irse uno mismo. Cierra sus sesiones: si no, seguiría viendo
     los datos hasta que caducara la cookie."""
-    yo = _usuario(request)
+    yo = await run_in_threadpool(_usuario, request)
     necesita = "lector" if user_id == yo.id else "admin"
     await run_in_threadpool(_exigir_org, request, org_id, necesita)
     cuentas = _cuentas(request)

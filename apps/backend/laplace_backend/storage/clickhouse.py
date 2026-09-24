@@ -404,9 +404,15 @@ class ClickHouseStore:
         clauses: list[str] = []
         params: dict[str, Any] = {}
 
+        # Las subconsultas de ids van acotadas al proyecto igual que la de fuera. La clave
+        # de ordenación empieza por `project_id`: sin él, cada filtro (estado, sesión,
+        # usuario, modelo, búsqueda) leía la tabla entera de la instalación, y `status=ok`
+        # hacía un NOT IN contra las trazas fallidas de todos los clientes.
+        acotar = ""
         if filters.project_id:
             clauses.append("project_id = %(project_id)s")
             params["project_id"] = filters.project_id
+            acotar = " AND project_id = %(project_id)s"
         if filters.since is not None:
             clauses.append("start_time >= %(since)s")
             params["since"] = _utc(filters.since)
@@ -416,23 +422,26 @@ class ClickHouseStore:
         # Sesión y usuario los lleva el span raíz: se filtran trazas, no spans (D-123).
         if filters.session_id:
             clauses.append(
-                "trace_id IN (SELECT trace_id FROM spans WHERE session_id = %(session_id)s)"
+                "trace_id IN (SELECT trace_id FROM spans "
+                f"WHERE session_id = %(session_id)s{acotar})"
             )
             params["session_id"] = filters.session_id
         if filters.model:
             # El modelo es de un span, no de la traza: se filtra por trazas que lo usan.
             clauses.append(
                 "trace_id IN (SELECT DISTINCT trace_id FROM spans"
-                " WHERE request_model = %(model)s)"
+                f" WHERE request_model = %(model)s{acotar})"
             )
             params["model"] = filters.model
         if filters.user_id:
-            clauses.append("trace_id IN (SELECT trace_id FROM spans WHERE user_id = %(user_id)s)")
+            clauses.append(
+                f"trace_id IN (SELECT trace_id FROM spans WHERE user_id = %(user_id)s{acotar})"
+            )
             params["user_id"] = filters.user_id
 
         # El estado es una propiedad de la traza entera, no de un span: "ok" significa
         # que ninguno de sus spans falló, así que va por exclusión.
-        failed = "SELECT DISTINCT trace_id FROM spans WHERE status = 'error'"
+        failed = f"SELECT DISTINCT trace_id FROM spans WHERE status = 'error'{acotar}"
         if filters.status == "error":
             clauses.append(f"trace_id IN ({failed})")
         elif filters.status == "ok":
@@ -455,7 +464,10 @@ class ClickHouseStore:
             params["search"] = filters.search
         if sub:
             clauses.append(
-                "trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE " + " AND ".join(sub) + ")"
+                "trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE "
+                + " AND ".join(sub)
+                + acotar
+                + ")"
             )
 
         return ("WHERE " + " AND ".join(clauses) if clauses else "", params)
@@ -1055,6 +1067,27 @@ class ClickHouseStore:
 
     # -- tarifas propias, reparto por usuario y retención (D-123) -------------------
 
+    def unpriced_models(self, project_ids: list[str] | None, window: Window) -> list[str]:
+        """Modelos con llamadas sin tarifa en la ventana, de esos proyectos (`None`: todos).
+
+        Una consulta para todos, en vez de un `summarize_window` de 90 días por proyecto.
+        Sin `FINAL`: un duplicado sin fusionar no cambia un `DISTINCT`.
+        """
+        if project_ids is not None and not project_ids:
+            return []
+        params: dict[str, Any] = {"since": _utc(window.since), "until": _utc(window.until)}
+        donde = (
+            "cost_unknown = 1 AND request_model != '' "
+            "AND start_time >= %(since)s AND start_time <= %(until)s"
+        )
+        if project_ids is not None:
+            donde += " AND project_id IN %(proyectos)s"
+            params["proyectos"] = list(project_ids)
+        filas = self._client.query(
+            f"SELECT DISTINCT request_model FROM spans WHERE {donde}", parameters=params
+        ).result_rows
+        return sorted(f[0] for f in filas)
+
     def spans_by_model(self, model: str) -> list[Span]:
         """Todas las llamadas a un modelo, de todos los proyectos. Para el recálculo."""
         columns = ", ".join(COLUMNS)
@@ -1100,6 +1133,26 @@ class ClickHouseStore:
             )
             for r in _named(self._client.query(sql, parameters=params))
         ]
+
+    def apply_retention(self, days: int) -> None:
+        """La retención como TTL de la tabla, que es como ClickHouse borra lo viejo.
+
+        Antes era un `DELETE ... WHERE start_time < corte` una vez al día: un borrado
+        ligero que marca filas en todas las particiones afectadas y deja el trabajo de
+        verdad a las fusiones. El TTL lo hace ClickHouse en esas mismas fusiones, y
+        suelta particiones enteras cuando caducan del todo. Con `days` 0 se quita: borrar
+        datos no se enciende solo, y tampoco se queda encendido.
+        """
+        dias = int(days)
+        if dias > 0:
+            self._client.command(
+                f"ALTER TABLE spans MODIFY TTL toDateTime(start_time) + INTERVAL {dias} DAY"
+            )
+            return
+        try:
+            self._client.command("ALTER TABLE spans REMOVE TTL")
+        except Exception:  # noqa: BLE001 - no había TTL que quitar
+            logger.debug("la tabla no tenía TTL", exc_info=True)
 
     def delete_before(self, cutoff: datetime) -> int:
         """Borra los spans que empezaron antes de `cutoff`. Es la retención."""

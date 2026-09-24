@@ -21,6 +21,7 @@ from .api_evals import router as evals_router
 from .api_prompts import router as prompts_router
 from .auth import AuthMiddleware
 from .config import Settings, get_settings
+from .limites import CabecerasSeguridad, LimiteCuerpo
 from .storage.base import SpanStore
 
 logger = logging.getLogger("laplace")
@@ -58,6 +59,11 @@ def build_metadata(settings: Settings):
     return build_metadata_store(settings)
 
 
+#: Identificador del candado consultivo de Postgres para el bucle de alertas. Arbitrario,
+#: pero fijo: todos los procesos de una instalación tienen que pedir el mismo.
+CANDADO_ALERTAS = 0x4C41504C  # «LAPL»
+
+
 def build_alerts(settings: Settings, store, metadata=None):
     """El evaluador de alertas.
 
@@ -68,7 +74,13 @@ def build_alerts(settings: Settings, store, metadata=None):
     Se construye siempre desde D-123: los canales también se ponen en la interfaz, por
     proyecto. Sin ningún canal puesto no manda nada, que es lo que ya pasaba.
     """
-    from .alerts import AlertConfig, AlertRunner, EmailNotifier, build_alert_state
+    from .alerts import (
+        AlertConfig,
+        AlertRunner,
+        EmailNotifier,
+        WebhookNotifier,
+        build_alert_state,
+    )
 
     config = AlertConfig(settings)
     if settings.alerts_enabled and not config.base_url:
@@ -76,13 +88,61 @@ def build_alerts(settings: Settings, store, metadata=None):
             "las alertas van sin enlace: falta LAPLACE_ALERTS_BASE_URL con la raíz "
             "pública de la interfaz"
         )
+    # En la nube puede haber varios procesos: el turno lo reparte un candado de Postgres
+    # para que cada vuelta la haga uno. En local hay uno solo y no hace falta.
+    turno = None
+    if settings.store != "sqlite" and settings.postgres_enabled:
+        from functools import partial
+
+        from .storage._pg import turno_exclusivo
+
+        turno = partial(turno_exclusivo, settings.postgres_dsn, CANDADO_ALERTAS)
     return AlertRunner(
         store,
         config,
         build_alert_state(settings),
+        turno=turno,
         metadata=metadata,
+        webhook=WebhookNotifier(permitir_local=settings.store == "sqlite"),
         email=EmailNotifier(settings),
     )
+
+
+class PreparacionMetadatos:
+    """Migraciones de metadatos, tarifas propias y cuentas, hasta que salgan.
+
+    Antes se hacía una vez al arrancar y, si Postgres no estaba todavía —un despliegue en
+    el que la base arranca después que la API—, o tumbaba el arranque o dejaba la
+    instalación a medias hasta reiniciar: sin tarifas propias y, en una instalación
+    nueva, sin código de configuración. Ahora se intenta al arrancar y, si no sale, se
+    sigue intentando en segundo plano; cada paso hecho no se repite.
+    """
+
+    def __init__(self, app: FastAPI, settings: Settings) -> None:
+        self._app = app
+        self._settings = settings
+        self._pasos = [
+            ("migrar", lambda: app.state.metadata.migrate() if settings.auto_migrate else None),
+            ("tarifas", lambda: load_custom_prices(app.state.metadata)),
+            ("cuentas", lambda: preparar_cuentas(app, settings)),
+        ]
+
+    def intentar(self) -> bool:
+        """Da los pasos que falten. `True` si ya no queda ninguno."""
+        while self._pasos:
+            nombre, paso = self._pasos[0]
+            try:
+                paso()
+            except Exception:  # noqa: BLE001
+                logger.warning("los metadatos no están listos (%s); se reintentará", nombre)
+                return False
+            self._pasos.pop(0)
+        return True
+
+    async def hasta_que_salga(self, espera: float = 15.0) -> None:
+        while not await asyncio.to_thread(self.intentar):
+            await asyncio.sleep(espera)
+        logger.info("metadatos listos")
 
 
 async def retention_loop(store, days: int) -> None:
@@ -111,21 +171,25 @@ def preparar_cuentas(app: FastAPI, settings: Settings) -> None:
     """
     import secrets
 
-    from .cuentas import Frenos
+    from .cuentas import FrenosEnBase
     from .cuentas import build as build_cuentas
 
-    app.state.frenos = Frenos()
     app.state.setup_token = ""
     app.state.cuentas = build_cuentas(settings) if settings.auth_enforced else None
     if app.state.cuentas is None:
         return
     try:
         app.state.cuentas.migrate()
+        # Con base de cuentas, los intentos se cuentan en ella: todos los procesos ven
+        # los mismos (D-130). Hasta aquí seguía el freno en memoria del arranque.
+        app.state.frenos = FrenosEnBase(app.state.cuentas)
         if app.state.cuentas.hay_usuarios():
             return
     except Exception:  # noqa: BLE001
         logger.exception("no se pudo preparar la base de cuentas")
-        return
+        # El que llama lo reintenta: sin esto, una instalación nueva cuyo Postgres
+        # tardara en arrancar se quedaba sin código de configuración hasta reiniciar.
+        raise
     app.state.setup_token = settings.setup_token or secrets.token_urlsafe(18)
     logger.warning(
         "no hay ninguna cuenta todavía. Crea la primera en /configurar con este código "
@@ -138,11 +202,9 @@ def load_custom_prices(metadata) -> None:
     """Las tarifas puestas desde la interfaz, al arrancar (D-123)."""
     from .pricing import set_custom_prices
 
-    try:
-        guardadas = metadata.get_setting("*", "prices") or {}
-    except Exception:  # noqa: BLE001
-        logger.warning("no se pueden leer las tarifas propias", exc_info=True)
-        return
+    # Si no se pueden leer, se levanta: `PreparacionMetadatos` lo reintenta. Tragárselo
+    # dejaba la instalación con las tarifas de fábrica en silencio hasta reiniciar.
+    guardadas = metadata.get_setting("*", "prices") or {}
     if guardadas.get("models"):
         set_custom_prices(guardadas["models"])
         logger.info("tarifas propias cargadas — %d modelos", len(guardadas["models"]))
@@ -162,7 +224,6 @@ async def lifespan(app: FastAPI):
 
     if settings.auto_migrate:
         app.state.store.migrate()
-        app.state.metadata.migrate()
 
     destino = (
         settings.sqlite_path
@@ -186,8 +247,15 @@ async def lifespan(app: FastAPI):
     if app.state.judge.enabled:
         logger.info("LLM-as-judge activo — modelo=%s", app.state.judge.model)
 
-    load_custom_prices(app.state.metadata)
-    preparar_cuentas(app, settings)
+    # Lo que depende de Postgres se intenta ya; si no está, sigue en segundo plano y la
+    # API arranca igual: la ingesta y la lectura de trazas no dependen de Postgres.
+    from .cuentas import Frenos
+
+    app.state.frenos = Frenos()
+    app.state.cuentas = None
+    app.state.setup_token = ""
+    preparacion = PreparacionMetadatos(app, settings)
+    listos = preparacion.intentar()
 
     app.state.alerts = build_alerts(settings, app.state.store, app.state.metadata)
     from .alerts import alert_loop
@@ -195,6 +263,8 @@ async def lifespan(app: FastAPI):
     tareas = [
         asyncio.create_task(alert_loop(app.state.alerts, settings.alerts_interval_seconds))
     ]
+    if not listos:
+        tareas.append(asyncio.create_task(preparacion.hasta_que_salga()))
     if settings.alerts_enabled:
         logger.info(
             "alertas a Slack activas — repaso cada %ds, umbral %s$, calma %sh",
@@ -202,10 +272,19 @@ async def lifespan(app: FastAPI):
             settings.alerts_min_usd,
             settings.alerts_quiet_hours,
         )
-    if settings.retention_days > 0:
+    # En ClickHouse, la retención es un TTL de la tabla (lo aplica el propio motor en sus
+    # fusiones); en SQLite, un borrado diario. Se aplica también con 0, para quitar un
+    # TTL puesto antes: la variable manda.
+    if hasattr(app.state.store, "apply_retention"):
+        try:
+            await asyncio.to_thread(app.state.store.apply_retention, settings.retention_days)
+        except Exception:  # noqa: BLE001
+            logger.exception("no se pudo aplicar la retención a la tabla de spans")
+    elif settings.retention_days > 0:
         tareas.append(
             asyncio.create_task(retention_loop(app.state.store, settings.retention_days))
         )
+    if settings.retention_days > 0:
         logger.info("retención activa — se guardan %d días", settings.retention_days)
 
     try:
@@ -213,13 +292,24 @@ async def lifespan(app: FastAPI):
     finally:
         for tarea in tareas:
             tarea.cancel()
+        if settings.store != "sqlite":
+            from .storage._pg import cerrar_todos
+
+            cerrar_todos()
 
 
+# `/docs` y `/openapi.json` sólo en modo local (D-131). En la nube quedaban fuera del
+# middleware —no cuelgan de /api— y enseñaban a cualquiera el mapa entero de la API: cada
+# ruta, cada parámetro y cada modelo. Quien la opera la tiene en el código y en local.
+_documentar = not get_settings().auth_enforced
 app = FastAPI(
     title="Laplace",
     description="Observabilidad y optimización de agentes de IA: ingesta OTLP y lectura de trazas.",
     version="0.1.0",
     lifespan=lifespan,
+    docs_url="/docs" if _documentar else None,
+    redoc_url="/redoc" if _documentar else None,
+    openapi_url="/openapi.json" if _documentar else None,
 )
 
 app.add_middleware(
@@ -240,6 +330,11 @@ app.add_middleware(
     metadata_getter=lambda: app.state.metadata,
     cuentas_getter=lambda: getattr(app.state, "cuentas", None),
 )
+
+# El último que se añade es el más externo: el tope al cuerpo corta antes de que la
+# autenticación ni nadie lea una petición enorme.
+app.add_middleware(LimiteCuerpo, maximo=get_settings().max_body_bytes)
+app.add_middleware(CabecerasSeguridad)
 
 # Los routers van ANTES del comodín de la interfaz: FastAPI resuelve por orden de
 # registro, y un `/{ruta:path}` declarado primero se comería `/api` y `/health`.
@@ -330,7 +425,28 @@ def _log_ui_dir() -> None:
         )
 
 
-@app.get("/{ruta:path}", include_in_schema=False)
+def _segmento_next(ruta: str) -> str:
+    """Dónde deja el export de Next 16 el fichero de un segmento que se pide con puntos.
+
+    Al precargar una página, el navegador pide `trazas/__next.trazas.__PAGE__.txt`, pero
+    el export lo escribe en `trazas/__next.trazas/__PAGE__.txt`: los puntos tras el
+    prefijo son directorios. Next sirviéndose a sí mismo lo resuelve; un servidor de
+    ficheros no, y cada enlace visible dejaba un 404. Para lo demás devuelve la ruta tal
+    cual, que ya se ha probado arriba.
+    """
+    carpeta, _, nombre = ruta.rpartition("/")
+    if not (nombre.startswith("__next.") and nombre.endswith(".txt")):
+        return ruta
+    partes = nombre[len("__next.") : -len(".txt")].split(".")
+    if len(partes) < 2:
+        return ruta
+    anidado = f"__next.{partes[0]}/" + "/".join(partes[1:]) + ".txt"
+    return f"{carpeta}/{anidado}" if carpeta else anidado
+
+
+# `HEAD` además de `GET`: Next 16 comprueba con `HEAD` las páginas que va a precargar al
+# pasar por un enlace, y sin él cada enlace visible dejaba un 405 en la consola.
+@app.api_route("/{ruta:path}", methods=["GET", "HEAD"], include_in_schema=False)
 def interfaz(ruta: str) -> Response:
     """Sirve la interfaz estática desde el mismo origen que la API.
 
@@ -357,6 +473,7 @@ def interfaz(ruta: str) -> Response:
         raiz / limpia if limpia else raiz / "index.html",
         raiz / limpia / "index.html" if limpia else raiz / "index.html",
         raiz / f"{limpia}.html" if limpia else raiz / "index.html",
+        raiz / _segmento_next(limpia),
     ):
         # Nunca salir de la carpeta de la interfaz, pase lo que pase con la ruta.
         try:

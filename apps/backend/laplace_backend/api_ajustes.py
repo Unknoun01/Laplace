@@ -77,7 +77,7 @@ class FindingStateIn(BaseModel):
     project_id: str
     finding_id: str
     status: str = Field(pattern="^(arreglado|ignorado)$")
-    note: str = ""
+    note: str = Field(default="", max_length=2000)
 
 
 @router.post("/finding-state")
@@ -160,6 +160,33 @@ _CAMPOS_ALERTA = (
 )
 
 
+#: Destinatarios por proyecto. Un aviso de gasto no es una lista de correo, y sin tope
+#: el botón de «probar» servía para mandar correos desde nuestro servidor a quien fuera.
+MAX_DESTINATARIOS = 5
+
+
+def motivo_correo_invalido(valor: str) -> str:
+    """Por qué no vale este destinatario de alertas, o cadena vacía si vale (D-131).
+
+    Antes bastaba con una `@`: un salto de línea pasaba, y dentro de una cabecera de
+    correo es la forma de añadir cabeceras propias; y una coma daba para cien destinos.
+    """
+    from email.utils import getaddresses
+
+    if any(c in valor for c in "\r\n\0"):
+        return "la dirección de correo no puede llevar saltos de línea"
+    direcciones = [d for _, d in getaddresses([valor]) if d]
+    if not direcciones:
+        return "esa dirección de correo no es válida"
+    if len(direcciones) > MAX_DESTINATARIOS:
+        return f"como mucho {MAX_DESTINATARIOS} destinatarios"
+    for d in direcciones:
+        usuario, arroba, dominio = d.rpartition("@")
+        if not arroba or not usuario or "." not in dominio or " " in d:
+            return f"«{d}» no es una dirección de correo válida"
+    return ""
+
+
 def _oculto(url: str) -> str:
     """De una URL secreta, sólo el host: basta para reconocerla y no sirve para usarla."""
     from urllib.parse import urlparse
@@ -196,15 +223,15 @@ async def get_alert_settings(request: Request, project_id: str) -> dict[str, Any
 class AlertSettingsIn(BaseModel):
     project_id: str
     #: Un campo ausente no se toca; una cadena vacía quita ese canal.
-    webhook_url: str | None = None
-    generic_webhook_url: str | None = None
-    email_to: str | None = None
+    webhook_url: str | None = Field(default=None, max_length=2000)
+    generic_webhook_url: str | None = Field(default=None, max_length=2000)
+    email_to: str | None = Field(default=None, max_length=254)
     #: Umbral en dólares ya gastados. Se guarda como `min_usd`, que es como lo llama el
     #: resto de las alertas; aquí no lleva el sufijo por lo mismo que `BudgetIn`.
     threshold: float | None = Field(default=None, ge=0)
     quiet_hours: float | None = Field(default=None, ge=0)
     muted: bool | None = None
-    muted_kinds: list[str] | None = None
+    muted_kinds: list[str] | None = Field(default=None, max_length=50)
 
 
 @router.put("/alert-settings")
@@ -214,12 +241,16 @@ async def put_alert_settings(request: Request, body: AlertSettingsIn) -> dict[st
     cambios = body.model_dump(exclude_unset=True, exclude={"project_id"})
     if "threshold" in cambios:
         cambios["min_usd"] = cambios.pop("threshold")
+    local = request.app.state.settings.store == "sqlite"
     for campo in ("webhook_url", "generic_webhook_url"):
         url = (cambios.get(campo) or "").strip()
-        if url and not webhook_valido(url):
+        if url and not webhook_valido(url, permitir_local=local):
             raise HTTPException(
                 status_code=400,
-                detail="el webhook tiene que ser https (o http contra esta misma máquina)",
+                detail=(
+                    "el webhook tiene que ser https hacia un host público"
+                    + (" (o contra esta misma máquina)" if local else "")
+                ),
             )
     if (cambios.get("webhook_url") or "").strip() and "slack.com" not in cambios["webhook_url"]:
         raise HTTPException(
@@ -227,8 +258,11 @@ async def put_alert_settings(request: Request, body: AlertSettingsIn) -> dict[st
             detail="eso no parece un webhook de Slack; ponlo como webhook genérico",
         )
     correo = (cambios.get("email_to") or "").strip()
-    if correo and "@" not in correo:
-        raise HTTPException(status_code=400, detail="esa dirección de correo no es válida")
+    if correo:
+        motivo = motivo_correo_invalido(correo)
+        if motivo:
+            raise HTTPException(status_code=400, detail=motivo)
+        cambios["email_to"] = correo
     nuevo = {**actual, **{k: v for k, v in cambios.items() if k in _CAMPOS_ALERTA}}
     await run_in_threadpool(_guard, meta.set_setting, body.project_id, CLAVE_AJUSTES, nuevo)
     return await run_in_threadpool(_vista_alertas, request, body.project_id)
@@ -238,15 +272,9 @@ async def put_alert_settings(request: Request, body: AlertSettingsIn) -> dict[st
 async def test_alert(request: Request, project_id: str) -> dict[str, Any]:
     """Manda un mensaje de prueba por los canales puestos. Es la única forma de saber
     que el webhook está bien antes de que haga falta de verdad."""
-    runner = request.app.state.alerts
-    ajustes = runner.config_for(project_id)
-    if not ajustes.enabled:
+    llegado = await run_in_threadpool(request.app.state.alerts.send_test, project_id)
+    if llegado is None:
         raise HTTPException(status_code=400, detail="no hay ningún canal puesto, o está silenciado")
-    texto = (
-        f"*Laplace · «{project_id}»* — mensaje de prueba. Si lo lees, las alertas de este "
-        "proyecto llegan aquí."
-    )
-    llegado = await run_in_threadpool(runner._enviar, ajustes, texto)
     return {"delivered": llegado}
 
 
@@ -344,17 +372,17 @@ def _guardar_tarifas(meta: Any, modelos: dict[str, dict[str, Any]]) -> None:
 async def get_custom_prices(request: Request) -> dict[str, Any]:
     """Las tarifas propias y los modelos vistos que siguen sin tarifa."""
     identidad = identity_of(request)
-    sin_tarifa: set[str] = set()
-    for p in await run_in_threadpool(_store(request).list_projects):
-        if not identidad.allows(p.project_id):
-            continue
-        resumen = await run_in_threadpool(
-            _store(request).summarize_window, p.project_id, _ventana(90)
-        )
-        sin_tarifa.update(resumen.models_without_price)
+    if identidad.sees_everything:
+        proyectos = None
+    else:
+        todos = await run_in_threadpool(_store(request).list_projects)
+        proyectos = identidad.visible([p.project_id for p in todos])
+    sin_tarifa = await run_in_threadpool(
+        _store(request).unpriced_models, proyectos, _ventana(90)
+    )
     return {
         "models": custom_prices(),
-        "unpriced": sorted(sin_tarifa),
+        "unpriced": sin_tarifa,
         "editable": identidad.sees_everything,
     }
 
@@ -431,8 +459,22 @@ async def delete_project(request: Request, project_id: str, confirm: str) -> dic
     """
     if confirm != project_id:
         raise HTTPException(status_code=400, detail="confirm tiene que repetir el proyecto")
-    await run_in_threadpool(_store(request).delete_project, project_id)
+    # Primero lo mutable, claves incluidas, y en una transacción; después las trazas.
+    # Al revés, si fallaba lo segundo quedaba un proyecto sin trazas pero con sus claves
+    # vivas escribiendo en él. Así, si falla lo primero no se ha borrado nada, y si falla
+    # lo segundo ya no entra tráfico nuevo y repetir la petición termina el trabajo.
     await run_in_threadpool(_guard, _meta(request).delete_project_data, project_id)
+    try:
+        await run_in_threadpool(_store(request).delete_project, project_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("borrado de %s a medias: faltan las trazas", project_id)
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "se han borrado los ajustes, prompts, conjuntos y claves, pero no las "
+                "trazas. Repite el borrado para terminarlo."
+            ),
+        ) from exc
     # Con cuentas, el proyecto deja de ser de su organización y queda escrito quién lo
     # borró (D-127). En local no hay ni una cosa ni la otra.
     cuentas = getattr(request.app.state, "cuentas", None)

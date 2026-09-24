@@ -18,10 +18,16 @@ esté bonito, es que no vuelva a haber dos.
 
 from __future__ import annotations
 
+import importlib
 import inspect
+import pkgutil
 import re
+from pathlib import Path
 
 from laplace_backend import alerts, cifras, insights, panel, prompts
+
+#: La raíz del repositorio, para no depender de desde dónde se lance pytest.
+_RAIZ = Path(__file__).resolve().parents[3]
 
 
 def test_los_millares_van_con_punto():
@@ -70,7 +76,17 @@ def test_una_cifra_de_dinero_nunca_lleva_punto_decimal():
 
 
 #: Los módulos que escriben frases con cifras dentro para que las lea una persona.
-MODULOS_CON_TEXTO = (insights, alerts, panel, prompts)
+#: `insights` es un paquete (D-130): se miran todos sus módulos, no sólo `__init__`, que
+#: no tiene código y dejaría al guardia sin mirar ninguna regla.
+MODULOS_CON_TEXTO = (
+    *(
+        importlib.import_module(f"{insights.__name__}.{m.name}")
+        for m in pkgutil.iter_modules(insights.__path__)
+    ),
+    alerts,
+    panel,
+    prompts,
+)
 
 
 def test_nadie_mas_formatea_dinero_por_su_cuenta():
@@ -110,9 +126,7 @@ def test_la_web_no_puede_volver_al_punto_decimal_ingles():
     cuesta más de lo que arregla. Queda escrito para que quien lo vea sepa que está
     mirado.
     """
-    from pathlib import Path
-
-    fuente = Path("apps/web/lib/format.ts").read_text(encoding="utf-8")
+    fuente = (_RAIZ / "apps/web/lib/format.ts").read_text(encoding="utf-8")
     assert 'const LOCALE = "es-ES"' in fuente
     assert "toLocaleString(LOCALE" in fuente
 
@@ -121,7 +135,7 @@ def test_la_web_no_puede_volver_al_punto_decimal_ingles():
     # que salta donde no hay nada acaba silenciado.
     culpables = [
         (fichero.as_posix(), numero, linea.strip())
-        for fichero in Path("apps/web").rglob("*.ts*")
+        for fichero in (_RAIZ / "apps/web").rglob("*.ts*")
         if ".next" not in fichero.as_posix() and "node_modules" not in fichero.as_posix()
         for numero, linea in enumerate(fichero.read_text(encoding="utf-8").splitlines(), 1)
         if re.search(r"\.toFixed\(\s*[1-9]", linea)

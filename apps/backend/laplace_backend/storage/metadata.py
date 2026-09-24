@@ -22,6 +22,8 @@ import json
 import logging
 import sqlite3
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
@@ -67,9 +69,13 @@ class MetadataStore(Protocol):
 
     # -- anotaciones ------------------------------------------------------------------
 
-    def list_annotations(self, trace_id: str) -> list[Annotation]: ...
+    def list_annotations(
+        self, trace_id: str, project_id: str | None = None
+    ) -> list[Annotation]: ...
 
-    def annotations_for(self, trace_ids: list[str]) -> dict[str, list[Annotation]]: ...
+    def annotations_for(
+        self, trace_ids: list[str], project_id: str | None = None
+    ) -> dict[str, list[Annotation]]: ...
 
     def save_annotation(self, project_id: str, annotation: Annotation) -> Annotation: ...
 
@@ -481,12 +487,22 @@ class SQLiteMetadataStore:
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path).expanduser()
 
-    def _conn(self) -> sqlite3.Connection:
+    @contextmanager
+    def _conn(self) -> Iterator[sqlite3.Connection]:
+        """Una conexión que se cierra al salir del `with` (D-131).
+
+        `with sqlite3.connect(...)` confirma la transacción pero **no cierra**: la
+        conexión quedaba viva hasta que el recolector pasara, que en Windows es tener el
+        fichero abierto y desde Python 3.13 un aviso por cada una.
+        """
         self._path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self._path, timeout=30.0, isolation_level=None)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode = WAL")
-        return conn
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode = WAL")
+            yield conn
+        finally:
+            conn.close()
 
     def migrate(self) -> None:
         with self._conn() as conn:
@@ -531,24 +547,40 @@ class SQLiteMetadataStore:
 
     # -- anotaciones -------------------------------------------------------------------
 
-    def list_annotations(self, trace_id: str) -> list[Annotation]:
+    def list_annotations(
+        self, trace_id: str, project_id: str | None = None
+    ) -> list[Annotation]:
+        """Las anotaciones de una traza, acotadas al proyecto si se dice cuál.
+
+        Un `trace_id` no es un secreto: viaja en cabeceras `traceparent` y en los logs de
+        cualquiera. Sin acotar, la lectura por id devolvería las de otro proyecto.
+        """
+        where, args = "trace_id = ?", [trace_id]
+        if project_id:
+            where, args = "trace_id = ? AND project_id = ?", [trace_id, project_id]
         with self._conn() as conn:
             filas = conn.execute(
-                f"SELECT {ANNOTATION_READ} FROM annotations WHERE trace_id = ? "
+                f"SELECT {ANNOTATION_READ} FROM annotations WHERE {where} "
                 f"ORDER BY created_at",
-                (trace_id,),
+                args,
             ).fetchall()
         return [annotation_from_row(f) for f in filas]
 
-    def annotations_for(self, trace_ids: list[str]) -> dict[str, list[Annotation]]:
+    def annotations_for(
+        self, trace_ids: list[str], project_id: str | None = None
+    ) -> dict[str, list[Annotation]]:
         if not trace_ids:
             return {}
         marcas = ", ".join("?" for _ in trace_ids)
+        where, args = f"trace_id IN ({marcas})", list(trace_ids)
+        if project_id:
+            where += " AND project_id = ?"
+            args.append(project_id)
         with self._conn() as conn:
             filas = conn.execute(
                 f"SELECT {ANNOTATION_READ} FROM annotations "
-                f"WHERE trace_id IN ({marcas}) ORDER BY created_at",
-                tuple(trace_ids),
+                f"WHERE {where} ORDER BY created_at",
+                args,
             ).fetchall()
         salida: dict[str, list[Annotation]] = {}
         for f in filas:
@@ -1100,16 +1132,20 @@ class NullMetadataStore:
     def get_diagnosis(self, trace_id: str) -> Diagnosis | None:
         return None
 
-    def list_annotations(self, trace_id: str) -> list[Annotation]:
+    def list_annotations(
+        self, trace_id: str, project_id: str | None = None
+    ) -> list[Annotation]:
         return []
 
-    def annotations_for(self, trace_ids: list[str]) -> dict[str, list[Annotation]]:
+    def annotations_for(
+        self, trace_ids: list[str], project_id: str | None = None
+    ) -> dict[str, list[Annotation]]:
         return {}
 
     def save_annotation(self, project_id: str, annotation: Annotation) -> Annotation:
         raise MetadataUnavailable("no hay base de metadatos: la anotación no se ha guardado")
 
-    def delete_annotation(self, annotation_id: str) -> bool:
+    def delete_annotation(self, annotation_id: str, project_id: str | None = None) -> bool:
         raise MetadataUnavailable("no hay base de metadatos")
 
     def create_dataset(self, dataset: Dataset, items: list[DatasetItem]) -> Dataset:
@@ -1124,7 +1160,7 @@ class NullMetadataStore:
     def list_dataset_items(self, dataset_id: str) -> list[DatasetItem]:
         return []
 
-    def delete_dataset(self, dataset_id: str) -> bool:
+    def delete_dataset(self, dataset_id: str, project_id: str | None = None) -> bool:
         raise MetadataUnavailable("no hay base de metadatos")
 
     def create_run(self, run: EvalRun) -> EvalRun:
@@ -1147,7 +1183,7 @@ class NullMetadataStore:
     def list_prompts(self, project_id: str) -> list[Prompt]:
         return []
 
-    def get_prompt(self, prompt_id: str) -> Prompt | None:
+    def get_prompt(self, prompt_id: str, project_id: str | None = None) -> Prompt | None:
         return None
 
     def add_prompt_version(
@@ -1171,7 +1207,7 @@ class NullMetadataStore:
     def list_prompt_deploys(self, prompt_id: str) -> list[PromptDeploy]:
         return []
 
-    def delete_prompt(self, prompt_id: str) -> bool:
+    def delete_prompt(self, prompt_id: str, project_id: str | None = None) -> bool:
         raise MetadataUnavailable("no hay base de metadatos")
 
     def api_key_by_hash(self, key_hash: str) -> dict[str, Any] | None:

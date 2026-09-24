@@ -35,6 +35,8 @@ import sqlite3
 import threading
 import time
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -46,6 +48,10 @@ logger = logging.getLogger("laplace.cuentas")
 ROLES = ("lector", "miembro", "admin", "propietario")
 
 COOKIE = "laplace_session"
+#: La clave de API de quien entra a la interfaz con clave y no con cuenta (D-130). En una
+#: cookie `httpOnly` y no en `localStorage`: JavaScript no puede leerla, así que un fallo
+#: de XSS no se lleva una credencial que no caduca.
+COOKIE_CLAVE = "laplace_key"
 #: La cabecera que toda escritura con cookie tiene que traer (ver la cabecera del módulo).
 CABECERA_CSRF = "x-laplace"
 DURACION_SESION = timedelta(days=30)
@@ -140,9 +146,9 @@ def normalizar_email(email: str) -> str:
 class Frenos:
     """Intentos fallidos de entrar, por email y por IP, en memoria (D-127).
 
-    En memoria y no en la base: se pierden al reiniciar, y está bien, porque su trabajo
-    es que probar contraseñas a mano sea inútil, no llevar un registro. El registro lo
-    lleva la auditoría.
+    Es el freno de un solo proceso: el de las pruebas y el de antes de que haya base de
+    cuentas. Con cuentas se usa `FrenosEnBase` (D-130), porque en memoria cada worker
+    llevaba su cuenta y con cuatro el tope de cinco intentos era de veinte.
     """
 
     def __init__(self, maximo: int = 5, ventana: float = 900.0) -> None:
@@ -169,6 +175,43 @@ class Frenos:
         with self._lock:
             for c in claves:
                 self._fallos.pop(c, None)
+
+
+class FrenosEnBase:
+    """Los mismos frenos que `Frenos`, contados en la base de cuentas (D-130).
+
+    Todos los procesos de la instalación ven los mismos intentos, y sobreviven a un
+    reinicio: reiniciar ya no es una forma de volver a tener cinco intentos. Mismos
+    métodos que `Frenos`, así que las rutas no distinguen cuál tienen.
+    """
+
+    def __init__(self, cuentas: CuentasStore, maximo: int = 5, ventana: float = 900.0) -> None:
+        self._cuentas = cuentas
+        self._maximo = maximo
+        self._ventana = timedelta(seconds=ventana)
+
+    def bloqueado(self, *claves: str) -> bool:
+        if not claves:
+            return False
+        desde = _iso(_ahora() - self._ventana)
+        marcas = ", ".join("?" for _ in claves)
+        filas = self._cuentas._filas(
+            f"SELECT clave, COUNT(*) FROM login_failures "
+            f"WHERE clave IN ({marcas}) AND at > ? GROUP BY clave",
+            (*claves, desde),
+        )
+        return any(int(n) >= self._maximo for _, n in filas)
+
+    def fallo(self, *claves: str) -> None:
+        ahora = _iso(_ahora())
+        for c in claves:
+            self._cuentas._ejecutar(
+                "INSERT INTO login_failures (clave, at) VALUES (?, ?)", (c, ahora)
+            )
+
+    def limpiar(self, *claves: str) -> None:
+        for c in claves:
+            self._cuentas._ejecutar("DELETE FROM login_failures WHERE clave = ?", (c,))
 
 
 # ---------------------------------------------------------------------------------
@@ -241,6 +284,13 @@ CREATE TABLE IF NOT EXISTS audit_log (
     ip          TEXT NOT NULL DEFAULT '',
     at          TEXT NOT NULL
 );
+-- Intentos fallidos de entrar, por email y por IP (D-130). En la base y no en memoria:
+-- con varios procesos, cada uno llevaba su cuenta y el tope se multiplicaba por ellos.
+CREATE TABLE IF NOT EXISTS login_failures (
+    clave  TEXT NOT NULL,
+    at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS login_failures_idx ON login_failures (clave, at);
 CREATE INDEX IF NOT EXISTS audit_org_idx ON audit_log (org_id, at);
 CREATE INDEX IF NOT EXISTS sessions_user_idx ON sessions (user_id);
 """
@@ -502,11 +552,42 @@ class CuentasStore:
         f = filas[0]
         return {"org_id": f[0], "org_name": f[1], "email": f[2], "role": f[3]}
 
-    def aceptar(self, token: str) -> None:
-        self._ejecutar(
-            "UPDATE invitations SET accepted_at = ? WHERE token_hash = ?",
-            (_iso(_ahora()), hash_token(token)),
+    def aceptar(self, token: str) -> bool:
+        """Gasta la invitación. `False` si ya estaba gastada o ha caducado.
+
+        La condición va en la propia escritura: comprobar antes y marcar después dejaba
+        que dos aceptaciones simultáneas del mismo enlace pasaran las dos.
+        """
+        return (
+            self._ejecutar(
+                "UPDATE invitations SET accepted_at = ? "
+                "WHERE token_hash = ? AND accepted_at IS NULL AND expires_at > ?",
+                (_iso(_ahora()), hash_token(token), _iso(_ahora())),
+            )
+            > 0
         )
+
+    def rol_en(self, org_id: str, user_id: str) -> str | None:
+        filas = self._filas(
+            "SELECT role FROM memberships WHERE org_id = ? AND user_id = ?", (org_id, user_id)
+        )
+        return filas[0][0] if filas else None
+
+    def purgar_caducadas(self) -> int:
+        """Borra sesiones caducadas e invitaciones vencidas sin aceptar.
+
+        No afecta a nada que funcione —las dos ya se ignoraban al leer—, pero sin esto
+        las tablas sólo crecían: cada entrada deja una sesión de 30 días para siempre.
+        """
+        ahora = _iso(_ahora())
+        sesiones = self._ejecutar("DELETE FROM sessions WHERE expires_at <= ?", (ahora,))
+        invitaciones = self._ejecutar(
+            "DELETE FROM invitations WHERE accepted_at IS NULL AND expires_at <= ?", (ahora,)
+        )
+        # Los intentos fallidos sólo cuentan un cuarto de hora; un día de margen sobra.
+        viejos = _iso(_ahora() - timedelta(days=1))
+        intentos = self._ejecutar("DELETE FROM login_failures WHERE at <= ?", (viejos,))
+        return sesiones + invitaciones + intentos
 
     def invitaciones(self, org_id: str) -> list[dict[str, str]]:
         filas = self._filas(
@@ -624,11 +705,16 @@ class SQLiteCuentas(CuentasStore):
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path).expanduser()
 
-    def _conn(self) -> Any:
+    @contextmanager
+    def _conn(self) -> Iterator[Any]:
+        """Una conexión que se cierra al salir del `with` (D-131)."""
         self._path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self._path, timeout=30.0, isolation_level=None)
-        conn.execute("PRAGMA journal_mode = WAL")
-        return conn
+        try:
+            conn.execute("PRAGMA journal_mode = WAL")
+            yield conn
+        finally:
+            conn.close()
 
 
 class PostgresCuentas(CuentasStore):
@@ -638,9 +724,11 @@ class PostgresCuentas(CuentasStore):
         self._dsn = dsn
 
     def _conn(self) -> Any:
-        import psycopg
+        # El mismo pool que los metadatos: cada petición con sesión lee la sesión y los
+        # roles, y abrir dos conexiones nuevas por petición era lo más caro de entrar.
+        from .storage._pg import conexion
 
-        return psycopg.connect(self._dsn, autocommit=True)
+        return conexion(self._dsn)
 
     def _migrar_claves(self) -> None:
         for columna in ("expires_at", "last_used_at", "created_by"):

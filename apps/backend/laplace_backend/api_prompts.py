@@ -232,10 +232,12 @@ class PromptIn(BaseModel):
 
     project_id: str
     name: str = Field(min_length=1, max_length=120)
-    description: str = ""
-    text: str = Field(min_length=1)
-    notes: str = ""
-    author: str = ""
+    description: str = Field(default="", max_length=2000)
+    #: Un prompt largo son decenas de miles de caracteres; esto es el tope de uno
+    #: absurdo, que ocuparía la base y viajaría en cada `get_prompt()`.
+    text: str = Field(min_length=1, max_length=200_000)
+    notes: str = Field(default="", max_length=2000)
+    author: str = Field(default="", max_length=120)
 
 
 @router.post("", response_model=PromptCard)
@@ -287,9 +289,9 @@ async def create_prompt(request: Request, body: PromptIn) -> PromptCard:
 
 class VersionIn(BaseModel):
     project_id: str
-    text: str = Field(min_length=1)
-    notes: str = ""
-    author: str = ""
+    text: str = Field(min_length=1, max_length=200_000)
+    notes: str = Field(default="", max_length=2000)
+    author: str = Field(default="", max_length=120)
     #: Ponerla en producción al guardarla. Por defecto **no**: guardar y desplegar son
     #: gestos distintos, y fundirlos haría imposible preparar una versión con calma.
     deploy: bool = False
@@ -323,8 +325,8 @@ async def add_version(request: Request, prompt_id: str, body: VersionIn) -> Prom
 class DeployIn(BaseModel):
     project_id: str
     version: int = Field(ge=1)
-    actor: str = ""
-    note: str = ""
+    actor: str = Field(default="", max_length=120)
+    note: str = Field(default="", max_length=2000)
 
 
 @router.post("/{prompt_id}/production")

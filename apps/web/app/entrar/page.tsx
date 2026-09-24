@@ -3,7 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { Cargando } from "@/components/states";
-import { getMe, login, setApiKey } from "@/lib/api";
+import { entrarConClave, getMe, login } from "@/lib/api";
 
 /**
  * Entrar (D-127). Email y contraseña; nada más en la primera pantalla.
@@ -91,6 +91,8 @@ function Contenido() {
  */
 function ConClave({ siguiente }: { siguiente: string }) {
   const [clave, setClave] = useState("");
+  const [comprobando, setComprobando] = useState(false);
+  const [fallo, setFallo] = useState("");
   return (
     <details className="porque con-clave">
       <summary>Tengo una clave de API</summary>
@@ -105,15 +107,24 @@ function ConClave({ siguiente }: { siguiente: string }) {
         <button
           type="button"
           className="btn"
-          disabled={!clave.startsWith("lp_")}
+          disabled={!clave.startsWith("lp_") || comprobando}
           onClick={() => {
-            setApiKey(clave.trim());
-            window.location.href = siguiente;
+            setComprobando(true);
+            setFallo("");
+            entrarConClave(clave)
+              .then(() => {
+                window.location.href = siguiente;
+              })
+              .catch((e: Error) => {
+                setFallo(e.message);
+                setComprobando(false);
+              });
           }}
         >
-          Usar la clave
+          {comprobando ? "Comprobando…" : "Usar la clave"}
         </button>
       </div>
+      {fallo && <p className="disclaimer">{fallo}</p>}
     </details>
   );
 }

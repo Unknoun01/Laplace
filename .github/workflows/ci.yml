@@ -1,0 +1,91 @@
+# Integración continua (D-129).
+#
+# Hasta aquí no había ninguna: las pruebas eran buenas y nadie las ejecutaba solas. El
+# fallo que dejó cuatro rutas de la nube en 500 (D-128) pasó porque Postgres no corría en
+# ninguna prueba; aquí corren ClickHouse y Postgres de verdad, y las pruebas «de nube»
+# dejan de saltarse.
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.8-alpine
+        env:
+          CLICKHOUSE_DB: laplace
+          CLICKHOUSE_USER: laplace
+          CLICKHOUSE_PASSWORD: laplace
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+        ports: ["8123:8123"]
+        options: >-
+          --health-cmd "wget --spider -q http://127.0.0.1:8123/ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: laplace
+          POSTGRES_USER: laplace
+          POSTGRES_PASSWORD: laplace
+        # 5433 en el host: es lo que espera la configuración por defecto del backend.
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U laplace -d laplace"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Instalar SDK y backend
+        run: |
+          pip install -e packages/sdk-python
+          pip install -e "apps/backend[cloud,dev]"
+      - name: Ruff
+        run: ruff check apps/backend packages/sdk-python
+      - name: Pruebas (con ClickHouse y Postgres)
+        run: pytest -q apps/backend/tests
+
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Tipos
+        run: npx tsc --noEmit
+      - name: Dependencias de producción sin avisos
+        run: npm audit --omit=dev --audit-level=high
+      - name: Build de la nube (standalone)
+        run: npm run build
+      - name: Build del modo local (export)
+        run: npm run build
+        env:
+          LAPLACE_EXPORT: "1"
+
+  compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker-compose.yml es válido
+        run: docker compose config -q

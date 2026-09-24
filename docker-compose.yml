@@ -9,9 +9,12 @@ services:
       CLICKHOUSE_USER: laplace
       CLICKHOUSE_PASSWORD: laplace
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    # Sólo desde esta máquina: la base la usa el backend por la red de compose, y
+    # publicarla en todas las interfaces con la contraseña de ejemplo era dejarla abierta
+    # a la red local. Los puertos siguen ahí para las pruebas y para mirar a mano.
     ports:
-      - "8123:8123"   # HTTP
-      - "9000:9000"   # protocolo nativo
+      - "127.0.0.1:8123:8123"   # HTTP
+      - "127.0.0.1:9000:9000"   # protocolo nativo
     volumes:
       - clickhouse-data:/var/lib/clickhouse
     ulimits:
@@ -34,7 +37,7 @@ services:
     ports:
       # 5433 en el host: 5432 suele estar ocupado por un Postgres nativo, y
       # colisionar con la base de datos del desarrollador es la peor primera impresion.
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -56,6 +59,14 @@ services:
       LAPLACE_CLICKHOUSE_DATABASE: laplace
       LAPLACE_POSTGRES_DSN: postgresql://laplace:laplace@postgres:5432/laplace
       LAPLACE_CORS_ORIGINS: http://localhost:3000
+      # De qué proxies se cree X-Forwarded-For: de `web`, por donde entra la interfaz.
+      # Es seguro sólo porque delante de Next está `entrada` (Caddy), que REESCRIBE la
+      # cabecera con la IP real, y porque `web` no publica su puerto. Next por sí solo
+      # reenvía la cabecera del navegador tal cual: sin Caddy, creer a `web` era creer al
+      # cliente (comprobado, D-128). Si quitas `entrada`, deja esto vacío.
+      LAPLACE_TRUSTED_PROXIES: "${LAPLACE_TRUSTED_PROXIES:-web}"
+      # Tope de una petición, en MiB. Un lote OTLP normal son unos pocos megas.
+      LAPLACE_MAX_BODY_MB: "${LAPLACE_MAX_BODY_MB:-32}"
       # Autenticacion. En la nube se exige clave por defecto; esto solo existe para
       # poder quitarla a sabiendas en una maquina de pruebas, y el log lo grita cuando
       # esta desactivada (D-097). Las claves se crean con:
@@ -96,10 +107,25 @@ services:
       # backend (ver `rewrites` en next.config.mjs). Así la interfaz no lleva ninguna
       # URL incrustada en el build y no hay CORS que abrir (D-069).
       LAPLACE_API_URL: http://backend:8000
-    ports:
-      - "3000:3000"
+    # Sin puerto publicado a propósito: a Next sólo se llega por `entrada`. Si Next fuera
+    # alcanzable directamente, cualquiera podría mandarle un X-Forwarded-For inventado
+    # que el backend, que se fía de `web`, se creería.
+    expose:
+      - "3000"
     depends_on:
       - backend
+
+  entrada:
+    # La puerta de la interfaz: reescribe X-Forwarded-For con la IP real para que el
+    # freno de intentos y la auditoría vean a cada usuario (ver deploy/Caddyfile).
+    image: caddy:2-alpine
+    container_name: laplace-entrada
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - web
 
 volumes:
   clickhouse-data:

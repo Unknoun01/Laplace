@@ -16,14 +16,16 @@ class Settings(BaseSettings):
     #: Fichero del modo local. `laplace ui` lo pone en `~/.laplace/laplace.db`.
     sqlite_path: str = "laplace.db"
 
-    clickhouse_host: str = "localhost"
+    #: 127.0.0.1 y no `localhost`: compose publica las bases sólo en IPv4 de loopback, y
+    #: `localhost` prueba antes `::1`, que no contesta, y tarda segundos en caer a IPv4.
+    clickhouse_host: str = "127.0.0.1"
     clickhouse_port: int = 8123
     clickhouse_user: str = "laplace"
     clickhouse_password: str = "laplace"
     clickhouse_database: str = "laplace"
     clickhouse_secure: bool = False
 
-    postgres_dsn: str = "postgresql://laplace:laplace@localhost:5433/laplace"
+    postgres_dsn: str = "postgresql://laplace:laplace@127.0.0.1:5433/laplace"
     #: Postgres sólo guarda metadatos y las tablas reservadas de Fases 3-4. Si no está
     #: disponible, la ingesta y la lectura de trazas siguen funcionando.
     postgres_enabled: bool = True
@@ -39,6 +41,18 @@ class Settings(BaseSettings):
     setup_token: str = ""
 
     cors_origins: str = "http://localhost:3000"
+
+    #: Tamaño máximo de un cuerpo de petición, en MiB, tal como llega por el cable. Un
+    #: lote OTLP normal son unos pocos megas; sin tope, una sola petición podía llenar
+    #: la memoria del proceso que comparten todos los proyectos. Descomprimido se admite
+    #: hasta `OTLP_EXPANSION` veces esto (ver `ingest/otlp.py`).
+    max_body_mb: int = 32
+    #: Proxies de los que se cree `X-Forwarded-For` y `X-Forwarded-Proto`, separados por
+    #: comas: IPs, rangos CIDR o nombres de host. Vacío: no se cree a nadie y cuenta la IP
+    #: de la conexión. Sin esto, cualquiera ponía la cabecera y se saltaba el freno de
+    #: intentos por IP. Next no vale como proxy de confianza por sí solo: reenvía la
+    #: cabecera del navegador sin tocarla. En compose va Caddy delante (deploy/Caddyfile).
+    trusted_proxies: str = ""
 
     #: Aplica las migraciones de ClickHouse y Postgres al arrancar. En un despliegue
     #: real esto lo haría un job aparte; con un solo proceso es más simple así.
@@ -110,6 +124,14 @@ class Settings(BaseSettings):
         if elegido in ("false", "0", "no"):
             return False
         return self.store != "sqlite"
+
+    @property
+    def max_body_bytes(self) -> int:
+        return max(1, self.max_body_mb) * 1024 * 1024
+
+    @property
+    def trusted_proxy_list(self) -> frozenset[str]:
+        return frozenset(p.strip() for p in self.trusted_proxies.split(",") if p.strip())
 
     @property
     def cors_origin_list(self) -> list[str]:

@@ -12,7 +12,7 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTrace
 from starlette.concurrency import run_in_threadpool
 
 from .auth import identity_of
-from .ingest.otlp import decode_request, parse_spans
+from .ingest.otlp import OTLP_EXPANSION, CuerpoDemasiadoGrande, decode_request, parse_spans
 from .insights import FindingDetail, Overview, overview
 from .insights import detail as finding_detail
 from .panel import Panel
@@ -51,12 +51,18 @@ async def ingest_traces(request: Request) -> Response:
     con o sin el SDK de Laplace.
     """
     body = await request.body()
+    tope = request.app.state.settings.max_body_bytes * OTLP_EXPANSION
     try:
         decoded = decode_request(
             body,
             content_type=request.headers.get("content-type", ""),
             content_encoding=request.headers.get("content-encoding", ""),
+            max_bytes=tope,
         )
+    except CuerpoDemasiadoGrande as exc:
+        # 413 y no 400: el exportador sabe que no tiene que reintentar el mismo lote.
+        logger.warning("petición OTLP demasiado grande: %s", exc)
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         logger.warning("petición OTLP ilegible: %s", exc)
         raise HTTPException(status_code=400, detail="petición OTLP ilegible") from exc
@@ -188,7 +194,11 @@ async def get_trace(
         # El diagnóstico sigue siendo hueco de la Fase 3; las anotaciones ya no lo
         # son: las llena la pestaña de Evaluaciones, y vienen con su fuente puesta.
         diagnosis=await run_in_threadpool(metadata.get_diagnosis, trace_id),
-        annotations=await run_in_threadpool(metadata.list_annotations, trace_id),
+        # Acotadas al proyecto de la traza: un `trace_id` no es un secreto, y sin acotar
+        # saldrían aquí las anotaciones que otro proyecto hubiera colgado de ese id.
+        annotations=await run_in_threadpool(
+            metadata.list_annotations, trace_id, alcance or spans[0].project_id
+        ),
     )
 
 
@@ -310,11 +320,15 @@ async def alerts_status(
     salte la primera alerta es enseñarle la decisión que se tomaría.
     """
     runner = getattr(request.app.state, "alerts", None)
-    proyectos = (
-        [project_id]
-        if project_id
-        else [p.project_id for p in await run_in_threadpool(_store(request).list_projects)]
-    )
+    # Sin proyecto en la petición, los que esta identidad puede ver y ni uno más. Antes
+    # salían todos los de la instalación: con la clave de un proyecto se leían el nombre,
+    # los umbrales y los hallazgos de los demás. El `project_id` que venga ya lo ha
+    # comprobado el middleware.
+    if project_id:
+        proyectos = [project_id]
+    else:
+        todos = await run_in_threadpool(_store(request).list_projects)
+        proyectos = identity_of(request).visible([p.project_id for p in todos])
     if runner is None or not any(runner.config_for(pid).enabled for pid in proyectos):
         return {
             "enabled": False,

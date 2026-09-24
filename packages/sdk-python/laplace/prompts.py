@@ -50,6 +50,14 @@ logger = logging.getLogger("laplace")
 #: compromiso: un rollback tarda como mucho eso en llegar a un proceso vivo, y un
 #: agente con tráfico no castiga al backend con una petición por llamada.
 DEFAULT_TTL_SECONDS = 60.0
+#: Lo que espera `get_prompt()` a Laplace antes de servir la copia guardada o la reserva.
+#: Va en el camino de cada petición del agente: con los 30 s genéricos del cliente, un
+#: Laplace colgado añadía medio minuto a cada fallo de caché del producto de otro.
+FETCH_TIMEOUT_SECONDS = 5.0
+#: Tras un fallo, cuánto se tarda en volver a preguntar por ese prompt. Mientras tanto se
+#: sirve la copia guardada o la reserva sin esperar a nadie. Sin esto, con Laplace caído
+#: cada llamada del agente volvía a esperar el timeout entero.
+RETRY_AFTER_FAILURE_SECONDS = 10.0
 
 #: Cuántos textos servidos se recuerdan para atribuir una llamada. Son los últimos de
 #: este contexto: un agente que use más de ocho prompts distintos en un mismo paso está
@@ -191,12 +199,18 @@ class _Entry:
 
 _cache: dict[tuple[str, str], _Entry] = {}
 _cache_lock = threading.Lock()
+#: El último fallo por prompt: cuándo y por qué. Se olvida con la primera respuesta buena.
+_fallos: dict[tuple[str, str], tuple[float, LaplaceHTTPError]] = {}
+#: Un cerrojo por prompt para que, al caducar la copia, pregunte un solo hilo y no todos
+#: los que llegan a la vez (una estampida contra el backend cada minuto).
+_en_vuelo: dict[tuple[str, str], threading.Lock] = {}
 
 
 def clear_cache() -> None:
     """Vacía la caché. La usan las pruebas y quien quiera forzar un refresco."""
     with _cache_lock:
         _cache.clear()
+        _fallos.clear()
 
 
 # ---------------------------------------------------------------------------------
@@ -238,27 +252,61 @@ def get_prompt(
 
     with _cache_lock:
         guardado = _cache.get(clave)
+        cerrojo = _en_vuelo.setdefault(clave, threading.Lock())
     if guardado is not None and (time.monotonic() - guardado.fetched_at) < ttl:
         return _served_copy(guardado.prompt, "cache")
 
-    try:
-        base = endpoint(endpoint_url)
-        consulta = f"project_id={quote(project_id)}&name={quote(name)}"
-        if version:
-            consulta += f"&version={int(version)}"
-        datos = request(f"{base}/api/prompts/resolve?{consulta}")
-    except LaplaceHTTPError as exc:
-        return _degrade(clave, name, fallback, exc)
+    reciente = _fallo_reciente(clave)
+    if reciente is not None:
+        return _degrade(clave, name, fallback, reciente)
 
-    servido = ServedPrompt(
-        name=datos["name"],
-        version=int(datos["version"]),
-        text=datos["text"],
-        prompt_id=datos.get("prompt_id", ""),
-    )
+    # Si otro hilo ya está preguntando y hay copia, aunque sea vieja, se sirve sin
+    # esperar. Si no hay ninguna, se espera a que termine y se usa lo que haya traído.
+    if not cerrojo.acquire(blocking=guardado is None):
+        return _served_copy(guardado.prompt, "cache")
+    try:
+        with _cache_lock:
+            guardado = _cache.get(clave)
+        if guardado is not None and (time.monotonic() - guardado.fetched_at) < ttl:
+            return _served_copy(guardado.prompt, "cache")
+        reciente = _fallo_reciente(clave)
+        if reciente is not None:
+            return _degrade(clave, name, fallback, reciente)
+
+        try:
+            base = endpoint(endpoint_url)
+            consulta = f"project_id={quote(project_id)}&name={quote(name)}"
+            if version:
+                consulta += f"&version={int(version)}"
+            datos = request(
+                f"{base}/api/prompts/resolve?{consulta}", timeout=FETCH_TIMEOUT_SECONDS
+            )
+        except LaplaceHTTPError as exc:
+            with _cache_lock:
+                _fallos[clave] = (time.monotonic(), exc)
+            return _degrade(clave, name, fallback, exc)
+
+        servido = ServedPrompt(
+            name=datos["name"],
+            version=int(datos["version"]),
+            text=datos["text"],
+            prompt_id=datos.get("prompt_id", ""),
+        )
+        with _cache_lock:
+            _cache[clave] = _Entry(prompt=servido, fetched_at=time.monotonic())
+            _fallos.pop(clave, None)
+        return _served_copy(servido, "laplace")
+    finally:
+        cerrojo.release()
+
+
+def _fallo_reciente(clave: tuple[str, str]) -> LaplaceHTTPError | None:
+    """El error del último intento, si fue hace menos de `RETRY_AFTER_FAILURE_SECONDS`."""
     with _cache_lock:
-        _cache[clave] = _Entry(prompt=servido, fetched_at=time.monotonic())
-    return _served_copy(servido, "laplace")
+        fallo = _fallos.get(clave)
+    if fallo is None or time.monotonic() - fallo[0] >= RETRY_AFTER_FAILURE_SECONDS:
+        return None
+    return fallo[1]
 
 
 def _served_copy(prompt: ServedPrompt, source: str) -> ServedPrompt:
