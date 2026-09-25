@@ -1156,6 +1156,31 @@ class SQLiteStore:
         )
         return [row_to_observed_prompt(f) for f in filas]
 
+    def co_occurring_step_keys(self, project_id: str, window: Window) -> set[str]:
+        """Claves que comparten ejecución y camino con otra clave distinta.
+
+        Primero los pares (camino, traza) con más de una clave; después, las claves que
+        aparecen en esos pares. Acotado por proyecto y ventana en los dos pasos.
+        """
+        filas = self._query(
+            f"""
+            WITH juntas AS (
+                SELECT step_site AS sitio, trace_id AS traza
+                FROM spans
+                WHERE {WINDOW_WHERE} AND span_type = 'llm' AND step_key != ''
+                GROUP BY step_site, trace_id
+                HAVING COUNT(DISTINCT step_key) > 1
+            )
+            SELECT DISTINCT s.step_key AS clave
+            FROM spans s
+            JOIN juntas j ON s.step_site = j.sitio AND s.trace_id = j.traza
+            WHERE s.project_id = :project_id AND s.start_time >= :since
+                AND s.start_time <= :until AND s.span_type = 'llm' AND s.step_key != ''
+            """,
+            self._window_params(project_id, window),
+        )
+        return {f["clave"] for f in filas}
+
     def coverage(self, project_id: str, window: Window) -> CoverageFacts:
         """Una sola consulta de cuentas sobre las llamadas a modelos de la ventana.
 

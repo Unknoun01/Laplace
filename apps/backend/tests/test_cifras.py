@@ -48,6 +48,11 @@ def test_el_dinero_lleva_las_dos_cosas_a_la_vez():
     assert cifras.dinero(1234.5) == "$1.234"
     assert cifras.dinero(5.0) == "$5,00"
     assert cifras.dinero(0.0042) == "$0,0042"
+    # Entre el céntimo y el dólar, dos cifras significativas: la tarjeta decía
+    # «$0,0692 al mes», cuatro decimales que nadie lee.
+    assert cifras.dinero(0.0692) == "$0,069"
+    assert cifras.dinero(0.4687) == "$0,47"
+    assert cifras.dinero(0.5) == "$0,50", "como la web: los céntimos de un precio se escriben"
     assert cifras.dinero(0.0000371) == "$0,000037"
     assert cifras.dinero(0) == "$0"
 
@@ -151,6 +156,7 @@ def test_identificador_quita_el_llamante_y_la_pista():
     from laplace_backend.pasos import identificador
 
     assert identificador("agente_de_equipaje → consultar_manual") == "consultar_manual"
+    assert identificador("responder — “Responde usando el manual…”") == "responder"
     assert identificador("responder — «Responde usando el manual…»") == "responder"
     assert identificador("buscar_vuelos") == "buscar_vuelos"
     assert identificador("") == "paso"

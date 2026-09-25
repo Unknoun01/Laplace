@@ -75,7 +75,8 @@ def dinero(value: float, currency: str = "USD") -> str:
     | 0        | `$0`            | cero es cero, sin decorar |
     | ≥ 100    | `$1.234`        | los céntimos de una factura mensual son ruido |
     | ≥ 1      | `$5,00`         | dos decimales, como cualquier precio |
-    | ≥ 0,01   | `$0,0042`       | cuatro, o un céntimo se redondea a nada |
+    | ≥ 0,1    | `$0,47`         | dos, como un precio                     |
+    | ≥ 0,01   | `$0,069`        | tres: dos cifras que se leen, sin ruido |
     | < 0,01   | `$0,000037`     | seis: el coste de un paso vive aquí |
     """
     simbolo = SIMBOLOS.get(currency, f"{currency} ")
@@ -86,8 +87,10 @@ def dinero(value: float, currency: str = "USD") -> str:
         return f"{simbolo}{miles(value)}"
     if magnitud >= 1:
         return f"{simbolo}{_es(f'{value:,.2f}')}"
+    if magnitud >= 0.1:
+        return f"{simbolo}{_es(f'{value:,.2f}')}"
     if magnitud >= 0.01:
-        return f"{simbolo}{decimal(value, 4)}"
+        return f"{simbolo}{decimal(value, 3)}"
     return f"{simbolo}{decimal(value, 6)}"
 
 

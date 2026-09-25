@@ -222,6 +222,10 @@ class ObservedStep(BaseModel):
     #: Las instrucciones cambian tantas veces que no pueden ser versiones: casi seguro
     #: llevan datos variables dentro. Se dice, y no se listan doscientas «versiones».
     unstable: bool = False
+    #: Las huellas de este paso corren juntas dentro de una misma ejecución: son llamadas
+    #: distintas desde el mismo sitio, no versiones de un prompt. Se enseñan igual, pero
+    #: sin afirmar un cambio que no hubo.
+    concurrent: bool = False
     note: str = ""
 
 
@@ -605,6 +609,7 @@ def _fusionar_por_prompt(filas: list[ObservedPrompt]) -> list[ObservedPrompt]:
 def observed_steps(
     observed: list[ObservedPrompt],
     verdicts_by_step: dict[str, dict[str, tuple[int, int]]] | None = None,
+    simultaneous: set[str] | None = None,
 ) -> list[ObservedStep]:
     """Agrupa lo visto en las trazas por paso, con la guarda de la huella partida.
 
@@ -624,7 +629,15 @@ def observed_steps(
     genera una huella por llamada, y sin esto la pantalla enseñaría doscientas
     «versiones» de un paso que en realidad tiene una. Cuando pasa, se dice lo que es —y
     ahora cuenta prompts y no llamantes, que era el otro lado del mismo fallo.
+
+    Y un camino no basta: una función que llama tres veces al modelo con tres prompts
+    —clasificar, extraer, contestar— deja tres huellas bajo el mismo camino, y eso no
+    son versiones. `simultaneous` trae las claves que conviven con otra del mismo camino
+    dentro de una ejecución; si alguna del grupo está ahí, el paso se marca como
+    llamadas simultáneas y no se habla de cambio. Con mezcla —dos llamadas que además
+    cambiaron de prompt— también: no afirmar un cambio es el lado seguro.
     """
+    simultaneas = simultaneous or set()
     por_paso: dict[tuple[str, str], list[ObservedPrompt]] = {}
     for fila in observed:
         etiqueta = fila.step_label or "(sin nombre)"
@@ -639,6 +652,7 @@ def observed_steps(
         etiqueta = nombre_de_paso(
             etiqueta_base, sitio, con_llamante=etiqueta_base in homonimos
         )
+        juntas = any(fila.step_key in simultaneas for fila in filas)
         filas = _fusionar_por_prompt(filas)
         filas.sort(key=lambda f: (f.last_seen or f.first_seen or datetime.min), reverse=True)
         paso = ObservedStep(
@@ -656,6 +670,13 @@ def observed_steps(
             )
             salida.append(paso)
             continue
+
+        if juntas and len(filas) > 1:
+            paso.concurrent = True
+            paso.note = (
+                "Estas instrucciones corren juntas en la misma ejecución: son llamadas "
+                "distintas desde el mismo sitio de tu código, no versiones de un prompt."
+            )
 
         for fila in filas:
             paso.variants.append(

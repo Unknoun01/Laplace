@@ -171,6 +171,22 @@ async def list_traces(
     )
 
 
+def _trace_por_prefijo(request: Request, prefijo: str, project_id: str) -> str | None:
+    """El id completo de la única traza del proyecto que empieza por `prefijo`.
+
+    `None` si no es un prefijo hexadecimal de al menos 8 caracteres, si no hay ninguna o
+    si hay más de una: con dos candidatas, abrir una cualquiera sería adivinar.
+    """
+    prefijo = prefijo.lower()
+    if not 8 <= len(prefijo) < 32 or any(c not in "0123456789abcdef" for c in prefijo):
+        return None
+    pagina = _store(request).list_traces(
+        TraceFilter(project_id=project_id, search=prefijo, limit=50)
+    )
+    ids = {t.trace_id for t in pagina.traces if t.trace_id.startswith(prefijo)}
+    return ids.pop() if len(ids) == 1 else None
+
+
 @router.get("/api/traces/{trace_id}", response_model=Trace)
 async def get_trace(
     request: Request, trace_id: str, project_id: str | None = None
@@ -184,6 +200,15 @@ async def get_trace(
     """
     alcance = identity_of(request).scope(project_id)
     spans = await run_in_threadpool(_store(request).get_trace_spans, trace_id, alcance)
+    if not spans and alcance:
+        # La lista enseña los 12 primeros caracteres del id, y es lo que la gente copia.
+        # Sólo con proyecto: buscar un prefijo en toda la instalación sería un rastreo.
+        completo = await run_in_threadpool(_trace_por_prefijo, request, trace_id, alcance)
+        if completo:
+            trace_id = completo
+            spans = await run_in_threadpool(
+                _store(request).get_trace_spans, trace_id, alcance
+            )
     if not spans:
         raise HTTPException(status_code=404, detail="traza no encontrada")
 

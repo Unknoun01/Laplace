@@ -1,6 +1,6 @@
 # Estado de Laplace
 
-Última actualización: 22 de septiembre de 2026.
+Última actualización: 26 de septiembre de 2026.
 
 ## Dónde está el producto
 
@@ -284,12 +284,10 @@ Lo que **no** demuestran, punto por punto:
 
 **No aguanta todavía, por orden de riesgo:**
 
-1. **La autenticación es de claves, no de cuentas.** No hay login, ni usuarios, ni
-   organizaciones, ni roles, ni rotación, ni caducidad, ni registro de accesos. Una clave
-   da acceso total de lectura y escritura a su proyecto, y quien la tenga es quien sea. La
-   comparte un equipo entero copiándola. Para una instalación propia con un puñado de
-   proyectos es suficiente y es infinitamente mejor que lo que había; para vender esto a
-   dos clientes en el mismo despliegue, falta el sistema de identidades (D-010).
+1. **Identidades: hay cuentas, falta lo de empresa.** Desde D-127 hay cuentas,
+   organizaciones, cuatro roles, invitaciones, registro de actividad y claves por
+   proyecto con caducidad. Lo que falta para vender a empresas es entrar con Google o
+   GitHub (SSO/SAML), aprovisionar por SCIM y verificar el correo.
 
    Y hay que decir una cosa más, porque esta sección la daba por cerrada: **la
    separación entre clientes tenía seis agujeros y estuvieron ahí desde que existe la

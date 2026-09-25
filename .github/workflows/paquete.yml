@@ -1,0 +1,102 @@
+# El paquete de Python, construido e instalado como lo instalaría un desconocido.
+#
+# La promesa del README —`pip install "laplace-trace[ui]"` y `laplace ui`— no la
+# comprobaba nadie: `laplace-trace[ui]` depende de `laplace-backend`, que no se había
+# publicado nunca, y el wheel con la interfaz dentro no se había construido jamás. Aquí se
+# construyen los dos wheels, se instalan en un entorno limpio **sin el repositorio** y se
+# arranca `laplace ui` para pedirle la interfaz y la API.
+#
+# Con una etiqueta `v*`, además, se publican en PyPI por Trusted Publishing: sin claves
+# guardadas en el repositorio. Hay que dar de alta los dos proyectos en PyPI como
+# «trusted publisher» de este repositorio y del entorno `pypi` antes de la primera vez.
+name: paquete
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+
+concurrency:
+  group: paquete-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  construir:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Dependencias de la interfaz
+        run: npm --prefix apps/web ci --no-audit --no-fund
+      - name: Interfaz dentro del paquete
+        run: python scripts/build_ui.py
+      - name: Wheels
+        run: |
+          pip install build
+          python -m build --outdir dist packages/sdk-python
+          python -m build --outdir dist apps/backend
+      - name: El wheel lleva la interfaz
+        run: |
+          python - <<'PY'
+          import glob, zipfile
+          wheel = glob.glob("dist/laplace_trace-*.whl")[0]
+          nombres = zipfile.ZipFile(wheel).namelist()
+          assert "laplace/ui/index.html" in nombres, "el wheel no lleva la interfaz"
+          print(wheel, len(nombres), "ficheros")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  probar-instalado:
+    needs: construir
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Sin checkout a propósito: si algo sólo funciona con el repositorio al lado, aquí
+      # se nota.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Instalar como un usuario
+        run: |
+          python -m venv /tmp/limpio
+          /tmp/limpio/bin/pip install dist/laplace_backend-*.whl "$(ls dist/laplace_trace-*.whl)[ui]"
+      - name: Arrancar laplace ui y pedirle la interfaz
+        run: |
+          cd /tmp
+          LAPLACE_HOME=/tmp/casa /tmp/limpio/bin/laplace ui --no-browser --port 8100 &
+          for i in $(seq 1 30); do
+            curl -fs http://127.0.0.1:8100/health && break
+            sleep 1
+          done
+          curl -fs http://127.0.0.1:8100/ | grep -qi "<html" || (echo "no sirve la interfaz" && exit 1)
+          curl -fs http://127.0.0.1:8100/api/projects
+
+  publicar:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: probar-instalado
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

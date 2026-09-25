@@ -477,6 +477,47 @@ def test_un_prompt_que_si_cambia_bajo_el_mismo_llamante_son_dos_versiones():
     }
 
 
+def test_tres_llamadas_de_la_misma_ejecucion_no_son_tres_versiones():
+    """El fallo que se vio en pantalla con la demo, en septiembre.
+
+    `responder` llama tres veces al modelo desde el mismo sitio —clasificar, extraer y
+    contestar—, así que las tres huellas comparten camino. La pestaña decía «3 juegos
+    de instrucciones» y «dos instrucciones distintas bajo el mismo paso son un cambio de
+    prompt», con las mismas dieciséis ejecuciones y las mismas fechas en las tres filas.
+    No hubo cambio: son tres llamadas que corren juntas en cada ejecución.
+
+    Lo que lo distingue no es el camino ni la fecha —un despliegue gradual también
+    solapa fechas— sino que aparezcan en la MISMA ejecución: una versión de un prompt no
+    convive con la anterior dentro de una sola traza.
+    """
+    filas = [
+        _observado("k1", "Clasifica la intención del usuario.", 16),
+        _observado("k2", "Devuelve origen y destino en JSON.", 16),
+        _observado("k3", "Responde usando exclusivamente este manual.", 16),
+    ]
+    pasos = prompts.observed_steps(filas, simultaneous={"k1", "k2", "k3"})
+
+    assert len(pasos) == 1
+    paso = pasos[0]
+    assert paso.concurrent is True, "corren juntas: no se puede hablar de versiones"
+    assert len(paso.variants) == 3, "las tres llamadas se siguen viendo, cada una con su coste"
+    assert "versiones" in paso.note and "misma ejecución" in paso.note, paso.note
+
+
+def test_sin_convivir_en_una_ejecucion_siguen_siendo_versiones():
+    """El contraejemplo: si las dos huellas no coinciden nunca en una traza, sí son un
+    cambio de prompt, y marcarlas como simultáneas escondería lo que la pestaña enseña."""
+    pasos = prompts.observed_steps(
+        [
+            _observado("k1", "Responde breve.", 10),
+            _observado("k2", "Responde largo y con detalle.", 10),
+        ],
+        simultaneous=set(),
+    )
+    assert pasos[0].concurrent is False
+    assert pasos[0].note == ""
+
+
 def test_la_guarda_de_la_plantilla_cuenta_prompts_y_no_llamantes():
     """D-093 se disparaba por el motivo equivocado.
 
@@ -1040,6 +1081,27 @@ def test_los_prompts_observados_dicen_lo_mismo_en_los_dos_almacenes(sembrado):
         assert observado.traces == otro.traces, clave
         assert observado.cost_usd == pytest.approx(otro.cost_usd, rel=1e-9), clave
         assert observado.first_seen == otro.first_seen, clave
+
+
+def test_las_llamadas_simultaneas_dicen_lo_mismo_en_los_dos_almacenes(sembrado):
+    """Qué huellas conviven con otra del mismo camino dentro de una ejecución.
+
+    Se siembra una traza con dos llamadas del mismo sitio y huellas distintas, que es la
+    forma de la demo; las trazas de versiones de `sembrado` nunca mezclan dos huellas en
+    la misma ejecución, así que no pueden salir.
+    """
+    project = sembrado["project"]
+    raiz, llm = _traza(project, f"{project}-juntas", 0.002, "", 0)
+    otra = Span(**{**llm.model_dump(), "span_id": uuid.uuid4().hex[:16]})
+    llm.step_key, llm.step_site = "sitio-clasificar", "atender > responder"
+    otra.step_key, otra.step_site = "sitio-contestar", "atender > responder"
+    for almacen in (sembrado["local"], sembrado["nube"]):
+        almacen.insert_spans([raiz, llm, otra])
+
+    ventana = _ventana()
+    aqui = sembrado["local"].co_occurring_step_keys(project, ventana)
+    alli = sembrado["nube"].co_occurring_step_keys(project, ventana)
+    assert aqui == alli == {"sitio-clasificar", "sitio-contestar"}
 
 
 def test_la_version_de_prompt_llega_a_la_atribucion_de_picos_en_la_nube(sembrado):

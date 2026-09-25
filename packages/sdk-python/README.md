@@ -1,6 +1,6 @@
 # laplace-trace
 
-SDK de Python de [Laplace](https://github.com/laplace-dev/laplace): observabilidad y
+SDK de Python de [Laplace](https://github.com/Unknoun01/Laplace): observabilidad y
 optimización de agentes de IA.
 
 Cuando un agente falla, tarda o dispara la factura de tokens, los logs normales no

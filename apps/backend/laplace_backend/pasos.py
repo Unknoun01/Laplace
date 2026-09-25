@@ -74,7 +74,10 @@ def con_pista(label: str, hint: str) -> str:
         return etiqueta
     if len(pista) > PISTA_EN_TITULO:
         pista = pista[:PISTA_EN_TITULO].rstrip(" ,.;:") + "…"
-    return f"{etiqueta} — «{pista}»"
+    # Comillas inglesas y no angulares: el nombre de un paso casi siempre acaba dentro de
+    # un título que ya lo pone entre «», y la norma en español es «… “…” …» para citar
+    # dentro de una cita. Con «» por dentro salían tres niveles seguidos: «»».
+    return f"{etiqueta} — “{pista}”"
 
 
 def hay_homonimos(pasos: list[tuple[str, str]]) -> set[str]:
@@ -99,5 +102,5 @@ def identificador(nombre: str) -> str:
     copiar. Vive aquí porque es el único sitio que sabe cómo se decora un nombre.
     """
     base = (nombre or "").split(" → ")[-1]
-    base = base.split(" — «")[0].strip()
+    base = base.split(" — “")[0].split(" — «")[0].strip()
     return base or "paso"

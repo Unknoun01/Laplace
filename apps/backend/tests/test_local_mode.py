@@ -138,3 +138,31 @@ def test_se_avisa_cuando_hay_dos_copias_construidas(tmp_path, monkeypatch, caplo
     assert f"interfaz servida desde {arbol}" in caplog.text
     assert "NO se está usando" in caplog.text
     assert str(paquete) in caplog.text
+
+
+def test_una_traza_se_abre_con_el_id_corto_que_ensena_la_interfaz(app_local):
+    """La lista enseña los 12 primeros caracteres del id, y pegarlos en la URL daba
+    «No encontramos esa traza». Con el proyecto dicho, un prefijo único basta; sin
+    proyecto no se busca por prefijo, porque sería rastrear la instalación entera."""
+    from helpers import exporter, otlp_body
+    from laplace import manual
+
+    exporter.clear()
+    with manual.llm_span(model="gpt-5.6-terra", system="openai") as llm:
+        llm.record_response(input_tokens=10, output_tokens=2)
+    app_local.post(
+        "/v1/traces", content=otlp_body(), headers={"content-type": "application/x-protobuf"}
+    )
+    proyecto = app_local.get("/api/projects").json()["projects"][0]["id"]
+    completo = app_local.get("/api/traces", params={"project_id": proyecto}).json()[
+        "traces"
+    ][0]["trace_id"]
+
+    corta = app_local.get(f"/api/traces/{completo[:12]}", params={"project_id": proyecto})
+    assert corta.status_code == 200, corta.text
+    assert corta.json()["summary"]["trace_id"] == completo
+
+    assert app_local.get(f"/api/traces/{completo[:12]}").status_code == 404
+    assert app_local.get(
+        "/api/traces/ffffffffffff", params={"project_id": proyecto}
+    ).status_code == 404

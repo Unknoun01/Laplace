@@ -1010,6 +1010,25 @@ class ClickHouseStore:
         )
         return [row_to_observed_prompt(f) for f in filas]
 
+    def co_occurring_step_keys(self, project_id: str, window: Window) -> set[str]:
+        """Claves que comparten ejecución y camino con otra clave distinta."""
+        filas = _named(
+            self._client.query(
+                f"""
+                SELECT DISTINCT arrayJoin(claves) AS clave
+                FROM (
+                    SELECT groupUniqArray(step_key) AS claves
+                    FROM spans FINAL
+                    WHERE {WINDOW_WHERE} AND span_type = 'llm' AND step_key != ''
+                    GROUP BY step_site, trace_id
+                    HAVING length(claves) > 1
+                )
+                """,
+                parameters=self._window_params(project_id, window),
+            )
+        )
+        return {f["clave"] for f in filas}
+
     def coverage(self, project_id: str, window: Window) -> CoverageFacts:
         """La misma cuenta que en local, con los mismos alias (D-066).
 

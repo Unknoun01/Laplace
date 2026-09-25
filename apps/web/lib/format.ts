@@ -34,7 +34,10 @@ export function money(amount: number, currency = "USD"): string {
   if (value === 0) return `${symbol}0`;
   if (value >= 100) return `${symbol}${round(amount, 0)}`;
   if (value >= 1) return `${symbol}${round(amount, 2)}`;
-  if (value >= 0.01) return `${symbol}${round(amount, 4)}`;
+  // Dos cifras significativas entre el céntimo y el dólar: «$0,0692 al mes» son cuatro
+  // decimales que nadie lee, y «$0,069» dice lo mismo.
+  if (value >= 0.1) return `${symbol}${round(amount, 2)}`;
+  if (value >= 0.01) return `${symbol}${round(amount, 3)}`;
   // Por debajo del céntimo hacen falta más decimales: el coste de un paso es
   // minúsculo y el de un mes no. Redondear a dos lo borraría todo.
   return `${symbol}${round(amount, 6)}`;

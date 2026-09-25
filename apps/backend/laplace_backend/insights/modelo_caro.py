@@ -144,7 +144,7 @@ def _modelo_caro_sin_tarifa(
     return Finding(
         id=f"modelo_caro:{usage.key}:{usage.model}",
         kind="modelo_caro",
-        title=f"Un paso muy corto se lo lleva el modelo más lento: «{usage.name}»",
+        title=f"Respuestas cortas con el modelo más lento: «{usage.name}»",
         lead=f"{nombre_rapido}, que ya usas, respondería lo mismo en menos tiempo.",
         summary=(
             f"«{usage.name}» responde con {salida:.0f} tokens en una llamada normal y usa "
@@ -221,7 +221,7 @@ def _expensive_model_finding(
     return Finding(
         id=f"modelo_caro:{usage.key}:{usage.model}",
         kind="modelo_caro",
-        title=f"Usas el modelo caro para un paso muy corto: «{usage.name}»",
+        title=f"Usas el modelo caro para respuestas cortas: «{usage.name}»",
         lead=f"Con {price.alternative}, el mismo trabajo costaría {veces_txt} menos.",
         summary=(
             f"Ese paso responde con {_salida_tipica(usage):.0f} tokens en una llamada normal, "
@@ -319,6 +319,57 @@ def _modelo_lento_detail(
     return detalle
 
 
+#: Entrada media por llamada a partir de la cual el paso trabaja con documentos delante.
+#: Ahí un modelo pequeño se equivoca más que al clasificar o extraer, y la ficha lo dice.
+CONTEXTO_LARGO_TOKENS = 4_000
+
+
+def _por_que_modelo_caro(usage: ModelUsage, alternativa: str) -> str:
+    """Por qué cuesta lo que cuesta ESTE paso, según dónde se va su dinero.
+
+    La ficha decía siempre «los modelos grandes se pagan sobre todo por lo que
+    escriben», también de un paso que recibe 20.000 tokens y contesta 19: casi todo su
+    coste era entrada. El texto sale ahora del reparto real, y cuando el paso trabaja
+    con mucho contexto se avisa del riesgo, que es justo donde más se nota.
+    """
+    coste = get_price_table().compute(
+        usage.model,
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        cached_input_tokens=usage.cached_input_tokens,
+    )
+    parte_entrada = coste.input_usd / coste.total_usd if coste.total_usd else 0.0
+    cierre = (
+        "Esto no es un fallo: es lo que pasa cuando un agente crece y todos los pasos "
+        "heredan el modelo con el que se empezó a probar."
+    )
+
+    if parte_entrada >= 0.5:
+        explicacion = (
+            f"El {cifras.porcentaje(parte_entrada)} de lo que cuesta este paso es lo que "
+            f"recibe, no lo que responde: {_miles(round(usage.avg_input_tokens))} tokens "
+            f"de entrada por llamada para una respuesta de {_salida_tipica(usage):.0f}. Con "
+            f"{alternativa or 'un modelo más barato'} cada token de entrada cuesta mucho "
+            f"menos, así que el ahorro sale casi entero de ahí."
+        )
+    else:
+        explicacion = (
+            "Los modelos grandes se pagan sobre todo por lo que escriben. Cuando un paso "
+            "sólo tiene que decidir entre unas pocas opciones o extraer un dato, casi todo "
+            "lo que pagas es capacidad que no se usa."
+        )
+
+    if usage.avg_input_tokens >= CONTEXTO_LARGO_TOKENS:
+        riesgo = (
+            "Ojo con este caso: el paso contesta con mucho contexto delante, y leer "
+            "documentos largos para dar una respuesta corta es donde un modelo pequeño se "
+            "equivoca más que al clasificar o extraer un dato. El ahorro es real; que "
+            "responda igual de bien hay que comprobarlo antes de cambiarlo."
+        )
+        return f"{explicacion}\n\n{riesgo}\n\n{cierre}"
+    return f"{explicacion}\n\n{cierre}"
+
+
 def _expensive_model_detail(
     finding: Finding, usage: ModelUsage, query: str
 ) -> FindingDetail:
@@ -341,13 +392,7 @@ def _expensive_model_detail(
         f"analizada. Una llamada normal responde con {_salida_tipica(usage):.0f} tokens, que es "
         f"lo que ocupa una etiqueta o una frase corta, no un texto elaborado."
     )
-    detalle.why = (
-        "Los modelos grandes se pagan sobre todo por lo que escriben. Cuando un paso sólo "
-        "tiene que decidir entre unas pocas opciones o extraer un dato, casi todo lo que "
-        "pagas es capacidad que no se usa.\n\n"
-        "Esto no es un fallo: es lo que pasa cuando un agente crece y todos los pasos heredan "
-        "el modelo con el que se empezó a probar."
-    )
+    detalle.why = _por_que_modelo_caro(usage, price.alternative if price else "")
     detalle.detection_explanation = (
         f"Regla activa: **un paso `llm` con al menos {MIN_CALLS_FOR_MODEL_RULE} llamadas y una "
         f"salida media de {MAX_OUTPUT_TOKENS_FOR_CHEAP_TASK} tokens o menos**, cuyo modelo "
@@ -369,9 +414,9 @@ def _expensive_model_detail(
         FixStep(
             title="Comprueba que la calidad aguanta",
             body=(
-                "Un modelo más pequeño no siempre decide igual. Pasa unos cuantos casos "
-                "reales por los dos y compara antes de dejarlo fijo. Cuando exista la capa de "
-                "evaluación podrás hacerlo desde aquí; hoy toca a mano."
+                "Un modelo más pequeño no siempre decide igual. Guarda las ejecuciones "
+                "reales de este paso como conjunto de casos (más abajo) y lánzalas con el "
+                "modelo nuevo: Evaluaciones te dirá si acierta igual antes de dejarlo fijo."
             ),
         ),
     ]

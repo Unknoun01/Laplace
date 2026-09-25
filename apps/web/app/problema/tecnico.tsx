@@ -46,7 +46,7 @@ export function Head({ finding }: { finding: FindingDetail }) {
         )}
         {finding.scope_label && (
           <div>
-            <b className="num neutral">{finding.scope_label}</b>
+            <b className="neutral frase">{finding.scope_label}</b>
             <span>afectadas</span>
           </div>
         )}
