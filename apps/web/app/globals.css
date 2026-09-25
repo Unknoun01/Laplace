@@ -15,7 +15,7 @@
   --bg-gradient-mid: #ffe4e1;   /* Rose gold bruma */
   --bg-gradient-end: #fdf5e6;   /* Destello cálido */
   --text: #2d2424;              /* Gris cálido oscuro para legibilidad */
-  --muted: #8b7373;             /* Texto secundario cálido */
+  --muted: #7a6262;             /* Texto secundario cálido; #8b7373 quedaba en 3,96:1 */
   --glass: rgba(255, 255, 255, 0.45); /* Cristal esmerilado blanco */
   --line: rgba(255, 255, 255, 0.8);   /* Bordes definidos para contraste */
   --accent-1: #c07c7c;          /* Rose Gold principal */
@@ -34,8 +34,9 @@
   --ink-4: var(--muted);
   --iris: color-mix(in srgb, var(--accent-1) 72%, var(--text));
   --teal: color-mix(in srgb, var(--accent-2) 62%, #5a1a08);
-  --amber: color-mix(in srgb, var(--accent-3) 58%, #3a2400);
-  --rose: #b93344;
+  /* Con 58 % el ámbar de los costes daba 3,4–3,95:1 sobre el cristal rosa. */
+  --amber: color-mix(in srgb, var(--accent-3) 42%, #3a2400);
+  --rose: #a52d3c;
   --rose-ink: #9a2a37;
   --on-iris: var(--text);
   --shadow: 0 10px 30px rgba(192, 124, 124, 0.14);
