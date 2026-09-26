@@ -2536,3 +2536,25 @@ carga**: lo que queda son cuatro consultas de 0,6 a 1,3 s cada una recorriendo t
 ventana, y bajar de ahí pide preagregados (vistas materializadas por hora para el uso
 por paso, el resumen y la cobertura) o calcular repeticiones y bucles al ingerir. Es el
 siguiente paso de la fase.
+
+### D-143 — El Diagnóstico que alguien mira se recalcula antes de caducar
+Los preagregados se descartaron por ahora, con los números delante: sólo abaratan el
+resumen, el uso por paso y la cobertura (unos 2 s de los 4), no las repeticiones ni los
+bucles, que miran dentro de cada traza. El Diagnóstico habría quedado en unos 2,5 s a
+cambio de mucho trabajo delicado: no contar dos veces un lote reenviado, cuadrar las
+horas del borde de la ventana, rellenar el histórico, borrar los preagregados con los
+datos y la paridad exacta con el modo local.
+
+En su lugar, la caché de un minuto (D-142) se renueva sola: cada petición deja guardada
+su forma de recalcularse, y un proceso de fondo recalcula cada Diagnóstico cuando lleva
+tres cuartos de su vida en la caché, **sólo si alguien lo ha leído en la última media
+hora**, para que lo que nadie abre no gaste ClickHouse. La ventana se calcula al
+renovar, no al pedir. Si mientras se recalcula alguien cambia algo por la API, el
+resultado se tira: se calculó con los estados de antes. Un fallo al renovar deja el valor
+anterior hasta que caduca, nunca para siempre. En local no hay caché ni renovador.
+
+Medido contra ClickHouse con 2 millones de spans: primera apertura 2,6 s; después,
+0,00 s también pasado el minuto. **La primera apertura de un proyecto sigue tardando lo
+que tarda** (unos 4 s con 10 millones al día); los preagregados siguen siendo la vía si
+eso llega a importar. Pruebas en `test_diagnostico_precalculado.py`, con reloj
+inyectado; seis mutaciones comprobadas.

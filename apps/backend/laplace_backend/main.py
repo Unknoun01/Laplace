@@ -265,6 +265,17 @@ async def lifespan(app: FastAPI):
     ]
     if not listos:
         tareas.append(asyncio.create_task(preparacion.hasta_que_salga()))
+    # El Diagnóstico que alguien está mirando se recalcula antes de caducar, para que
+    # abrirlo no espere nunca los segundos que tarda con volumen (D-143).
+    app.state.renovador_diagnostico = None
+    if settings.cache_diagnostico_s > 0:
+        from .api import CACHE_DIAGNOSTICO
+        from .cache_diagnostico import renovar_siempre
+
+        app.state.renovador_diagnostico = asyncio.create_task(
+            renovar_siempre(CACHE_DIAGNOSTICO, settings.cache_diagnostico_s)
+        )
+        tareas.append(app.state.renovador_diagnostico)
     if settings.alerts_enabled:
         logger.info(
             "alertas a Slack activas — repaso cada %ds, umbral %s$, calma %sh",

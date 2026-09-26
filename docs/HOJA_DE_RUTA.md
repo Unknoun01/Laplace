@@ -2,7 +2,7 @@
 
 Documento de traspaso entre sesiones. Última actualización: 26 de septiembre de 2026.
 Léelo entero antes de tocar nada; después lee `STATUS.md` y las últimas entradas de
-`DECISIONS.md` (D-134 a D-142).
+`DECISIONS.md` (D-134 a D-143).
 
 ## 1. Qué es y hacia dónde va
 
@@ -34,7 +34,7 @@ probada: `laplace ui` (un proceso + SQLite) y Docker (ClickHouse + Postgres + Ne
 - **Por fases:** una rama por fase y un commit por bloque. Se enseña al usuario y se fusiona a `master` sólo cuando lo aprueba (`git merge --no-ff`).
 - **Nada entra sin su prueba.** Primero la prueba en rojo, después el arreglo.
 - **Hay que comprobar que la prueba muerde:** romper el código a propósito y verla fallar.
-- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-143**.
+- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-144**.
 - **Todo en español:** código, comentarios, commits y textos.
 - **Los commits terminan con** `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - **Reglas del producto que no se tocan:**
@@ -57,7 +57,7 @@ probada: `laplace ui` (un proceso + SQLite) y Docker (ClickHouse + Postgres + Ne
 - **Servidor local:** la configuración «local» de `.claude/launch.json` (puerto 8100). Tras tocar Python hay que reiniciarlo.
 - **Demo:** `.venv/Scripts/python.exe -m laplace.cli demo --endpoint http://127.0.0.1:8100` carga un mes de datos.
 - **Pantallas:** `test_pantallas.py` usa Playwright con Chromium, ya instalados en `.venv`.
-- **Estado al cerrar esta sesión:** 674 pruebas pasan, 0 fallan y 4 se saltan (las que necesitan clave de proveedor).
+- **Estado al cerrar esta sesión:** 683 pruebas pasan, 0 fallan y 4 se saltan (las que necesitan clave de proveedor).
 - **Prueba de carga:** `python scripts/carga.py --spans 10000000` genera un día de tráfico en ClickHouse y mide las pantallas; `--borrar` lo quita. Con 10 millones hacen falta unos 8 GB para Docker.
 
 ## 3. Hecho
@@ -101,17 +101,17 @@ probada: `laplace ui` (un proceso + SQLite) y Docker (ClickHouse + Postgres + Ne
 
 ## 4. Pendiente, por orden
 
-### Fase 3: cerrada en la rama `fase3-cierre` (D-141), pendiente de fusionar
+### Fase 3: cerrada y fusionada (D-141)
 - Sin probar todavía: Anthropic por OpenInference-js/OpenLLMetry-js, el AI SDK de Vercel, LangChain.js y `client.beta.*` en Python.
 - Paquete fino `@laplace/sdk` (`init`, `observe`, `getPrompt`) cuando el usuario reserve el scope de npm.
 
-### Fase 4: escala (en la rama `fase4-escala`, D-142)
+### Fase 4: escala, fusionada (D-142, D-143)
 **Hecho y medido:** repeticiones y bucles en dos fases (antes tumbaban la máquina), el Diagnóstico sin lecturas repetidas y con caché de un minuto en la nube, ingesta fuera del bucle de eventos con `async_insert` y el proyecto registrado una vez, payloads con `ZSTD(3)`.
 
 **Resultado con 10 millones de spans/día:** Diagnóstico unos 4 s en la primera carga (objetivo 1,5 s, **sin cumplir**); Panel, lista y abrir traza por debajo de 1,5 s salvo la búsqueda (1,6 s).
 
 **Lo que queda, por orden:**
-1. **Preagregados** para bajar el Diagnóstico de 4 s: vistas materializadas por hora (proyecto, paso, modelo) para el uso por paso, el resumen y la cobertura; y pensar si repeticiones y bucles se calculan al ingerir. Es lo que falta para el objetivo.
+1. **Hecho (D-143):** el Diagnóstico que alguien mira se recalcula en segundo plano antes de caducar; abrirlo es instantáneo salvo la primera vez (unos 4 s con 10 millones al día). **Preagregados, aparcados:** sólo bajarían esa primera vez a unos 2,5 s (repeticiones y bucles no se preagregan) y piden mucho cuidado; retomarlos si la primera carga llega a importar.
 2. Búsqueda en el contenido de prompts y respuestas (`tokenbf_v1`/`ngrambf_v1` en ClickHouse, FTS5 en SQLite); la búsqueda por nombre ya roza el objetivo.
 3. Latencia p50/p95 y tasa de error en el Panel.
 4. Medir con semanas de histórico (hace falta una máquina con más memoria) para decidir sobre acotar por tiempo las subconsultas de `_where` y sobre `FINAL` con partes sin fusionar. Descartado con números: la clave de ordenación nueva y la tabla `trace_id → proyecto` (abrir una traza ya tarda 0,03 s) y lanzar las lecturas en paralelo.

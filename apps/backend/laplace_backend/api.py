@@ -264,16 +264,17 @@ async def get_overview(
     guardado = CACHE_DIAGNOSTICO.leer(clave, segundos)
     if guardado is not None:
         return guardado
-    resultado = await run_in_threadpool(
-        lambda: overview(
-            _store(request),
-            project_id,
-            _window(days),
-            has_managed_prompts=gestiona,
-            states=estados,
+    store = _store(request)
+
+    def calcular() -> Overview:
+        # La ventana se calcula al llamar, no al definir: al renovarse en segundo plano
+        # tiene que terminar en el ahora de ese momento (D-143).
+        return overview(
+            store, project_id, _window(days), has_managed_prompts=gestiona, states=estados
         )
-    )
-    CACHE_DIAGNOSTICO.guardar(clave, resultado, segundos)
+
+    resultado = await run_in_threadpool(calcular)
+    CACHE_DIAGNOSTICO.guardar(clave, resultado, segundos, calcular)
     return resultado
 
 
