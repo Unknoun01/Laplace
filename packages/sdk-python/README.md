@@ -114,12 +114,23 @@ Lo que el estándar no cubre va bajo `laplace.*`. El contrato completo está en
 Consecuencia práctica: puedes apuntar el SDK a cualquier colector OTel, y cualquier
 proceso ya instrumentado con OTel puede exportar a Laplace sin usar este SDK.
 
+## Qué se traza solo
+
+- **OpenAI**: `chat.completions.create` y `.parse`, y la Responses API
+  (`responses.create` y `.parse`, la que usa el Agents SDK). Los ayudantes `.stream()`
+  de las dos pasan por `create` y también se ven.
+- **Anthropic**: `messages.create`, `.parse` y el gestor `messages.stream()`.
+- Todo en síncrono y asíncrono, y en streaming con los tokens que manda el proveedor.
+  Si no los manda (Chat sin `stream_options={"include_usage": True}`), se estiman y el
+  span queda marcado como estimado.
+
 ## Limitaciones conocidas
 
-- **Streaming**: las llamadas con `stream=True` se registran como span (latencia,
-  modelo, parámetros, prompt) pero todavía no se acumulan los tokens ni el contenido
-  de la respuesta. El span queda marcado con `laplace.streaming.captured = false`.
-- Integraciones automáticas: OpenAI y Anthropic. Para el resto, `laplace.llm_span`.
+- Integraciones automáticas: OpenAI y Anthropic. Para el resto, `laplace.llm_span`, o
+  cualquier instrumentación de OpenInference u OpenLLMetry apuntada a Laplace.
+- `with_raw_response` se lee entero. `with_streaming_response` no, porque el cuerpo es
+  del usuario: ahí los tokens se estiman y se marcan.
+- No se ven las llamadas por `client.beta.*`.
 
 ## Principio
 

@@ -1,0 +1,53 @@
+# La capa no verificada de precios, renovada cada semana (D-138).
+#
+# Descarga la tabla de LiteLLM, la convierte y, si ha cambiado, abre una PR con el
+# informe: qué modelos entran o salen y dónde dice LiteLLM otra cosa que nuestra tabla
+# verificada. La verificada no se toca nunca desde aquí: cada discrepancia es un motivo
+# para volver a la página del proveedor, no un cambio automático.
+name: precios-litellm
+
+on:
+  schedule:
+    - cron: "17 6 * * 1" # los lunes a primera hora
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  actualizar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Instalar SDK y backend
+        run: |
+          pip install -e packages/sdk-python
+          pip install -e "apps/backend[dev]"
+      - name: Regenerar la capa
+        run: python scripts/precios_litellm.py --informe informe-precios.md
+      - name: Las pruebas de precios siguen en verde con la capa nueva
+        run: pytest -q apps/backend/tests/test_pricing.py apps/backend/tests/test_precios_litellm.py
+      - name: Abrir la PR si ha cambiado
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet -- apps/backend/laplace_backend/pricing/litellm_prices.json; then
+            echo "La capa no ha cambiado."
+            exit 0
+          fi
+          rama="precios-litellm/$(date +%Y-%m-%d)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$rama"
+          git add apps/backend/laplace_backend/pricing/litellm_prices.json
+          git commit -m "Precios: capa de LiteLLM del $(date +%Y-%m-%d)"
+          git push origin "$rama"
+          gh pr create --base master --head "$rama" \
+            --title "Precios: capa de LiteLLM del $(date +%Y-%m-%d)" \
+            --body-file informe-precios.md

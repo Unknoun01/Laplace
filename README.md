@@ -346,6 +346,16 @@ tests fallan solos si no se hace: uno cuando una fuente pasa de 30 días, otro c
 tarifa promocional (campo `expires`) ha vencido, y otro cuando aparece en las trazas un
 modelo que no está en la tabla.
 
+**Debajo va la tabla de LiteLLM**, en `litellm_prices.json`: unos 3.000 modelos más
+(Gemini, Mistral, DeepSeek, Bedrock, Azure, OpenRouter…). Sólo se usa para lo que la
+tabla propia no resuelve, y lo que sale de ella se marca como **tarifa no verificada**:
+no es un suelo como la tarifa asumida, porque puede quedarse corta o pasarse. Un nombre
+de gateway que LiteLLM conoce (`eu.anthropic.…`, `azure/…`) se cobra con su precio, que
+no siempre es el del proveedor directo. Los modelos a cero en LiteLLM no entran. Un
+trabajo semanal de CI (`precios-litellm.yml`) la regenera con
+`scripts/precios_litellm.py` y abre una PR con un informe de dónde LiteLLM dice otra cosa
+que la tabla propia; la propia no se cambia nunca sola.
+
 Un modelo sin tarifa **no** cuesta cero: se marca como desconocido y la interfaz avisa de
 que el total está incompleto. Se le puede poner precio desde **Ajustes**, y entonces se
 recalcula también lo ya guardado, no sólo lo que llegue después.

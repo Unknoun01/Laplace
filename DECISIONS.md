@@ -2323,3 +2323,130 @@ se guardan otra vez en crudo. Nombres contrastados contra
 `openinference-semantic-conventions` y `opentelemetry-semantic-conventions-ai`. Pruebas en
 `test_convenciones.py`, incluida una que exige que el motor encuentre una repetición en
 tráfico que nunca ha visto el SDK de Laplace.
+
+### D-137 — Las otras puertas al modelo: Responses API, `parse`, `messages.stream()` y la respuesta cruda
+Sólo se instrumentaban `chat.completions.create` y `messages.create`, y un agente llama al
+modelo por más sitios. Una llamada que no pasa por el parche no existe para Laplace: ni
+coste ni hallazgos, y la cobertura no puede avisar porque ni siquiera ve el span.
+
+* **La Responses API de OpenAI** (`responses.create` y `.parse`, síncrono, asíncrono y
+  streaming), que es la que usa el Agents SDK. `instructions` se une como mensaje de
+  sistema, igual que el `system` de Anthropic, porque es la mitad de la identidad del
+  paso. Los mensajes con partes `input_text`/`output_text` se aplanan a texto si todas
+  son texto; las llamadas a herramientas se guardan enteras. `finish_reasons` guarda el
+  motivo del corte (`max_output_tokens`) y si no lo hay, el estado. En streaming no hace
+  falta `include_usage`: el evento final trae la respuesta entera con su uso. Un flujo
+  que acaba en `response.failed` se cierra como error aunque por fuera haya terminado
+  bien, y sin uso se estima y se marca.
+* **`chat.completions.parse`, `responses.parse` y `messages.parse`** van directos a la
+  red sin pasar por `create`, así que llevan su propio parche. Los ayudantes
+  `chat.completions.stream()` y `responses.stream()` no: llaman a `create` por dentro, y
+  parchearlos contaría la llamada dos veces. Hay una prueba que lo exige.
+* **`messages.stream()` de Anthropic** no llama a nada: devuelve un gestor que lanza la
+  petición al entrar en el `with`. El span se abre en esa petición y no al preparar el
+  gestor (uno que no se abre no ha llamado al modelo), y el flujo crudo se envuelve con el
+  mismo acumulador de `create(stream=True)`, así que `get_final_message()`, `text_stream`
+  e iterar pasan todos por él. La petición vive en un atributo privado del gestor: si
+  una versión lo mueve, se avisa en el log y las pruebas contra el SDK real lo detectan.
+* **El rol `developer`** cuenta como instrucciones en la huella del paso. Es el nombre que
+  OpenAI da al prompt de sistema desde los modelos de razonamiento, y sin él todo el
+  tráfico que lo use caía en un único paso.
+* **`with_raw_response` costaba cero dólares.** Nuestro parche recibía la respuesta HTTP
+  sin parsear, el span salía con cero tokens *medidos* y la llamada no costaba nada.
+  LiteLLM llama así a OpenAI siempre. Ahora se parsea en el parche —el cliente guarda el
+  resultado, y el `.parse()` del usuario recibe el mismo objeto sin releer nada— sólo
+  cuando la cabecera dice que el cuerpo ya está leído. La de `with_streaming_response`
+  no se toca, porque el cuerpo es del usuario: ahí, y en cualquier respuesta sin uso, la
+  entrada se estima y el span se marca como estimado. Una respuesta sin uso ya no puede
+  ser una llamada gratis.
+* **Sin ruido en el proceso ajeno.** Volcar una salida estructurada hacía que Pydantic
+  avisara en cada llamada; `dump_model` pide `warnings=False`.
+
+Pruebas en `test_proveedores_otras_rutas.py` (34), contra `openai` 3.13 y `anthropic` 1.5
+con el transporte falso. Dieciséis mutaciones, y todas ponen alguna en rojo: quitar cada
+parche (cuatro), parchear también `responses.stream()`, dejar de unir `instructions`,
+quitar `developer`, no leer la escritura de caché, no marcar el flujo fallido, abrir el
+span al preparar el gestor, mover el atributo del gestor, no leer la respuesta cruda, no
+esperarla en asíncrono, leer también la de streaming, escribir el cero medido y dejar los
+avisos de Pydantic. Fuera: `client.beta.*`.
+
+### D-138 — La tabla de LiteLLM como capa no verificada
+La tabla propia tiene 56 modelos de OpenAI y Anthropic transcritos a mano y con fecha.
+Todo lo demás —Gemini, Mistral, DeepSeek, lo que pase por Bedrock, Azure u OpenRouter—
+salía como «coste desconocido»: honrado, pero sin cifra para casi cualquiera que no use
+esos dos proveedores. Debajo va ahora la tabla comunitaria de LiteLLM
+(`pricing/litellm_prices.json`, unos 3.200 modelos de texto).
+
+* **Cómo se convierte.** De USD por token a USD por millón; sólo modos de texto (`chat`,
+  `responses`, `completion`); entrada, salida, lectura y escritura de caché (5 min y 1 h)
+  y modo prioritario. Los tramos de contexto largo, lotes y regiones de LiteLLM no se
+  cargan. **Un modelo a cero en entrada y salida no entra**: para Laplace «cuesta cero» es
+  una afirmación, y la de un modelo local no la ha verificado nadie (D-108).
+* **Quién manda.** El nombre tal cual, primero en la verificada y después en LiteLLM;
+  sólo entonces se pelan los adornos del gateway y se repite. Así un snapshot que LiteLLM
+  tenga como entrada exacta no le gana al modelo base verificado, pero un nombre de
+  gateway que LiteLLM conoce sí se cobra con su precio. Eso cambia una cosa que ya
+  estaba mal: `eu.anthropic.claude-…` en Bedrock regional cuesta un 10 % más, igual que
+  las zonas de datos de Azure o el recargo de OpenRouter, y se cobraba en silencio a la
+  tarifa verificada del proveedor directo, por debajo de la factura. La prueba de
+  identificadores de `test_pricing.py` pasa a mirar sólo la capa verificada, que es lo
+  que prueba (cómo se pelan los adornos). Las tarifas propias del usuario mandan sobre
+  las dos capas.
+* **Cómo se dice.** `Cost.rate_unverified`, aparte de `rate_assumed`. Asumida quiere decir
+  suelo («coste mínimo», con «+»), y una tarifa de LiteLLM puede quedarse corta o pasarse:
+  llamarla suelo sería afirmar lo que no se sabe. No lleva columna nueva: `rate` termina
+  en `@ litellm <fecha>` y los dos almacenes derivan la marca de ahí al leer, con prueba
+  de paridad. La interfaz dice «coste (tarifa no verificada)» y la nota lleva la fecha de
+  descarga. La capa no entra en `stale_sources`: la que caduca a los 30 días es la
+  verificada.
+* **Cómo se renueva.** `scripts/precios_litellm.py` descarga, convierte y escribe la capa
+  sólo si cambian los modelos, y con `--informe` compara las dos capas tal como las usa el
+  producto. `precios-litellm.yml` lo corre los lunes y abre una PR con ese informe. La
+  verificada no se toca nunca desde ahí: una discrepancia es un motivo para volver a la
+  página del proveedor. En la primera descarga (26 de septiembre) no hay ninguna por
+  encima del 1 % en los nombres directos, lo que no sustituye a reverificar la tabla antes
+  del 7 de octubre.
+* **Coste.** Con 3.200 prefijos más, cada búsqueda se recuerda mientras vive la tabla.
+
+Pendiente: los hallazgos y el panel no distinguen todavía cifras con tarifa no
+verificada (sí el span, la traza y la ficha técnica), y la traza agregada no lleva la
+marca. Pruebas en `test_precios_litellm.py` (22); ocho mutaciones comprobadas —que
+LiteLLM mande, pelar antes, quitar la marca, convertirla en asumida, dejar entrar los
+modelos gratis o los que no son de texto, no derivar la marca al leer y no pasar a
+millones— y todas ponen alguna en rojo.
+
+### D-139 — Agentes en TypeScript: la guía, y dos fallos de la ingesta que destapó
+La guía (`docs/typescript.md`) no se ha escrito de memoria: un agente en Node con
+`openai` 7.23 se ha instrumentado con OpenInference-js y con OpenLLMetry-js, contra un
+servidor que responde como OpenAI, exportando a `laplace ui`. Lo que salió:
+
+* **El exportador JSON de Node guardaba ids inventados.** OTLP/JSON manda los ids de
+  traza y de span en hexadecimal; el JSON genérico de protobuf los espera en base64. Un
+  id hexadecimal de 32 caracteres también es base64 válido, así que se leía sin error y
+  se guardaba un id de 24 bytes que no existía. Ahora se pasan a base64 antes de leer,
+  en las dos grafías de los campos; se distinguen por el largo (32/16 caracteres en
+  hexadecimal, 24/12 en base64), así que lo que ya venía en base64 sigue valiendo.
+  `test_otlp_json.py`.
+* **Las convenciones GenAI nuevas.** OpenLLMetry-js 0.27 ya manda `gen_ai.provider.name`
+  en vez de `gen_ai.system`, y los mensajes con el texto en `parts` en vez de `content`.
+  Lo primero dejaba el proveedor vacío; lo segundo dejaba la huella del paso sin
+  instrucciones, así que dos pasos con prompts distintos caían en uno. Se leen los dos.
+  Los mensajes se siguen guardando en crudo, como dice el contrato.
+* **Lo que no se puede arreglar desde aquí.** OpenLLMetry-js no manda los tokens leídos
+  de caché de OpenAI aunque la respuesta los traiga: el coste sale por encima de la
+  factura y Laplace no tiene cómo saberlo. La guía lo dice y recomienda OpenInference
+  para OpenAI. Y con estos instrumentadores sólo llegan las instrucciones, no el camino
+  de llamada, así que dos pasos con el mismo prompt se agrupan juntos.
+
+El paquete fino `@laplace/sdk` (`init`, `observe`, `getPrompt`) espera a que el usuario
+reserve el scope en npm. Mutaciones comprobadas: no convertir los ids, quitar la grafía
+`parentSpanId`, no leer `gen_ai.provider.name` y no leer `parts`; todas en rojo.
+
+### D-140 — La prueba inestable era un servidor falso que no leía el cuerpo
+`test_el_notificador_no_sigue_redirecciones` fallaba una de cada catorce veces con
+`ConnectionAbortedError` (36 de 500 en un bucle). Su servidor falso contestaba 302 sin
+leer el cuerpo del POST y cerraba; en Windows, cerrar un socket con datos sin leer manda
+un RST, y el cliente veía la conexión anulada antes de leer la respuesta. El fallo era de
+la prueba, no del notificador: ahora el servidor lee el cuerpo antes de contestar. 0 de
+2.000 en el mismo bucle, y la prueba sigue mordiendo: con un `build_opener()` que sí
+sigue redirecciones se pone en rojo.

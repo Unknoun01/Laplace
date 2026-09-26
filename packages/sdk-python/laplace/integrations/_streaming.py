@@ -34,7 +34,10 @@ class Accumulator(Protocol):
 
     def feed(self, chunk: Any) -> None: ...
 
-    def finish(self, span: OtelSpan) -> None: ...
+    def finish(self, span: OtelSpan) -> str | None:
+        """Vuelca lo acumulado. Devuelve un mensaje de error si el flujo terminó bien
+        por fuera pero el proveedor dice dentro que la llamada falló."""
+        ...
 
 
 def estimate_tokens(text: str) -> int:
@@ -52,11 +55,12 @@ def estimate_messages_tokens(messages: Any) -> int:
 def _end(span: OtelSpan, accumulator: Accumulator | None, error: BaseException | None) -> None:
     """Cierra el span una sola vez, con lo que se haya podido acumular."""
     try:
-        if accumulator is not None:
-            accumulator.finish(span)
+        fallo = accumulator.finish(span) if accumulator is not None else None
         if error is not None:
             span.record_exception(error)
             span.set_status(Status(StatusCode.ERROR, f"{type(error).__name__}: {error}"))
+        elif fallo:
+            span.set_status(Status(StatusCode.ERROR, fallo))
         else:
             span.set_status(Status(StatusCode.OK))
     except Exception:  # noqa: BLE001
@@ -194,12 +198,17 @@ def record_stream_result(
     cache_write_1h_tokens: int | None = None,
     tier: str = "standard",
     region: str = "global",
+    reasoning_tokens: int | None = None,
+    messages: list[Any] | None = None,
 ) -> None:
     """Cierra un span de streaming con los mismos atributos que uno normal.
 
     Si el proveedor no ha devuelto el recuento, se cuenta localmente y se marca el span
     como estimado: la interfaz distingue medido de estimado, y el usuario sabe de cuál
     de los dos sale su factura.
+
+    `messages` sustituye al texto acumulado cuando el proveedor manda al final la
+    respuesta entera (la Responses API), que trae también las llamadas a herramientas.
     """
     medido = input_tokens is not None or output_tokens is not None
     entrada = input_tokens if input_tokens is not None else fallback_input_tokens
@@ -210,7 +219,9 @@ def record_stream_result(
         model=model,
         response_id=response_id,
         finish_reasons=finish_reasons,
-        messages=[{"role": role, "content": text}] if text else [],
+        messages=messages
+        if messages is not None
+        else ([{"role": role, "content": text}] if text else []),
     )
     c.record_usage(
         span,
@@ -219,6 +230,7 @@ def record_stream_result(
         cached_input_tokens=cached_input_tokens,
         cache_write_tokens=cache_write_tokens,
         cache_write_1h_tokens=cache_write_1h_tokens,
+        reasoning_tokens=reasoning_tokens,
     )
     c.record_billing(span, tier=tier, region=region)
     c.set_attr(span, semconv.LAPLACE_STREAMING, True)
@@ -226,6 +238,19 @@ def record_stream_result(
     # recuento, esto es un dato medido y la UI no tiene por qué desconfiar de él.
     if not medido:
         c.set_attr(span, semconv.LAPLACE_USAGE_ESTIMATED, True)
+
+
+def record_missing_usage(span: OtelSpan, response: Any, messages: Any) -> None:
+    """Una respuesta sin uso no es una llamada gratis.
+
+    Sin esto, el span salía con cero tokens **medidos** y la llamada costaba cero
+    dólares. Se estima la entrada y se marca como estimado, que es lo que se hace ya en
+    streaming cuando el proveedor no manda el recuento.
+    """
+    if c.getattr_path(response, "usage") is not None:
+        return
+    c.set_attr(span, semconv.GEN_AI_USAGE_INPUT_TOKENS, estimate_messages_tokens(messages))
+    c.set_attr(span, semconv.LAPLACE_USAGE_ESTIMATED, True)
 
 
 def safe(fn: Callable[[], None]) -> None:

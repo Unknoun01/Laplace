@@ -20,6 +20,11 @@ Cuatro reglas que sostienen la credibilidad de todo el producto:
    metro aplicó —contexto largo, residencia de datos, modo rápido—, se cobra el
    estándar y el span queda marcado como tarifa asumida, visible en modo avanzado.
    Nunca se elige en silencio la tarifa que engorda nuestro número (D-051).
+
+Y dos capas (D-138). La propia, transcrita de la página de cada proveedor y con fecha, y
+debajo la tabla comunitaria de LiteLLM, que cubre miles de modelos más. La propia
+resuelve primero, también por snapshot; lo que sale sólo de LiteLLM se cobra, pero
+marcado como tarifa no verificada.
 """
 
 from __future__ import annotations
@@ -36,6 +41,16 @@ from typing import Any, Literal
 logger = logging.getLogger("laplace.pricing")
 
 _PRICES_PATH = Path(__file__).with_name("model_prices.json")
+#: La capa no verificada: la tabla de LiteLLM ya convertida a nuestro formato. La
+#: regenera `scripts/precios_litellm.py`, y un trabajo semanal de CI abre la PR.
+LITELLM_PATH = Path(__file__).with_name("litellm_prices.json")
+#: Cómo se reconoce en `rate` una tarifa de la capa no verificada. Es lo único que se
+#: guarda de ella, así que los dos almacenes derivan la marca de aquí al leer.
+MARCA_NO_VERIFICADA = " @ litellm "
+
+
+def es_no_verificada(rate: str | None) -> bool:
+    return MARCA_NO_VERIFICADA in (rate or "")
 _MILLION = 1_000_000.0
 
 #: Metro de facturación pedido por quien hizo la llamada.
@@ -119,6 +134,8 @@ class ModelPrice:
     #: Clave del bloque `sources`: de dónde salen estos números.
     source: str = ""
     note: str = ""
+    #: False si la tarifa sale sólo de la tabla de LiteLLM: se cobra, pero se dice.
+    verified: bool = True
 
 
 @dataclass(frozen=True)
@@ -157,6 +174,9 @@ class CostBreakdown:
     unknown: bool = True
     #: True cuando no se ha podido saber qué metro aplicó y se ha cobrado el estándar.
     assumed: bool = False
+    #: True cuando la tarifa sale sólo de LiteLLM. No es un suelo como `assumed`: puede
+    #: quedarse corta o pasarse, y lo único honrado es decir que no está verificada.
+    unverified: bool = False
     #: Tarifa aplicada, para poder auditarla en modo avanzado.
     #: Formato: `<modelo de la tabla> @ <versión de la tabla>`.
     rate: str = ""
@@ -168,20 +188,37 @@ class PriceTable:
     """Tabla de precios por modelo, cargada del JSON del repo."""
 
     def __init__(
-        self, models: dict[str, ModelPrice], version: str, sources: dict[str, Source]
+        self,
+        models: dict[str, ModelPrice],
+        version: str,
+        sources: dict[str, Source],
+        unverified: dict[str, ModelPrice] | None = None,
+        unverified_date: str = "",
     ) -> None:
         self._models = models
         self._version = version
         self._sources = sources
+        self._unverified = unverified or {}
+        self._unverified_date = unverified_date
         # Prefijos de más largo a más corto: la coincidencia más específica gana.
         self._prefixes = sorted(models, key=len, reverse=True)
+        self._unverified_prefixes = sorted(self._unverified, key=len, reverse=True)
+        # Cada span pregunta por su modelo, y con la capa de LiteLLM son miles de
+        # prefijos que recorrer: la respuesta se recuerda mientras viva esta tabla.
+        self._memo: dict[str, ModelPrice | None] = {}
 
     @classmethod
-    def load(cls, path: Path | None = None) -> PriceTable:
-        # Las tarifas propias sólo se aplican a la tabla del producto: una prueba que
-        # carga su propio fichero tiene que leer exactamente ese fichero.
+    def load(
+        cls, path: Path | None = None, *, unverified_path: Path | None = None
+    ) -> PriceTable:
+        # Las tarifas propias y la capa de LiteLLM sólo se aplican a la tabla del
+        # producto: una prueba que carga su propio fichero tiene que leer exactamente
+        # ese fichero, salvo que pida la capa a propósito.
         propias = path is None
         path = path or _PRICES_PATH
+        if unverified_path is None and propias:
+            unverified_path = LITELLM_PATH
+        unverified, unverified_date = _load_unverified(unverified_path)
         try:
             raw: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001
@@ -243,8 +280,13 @@ class PriceTable:
             for key, value in (raw.get("sources") or {}).items()
         }
         version = str(raw.get("version", "desconocida"))
-        logger.info("tabla de precios %s cargada: %d modelos", version, len(models))
-        return cls(models, version, sources)
+        logger.info(
+            "tabla de precios %s cargada: %d modelos verificados y %d de LiteLLM",
+            version,
+            len(models),
+            len(unverified),
+        )
+        return cls(models, version, sources, unverified, unverified_date)
 
     @property
     def version(self) -> str:
@@ -252,7 +294,13 @@ class PriceTable:
 
     @property
     def models(self) -> dict[str, ModelPrice]:
+        """Los modelos de la capa verificada (y las tarifas propias)."""
         return dict(self._models)
+
+    @property
+    def unverified_models(self) -> dict[str, ModelPrice]:
+        """Los de la capa de LiteLLM, que sólo se usan si la verificada no resuelve."""
+        return dict(self._unverified)
 
     @property
     def sources(self) -> dict[str, Source]:
@@ -268,17 +316,25 @@ class PriceTable:
         """
         if not model:
             return None
-
-        for candidate in _candidates(model.strip().lower()):
-            direct = self._models.get(candidate)
-            if direct is not None:
-                return direct
-            for prefix in self._prefixes:
-                if candidate.startswith(prefix) and _SNAPSHOT_SUFFIX.match(
-                    candidate[len(prefix) :]
-                ):
-                    return self._models[prefix]
-        return None
+        clave = model.strip().lower()
+        if clave in self._memo:
+            return self._memo[clave]
+        # Primero el nombre tal cual, en las dos capas y por ese orden: un snapshot que
+        # LiteLLM tenga como entrada exacta no le gana al modelo base verificado. Sólo
+        # después se le quitan los adornos del gateway. El orden importa: un nombre
+        # adornado (`azure/…`, `eu.anthropic.…`, `openrouter/…`) es otro vendedor con su
+        # propio precio —Bedrock regional cobra un 10 % más— y, si LiteLLM lo conoce,
+        # ese precio sin verificar está más cerca de la factura que el del proveedor.
+        candidatos = _candidates(clave)
+        literal, pelados = candidatos[:1], candidatos[1:]
+        encontrado = (
+            _resolve(literal, self._models, self._prefixes)
+            or _resolve(literal, self._unverified, self._unverified_prefixes)
+            or _resolve(pelados, self._models, self._prefixes)
+            or _resolve(pelados, self._unverified, self._unverified_prefixes)
+        )
+        self._memo[clave] = encontrado
+        return encontrado
 
     # -- cálculo -----------------------------------------------------------------
 
@@ -309,6 +365,15 @@ class PriceTable:
 
         source = self._sources.get(price.source)
         notas: list[str] = []
+        sin_verificar = (
+            []
+            if price.verified
+            else [
+                "Tarifa no verificada: sale de la tabla comunitaria de LiteLLM "
+                f"(descargada el {self._unverified_date or 'día desconocido'}), no de la "
+                "página del proveedor. Puede no coincidir con la factura."
+            ]
+        )
 
         base_in, base_out = self._tier_rates(price, source, tier, notas)
         multiplicador = self._region_multiplier(price, source, region, notas)
@@ -359,8 +424,13 @@ class PriceTable:
             cache_saving_usd=max(0.0, ahorrado),
             unknown=False,
             assumed=bool(notas),
-            rate=f"{price.model} @ {self._version}",
-            note=" ".join(notas),
+            unverified=not price.verified,
+            rate=(
+                f"{price.model} @ {self._version}"
+                if price.verified
+                else f"{price.model} @ litellm {self._unverified_date}"
+            ),
+            note=" ".join(sin_verificar + notas),
         )
 
     # -- metros --------------------------------------------------------------------
@@ -483,6 +553,95 @@ class PriceTable:
 
 def _opt(value: Any) -> float | None:
     return None if value is None else float(value)
+
+
+def _resolve(
+    candidates: list[str], models: dict[str, ModelPrice], prefixes: list[str]
+) -> ModelPrice | None:
+    for candidate in candidates:
+        direct = models.get(candidate)
+        if direct is not None:
+            return direct
+        for prefix in prefixes:
+            if candidate.startswith(prefix) and _SNAPSHOT_SUFFIX.match(candidate[len(prefix) :]):
+                return models[prefix]
+    return None
+
+
+def _load_unverified(path: Path | None) -> tuple[dict[str, ModelPrice], str]:
+    """La capa de LiteLLM, ya convertida. Si falta o no se lee, no hay capa: todo lo que
+    no esté en la verificada vuelve a ser «coste desconocido», nunca cero."""
+    if path is None:
+        return {}, ""
+    try:
+        raw: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        logger.warning("no se pudo leer la capa de LiteLLM en %s; se sigue sin ella", path)
+        return {}, ""
+    modelos = {
+        name: ModelPrice(
+            model=name,
+            input=float(entry["input"]),
+            output=float(entry["output"]),
+            cached_input=_opt(entry.get("cached_input")),
+            cache_write=_opt(entry.get("cache_write")),
+            cache_write_1h=_opt(entry.get("cache_write_1h")),
+            fast_input=_opt(entry.get("fast_input")),
+            fast_output=_opt(entry.get("fast_output")),
+            source="litellm",
+            verified=False,
+        )
+        for name, entry in (raw.get("models") or {}).items()
+    }
+    return modelos, str(raw.get("fetched_at", ""))
+
+
+#: Los modos de LiteLLM que se cobran por token de texto, que es lo que mide el contrato.
+_MODOS_DE_TEXTO = ("chat", "responses", "completion")
+
+#: Metro de LiteLLM (USD por token) → metro nuestro (USD por millón).
+_METROS_LITELLM = {
+    "input": "input_cost_per_token",
+    "output": "output_cost_per_token",
+    "cached_input": "cache_read_input_token_cost",
+    "cache_write": "cache_creation_input_token_cost",
+    "cache_write_1h": "cache_creation_input_token_cost_above_1hr",
+    "fast_input": "input_cost_per_token_priority",
+    "fast_output": "output_cost_per_token_priority",
+}
+
+
+def convertir_litellm(raw: dict[str, Any]) -> dict[str, dict[str, float]]:
+    """La tabla de LiteLLM, en nuestro formato y sólo con lo que se puede sostener.
+
+    * Sólo modelos de texto: una imagen o un embedding se cobran por otras unidades.
+    * Sólo con entrada y salida numéricas. Un modelo a cero en las dos no entra: para
+      Laplace «cuesta cero» es una afirmación, y ésa no la ha verificado nadie.
+    * Nombres en minúsculas, que es como compara la búsqueda.
+    * Los tramos de contexto largo, lote y regiones de LiteLLM no se cargan: la capa
+      entera ya va marcada como no verificada, y esos metros los aplica la verificada.
+    """
+    salida: dict[str, dict[str, float]] = {}
+    for nombre, entrada in raw.items():
+        if nombre == "sample_spec" or not isinstance(entrada, dict):
+            continue
+        if entrada.get("mode") not in _MODOS_DE_TEXTO:
+            continue
+        precio: dict[str, float] = {}
+        for nuestro, suyo in _METROS_LITELLM.items():
+            valor = entrada.get(suyo)
+            if valor is None:
+                continue
+            if isinstance(valor, bool) or not isinstance(valor, (int, float)):
+                precio = {}
+                break
+            precio[nuestro] = round(float(valor) * _MILLION, 6)
+        if "input" not in precio or "output" not in precio:
+            continue
+        if precio["input"] <= 0 and precio["output"] <= 0:
+            continue
+        salida[str(nombre).strip().lower()] = precio
+    return dict(sorted(salida.items()))
 
 
 _table: PriceTable | None = None

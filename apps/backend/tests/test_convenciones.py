@@ -175,6 +175,53 @@ def test_la_cache_con_los_nombres_nuevos_de_opentelemetry():
     assert span.llm.usage.input_tokens == 4_000, "cabía dentro: no se suma"
 
 
+def _openllmetry_js(instrucciones: str) -> dict:
+    """Lo que manda OpenLLMetry-js 0.27 con OpenAI, copiado de una traza de verdad: ya
+    usa las convenciones GenAI nuevas de OpenTelemetry, con el proveedor en
+    `gen_ai.provider.name` y los mensajes en `parts` en lugar de `content`."""
+    return {
+        "gen_ai.provider.name": "openai",
+        "gen_ai.operation.name": "chat",
+        "gen_ai.request.model": "gpt-5.6-luna",
+        "gen_ai.response.model": "gpt-5.6-luna",
+        "traceloop.workflow.name": "atender_ticket",
+        "gen_ai.usage.input_tokens": 1_200,
+        "gen_ai.usage.output_tokens": 12,
+        "gen_ai.input.messages": json.dumps(
+            [
+                {"role": "system", "parts": [{"type": "text", "content": instrucciones}]},
+                {"role": "user", "parts": [{"type": "text", "content": "¿Equipaje?"}]},
+            ]
+        ),
+        "gen_ai.output.messages": json.dumps(
+            [
+                {
+                    "role": "assistant",
+                    "finish_reason": "stop",
+                    "parts": [{"type": "text", "content": "Una maleta."}],
+                }
+            ]
+        ),
+    }
+
+
+def test_las_convenciones_nuevas_dicen_el_proveedor():
+    """`gen_ai.system` pasó a llamarse `gen_ai.provider.name`."""
+    _emitir("chat gpt-5.6-luna", _openllmetry_js("Clasifica el ticket."))
+    (span,) = ingest()
+    assert span.llm.system == "openai"
+
+
+def test_las_instrucciones_en_parts_hacen_la_identidad_del_paso():
+    """Con los mensajes en `parts`, la huella no veía las instrucciones: dos pasos con
+    prompts distintos caían en uno, y la pista legible salía vacía."""
+    _emitir("chat gpt-5.6-luna", _openllmetry_js("Clasifica el ticket."))
+    _emitir("chat gpt-5.6-luna", _openllmetry_js("Resume el ticket."))
+    spans = ingest()
+    assert len({s.step_key for s in spans}) == 2
+    assert {s.step_hint for s in spans} == {"Clasifica el ticket.", "Resume el ticket."}
+
+
 def test_lo_nuestro_manda_sobre_lo_ajeno():
     """Un span con los dos juegos de atributos: los de Laplace no se pisan."""
     atributos = _openinference_llm()

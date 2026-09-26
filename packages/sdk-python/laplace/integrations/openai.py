@@ -8,6 +8,7 @@ terceros por dentro.
 from __future__ import annotations
 
 import functools
+import importlib
 import logging
 from typing import Any
 
@@ -23,24 +24,53 @@ logger = logging.getLogger("laplace")
 
 _patched = False
 
+#: Las puertas por las que se llama al modelo: `(módulo, clases, método, forma)`.
+#:
+#: Los ayudantes `chat.completions.stream()` y `responses.stream()` no están porque
+#: llaman por dentro a `create(stream=True)`: parchearlos contaría la misma llamada dos
+#: veces. `parse()` sí, porque va directo a la red sin pasar por `create`.
+_PUERTAS = (
+    ("openai.resources.chat.completions", ("Completions", "AsyncCompletions"), "create", "chat"),
+    ("openai.resources.chat.completions", ("Completions", "AsyncCompletions"), "parse", "chat"),
+    ("openai.resources.responses", ("Responses", "AsyncResponses"), "create", "responses"),
+    ("openai.resources.responses", ("Responses", "AsyncResponses"), "parse", "responses"),
+)
+
+
+def _clases(modulo: str, nombres: tuple[str, ...]) -> list[tuple[Any, bool]]:
+    """Las clases de una puerta que existen en la versión instalada, con si son async."""
+    try:
+        mod = importlib.import_module(modulo)
+    except Exception:  # noqa: BLE001 - una versión vieja sin esa API no es un error
+        return []
+    encontradas = []
+    for nombre in nombres:
+        cls = getattr(mod, nombre, None)
+        if cls is not None:
+            encontradas.append((cls, nombre.startswith("Async")))
+    return encontradas
+
 
 def instrument() -> bool:
-    """Parchea `chat.completions.create` (sync y async). Idempotente."""
+    """Parchea Chat Completions y la Responses API (`create` y `parse`, sync y async).
+
+    Idempotente.
+    """
     global _patched
     if _patched:
         return True
     try:
-        from openai.resources.chat import completions as chat_completions
+        import openai  # noqa: F401
     except Exception:  # noqa: BLE001 - openai no instalado: no es un error
         return False
 
-    sync_cls = getattr(chat_completions, "Completions", None)
-    async_cls = getattr(chat_completions, "AsyncCompletions", None)
-
-    if sync_cls is not None and not getattr(sync_cls.create, "_laplace_patched", False):
-        sync_cls.create = _wrap_sync(sync_cls.create)
-    if async_cls is not None and not getattr(async_cls.create, "_laplace_patched", False):
-        async_cls.create = _wrap_async(async_cls.create)
+    for modulo, nombres, metodo, forma in _PUERTAS:
+        for cls, asincrono in _clases(modulo, nombres):
+            original = getattr(cls, metodo, None)
+            if original is None or getattr(original, "_laplace_patched", False):
+                continue
+            envolver = _wrap_async if asincrono else _wrap_sync
+            setattr(cls, metodo, envolver(original, _FORMAS[forma]))
 
     _patched = True
     logger.debug("laplace: openai instrumentado")
@@ -50,15 +80,11 @@ def instrument() -> bool:
 def uninstrument() -> None:
     """Deshace el parcheo. Pensado para tests."""
     global _patched
-    try:
-        from openai.resources.chat import completions as chat_completions
-    except Exception:  # noqa: BLE001
-        return
-    for cls_name in ("Completions", "AsyncCompletions"):
-        cls = getattr(chat_completions, cls_name, None)
-        original = getattr(getattr(cls, "create", None), "_laplace_original", None)
-        if cls is not None and original is not None:
-            cls.create = original
+    for modulo, nombres, metodo, _forma in _PUERTAS:
+        for cls, _asincrono in _clases(modulo, nombres):
+            original = getattr(getattr(cls, metodo, None), "_laplace_original", None)
+            if original is not None:
+                setattr(cls, metodo, original)
     _patched = False
 
 
@@ -138,6 +164,7 @@ def _finish(span: OtelSpan, kwargs: dict[str, Any], response: Any) -> None:
             ),
         )
         c.record_billing(span, tier=_tier(kwargs, response), region=None)
+        st.record_missing_usage(span, response, kwargs.get("messages"))
         span.set_status(Status(StatusCode.OK))
     except Exception:  # noqa: BLE001
         logger.debug("laplace: fallo al leer la respuesta de openai", exc_info=True)
@@ -210,10 +237,208 @@ class _OpenAIStream:
         )
 
 
-def _wrap_sync(original: Any) -> Any:
+# ---------------------------------------------------------------------------------
+# Responses API
+# ---------------------------------------------------------------------------------
+
+
+def _texto(content: Any) -> Any:
+    """Aplana una lista de partes con texto (`input_text`, `output_text`) a una cadena.
+
+    Si alguna parte no es texto —una imagen, una negativa—, se deja como vino: aplanar
+    sólo lo que se puede es mejor que perder lo que no.
+    """
+    if isinstance(content, list) and content:
+        partes = [c.dump_model(p) for p in content]
+        if all(isinstance(p, dict) and isinstance(p.get("text"), str) for p in partes):
+            return "".join(p["text"] for p in partes)
+        return partes
+    return content
+
+
+def _responses_input(kwargs: dict[str, Any]) -> list[Any]:
+    """`instructions` + `input`, como una lista de mensajes.
+
+    Las instrucciones van fuera de `input`, como el `system` de Anthropic, y son la
+    mitad de la identidad del paso: se unen como mensaje de sistema. Los elementos que
+    no son mensajes (el resultado de una herramienta, una referencia) se guardan tal
+    cual.
+    """
+    mensajes: list[Any] = []
+    instrucciones = kwargs.get("instructions")
+    if instrucciones:
+        mensajes.append({"role": "system", "content": instrucciones})
+    entrada = kwargs.get("input")
+    if isinstance(entrada, str):
+        mensajes.append({"role": "user", "content": entrada})
+    elif isinstance(entrada, (list, tuple)):
+        for item in entrada:
+            datos = c.dump_model(item)
+            if isinstance(datos, dict) and "role" in datos:
+                mensajes.append({"role": datos["role"], "content": _texto(datos.get("content"))})
+            else:
+                mensajes.append(datos)
+    return mensajes
+
+
+def _responses_output(response: Any) -> list[Any]:
+    """Los mensajes de la respuesta como texto; las llamadas a herramientas, enteras."""
+    salida: list[Any] = []
+    for item in c.getattr_path(response, "output") or []:
+        datos = c.dump_model(item)
+        if isinstance(datos, dict) and datos.get("type") == "message":
+            salida.append(
+                {"role": datos.get("role") or "assistant", "content": _texto(datos.get("content"))}
+            )
+        else:
+            salida.append(datos)
+    return salida
+
+
+def _responses_finish_reasons(response: Any) -> list[str]:
+    """El motivo del corte si lo hay (`max_output_tokens`), y si no, el estado."""
+    valor = c.getattr_path(response, "incomplete_details.reason") or c.getattr_path(
+        response, "status"
+    )
+    return [str(valor)] if valor else []
+
+
+def _responses_usage(response: Any) -> dict[str, Any]:
+    """El uso de la Responses API. Como en Chat, `input_tokens` ya incluye lo servido
+    desde caché, así que no hay que sumar nada (D-050)."""
+    return {
+        "input_tokens": c.getattr_path(response, "usage.input_tokens"),
+        "output_tokens": c.getattr_path(response, "usage.output_tokens"),
+        "cached_input_tokens": c.getattr_path(
+            response, "usage.input_tokens_details.cached_tokens"
+        ),
+        "cache_write_tokens": c.getattr_path(
+            response, "usage.input_tokens_details.cache_write_tokens"
+        ),
+        "reasoning_tokens": c.getattr_path(
+            response, "usage.output_tokens_details.reasoning_tokens"
+        ),
+    }
+
+
+def _responses_start_span(kwargs: dict[str, Any]) -> OtelSpan:
+    model = kwargs.get("model")
+    envolvente = c.enclosing_step()
+    span = get_tracer().start_span(
+        c.span_name(semconv.OPERATION_CHAT, model), kind=SpanKind.CLIENT
+    )
+    c.record_request(
+        span,
+        system=semconv.SYSTEM_OPENAI,
+        model=model,
+        messages=_responses_input(kwargs),
+        kwargs=kwargs,
+        enclosing=envolvente,
+    )
+    if kwargs.get("tools"):
+        c.set_attr(span, "laplace.request.tools", c.payload(kwargs["tools"]) or "")
+    return span
+
+
+def _responses_finish(span: OtelSpan, kwargs: dict[str, Any], response: Any) -> None:
+    try:
+        c.record_response(
+            span,
+            model=c.getattr_path(response, "model"),
+            response_id=c.getattr_path(response, "id"),
+            finish_reasons=_responses_finish_reasons(response),
+            messages=_responses_output(response),
+        )
+        c.record_usage(span, **_responses_usage(response))
+        c.record_billing(span, tier=_tier(kwargs, response), region=None)
+        st.record_missing_usage(span, response, _responses_input(kwargs))
+        span.set_status(Status(StatusCode.OK))
+    except Exception:  # noqa: BLE001
+        logger.debug("laplace: fallo al leer la respuesta de openai", exc_info=True)
+
+
+#: Los eventos que cierran un flujo de la Responses API, con la respuesta entera dentro.
+_EVENTOS_FINALES = ("response.completed", "response.incomplete", "response.failed")
+
+
+class _ResponsesStream:
+    """Junta los eventos de un `responses.create(stream=True)`.
+
+    Aquí no hace falta pedir el uso como en Chat: el evento final trae la respuesta
+    entera con su `usage`. Sólo si el flujo se corta antes de ese evento, o si llega
+    sin uso, se estima y se marca.
+    """
+
+    def __init__(self, kwargs: dict[str, Any]) -> None:
+        self._text: list[str] = []
+        self._model: str | None = kwargs.get("model")
+        self._id: str | None = None
+        self._final: Any = None
+        self._kwargs = kwargs
+        self._fallback_input = st.estimate_messages_tokens(_responses_input(kwargs))
+
+    def feed(self, event: Any) -> None:
+        tipo = getattr(event, "type", None)
+        respuesta = getattr(event, "response", None)
+        if respuesta is not None:
+            self._model = c.getattr_path(respuesta, "model") or self._model
+            self._id = c.getattr_path(respuesta, "id") or self._id
+        if tipo == "response.output_text.delta":
+            delta = getattr(event, "delta", None)
+            if delta:
+                self._text.append(str(delta))
+        elif tipo in _EVENTOS_FINALES:
+            self._final = respuesta
+
+    def finish(self, span: OtelSpan) -> str | None:
+        final = self._final
+        uso = _responses_usage(final) if final is not None else {}
+        st.record_stream_result(
+            span,
+            system=semconv.SYSTEM_OPENAI,
+            text="".join(self._text),
+            role="assistant",
+            model=self._model,
+            response_id=self._id,
+            finish_reasons=_responses_finish_reasons(final) if final is not None else [],
+            input_tokens=uso.get("input_tokens"),
+            output_tokens=uso.get("output_tokens"),
+            cached_input_tokens=uso.get("cached_input_tokens"),
+            cache_write_tokens=uso.get("cache_write_tokens"),
+            reasoning_tokens=uso.get("reasoning_tokens"),
+            fallback_input_tokens=self._fallback_input,
+            tier=_tier(self._kwargs, final),
+            # La respuesta final trae también las llamadas a herramientas, que el texto
+            # acumulado no ve.
+            messages=_responses_output(final) if c.getattr_path(final, "output") else None,
+        )
+        if c.getattr_path(final, "status") == "failed":
+            return str(c.getattr_path(final, "error.message") or "la respuesta falló")
+        return None
+
+
+class _Forma:
+    """Cómo se abre, se cierra y se lee en streaming el span de cada API."""
+
+    def __init__(self, start: Any, finish: Any, stream: Any) -> None:
+        self.start = start
+        self.finish = finish
+        self.stream = stream
+
+
+_FORMAS = {
+    "chat": _Forma(_start_span, _finish, _OpenAIStream),
+    "responses": _Forma(_responses_start_span, _responses_finish, _ResponsesStream),
+}
+
+
+# ---------------------------------------------------------------------------------
+
+
+def _wrap_sync(original: Any, forma: _Forma) -> Any:
     @functools.wraps(original)
     def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
-        span = _start_span(kwargs)
+        span = forma.start(kwargs)
         try:
             response = original(self, *args, **kwargs)
         except BaseException as exc:
@@ -223,8 +448,8 @@ def _wrap_sync(original: Any) -> Any:
             raise
         if kwargs.get("stream"):
             # El span lo cierra el propio stream cuando termine de consumirse.
-            return st.wrap(response, span, _OpenAIStream(kwargs), is_async=False)
-        _finish(span, kwargs, response)
+            return st.wrap(response, span, forma.stream(kwargs), is_async=False)
+        forma.finish(span, kwargs, c.readable(response, kwargs))
         span.end()
         return response
 
@@ -233,10 +458,10 @@ def _wrap_sync(original: Any) -> Any:
     return wrapper
 
 
-def _wrap_async(original: Any) -> Any:
+def _wrap_async(original: Any, forma: _Forma) -> Any:
     @functools.wraps(original)
     async def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
-        span = _start_span(kwargs)
+        span = forma.start(kwargs)
         try:
             response = await original(self, *args, **kwargs)
         except BaseException as exc:
@@ -245,8 +470,8 @@ def _wrap_async(original: Any) -> Any:
             span.end()
             raise
         if kwargs.get("stream"):
-            return st.wrap(response, span, _OpenAIStream(kwargs), is_async=True)
-        _finish(span, kwargs, response)
+            return st.wrap(response, span, forma.stream(kwargs), is_async=True)
+        forma.finish(span, kwargs, await c.readable_async(response, kwargs))
         span.end()
         return response
 
