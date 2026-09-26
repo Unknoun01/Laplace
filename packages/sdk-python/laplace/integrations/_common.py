@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import sys
+import weakref
 from typing import Any
 
 from opentelemetry import trace
@@ -26,6 +28,87 @@ _PARAM_ATTRS = {
     "presence_penalty": semconv.GEN_AI_REQUEST_PRESENCE_PENALTY,
     "seed": semconv.GEN_AI_REQUEST_SEED,
 }
+
+
+#: Los instrumentadores que trazan llamadas a modelos. De OpenInference, todos: es una
+#: familia sólo de IA. De OpenLLMetry (`opentelemetry.instrumentation.*`), sólo los de
+#: LLM y frameworks de agentes: ahí también viven `requests` o `httpx`, que no cuentan.
+_PREFIJO_OPENINFERENCE = "openinference.instrumentation."
+_OPENLLMETRY = frozenset(
+    "opentelemetry.instrumentation." + n
+    for n in (
+        "openai", "openai_agents", "anthropic", "langchain", "llamaindex", "crewai",
+        "bedrock", "vertexai", "google_generativeai", "mistralai", "cohere", "groq",
+        "ollama", "together", "replicate", "watsonx", "sagemaker", "transformers",
+        "haystack", "alephalpha", "writer", "agno", "mcp",
+    )
+)
+
+#: Instrumentadores de los que ya se ha avisado, para avisar una vez y no por llamada.
+_avisado: set[str] = set()
+#: Clases instrumentador por módulo ya mirado, para no recorrer sus atributos en cada
+#: llamada. La clave es el objeto módulo: un módulo recargado se vuelve a mirar.
+_por_modulo: weakref.WeakKeyDictionary[Any, list[type]] = weakref.WeakKeyDictionary()
+
+
+def _clases_instrumentador() -> list[type]:
+    """Las clases instrumentador de esas familias ya importadas. Esto corre en cada
+    llamada al modelo: recorrer los nombres de `sys.modules` son microsegundos, y los
+    atributos de cada módulo se miran una sola vez."""
+    try:
+        from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
+    except Exception:  # noqa: BLE001 - sin la clase base no hay instrumentadores ajenos
+        return []
+    clases: list[type] = []
+    for nombre, modulo in list(sys.modules.items()):
+        if modulo is None or not (
+            nombre.startswith(_PREFIJO_OPENINFERENCE) or nombre in _OPENLLMETRY
+        ):
+            continue
+        propias = _por_modulo.get(modulo)
+        if propias is None:
+            propias = [
+                v
+                for v in list(vars(modulo).values())
+                if isinstance(v, type)
+                and issubclass(v, BaseInstrumentor)
+                and v is not BaseInstrumentor
+            ]
+            _por_modulo[modulo] = propias
+        clases.extend(c for c in propias if c not in clases)
+    return clases
+
+
+def other_instrumentor() -> str | None:
+    """El otro instrumentador de LLM activo, si lo hay y hay que cederle la llamada.
+
+    Con LangGraph instrumentado por OpenInference y `laplace.init()` a la vez, cada
+    llamada salía dos veces en trazas distintas, sin nada con que emparejarlas en la
+    ingesta: el gasto, el doble (D-141). Se mira en cada llamada y no al arrancar
+    porque lo normal es instrumentar el framework después de `init()`.
+    """
+    if not get_config().defer_to_others:
+        return None
+    try:
+        for cls in _clases_instrumentador():
+            instancia = cls.__dict__.get("_instance")
+            if instancia is not None and getattr(
+                instancia, "_is_instrumented_by_opentelemetry", False
+            ):
+                nombre = f"{cls.__module__}.{cls.__name__}"
+                if nombre not in _avisado:
+                    _avisado.add(nombre)
+                    logger.warning(
+                        "laplace: %s ya traza las llamadas al modelo; Laplace no las "
+                        "traza otra vez para no contarlas dos veces. Si ese "
+                        "instrumentador no exporta a Laplace, arranca con "
+                        "laplace.init(defer_to_others=False).",
+                        nombre,
+                    )
+                return nombre
+    except Exception:  # noqa: BLE001 - nunca romper la llamada del usuario
+        logger.debug("laplace: no se pudo mirar si hay otro instrumentador", exc_info=True)
+    return None
 
 
 def set_attr(span: OtelSpan, key: str, value: Any) -> None:

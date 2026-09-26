@@ -524,6 +524,9 @@ def _amount_phrase(finding: Finding, ventana: str) -> str:
     frase = f"{suelo}{money(finding.window_waste_usd)} en {ventana}"
     if finding.monthly_saving_usd is not None:
         frase += f" · {suelo}{money(finding.monthly_saving_usd)} al mes a ese ritmo"
+    if finding.cost_unverified:
+        # No es un suelo: una tarifa de LiteLLM puede pasarse igual que quedarse corta.
+        frase += " (tarifa sin verificar)"
     return frase
 
 

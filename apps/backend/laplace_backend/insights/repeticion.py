@@ -86,7 +86,9 @@ def _repetition_finding(
             if sin_tarifa
             else ""
         ),
-        **_floor_flags(group.extra_unknown_cost_spans, group.extra_assumed_rate_spans),
+        **_floor_flags(
+            group.extra_unknown_cost_spans, group.extra_assumed_rate_spans, [group.model]
+        ),
         difficulty="easy",
         difficulty_label="Una línea en el prompt",
         scope_label=_scope_label(group.traces, summary.traces),

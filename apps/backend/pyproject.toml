@@ -41,6 +41,8 @@ dev = [
     "ruff>=0.5",
     "openai>=1.0",
     "anthropic>=0.30",
+    # La clase base de los instrumentadores ajenos, para probar que se les cede (D-141).
+    "opentelemetry-instrumentation>=0.50b0",
 ]
 
 [tool.pytest.ini_options]

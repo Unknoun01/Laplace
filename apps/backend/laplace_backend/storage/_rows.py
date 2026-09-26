@@ -28,7 +28,7 @@ from laplace.schema import (
     TraceSummary,
 )
 
-from ..pricing import es_no_verificada
+from ..pricing import es_no_verificada, modelos_no_verificados
 
 logger = logging.getLogger("laplace.storage")
 
@@ -382,6 +382,7 @@ def row_to_summary(r: dict[str, Any]) -> TraceSummary:
             cache_saving_usd=float(r["cache_saving_usd"]),
             unknown=sin_tarifa > 0,
             rate_assumed=asumidos > 0,
+            rate_unverified=bool(modelos_no_verificados(modelos)),
         ),
         # El `sorted` es lo único que hace que los dos almacenes digan lo mismo aquí:
         # ClickHouse junta los modelos con `groupArray`, que conserva el orden de

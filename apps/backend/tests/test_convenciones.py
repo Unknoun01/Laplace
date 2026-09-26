@@ -222,6 +222,28 @@ def test_las_instrucciones_en_parts_hacen_la_identidad_del_paso():
     assert {s.step_hint for s in spans} == {"Clasifica el ticket.", "Resume el ticket."}
 
 
+def test_el_nodo_de_langgraph_es_el_sitio_del_paso():
+    """OpenInference no dice desde dónde se llama, pero con LangGraph deja el nodo en
+    `metadata.langgraph_node`. Sin él, dos nodos con el mismo prompt de sistema se
+    juntaban en un paso, que es lo que se vio con un agente de verdad (D-141)."""
+    for nodo in ("clasificar", "responder"):
+        atributos = _openinference_llm()
+        atributos["metadata"] = json.dumps({"langgraph_node": nodo, "langgraph_step": 1})
+        _emitir("ChatOpenAI", atributos)
+    spans = ingest()
+    assert len({s.step_key for s in spans}) == 2
+    assert {s.step_label for s in spans} == {"clasificar", "responder"}
+
+
+def test_el_nodo_de_langgraph_no_pisa_el_sitio_del_sdk():
+    atributos = _openinference_llm()
+    atributos["metadata"] = json.dumps({"langgraph_node": "agent"})
+    atributos["laplace.step.parent"] = "atender_ticket"
+    _emitir("ChatOpenAI", atributos)
+    (span,) = ingest()
+    assert span.step_label == "atender_ticket"
+
+
 def test_lo_nuestro_manda_sobre_lo_ajeno():
     """Un span con los dos juegos de atributos: los de Laplace no se pisan."""
     atributos = _openinference_llm()

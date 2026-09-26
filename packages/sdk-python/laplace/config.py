@@ -65,6 +65,9 @@ class LaplaceConfig:
     debug: bool = False
     #: Desactiva por completo la emisión sin tocar el código instrumentado.
     disabled: bool = False
+    #: Si hay otro instrumentador de LLM activo (OpenInference, OpenLLMetry), no se
+    #: traza la llamada: ya la traza él, y contarla dos veces duplicaría el gasto (D-141).
+    defer_to_others: bool = True
 
     headers: dict[str, str] = field(default_factory=dict)
 
@@ -83,6 +86,7 @@ class LaplaceConfig:
             exit_flush_timeout_ms=_env_int("LAPLACE_EXIT_FLUSH_MS", 2_000) or 2_000,
             debug=_env_bool("LAPLACE_DEBUG", False),
             disabled=_env_bool("LAPLACE_DISABLED", False),
+            defer_to_others=_env_bool("LAPLACE_DEFER_TO_OTHERS", True),
         )
 
     @property

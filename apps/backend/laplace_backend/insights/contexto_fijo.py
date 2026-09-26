@@ -236,7 +236,7 @@ def _fixed_context_finding(
         costs_money=ahorro > 0,
         monthly_saving_usd=_to_monthly(ahorro, base) if ahorro > 0 else None,
         observed_days=days,
-        **_floor_flags(usage.unknown_cost_spans, usage.assumed_rate_spans),
+        **_floor_flags(usage.unknown_cost_spans, usage.assumed_rate_spans, [usage.model]),
         difficulty="mid",
         difficulty_label="Un rato de trabajo",
         scope_label=_scope_label(usage.traces, summary.traces),

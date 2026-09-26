@@ -236,6 +236,19 @@ def test_una_cifra_no_fiable_se_anuncia_como_suelo_y_nunca_como_total():
     assert "mayor, nunca menor" in texto
 
 
+def test_una_cifra_con_tarifa_sin_verificar_lo_dice_y_no_es_un_suelo():
+    """Lo que sale fuera también tiene que decirlo (D-141). Pero no con «al menos»: una
+    tarifa de LiteLLM puede pasarse igual que quedarse corta."""
+    hallazgo = _finding(
+        "gemini", 5.0, cost_unverified=True, unverified_rate_models=["gemini-2.5-pro"]
+    )
+    vista = _overview(hallazgo)
+    texto = compose(vista, decide(vista, AJUSTES, {}, AHORA), AJUSTES, {})
+    assert "al menos" not in texto
+    assert "$5,00" in texto
+    assert "tarifa sin verificar" in texto
+
+
 def test_sin_proyeccion_la_alerta_no_inventa_una_cifra_mensual():
     hallazgo = _finding("nuevo", 5.0, monthly=None, observed_days=0.02)
     vista = _overview(hallazgo, projected=False, observed_days=0.02)

@@ -157,6 +157,9 @@ export function FindingCard({
         {!flojo && finding.cost_is_floor && (
           <span className="meta">Es un suelo: el coste real puede ser mayor</span>
         )}
+        {!flojo && finding.cost_unverified && (
+          <span className="meta">Con tarifa sin verificar</span>
+        )}
         <span className="meta ver" aria-hidden>
           Ver cómo arreglarlo →
         </span>

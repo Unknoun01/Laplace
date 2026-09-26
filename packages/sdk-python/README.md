@@ -124,6 +124,12 @@ proceso ya instrumentado con OTel puede exportar a Laplace sin usar este SDK.
   Si no los manda (Chat sin `stream_options={"include_usage": True}`), se estiman y el
   span queda marcado como estimado.
 
+**Si ya usas OpenInference u OpenLLMetry** (LangGraph, LlamaIndex, CrewAI…), las
+llamadas al modelo ya las traza ese instrumentador. Mientras esté activo, Laplace no las
+traza otra vez —si no, cada llamada contaría dos veces— y lo dice una vez en el log. Si
+ese instrumentador exporta a otro sitio y quieres las llamadas también en Laplace,
+`laplace.init(defer_to_others=False)` (o `LAPLACE_DEFER_TO_OTHERS=false`).
+
 ## Limitaciones conocidas
 
 - Integraciones automáticas: OpenAI y Anthropic. Para el resto, `laplace.llm_span`, o
