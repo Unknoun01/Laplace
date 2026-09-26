@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -453,7 +454,13 @@ class PostgresMetadataStore:
         return prompt_from_row(_rows(_PROMPT_ALIASES, [fila])[0])
 
     def add_prompt_version(
-        self, prompt_id: str, text: str, *, notes: str = "", author: str = ""
+        self,
+        prompt_id: str,
+        text: str,
+        *,
+        notes: str = "",
+        author: str = "",
+        at: datetime | None = None,
     ) -> PromptVersion:
         """La siguiente versión, con el número calculado dentro de la escritura.
 
@@ -464,11 +471,13 @@ class PostgresMetadataStore:
         """
         with self._connect() as conn:
             fila = conn.execute(
-                "INSERT INTO prompt_versions (id, prompt_id, version, text, notes, author) "
-                "SELECT %s, %s, COALESCE(MAX(version), 0) + 1, %s, %s, %s "
+                "INSERT INTO prompt_versions "
+                "(id, prompt_id, version, text, notes, author, created_at) "
+                "SELECT %s, %s, COALESCE(MAX(version), 0) + 1, %s, %s, %s, "
+                "COALESCE(%s, now()) "
                 "FROM prompt_versions WHERE prompt_id = %s "
                 "RETURNING id, prompt_id, version, text, notes, author, created_at",
-                (new_id("pv"), prompt_id, text, notes, author, prompt_id),
+                (new_id("pv"), prompt_id, text, notes, author, at, prompt_id),
             ).fetchone()
             conn.execute(
                 "UPDATE prompts SET updated_at = now() WHERE id = %s", (prompt_id,)
@@ -496,7 +505,13 @@ class PostgresMetadataStore:
         return prompt_version_from_row(_rows(_VERSION_ALIASES, [fila])[0])
 
     def set_prompt_production(
-        self, prompt_id: str, version: int, *, actor: str = "", note: str = ""
+        self,
+        prompt_id: str,
+        version: int,
+        *,
+        actor: str = "",
+        note: str = "",
+        at: datetime | None = None,
     ) -> PromptDeploy:
         with self._connect() as conn:
             previa = conn.execute(
@@ -505,8 +520,9 @@ class PostgresMetadataStore:
             ).fetchone()
             anterior = int(previa[0]) if previa and previa[0] else 0
             fila = conn.execute(
-                "INSERT INTO prompt_deploys (id, prompt_id, version, actor, note, rollback) "
-                "VALUES (%s, %s, %s, %s, %s, %s) "
+                "INSERT INTO prompt_deploys "
+                "(id, prompt_id, version, actor, note, rollback, at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, COALESCE(%s, now())) "
                 "RETURNING id, prompt_id, version, at, actor, note, rollback",
                 (
                     new_id("dep"),
@@ -515,6 +531,7 @@ class PostgresMetadataStore:
                     actor,
                     note,
                     bool(anterior and version < anterior),
+                    at,
                 ),
             ).fetchone()
             conn.execute(

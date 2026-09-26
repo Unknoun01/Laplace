@@ -12,7 +12,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from laplace.schema import Span, TraceSummary
 
-from ..pasos import con_pista, nombre_de_paso
+from ..pasos import con_pista, inicio_distinto, nombre_de_paso
 
 
 @dataclass
@@ -154,7 +154,9 @@ class RepeatedGroup:
     extra_output_tokens: int = 0
     max_per_trace: int = 0
     sample_trace_id: str = ""
-
+    #: Última vez que se vio en la ventana. Lo que dejó de ocurrir no se proyecta como
+    #: ahorro futuro: sería prometer dinero por arreglar algo que ya no pasa (D-135).
+    last_seen: datetime | None = None
 
 @dataclass
 class LoopGroup:
@@ -188,7 +190,9 @@ class LoopGroup:
     extra_output_tokens: int = 0
     extra_unknown_cost_spans: int = 0
     sample_trace_id: str = ""
-
+    #: Última vez que se vio en la ventana. Lo que dejó de ocurrir no se proyecta como
+    #: ahorro futuro: sería prometer dinero por arreglar algo que ya no pasa (D-135).
+    last_seen: datetime | None = None
 
 @dataclass
 class ModelUsage:
@@ -227,6 +231,10 @@ class ModelUsage:
     #: Camino de llamada («atender_ticket > redactar_respuesta»). Sirve para titular
     #: dos pasos homónimos de forma legible.
     site: str = ""
+    #: Prompt gestionado y versión con los que corrió este paso, si los hay. Es lo que
+    #: separa en un título dos versiones de un prompt que empiezan igual (D-135).
+    prompt_name: str = ""
+    prompt_version: int = 0
     #: Tiempo total del paso, para sumar lo que se recupera arreglándolo.
     #: Es lo que permite decir algo útil sobre «modelo caro» cuando no hay tarifa: la
     #: latencia se mide siempre (D-108).
@@ -242,7 +250,9 @@ class ModelUsage:
     #: número. Las medias siguen existiendo, pero para enseñarlas, no para decidir.
     p50_output_tokens: float = 0.0
     sample_trace_id: str = ""
-
+    #: Última vez que se vio en la ventana. Lo que dejó de ocurrir no se proyecta como
+    #: ahorro futuro: sería prometer dinero por arreglar algo que ya no pasa (D-135).
+    last_seen: datetime | None = None
 
 @dataclass
 class Bucket:
@@ -456,6 +466,52 @@ def disambiguate(filas: list[Any]) -> list[Any]:
         # Sin camino —tráfico anterior a D-106, o un agente sin decorar— lo único que
         # queda para separarlos es el principio de sus instrucciones, recortado.
         fila.name = con_pista(fila.name, getattr(fila, "hint", ""))
+    return _segunda_pasada(filas)
+
+
+def _segunda_pasada(filas: list[Any]) -> list[Any]:
+    """Lo que sigue titulándose igual después de la primera pasada.
+
+    Pasa con dos versiones de un prompt, que comparten el principio (la pista recortada
+    es la misma), y con el mismo paso llamado con dos modelos. En la demo de un mes, el
+    inicio enseñaba tres tarjetas idénticas con tres cifras distintas (D-135). Primero el
+    modelo, que se lee de un vistazo; si no basta, la parte del prompt donde cambian.
+    """
+    grupos: dict[str, list[Any]] = {}
+    for fila in filas:
+        grupos.setdefault(fila.name, []).append(fila)
+    for nombre, grupo in grupos.items():
+        if len(grupo) < 2:
+            continue
+        modelos = {getattr(f, "model", "") for f in grupo}
+        if len(modelos) > 1:
+            # Sólo al que no usa el modelo más común: al resto no le hace falta.
+            conteo = {m: sum(1 for f in grupo if getattr(f, "model", "") == m) for m in modelos}
+            habitual = max(sorted(conteo), key=lambda m: conteo[m])
+            for fila in grupo:
+                if getattr(fila, "model", "") != habitual:
+                    fila.name = f"{nombre} · {fila.model}"
+        pendientes = [f for f in grupo if f.name == nombre]
+        base = nombre.split(" — ")[0]
+        versiones = {getattr(f, "prompt_version", 0) for f in pendientes}
+        if len(pendientes) > 1 and len(versiones) > 1:
+            # Un prompt gestionado dice su versión, que es lo que el usuario reconoce.
+            for fila in pendientes:
+                if fila.prompt_version:
+                    fila.name = f"{base} · prompt {fila.prompt_name} v{fila.prompt_version}"
+            pendientes = [f for f in pendientes if f.name == nombre]
+        pistas = {getattr(f, "hint", "") for f in pendientes}
+        if len(pendientes) > 1 and len(pistas) > 1:
+            desde = inicio_distinto(sorted(pistas))
+            for fila in pendientes:
+                if len(" ".join(getattr(fila, "hint", "").split())) > desde:
+                    fila.name = con_pista(base, fila.hint, desde)
+            pendientes = [f for f in pendientes if f.name == nombre]
+        if len(pendientes) > 1:
+            # Nada visible los separa: las instrucciones difieren más allá de lo que se
+            # guarda. Se numeran, y la ficha enseña cada una por separado.
+            for n, fila in enumerate(pendientes[1:], start=2):
+                fila.name = f"{nombre} (variante {n})"
     return filas
 
 

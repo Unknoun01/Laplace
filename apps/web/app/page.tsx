@@ -7,7 +7,7 @@ import { BigMoney, FindingCard, GapBar, Readout } from "@/components/pieces";
 import { BackendDown, CargandoDiagnostico, NeedsKey, NoProject, NoTracesYet, NotYours, NothingToFix } from "@/components/states";
 import { getBudget, getOverview, listProjects, parseDays } from "@/lib/api";
 import { descargarCsv } from "@/lib/csv";
-import { duration, money, number, percent, spanLabel, tokens, windowLabel } from "@/lib/format";
+import { dayHour, duration, money, number, percent, spanLabel, tokens, windowLabel } from "@/lib/format";
 import type { Budget, Finding, Overview } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
 import { CasiTodoEvitable, CASI_TODO_EVITABLE, CoberturaBloque, CoberturaLinea, Caveats, SinDinero } from "./avisos";
@@ -321,11 +321,18 @@ function LineaPresupuesto({ budget, query }: { budget: Budget | null; query: str
 }
 
 /**
- * Lo que el usuario ya ha resuelto: arreglado o ignorado (D-123).
+ * Lo que ya no está pendiente: arreglado o ignorado por el usuario (D-123), o que dejó
+ * de ocurrir dentro del rango sin que nadie lo marcara (D-135).
  *
  * Plegado y al final. No desaparece del todo porque un ignorado es una decisión que se
  * puede querer revisar, y un arreglado lleva la cifra que demuestra que sirvió.
  */
+const ETIQUETA_ESTADO: Record<string, string> = {
+  arreglado: "Arreglado",
+  ignorado: "Ignorado",
+  desaparecido: "Ya no ocurre",
+};
+
 function Apartados({
   findings,
   query,
@@ -340,16 +347,22 @@ function Apartados({
     <details className="apartados sec">
       <summary>
         {findings.length === 1
-          ? "Un problema marcado como arreglado o ignorado"
-          : `${findings.length} problemas marcados como arreglados o ignorados`}
+          ? "Un problema que ya no está pendiente"
+          : `${findings.length} problemas que ya no están pendientes`}
       </summary>
       <ul>
         {findings.map((f) => (
           <li key={f.id}>
-            <span className={`chip ${f.state === "ignorado" ? "where" : "easy"}`}>
-              {f.state === "ignorado" ? "Ignorado" : "Arreglado"}
+            <span className={`chip ${f.state === "arreglado" ? "easy" : "where"}`}>
+              {ETIQUETA_ESTADO[f.state] ?? "Arreglado"}
             </span>{" "}
             <Link href={`/problema${query}&id=${encodeURIComponent(f.id)}`}>{f.title}</Link>
+            {f.state === "desaparecido" && f.last_seen && (
+              <small>
+                No ocurre desde el {dayHour(f.last_seen)}. No cuenta como ahorro: arreglarlo
+                ya no te devolvería nada.
+              </small>
+            )}
             {f.fix_check && <small>{f.fix_check.headline}</small>}
             {f.state === "ignorado" && f.state_note && <small>«{f.state_note}»</small>}
             {!f.fix_check && f.state === "ignorado" && f.costs_money && (

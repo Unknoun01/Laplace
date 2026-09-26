@@ -114,7 +114,13 @@ class MetadataStore(Protocol):
     def get_prompt(self, prompt_id: str, project_id: str | None = None) -> Prompt | None: ...
 
     def add_prompt_version(
-        self, prompt_id: str, text: str, *, notes: str = "", author: str = ""
+        self,
+        prompt_id: str,
+        text: str,
+        *,
+        notes: str = "",
+        author: str = "",
+        at: datetime | None = None,
     ) -> PromptVersion: ...
 
     def list_prompt_versions(self, prompt_id: str) -> list[PromptVersion]: ...
@@ -122,7 +128,13 @@ class MetadataStore(Protocol):
     def get_prompt_version(self, prompt_id: str, version: int) -> PromptVersion | None: ...
 
     def set_prompt_production(
-        self, prompt_id: str, version: int, *, actor: str = "", note: str = ""
+        self,
+        prompt_id: str,
+        version: int,
+        *,
+        actor: str = "",
+        note: str = "",
+        at: datetime | None = None,
     ) -> PromptDeploy: ...
 
     def list_prompt_deploys(self, prompt_id: str) -> list[PromptDeploy]: ...
@@ -849,15 +861,24 @@ class SQLiteMetadataStore:
         return prompt_from_row(fila) if fila and fila["id"] else None
 
     def add_prompt_version(
-        self, prompt_id: str, text: str, *, notes: str = "", author: str = ""
+        self,
+        prompt_id: str,
+        text: str,
+        *,
+        notes: str = "",
+        author: str = "",
+        at: datetime | None = None,
     ) -> PromptVersion:
         """La siguiente versión. El número se calcula **dentro** de la escritura.
 
         Calcularlo fuera y pasarlo sería dejar que dos guardados a la vez escriban la
         misma versión con textos distintos, y a partir de ahí el tráfico de una versión
         sería de dos textos y nadie lo sabría.
+
+        `at` fecha la versión en el pasado: sirve para importar un historial (y para la
+        demo, que cuenta un mes). Sin él, es ahora.
         """
-        ahora = _now()
+        ahora = at or _now()
         with self._conn() as conn:
             conn.execute("BEGIN IMMEDIATE")
             fila = conn.execute(
@@ -906,9 +927,15 @@ class SQLiteMetadataStore:
         return prompt_version_from_row(fila) if fila else None
 
     def set_prompt_production(
-        self, prompt_id: str, version: int, *, actor: str = "", note: str = ""
+        self,
+        prompt_id: str,
+        version: int,
+        *,
+        actor: str = "",
+        note: str = "",
+        at: datetime | None = None,
     ) -> PromptDeploy:
-        ahora = _now()
+        ahora = at or _now()
         with self._conn() as conn:
             conn.execute("BEGIN IMMEDIATE")
             fila = conn.execute(
@@ -1187,7 +1214,13 @@ class NullMetadataStore:
         return None
 
     def add_prompt_version(
-        self, prompt_id: str, text: str, *, notes: str = "", author: str = ""
+        self,
+        prompt_id: str,
+        text: str,
+        *,
+        notes: str = "",
+        author: str = "",
+        at: datetime | None = None,
     ) -> PromptVersion:
         raise MetadataUnavailable("no hay base de metadatos: la versión no se ha guardado")
 
@@ -1198,7 +1231,13 @@ class NullMetadataStore:
         return None
 
     def set_prompt_production(
-        self, prompt_id: str, version: int, *, actor: str = "", note: str = ""
+        self,
+        prompt_id: str,
+        version: int,
+        *,
+        actor: str = "",
+        note: str = "",
+        at: datetime | None = None,
     ) -> PromptDeploy:
         raise MetadataUnavailable(
             "no hay base de metadatos: el cambio de producción no se ha guardado"

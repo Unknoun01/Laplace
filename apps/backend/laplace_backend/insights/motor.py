@@ -6,11 +6,13 @@ Parte del motor de detección (`laplace_backend.insights`, D-130).
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from datetime import timedelta
 from typing import Any
 
 from ..coverage import build as build_coverage
 from ..dinero import motivo_sin_dinero
 from ..pasos import SEPARADOR as SEPARADOR_DE_CAMINO
+from ..pasos import con_pista
 from ..storage.base import LoopGroup, ModelUsage, RepeatedGroup, Window, WindowSummary
 from .bucle import _loop_detail, _loop_finding
 from .contexto_fijo import _fixed_context_detail, _fixed_context_finding
@@ -153,6 +155,70 @@ def _without_duplicates(
     )
 
 
+def _pasos_compartidos(usos: list[ModelUsage]) -> set[str]:
+    """Los nombres de paso que en este proyecto llevan más de una identidad.
+
+    Todas las llamadas al modelo hechas dentro de `responder` se llaman «responder»,
+    aunque una clasifique, otra extraiga y otra conteste. Entre los usos por paso eso
+    ya se desambigua (`disambiguate`); una repetición o un bucle, que salen de otra
+    consulta, no se enteraban y se titulaban «Tu agente repite «responder»» cuando lo
+    que se repetía era la extracción (D-135).
+    """
+    claves: dict[str, set[str]] = {}
+    for uso in usos:
+        claves.setdefault(_nombre_base(uso.name), set()).add(uso.key)
+    return {nombre for nombre, ks in claves.items() if len(ks) > 1}
+
+
+def _nombre_base(nombre: str) -> str:
+    """El nombre de la función, sin llamante, pista, modelo ni variante."""
+    return nombre.split(" — ")[0].split(" · ")[0].split(" (variante")[0].split(" → ")[-1]
+
+
+def _nombrar(grupos: list[Any], compartidos: set[str]) -> list[Any]:
+    for grupo in grupos:
+        if " — " in grupo.name:
+            continue  # ya lleva su pista
+        if _nombre_base(grupo.name) in compartidos and getattr(grupo, "hint", ""):
+            grupo.name = con_pista(grupo.name, grupo.hint)
+    return grupos
+
+
+def _con_fecha(finding: Finding, grupo: Any) -> Finding:
+    finding.last_seen = getattr(grupo, "last_seen", None)
+    return finding
+
+
+#: Cuánto tiempo sin ocurrir hace falta para dar un hallazgo por desaparecido: un día,
+#: o la décima parte de la ventana si es mayor. Menos sería confundir una hora sin
+#: tráfico con un arreglo.
+DESAPARECIDO_MIN = timedelta(days=1)
+
+
+def desaparecidos(
+    findings: list[Finding], window: Window
+) -> tuple[list[Finding], list[Finding]]:
+    """Separa lo que sigue ocurriendo de lo que dejó de ocurrir dentro de la ventana.
+
+    Con treinta días de ventana, un paso que se retiró hace nueve —la v1 de un prompt
+    sustituida por la v2— salía como «te ahorras 34 $ al mes arreglándolo»: proyectaba
+    a futuro un gasto que ya no existe. Lo que no ocurre desde hace tiempo se aparta con
+    su fecha, sin dinero prometido, y el usuario lo ve igual (D-135).
+    """
+    margen = max(DESAPARECIDO_MIN, (window.until - window.since) / 10)
+    corte = window.until - margen
+    vigentes: list[Finding] = []
+    idos: list[Finding] = []
+    for finding in findings:
+        if finding.last_seen is not None and finding.last_seen < corte:
+            finding.state = "desaparecido"
+            finding.state_at = finding.last_seen
+            idos.append(finding)
+        else:
+            vigentes.append(finding)
+    return vigentes, idos
+
+
 def detect(store: Any, project_id: str, window: Window) -> list[Finding]:
     """Ejecuta las tres reglas y devuelve los hallazgos ordenados por dinero."""
     summary = store.summarize_window(project_id, window)
@@ -165,19 +231,27 @@ def detect(store: Any, project_id: str, window: Window) -> list[Finding]:
     base = _projection_base(summary, window)
     findings: list[Finding] = []
 
-    grupos = store.repeated_groups(project_id, window, min_repeats=MIN_REPEATS)
+    usos = store.model_usage(project_id, window, min_calls=1)
+    compartidos = _pasos_compartidos(usos)
+
+    grupos = _nombrar(
+        store.repeated_groups(project_id, window, min_repeats=MIN_REPEATS), compartidos
+    )
     for group in grupos:
-        findings.append(_repetition_finding(group, summary, dias, base))
+        findings.append(_con_fecha(_repetition_finding(group, summary, dias, base), group))
 
     # Los bucles van aparte de las repeticiones exactas y no se solapan con ellas: la
     # consulta exige entradas distintas, que es justo lo que la regla 1 no mira.
-    bucles = _sin_envoltorios(
-        store.loop_groups(
-            project_id, window, min_vueltas=MIN_VUELTAS_BUCLE, max_salidas=MAX_SALIDAS_BUCLE
-        )
+    bucles = _nombrar(
+        _sin_envoltorios(
+            store.loop_groups(
+                project_id, window, min_vueltas=MIN_VUELTAS_BUCLE, max_salidas=MAX_SALIDAS_BUCLE
+            )
+        ),
+        compartidos,
     )
     for bucle in bucles:
-        findings.append(_loop_finding(bucle, summary, dias, base))
+        findings.append(_con_fecha(_loop_finding(bucle, summary, dias, base), bucle))
 
     # Las reglas no pueden solaparse: si una llamada al modelo se repite, la regla de
     # repetición ya cuenta el 100% de las copias sobrantes. Contarlas otra vez en la
@@ -185,7 +259,6 @@ def detect(store: Any, project_id: str, window: Window) -> list[Finding]:
     # Se descuentan los tokens duplicados antes de evaluar el resto de reglas.
     duplicados = _duplicate_tokens(grupos, bucles)
 
-    usos = store.model_usage(project_id, window, min_calls=1)
     for uso in usos:
         neto = _without_duplicates(uso, duplicados)
         if neto.calls >= MIN_CALLS_FOR_MODEL_RULE and (
@@ -194,10 +267,10 @@ def detect(store: Any, project_id: str, window: Window) -> list[Finding]:
         ):
             hallazgo = _expensive_model_finding(neto, summary, dias, base, otros=usos)
             if hallazgo is not None:
-                findings.append(hallazgo)
+                findings.append(_con_fecha(hallazgo, neto))
         contexto = _fixed_context_finding(neto, summary, dias, base)
         if contexto is not None:
-            findings.append(contexto)
+            findings.append(_con_fecha(contexto, neto))
 
     # Primero lo que más dinero devuelve; los que sólo cuestan tiempo, al final,
     # ordenados por el tiempo que recuperan. Se ordena por el dinero YA GASTADO y no
@@ -234,6 +307,10 @@ def overview(
         from ..seguimiento import aplicar_estados
 
         findings, apartados = aplicar_estados(store, project_id, findings, states)
+    # Después de los estados: lo que el usuario marcó se sigue comprobando por su camino,
+    # y aquí sólo se aparta lo que dejó de ocurrir sin que nadie dijera nada.
+    findings, idos = desaparecidos(findings, window)
+    apartados += idos
     cobertura = build_coverage(
         store.coverage(project_id, window), has_managed_prompts=has_managed_prompts
     )
@@ -299,7 +376,11 @@ def overview(
 def _detalle_repeticion(
     store: Any, project_id: str, window: Window, key: str, ctx: _Contexto
 ) -> FindingDetail | None:
-    for group in store.repeated_groups(project_id, window, min_repeats=MIN_REPEATS):
+    # El mismo nombre que en la lista: la ficha y la tarjeta no pueden titularse distinto.
+    compartidos = _pasos_compartidos(store.model_usage(project_id, window, min_calls=1))
+    for group in _nombrar(
+        store.repeated_groups(project_id, window, min_repeats=MIN_REPEATS), compartidos
+    ):
         if group.step_key != key:
             continue
         finding = _repetition_finding(group, ctx.summary, ctx.dias, ctx.base)
@@ -311,12 +392,16 @@ def _detalle_repeticion(
 def _detalle_bucle(
     store: Any, project_id: str, window: Window, key: str, ctx: _Contexto
 ) -> FindingDetail | None:
-    for group in _sin_envoltorios(
-        store.loop_groups(
-            project_id, window, min_vueltas=MIN_VUELTAS_BUCLE, max_salidas=MAX_SALIDAS_BUCLE
-        )
+    compartidos = _pasos_compartidos(store.model_usage(project_id, window, min_calls=1))
+    for group in _nombrar(
+        _sin_envoltorios(
+            store.loop_groups(
+                project_id, window, min_vueltas=MIN_VUELTAS_BUCLE, max_salidas=MAX_SALIDAS_BUCLE
+            )
+        ),
+        compartidos,
     ):
-        if group.loop_hash != key:
+        if (group.step_key or group.loop_hash) != key:
             continue
         finding = _loop_finding(group, ctx.summary, ctx.dias, ctx.base)
         evidencia = store.sample_loop(project_id, window, group.loop_hash)

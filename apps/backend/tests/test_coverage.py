@@ -139,11 +139,16 @@ def test_no_gestionar_prompts_no_es_un_defecto():
 
 def test_gestionar_prompts_y_no_marcarlos_si_es_un_defecto():
     """Si el proyecto tiene prompts gestionados y las trazas no los llevan, algo está
-    mal de verdad: o el SDK es viejo o el texto se está reescribiendo antes de mandarlo."""
+    mal de verdad: o el SDK es viejo o el texto se está reescribiendo antes de mandarlo.
+
+    La señal se pinta como mala, pero ya no va delante del dinero: se mide sobre TODAS
+    las llamadas, y con un prompt gestionado entre varios pasos sale baja sin que nada
+    esté roto. No distingue los dos casos, y ninguna cifra del inicio depende de ella
+    (D-135)."""
     cobertura = cov.build(_facts(with_prompt_version=10), has_managed_prompts=True)
     prompts = _señal(cobertura, "prompts")
     assert prompts.level == "malo"
-    assert cobertura.prominent is True
+    assert cobertura.prominent is False
 
 
 # ---------------------------------------------------------------------------------
@@ -360,3 +365,14 @@ def test_sin_camino_de_llamada_el_sano_tapaba_al_roto(tmp_path):
     facts = store.coverage("p", _ventana())
     assert facts.llm_calls == 24
     assert facts.split_steps == [], "sin camino, los dos llamantes caen en el mismo montón"
+
+
+def test_la_version_de_prompt_baja_no_se_pone_delante_del_dinero():
+    """Se vio con la demo de un mes: un proyecto con un solo prompt gestionado tenía el
+    18 % de sus llamadas con versión, y el inicio abría con «Léelo antes que las cifras de
+    abajo». Ninguna cifra de abajo depende de eso: la versión sólo le sirve a la pestaña
+    de Prompts. Se dice en su sitio, pero no delante del dinero (D-135)."""
+    cobertura = cov.build(_facts(with_prompt_version=18), has_managed_prompts=True)
+    assert _señal(cobertura, "prompts").level in ("malo", "flojo")
+    assert cobertura.prominent is False
+    assert "Léelo antes que las cifras" not in cobertura.headline

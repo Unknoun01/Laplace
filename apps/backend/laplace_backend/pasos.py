@@ -62,14 +62,19 @@ def nombre_de_paso(label: str, site: str = "", *, con_llamante: bool = True) -> 
 PISTA_EN_TITULO = 32
 
 
-def con_pista(label: str, hint: str) -> str:
+def con_pista(label: str, hint: str, desde: int = 0) -> str:
     """El último recurso: el paso más el principio de sus instrucciones, recortado.
 
     Se usa cuando no hay camino de llamada con el que separar dos pasos homónimos, que
     es el tráfico anterior a D-106 y el de quien no decora nada.
+
+    Con `desde`, la pista empieza ahí, con «…» delante: dos versiones de un prompt suelen
+    compartir el principio, y lo que las distingue es dónde cambian (D-135).
     """
     etiqueta = (label or "").strip()
     pista = " ".join((hint or "").split())
+    if desde:
+        pista = "…" + pista[desde:].lstrip(" ,.;:")
     if not pista or pista == etiqueta:
         return etiqueta
     if len(pista) > PISTA_EN_TITULO:
@@ -78,6 +83,26 @@ def con_pista(label: str, hint: str) -> str:
     # un título que ya lo pone entre «», y la norma en español es «… “…” …» para citar
     # dentro de una cita. Con «» por dentro salían tres niveles seguidos: «»».
     return f"{etiqueta} — “{pista}”"
+
+
+def inicio_distinto(pistas: list[str]) -> int:
+    """Dónde empiezan a diferir estas pistas, retrocediendo al principio de una palabra.
+
+    Cero si ya difieren al principio o si alguna es prefijo entero de otra y no queda
+    nada que enseñar después.
+    """
+    normalizadas = [" ".join((p or "").split()) for p in pistas]
+    if len(normalizadas) < 2:
+        return 0
+    comun = 0
+    for letras in zip(*normalizadas, strict=False):
+        if len(set(letras)) > 1:
+            break
+        comun += 1
+    if comun < PISTA_EN_TITULO:
+        return 0
+    corte = normalizadas[0].rfind(" ", 0, comun)
+    return corte + 1 if corte > 0 else 0
 
 
 def hay_homonimos(pasos: list[tuple[str, str]]) -> set[str]:

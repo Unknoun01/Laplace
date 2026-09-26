@@ -86,17 +86,47 @@ def comando_ui(args: argparse.Namespace) -> int:
 
 
 def comando_demo(args: argparse.Namespace) -> int:
-    """Manda unas trazas de ejemplo para ver el producto funcionando sin escribir código.
+    """Carga un mes de datos de ejemplo para ver el producto funcionando sin escribir código.
 
     Son datos **simulados**, en un proyecto aparte llamado `demo`, y se dice al
-    imprimirlo: sirven para enseñar qué detecta Laplace, no para medir nada tuyo.
+    imprimirlo: sirven para enseñar qué hace Laplace, no para medir nada tuyo. Lo carga el
+    propio servidor de `laplace ui` (`POST /api/demo`), porque además de las trazas
+    escribe prompts, anotaciones y una comparación, que no viajan por la ingesta.
     """
-    from .demo import enviar_trazas_de_ejemplo
+    import json
+    import urllib.error
+    import urllib.request
 
-    print(f"Enviando trazas simuladas al proyecto «demo» en {args.endpoint} …")
-    trazas = enviar_trazas_de_ejemplo(args.endpoint)
-    print(f"listo: {trazas} trazas de ejemplo. Son datos inventados, no tuyos.")
-    print(f"Ábrelas en {args.endpoint}/?project=demo")
+    base = args.endpoint.rstrip("/")
+    print(f"Cargando un mes de datos simulados en el proyecto «demo» de {base} …")
+    peticion = urllib.request.Request(
+        f"{base}/api/demo", method="POST", headers={"x-laplace": "cli"}
+    )
+    try:
+        with urllib.request.urlopen(peticion, timeout=600) as respuesta:
+            datos = json.loads(respuesta.read() or b"{}")
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            print(
+                "ese servidor no carga datos de ejemplo: sólo existen en `laplace ui`, "
+                "no en una instalación compartida.",
+                file=sys.stderr,
+            )
+        else:
+            print(f"el servidor ha respondido {exc.code}: {exc.read()[:300]!r}", file=sys.stderr)
+        return 1
+    except urllib.error.URLError as exc:
+        print(
+            f"no hay nada escuchando en {base} ({exc.reason}). Arranca antes `laplace ui`.",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(
+        f"listo: {datos.get('traces', 0)} ejecuciones en {datos.get('days', 0)} días. "
+        "Son datos inventados, no tuyos."
+    )
+    print(f"Ábrelas en {base}/?project=demo")
     return 0
 
 

@@ -2285,3 +2285,20 @@ ninguna prueba veía. Cada arreglo lleva la suya.
   estaba publicado. `paquete.yml` construye los dos wheels con la interfaz dentro, los
   instala en un entorno limpio sin el repositorio, arranca `laplace ui` y le pide la
   interfaz y la API; con una etiqueta `v*` publica por Trusted Publishing.
+
+### D-135 — Lo que la demo de un mes destapó en el motor (en curso)
+La demo pasa a ser un mes de «Vuelos Laplace» (814 ejecuciones, reloj simulado sobre la
+ingesta normal, prompts v1/v2 con su fecha, anotaciones, comparación A/B y un arreglo
+marcado). Con tráfico de verdad aparecieron seis fallos del motor, cada uno con prueba en
+`test_demo_hallazgos.py`: un bucle se multiplicaba por cada pregunta distinta (ahora se
+agrupa por paso); dos versiones de un prompt se titulaban igual (segunda pasada: modelo,
+versión de prompt, dónde cambian las instrucciones o «variante n»); las tiradas de
+evaluación salían como cosas que arreglar (las reglas excluyen `laplace-eval`, el gasto
+no); el contexto fijo decía «no está en la tabla de precios» de un modelo que estaba
+(sin nada que recuperar y con tarifa, no hay hallazgo); la versión de prompt baja se
+ponía delante del dinero (ya no: no mueve ninguna cifra); y lo que dejó de ocurrir se
+proyectaba como ahorro (se aparta como «ya no ocurre»). Además, una repetición o un bucle
+cuyo nombre comparten varios pasos lleva la pista de sus instrucciones, y `add_prompt_version`
+y `set_prompt_production` aceptan `at=` para fechar el historial.
+
+Pendiente: pruebas de pantalla con Playwright en CI.
