@@ -66,26 +66,26 @@ CREATE TABLE IF NOT EXISTS spans
 
     -- Payloads en crudo, sin truncar (contrato §3): el diagnóstico automático
     -- necesita el texto real para razonar sobre la causa del fallo.
-    input_messages      String,
-    output_messages     String,
-    llm_params          String,
+    input_messages      String CODEC(ZSTD(3)),
+    output_messages     String CODEC(ZSTD(3)),
+    llm_params          String CODEC(ZSTD(3)),
     finish_reasons      Array(String),
 
     tool_name           String,
     tool_call_id        String,
-    tool_arguments      String,
-    tool_output         String,
+    tool_arguments      String CODEC(ZSTD(3)),
+    tool_output         String CODEC(ZSTD(3)),
 
     retrieval_query     String,
-    retrieval_documents String,
+    retrieval_documents String CODEC(ZSTD(3)),
 
-    input_payload       String,
-    output_payload      String,
+    input_payload       String CODEC(ZSTD(3)),
+    output_payload      String CODEC(ZSTD(3)),
 
     session_id          String,
     user_id             String,
     tags                Array(String),
-    metadata            String,
+    metadata            String CODEC(ZSTD(3)),
 
     -- Hash de (tipo, nombre, modelo, entrada). Mismo hash dentro de una traza =
     -- llamada repetida. Alimenta la detección de bucles y el diagnóstico.
@@ -105,8 +105,8 @@ CREATE TABLE IF NOT EXISTS spans
     prompt_name         LowCardinality(String),
     prompt_version      UInt32,
 
-    events              String,
-    attributes          String,
+    events              String CODEC(ZSTD(3)),
+    attributes          String CODEC(ZSTD(3)),
 
     ingested_at         DateTime64(3, 'UTC') DEFAULT now64(3),
 
@@ -171,3 +171,19 @@ ALTER TABLE spans ADD COLUMN IF NOT EXISTS loop_out_hash String DEFAULT '';
 -- deducirlas del texto, que es justo lo que no se puede hacer sin mentir.
 ALTER TABLE spans ADD COLUMN IF NOT EXISTS prompt_name LowCardinality(String) DEFAULT '';
 ALTER TABLE spans ADD COLUMN IF NOT EXISTS prompt_version UInt32 DEFAULT 0;
+
+-- Instalaciones anteriores a D-142. Los payloads son casi todo el disco, y con ZSTD(3)
+-- ocupan menos de la mitad que con el LZ4 por defecto (medido con la prueba de carga).
+-- Cambiar el códec no reescribe nada: las partes nuevas nacen con él y las viejas lo
+-- toman al fusionarse.
+ALTER TABLE spans MODIFY COLUMN input_messages String CODEC(ZSTD(3));
+ALTER TABLE spans MODIFY COLUMN output_messages String CODEC(ZSTD(3));
+ALTER TABLE spans MODIFY COLUMN llm_params String CODEC(ZSTD(3));
+ALTER TABLE spans MODIFY COLUMN tool_arguments String CODEC(ZSTD(3));
+ALTER TABLE spans MODIFY COLUMN tool_output String CODEC(ZSTD(3));
+ALTER TABLE spans MODIFY COLUMN retrieval_documents String CODEC(ZSTD(3));
+ALTER TABLE spans MODIFY COLUMN input_payload String CODEC(ZSTD(3));
+ALTER TABLE spans MODIFY COLUMN output_payload String CODEC(ZSTD(3));
+ALTER TABLE spans MODIFY COLUMN metadata String CODEC(ZSTD(3));
+ALTER TABLE spans MODIFY COLUMN events String CODEC(ZSTD(3));
+ALTER TABLE spans MODIFY COLUMN attributes String CODEC(ZSTD(3));

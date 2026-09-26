@@ -336,6 +336,23 @@ app.add_middleware(
 app.add_middleware(LimiteCuerpo, maximo=get_settings().max_body_bytes)
 app.add_middleware(CabecerasSeguridad)
 
+
+@app.middleware("http")
+async def _olvidar_diagnostico(request, call_next):
+    """Un cambio por la API —marcar un hallazgo, una tarifa, la demo— se ve en el
+    Diagnóstico en el momento, no al minuto. La ingesta va por /v1/traces y no borra: ese
+    minuto de retraso es justo lo que la caché compra (D-142)."""
+    respuesta = await call_next(request)
+    if (
+        request.method in ("POST", "PUT", "PATCH", "DELETE")
+        and request.url.path.startswith("/api")
+        and respuesta.status_code < 400
+    ):
+        from .api import CACHE_DIAGNOSTICO
+
+        CACHE_DIAGNOSTICO.olvidar()
+    return respuesta
+
 # Los routers van ANTES del comodín de la interfaz: FastAPI resuelve por orden de
 # registro, y un `/{ruta:path}` declarado primero se comería `/api` y `/health`.
 app.include_router(router)

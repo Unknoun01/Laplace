@@ -2,7 +2,7 @@
 
 Documento de traspaso entre sesiones. Última actualización: 26 de septiembre de 2026.
 Léelo entero antes de tocar nada; después lee `STATUS.md` y las últimas entradas de
-`DECISIONS.md` (D-134 a D-140).
+`DECISIONS.md` (D-134 a D-142).
 
 ## 1. Qué es y hacia dónde va
 
@@ -34,7 +34,7 @@ probada: `laplace ui` (un proceso + SQLite) y Docker (ClickHouse + Postgres + Ne
 - **Por fases:** una rama por fase y un commit por bloque. Se enseña al usuario y se fusiona a `master` sólo cuando lo aprueba (`git merge --no-ff`).
 - **Nada entra sin su prueba.** Primero la prueba en rojo, después el arreglo.
 - **Hay que comprobar que la prueba muerde:** romper el código a propósito y verla fallar.
-- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-141**.
+- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-143**.
 - **Todo en español:** código, comentarios, commits y textos.
 - **Los commits terminan con** `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - **Reglas del producto que no se tocan:**
@@ -57,7 +57,8 @@ probada: `laplace ui` (un proceso + SQLite) y Docker (ClickHouse + Postgres + Ne
 - **Servidor local:** la configuración «local» de `.claude/launch.json` (puerto 8100). Tras tocar Python hay que reiniciarlo.
 - **Demo:** `.venv/Scripts/python.exe -m laplace.cli demo --endpoint http://127.0.0.1:8100` carga un mes de datos.
 - **Pantallas:** `test_pantallas.py` usa Playwright con Chromium, ya instalados en `.venv`.
-- **Estado al cerrar esta sesión:** 646 pruebas pasan, 0 fallan y 4 se saltan (las que necesitan clave de proveedor).
+- **Estado al cerrar esta sesión:** 674 pruebas pasan, 0 fallan y 4 se saltan (las que necesitan clave de proveedor).
+- **Prueba de carga:** `python scripts/carga.py --spans 10000000` genera un día de tráfico en ClickHouse y mide las pantallas; `--borrar` lo quita. Con 10 millones hacen falta unos 8 GB para Docker.
 
 ## 3. Hecho
 
@@ -100,27 +101,20 @@ probada: `laplace ui` (un proceso + SQLite) y Docker (ClickHouse + Postgres + Ne
 
 ## 4. Pendiente, por orden
 
-### Fase 3: integraciones (lo que queda)
-1. **Decidir con el usuario el doble conteo** de `laplace.init()` junto a un instrumentador de OpenInference u OpenLLMetry: cada llamada sale dos veces (ver `STATUS.md`). Opciones: avisar, no parchear OpenAI/Anthropic cuando hay otro instrumentador de LLM activo, o emparejar por contenido y tiempo en la ingesta.
-2. **Reverificar la tabla verificada antes del 7 de octubre** (versión `2026.09.07b`): hay tests que fallan solos cuando caduca. El informe de LiteLLM del 26 de septiembre no ve diferencias en los nombres directos, pero eso no sustituye a ir a las páginas.
-3. **Sitio de llamada desde LangGraph:** usar `metadata.langgraph_node` de OpenInference como `step_site`.
-4. **Hallazgos y panel con tarifa no verificada:** hoy la marca llega al span, a la traza y a la ficha técnica, pero no a los hallazgos ni a la traza agregada.
-5. **Paquete fino `@laplace/sdk`** con `init`, `observe` y `getPrompt`, cuando el usuario reserve el scope de npm.
-6. Sin probar todavía: Anthropic por OpenInference-js/OpenLLMetry-js, el AI SDK de Vercel, LangChain.js, y `client.beta.*` en Python.
+### Fase 3: cerrada en la rama `fase3-cierre` (D-141), pendiente de fusionar
+- Sin probar todavía: Anthropic por OpenInference-js/OpenLLMetry-js, el AI SDK de Vercel, LangChain.js y `client.beta.*` en Python.
+- Paquete fino `@laplace/sdk` (`init`, `observe`, `getPrompt`) cuando el usuario reserve el scope de npm.
 
-### Fase 4: escala y rendimiento (ClickHouse)
-- `async_insert=1, wait_for_async_insert=1` en las inserciones: hoy se hace una inserción síncrona por petición.
-- Clave de orden `(project_id, toDate(start_time), trace_id, span_id)` más una tabla o proyección `trace_id → proyecto` para abrir trazas por id.
-- `CODEC(ZSTD(3))` en las columnas de payload.
-- Quitar `FINAL` de las consultas calientes (hay 28) y usar agregación con `argMax`.
-- Vistas materializadas por hora (proyecto, paso y modelo) para el Panel y el Diagnóstico, y una caché de 60 s de `overview`.
-- Acotar por la ventana de tiempo las subconsultas de filtros de `_where`: hoy recorren todo el histórico.
-- Búsqueda en el contenido de prompts y respuestas: `tokenbf_v1` o `ngrambf_v1` en ClickHouse y FTS5 en SQLite. Hoy sólo se busca por nombre e id.
-- En la ingesta:
-  - `parse_spans` a un hilo aparte (`run_in_threadpool`);
-  - caché de `ensure_project`.
-- Latencia p50/p95 y tasa de error en el Panel.
-- Prueba de carga con un objetivo escrito, por ejemplo 10 millones de spans al día con el Diagnóstico por debajo de 1,5 s.
+### Fase 4: escala (en la rama `fase4-escala`, D-142)
+**Hecho y medido:** repeticiones y bucles en dos fases (antes tumbaban la máquina), el Diagnóstico sin lecturas repetidas y con caché de un minuto en la nube, ingesta fuera del bucle de eventos con `async_insert` y el proyecto registrado una vez, payloads con `ZSTD(3)`.
+
+**Resultado con 10 millones de spans/día:** Diagnóstico unos 4 s en la primera carga (objetivo 1,5 s, **sin cumplir**); Panel, lista y abrir traza por debajo de 1,5 s salvo la búsqueda (1,6 s).
+
+**Lo que queda, por orden:**
+1. **Preagregados** para bajar el Diagnóstico de 4 s: vistas materializadas por hora (proyecto, paso, modelo) para el uso por paso, el resumen y la cobertura; y pensar si repeticiones y bucles se calculan al ingerir. Es lo que falta para el objetivo.
+2. Búsqueda en el contenido de prompts y respuestas (`tokenbf_v1`/`ngrambf_v1` en ClickHouse, FTS5 en SQLite); la búsqueda por nombre ya roza el objetivo.
+3. Latencia p50/p95 y tasa de error en el Panel.
+4. Medir con semanas de histórico (hace falta una máquina con más memoria) para decidir sobre acotar por tiempo las subconsultas de `_where` y sobre `FINAL` con partes sin fusionar. Descartado con números: la clave de ordenación nueva y la tabla `trace_id → proyecto` (abrir una traza ya tarda 0,03 s) y lanzar las lecturas en paralelo.
 
 ### Fase 5: interfaz e internacionalización
 - **i18n en cinco idiomas:**
@@ -171,6 +165,8 @@ probada: `laplace ui` (un proceso + SQLite) y Docker (ClickHouse + Postgres + Ne
 - `laplace demo` escribe caracteres rotos en la consola de Windows (la salida no va en UTF-8).
 - `DECISIONS.md` pesa 150 KB: hace falta un índice por tema y documentación de cara al usuario aparte (Mintlify, Docusaurus o Starlight).
 - En `STATUS.md`, «Qué queda» está desfasado: actualizarlo al cerrar cada fase.
+- `test_pantallas.py` falló una vez por tiempo (la pantalla de Prompts no cargó en 15 s en una pasada completa) y pasó 3 de 3 aislada: posible segunda prueba inestable, sin causa identificada.
+- Tras la caída de Docker del 26 de septiembre quedaron apartadas `%LOCALAPPDATA%\Docker\run.viejo-*` y `docker-secrets-engine.viejo-*` con sockets bloqueados; se pueden borrar tras reiniciar Windows.
 - Las tiradas de evaluación se registran con la fecha de ahora aunque sus trazas sean de ayer (en la demo).
 
 ## 6. Lo que sólo puede hacer el usuario
