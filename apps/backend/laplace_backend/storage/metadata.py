@@ -498,6 +498,8 @@ class SQLiteMetadataStore:
 
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path).expanduser()
+        #: Proyectos ya registrados por este proceso: la ingesta pregunta en cada lote.
+        self._registrados: set[str] = set()
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
@@ -547,11 +549,14 @@ class SQLiteMetadataStore:
         ]
 
     def ensure_project(self, project_id: str) -> None:
+        if project_id in self._registrados:
+            return
         with self._conn() as conn:
             conn.execute(
                 "INSERT OR IGNORE INTO projects (id, name, created_at) VALUES (?, ?, ?)",
                 (project_id, project_id, _now().isoformat()),
             )
+        self._registrados.add(project_id)
 
     def get_diagnosis(self, trace_id: str) -> Diagnosis | None:
         """Hueco de la Fase 3. En local todavía no hay diagnóstico automático."""
@@ -1082,6 +1087,7 @@ class SQLiteMetadataStore:
 
     def delete_project_data(self, project_id: str) -> None:
         """Todo lo mutable de un proyecto. Los hijos antes que los padres."""
+        self._registrados.discard(project_id)
         with self._conn() as conn:
             conn.execute("BEGIN")
             for sql in _BORRAR_PROYECTO_SQLITE:

@@ -112,6 +112,9 @@ class PostgresMetadataStore:
 
     def __init__(self, settings: Settings) -> None:
         self._dsn = settings.postgres_dsn
+        #: Proyectos ya registrados por este proceso. Cada lote de la ingesta pregunta,
+        #: y sin esto era una escritura en Postgres por lote, siempre la misma (D-142).
+        self._registrados: set[str] = set()
 
     def _connect(self) -> Any:
         # Import perezoso: `psycopg` es una dependencia opcional (extra `cloud`). En
@@ -148,11 +151,14 @@ class PostgresMetadataStore:
 
     def ensure_project(self, project_id: str) -> None:
         """Registra el proyecto la primera vez que llegan spans suyos."""
+        if project_id in self._registrados:
+            return
         with self._connect() as conn:
             conn.execute(
                 "INSERT INTO projects (id, name) VALUES (%s, %s) ON CONFLICT (id) DO NOTHING",
                 (project_id, project_id),
             )
+        self._registrados.add(project_id)
 
     # -- hueco reservado de la Fase 3 ------------------------------------------------
 
@@ -650,6 +656,7 @@ class PostgresMetadataStore:
 
     def delete_project_data(self, project_id: str) -> None:
         """Todo lo mutable de un proyecto, en una transacción. Hijos primero."""
+        self._registrados.discard(project_id)
         with self._connect() as conn, conn.transaction():
             for sql in (*_BORRAR_PROYECTO, *_BORRAR_PROYECTO_PG):
                 conn.execute(sql, (project_id,))

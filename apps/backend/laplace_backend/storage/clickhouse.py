@@ -139,6 +139,19 @@ FROM (
         argMin(cost_rate_assumed, (start_time, span_id))    AS asumida_primera
     FROM spans FINAL
     WHERE {RULES_WHERE} AND dedup_hash != ''
+      -- Primero, qué parejas (traza, entrada) se repiten, contando sin más. Sin este
+      -- filtro, la agregación de abajo —una docena de estados por pareja, con FINAL—
+      -- se hacía para todas, y casi ninguna se repite: con 5 millones de spans pedía más
+      -- de 2 GB y no terminaba en cinco minutos (D-142). Va sin FINAL porque sólo acota:
+      -- un span reenviado puede colar una pareja de más, y el HAVING de abajo, que sí
+      -- cuenta sobre FINAL, la descarta. El hash de 64 bits agrupa mucho más barato que
+      -- dos cadenas, y una colisión también es sólo una candidata de más.
+      AND sipHash64(trace_id, dedup_hash) IN (
+          SELECT sipHash64(trace_id, dedup_hash) FROM spans
+          WHERE {RULES_WHERE} AND dedup_hash != ''
+          GROUP BY sipHash64(trace_id, dedup_hash)
+          HAVING count() >= %(min_repeats)s
+      )
     GROUP BY trace_id, dedup_hash
     HAVING n >= %(min_repeats)s
 )
@@ -240,6 +253,14 @@ FROM (
         sum(cost_unknown)                  AS sin_tarifa
     FROM spans FINAL
     WHERE {RULES_WHERE} AND loop_hash != ''
+      -- El mismo atajo que en las repeticiones: primero las parejas con vueltas de
+      -- sobra, sin FINAL y por hash; el HAVING de abajo decide con los datos exactos.
+      AND sipHash64(trace_id, loop_hash) IN (
+          SELECT sipHash64(trace_id, loop_hash) FROM spans
+          WHERE {RULES_WHERE} AND loop_hash != ''
+          GROUP BY sipHash64(trace_id, loop_hash)
+          HAVING count() >= %(min_vueltas)s
+      )
     GROUP BY trace_id, loop_hash
     HAVING n >= %(min_vueltas)s AND entradas > 1 AND salidas <= %(max_salidas)s
 )
@@ -346,6 +367,11 @@ class ClickHouseStore:
             "spans",
             [span_to_row(span) for span in spans],
             column_names=list(COLUMNS),
+            # El servidor junta los lotes pequeños antes de escribir: sin esto, cada
+            # petición de la ingesta creaba una parte nueva y las fusiones no daban
+            # abasto con volumen. Esperar la confirmación mantiene lo que promete el
+            # 200: que está guardado y el exportador no tiene que reintentar (D-142).
+            settings={"async_insert": 1, "wait_for_async_insert": 1},
         )
         return len(spans)
 

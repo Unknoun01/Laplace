@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -12,6 +13,8 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTrace
 from starlette.concurrency import run_in_threadpool
 
 from .auth import identity_of
+from .cache_diagnostico import CacheDiagnostico
+from .config import get_settings
 from .ingest.otlp import OTLP_EXPANSION, CuerpoDemasiadoGrande, decode_request, parse_spans
 from .insights import FindingDetail, Overview, overview
 from .insights import detail as finding_detail
@@ -67,7 +70,9 @@ async def ingest_traces(request: Request) -> Response:
         logger.warning("petición OTLP ilegible: %s", exc)
         raise HTTPException(status_code=400, detail="petición OTLP ilegible") from exc
 
-    spans = parse_spans(decoded)
+    # Fuera del bucle de eventos: traducir un lote grande son decenas de milisegundos de
+    # CPU, y mientras tanto no avanzaba ninguna otra petición (D-142).
+    spans = await run_in_threadpool(parse_spans, decoded)
 
     # La clave ata el proyecto. Los spans traen el suyo dentro del protobuf —lo pone
     # `laplace.init(project=...)`— así que aquí es donde se comprueba que coincide. Se
@@ -238,6 +243,10 @@ def _window(days: int) -> Window:
     return Window(since=until - timedelta(days=days), until=until, days=days)
 
 
+#: El Diagnóstico recordado un minuto en la nube; lo borra cualquier cambio por la API.
+CACHE_DIAGNOSTICO = CacheDiagnostico()
+
+
 @router.get("/api/overview", response_model=Overview)
 async def get_overview(
     request: Request,
@@ -250,15 +259,23 @@ async def get_overview(
     # rojo ni cuenta para el veredicto, y eso hay que saberlo aquí (D-096).
     gestiona = bool(await run_in_threadpool(_metadata(request).list_prompts, project_id))
     estados = await run_in_threadpool(leer_estados, _metadata(request), project_id)
-    return await run_in_threadpool(
-        lambda: overview(
-            _store(request),
-            project_id,
-            _window(days),
-            has_managed_prompts=gestiona,
-            states=estados,
+    segundos = get_settings().cache_diagnostico_s
+    clave = (project_id, days, gestiona, json.dumps(estados, sort_keys=True, default=str))
+    guardado = CACHE_DIAGNOSTICO.leer(clave, segundos)
+    if guardado is not None:
+        return guardado
+    store = _store(request)
+
+    def calcular() -> Overview:
+        # La ventana se calcula al llamar, no al definir: al renovarse en segundo plano
+        # tiene que terminar en el ahora de ese momento (D-143).
+        return overview(
+            store, project_id, _window(days), has_managed_prompts=gestiona, states=estados
         )
-    )
+
+    resultado = await run_in_threadpool(calcular)
+    CACHE_DIAGNOSTICO.guardar(clave, resultado, segundos, calcular)
+    return resultado
 
 
 @router.get("/api/findings/{finding_id:path}", response_model=FindingDetail)

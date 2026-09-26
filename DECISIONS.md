@@ -2483,3 +2483,78 @@ Mutaciones comprobadas: no ceder nunca, quitar un nombre de la lista, avisar en 
 llamada, ceder a un instrumentador apagado, ceder a cualquier `opentelemetry.
 instrumentation.*`, pisar el sitio del SDK con el nodo, no pasar el modelo a la marca,
 no marcar la traza agregada y convertir la marca en suelo; todas en rojo.
+
+## 2026-09-26 — Fase 4: escala
+
+### D-142 — Diez millones de spans al día: qué se ha medido y qué se ha cambiado
+`scripts/carga.py` genera dentro de ClickHouse (`INSERT … SELECT FROM numbers()`, unos
+120.000 spans/s) un día de tráfico con forma de agente —trazas de ocho spans, 3 % de
+errores, repeticiones en una de cada diez, payloads de un par de KB, la mitad del
+volumen en un proyecto— y mide las pantallas contra el objetivo escrito: **10 millones
+de spans al día y el Diagnóstico por debajo de 1,5 s**. Se ha decidido con esos números
+delante, y lo que la hoja de ruta proponía y los números no apoyaban no se ha hecho.
+
+* **Repeticiones y bucles, de tumbar la máquina a algo más de un segundo.** Con 5
+  millones de spans en un proyecto, la consulta de repeticiones pedía más de 2 GB y no
+  terminaba en cinco minutos; midiendo la primera vez, se llevó por delante la máquina
+  virtual de Docker. Hacía una docena de agregados con `FINAL` para cada pareja (traza,
+  entrada), y casi ninguna se repite. Ahora una primera pasada, sin `FINAL` y agrupando
+  por un hash de 64 bits, busca las parejas candidatas, y la agregación de siempre sólo
+  corre sobre ellas. El filtro sólo acota: un span reenviado o una colisión cuelan una
+  candidata de más, y el `HAVING` de siempre, sobre `FINAL`, la descarta. Los bucles
+  llevan el mismo atajo. Una prueba de paridad nueva pone un bucle justo en el mínimo de
+  vueltas, porque ninguna vigilaba ese borde.
+* **El resumen del Diagnóstico se pedía dos veces**; ahora cada lectura se hace una vez
+  por petición. Lanzar las cinco lecturas a la vez se probó y **no se hace**: cada
+  consulta ya usa todos los núcleos, y en paralelo tardaban 5,1 s frente a 5,0 en serie.
+* **Caché de un minuto del Diagnóstico en la nube**, que se pide al abrir el inicio, la
+  lista y cada traza. Cualquier escritura por `/api` la borra (marcar un hallazgo, una
+  tarifa, la demo), porque quien lo hace espera verlo ya; lo que llega por la ingesta
+  tarda hasta un minuto en verse, que es el precio. En local no hay caché.
+  `LAPLACE_OVERVIEW_CACHE_S` la cambia.
+* **Ingesta:** traducir el lote sale del bucle de eventos (`run_in_threadpool`); el
+  proyecto se registra una vez por proceso y no en cada lote, y se olvida al borrarlo;
+  ClickHouse inserta con `async_insert=1, wait_for_async_insert=1`, que junta los lotes
+  pequeños en el servidor sin que el 200 deje de significar «guardado».
+* **Payloads con `ZSTD(3)`**: menos de la mitad de disco que con LZ4 sobre una muestra
+  de un millón de filas (datos sintéticos, muy repetitivos: con datos reales la
+  diferencia será menor). Cambiar el códec no reescribe nada; las partes viejas lo toman
+  al fusionarse.
+* **Lo que no se ha hecho, y por qué.** La clave de ordenación nueva y la tabla
+  `trace_id → proyecto`: abrir una traza ya tarda 0,03 s, con proyecto o sin él, gracias
+  al índice bloom de `trace_id`. Quitar `FINAL`: sobre la tabla medida cuesta lo mismo
+  con que sin él, y la ganancia no justifica reescribir 28 consultas con su paridad.
+  Acotar por tiempo las subconsultas de filtros: con un solo día de datos no se nota, y
+  un portátil no aguanta generar semanas de histórico a este ritmo para medirlo. Los
+  tres quedan anotados en la hoja de ruta, con la medida que falta.
+
+**Resultado, sobre 10 millones de spans en un día (proyecto grande, 4,8 millones):**
+Diagnóstico unos 4 s en la primera carga y lo que tarde servir la caché después (antes
+no terminaba); Panel 1,2–1,4 s; lista de trazas 1,0 s, sólo errores 0,6 s, con búsqueda
+1,6 s; abrir una traza 0,03 s. **El objetivo del Diagnóstico no se cumple en la primera
+carga**: lo que queda son cuatro consultas de 0,6 a 1,3 s cada una recorriendo toda la
+ventana, y bajar de ahí pide preagregados (vistas materializadas por hora para el uso
+por paso, el resumen y la cobertura) o calcular repeticiones y bucles al ingerir. Es el
+siguiente paso de la fase.
+
+### D-143 — El Diagnóstico que alguien mira se recalcula antes de caducar
+Los preagregados se descartaron por ahora, con los números delante: sólo abaratan el
+resumen, el uso por paso y la cobertura (unos 2 s de los 4), no las repeticiones ni los
+bucles, que miran dentro de cada traza. El Diagnóstico habría quedado en unos 2,5 s a
+cambio de mucho trabajo delicado: no contar dos veces un lote reenviado, cuadrar las
+horas del borde de la ventana, rellenar el histórico, borrar los preagregados con los
+datos y la paridad exacta con el modo local.
+
+En su lugar, la caché de un minuto (D-142) se renueva sola: cada petición deja guardada
+su forma de recalcularse, y un proceso de fondo recalcula cada Diagnóstico cuando lleva
+tres cuartos de su vida en la caché, **sólo si alguien lo ha leído en la última media
+hora**, para que lo que nadie abre no gaste ClickHouse. La ventana se calcula al
+renovar, no al pedir. Si mientras se recalcula alguien cambia algo por la API, el
+resultado se tira: se calculó con los estados de antes. Un fallo al renovar deja el valor
+anterior hasta que caduca, nunca para siempre. En local no hay caché ni renovador.
+
+Medido contra ClickHouse con 2 millones de spans: primera apertura 2,6 s; después,
+0,00 s también pasado el minuto. **La primera apertura de un proyecto sigue tardando lo
+que tarda** (unos 4 s con 10 millones al día); los preagregados siguen siendo la vía si
+eso llega a importar. Pruebas en `test_diagnostico_precalculado.py`, con reloj
+inyectado; seis mutaciones comprobadas.

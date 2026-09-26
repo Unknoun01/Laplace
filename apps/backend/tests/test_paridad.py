@@ -238,6 +238,17 @@ def test_los_bucles_salen_iguales_en_los_dos_almacenes(dos_almacenes):
         assert a.sample_trace_id == b.sample_trace_id, a.loop_hash
 
 
+def test_un_bucle_justo_en_el_minimo_sale_en_los_dos(dos_almacenes):
+    """El sembrado da seis vueltas por traza. Con el mínimo en seis, justo en el borde,
+    los dos almacenes lo tienen que ver: la nube acota antes con un filtro barato (D-142),
+    y un `>` donde va `>=` se comería los bucles del borde sin que nada más fallara."""
+    ventana = _ventana()
+    aqui = dos_almacenes["local"].loop_groups(dos_almacenes["project"], ventana, min_vueltas=6)
+    alli = dos_almacenes["nube"].loop_groups(dos_almacenes["project"], ventana, min_vueltas=6)
+    assert aqui, "con el mínimo en seis, el bucle sembrado tiene que salir"
+    assert [g.loop_hash for g in aqui] == [g.loop_hash for g in alli]
+
+
 def test_la_cobertura_agrupa_por_camino_igual_en_los_dos(dos_almacenes):
     """La agrupación por sitio de llamada también se escribió dos veces (D-106)."""
     ventana = _ventana()

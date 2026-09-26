@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     store: str = "clickhouse"
     #: Fichero del modo local. `laplace ui` lo pone en `~/.laplace/laplace.db`.
     sqlite_path: str = "laplace.db"
+    #: Segundos que se recuerda el Diagnóstico. Sin fijar: 60 en la nube y 0 en local
+    #: (D-142).
+    overview_cache_s: int | None = None
 
     #: 127.0.0.1 y no `localhost`: compose publica las bases sólo en IPv4 de loopback, y
     #: `localhost` prueba antes `::1`, que no contesta, y tarda segundos en caer a IPv4.
@@ -124,6 +127,12 @@ class Settings(BaseSettings):
         if elegido in ("false", "0", "no"):
             return False
         return self.store != "sqlite"
+
+    @property
+    def cache_diagnostico_s(self) -> int:
+        if self.overview_cache_s is not None:
+            return max(0, self.overview_cache_s)
+        return 60 if self.store == "clickhouse" else 0
 
     @property
     def max_body_bytes(self) -> int:

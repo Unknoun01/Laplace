@@ -300,6 +300,11 @@ def overview(
     sobre la mitad de las llamadas no es medio ahorro, es un número que no se puede
     leer sin saber que es la mitad (D-096).
     """
+    # Cada lectura una sola vez: el resumen se pedía dos veces, y con volumen cada una
+    # pasa del medio segundo (D-142).
+    from .lecturas import Recordado
+
+    store = Recordado(store)
     summary = store.summarize_window(project_id, window)
     findings = detect(store, project_id, window)
     apartados: list[Finding] = []
