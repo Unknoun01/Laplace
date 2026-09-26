@@ -2,12 +2,14 @@
 
 Node 22.6 o posterior quita los tipos solo. Lo único que no hace es resolver los imports
 sin extensión que escribe la web (`./idioma`), y para eso se registra un gancho que
-prueba con `.ts`. Sin Node, o con uno viejo, la prueba que lo pida se salta.
+prueba con `.ts`. Sin Node, o con uno viejo, la prueba que lo pida se salta; en la CI
+(`LAPLACE_EXIGIR_NODE`), falla.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -30,13 +32,16 @@ def ejecutar(cuerpo: str) -> object:
 
     Dentro, `web(ruta)` importa un fichero de `apps/web` (`web("lib/format.ts")`).
     """
+    # En la CI, que falte Node es un fallo: el espejo con la web no puede dejar de
+    # comprobarse en silencio.
+    saltar = pytest.fail if os.environ.get("LAPLACE_EXIGIR_NODE") else pytest.skip
     node = shutil.which("node")
     if node is None:
-        pytest.skip("no hay Node")
+        saltar("no hay Node")
     version = subprocess.run([node, "--version"], capture_output=True, text=True).stdout
     mayor, menor = (int(x) for x in version.lstrip("v").split(".")[:2])
     if (mayor, menor) < (22, 6):
-        pytest.skip(f"Node {version.strip()} no ejecuta TypeScript")
+        saltar(f"Node {version.strip()} no ejecuta TypeScript")
     guion = f"""
 import {{ register }} from "node:module";
 import {{ pathToFileURL }} from "node:url";
