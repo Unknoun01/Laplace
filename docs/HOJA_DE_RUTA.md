@@ -168,6 +168,7 @@ probada: `laplace ui` (un proceso + SQLite) y Docker (ClickHouse + Postgres + Ne
   - SSO/SAML, SCIM y verificación de correo.
 
 ## 5. Deuda y detalles sueltos
+- **Hay una prueba inestable sin identificar.** El 26 de septiembre, una pasada completa dio «1 failed, 583 passed» y la siguiente, sin cambios, 584 en verde. Pasar la suite con `-rf` hasta que vuelva a fallar y ver cuál es: las sospechosas son `test_pantallas.py` (tiempos) y cualquiera que dependa del reloj.
 - `globals.css` tiene 3.265 líneas en un solo fichero: partirlo.
 - Al cargar se piden dos veces `/api/projects` y `/api/auth/me`.
 - `/health` en modo local dice `clickhouse: true, postgres: true`.
