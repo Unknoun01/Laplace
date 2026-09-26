@@ -33,6 +33,7 @@ from laplace.schema import (
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
 
 from ..pricing import get_price_table
+from .convenciones import TRADUCIDOS, normalizar
 
 logger = logging.getLogger("laplace.ingest")
 
@@ -326,7 +327,9 @@ def parse_spans(request: ExportTraceServiceRequest) -> list[Span]:
 
 
 def _build_span(proto_span: Any, project_id: str, resource: dict[str, Any], prices: Any) -> Span:
-    attrs = _attributes(proto_span.attributes)
+    # Lo que venga de OpenInference u OpenLLMetry se traduce aquí, antes de clasificar:
+    # a partir de esta línea el span habla nuestro idioma (D-136).
+    attrs = normalizar(_attributes(proto_span.attributes))
     span_type = classify(attrs)
     name = proto_span.name
 
@@ -432,7 +435,11 @@ def _build_span(proto_span: Any, project_id: str, resource: dict[str, Any], pric
         prompt_name=str(attrs.get(semconv.LAPLACE_PROMPT_NAME) or ""),
         prompt_version=_entero(attrs.get(semconv.LAPLACE_PROMPT_VERSION)),
         events=events,
-        attributes={k: v for k, v in attrs.items() if k not in consumed},
+        attributes={
+            k: v
+            for k, v in attrs.items()
+            if k not in consumed and not k.startswith(TRADUCIDOS)
+        },
     )
 
 

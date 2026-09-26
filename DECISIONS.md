@@ -2308,3 +2308,18 @@ los lados y que cada una diga lo suyo; además, que la ficha de un problema y un
 se abran desde sus enlaces y que la cifra grande no vaya en monoespaciada. Se comprobó
 que muerden (un texto que no existe y un bloque de 3.000 px las ponen en rojo). Corre en
 un trabajo propio de CI y se salta sola sin Playwright o sin la interfaz construida.
+
+## 2026-09-26 — Fase 3: integraciones
+
+### D-136 — Las trazas de OpenInference y OpenLLMetry, entendidas
+Un agente con LangGraph, CrewAI, LlamaIndex, el Agents SDK de OpenAI o el AI SDK de
+Vercel suele ir instrumentado ya con OpenInference (Arize) u OpenLLMetry (Traceloop), y
+sus spans llegaban como `chain` sin modelo, tokens ni coste. `ingest/convenciones.py`
+traduce las dos familias a nuestros atributos antes de clasificar: tipo de span, modelo,
+tokens (con la caché dentro del total, sumándola sólo si no cabe), mensajes aplanados,
+parámetros, herramientas, entrada y salida, sesión y usuario. Regla única: se rellena lo
+que falta y nunca se pisa lo que ya viene en nuestro formato. Los atributos traducidos no
+se guardan otra vez en crudo. Nombres contrastados contra
+`openinference-semantic-conventions` y `opentelemetry-semantic-conventions-ai`. Pruebas en
+`test_convenciones.py`, incluida una que exige que el motor encuentre una repetición en
+tráfico que nunca ha visto el SDK de Laplace.
