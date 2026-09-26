@@ -184,3 +184,25 @@ def test_la_cifra_grande_no_se_parte(servidor, navegador):
         assert "mono" not in fuente.lower(), fuente
     finally:
         pagina.close()
+
+
+def test_buscar_en_el_contenido_y_pasar_de_pagina(servidor, navegador):
+    """La pregunta del usuario no es el nombre de ningún paso: por nombre no sale nada y
+    en el contenido sí (D-144). Y la página siguiente conserva la búsqueda, que antes se
+    perdía con todos los demás filtros."""
+    base = servidor + "/trazas/?project=demo&days=30&sort=recent&q=GUITARRA"
+    pagina, errores = _abrir(navegador, base, "escritorio")
+    try:
+        pagina.wait_for_function(
+            "() => document.querySelector('main')?.innerText.includes('Ninguna traza coincide')",
+            timeout=15_000,
+        )
+        pagina.goto(base + "&en=contenido", wait_until="networkidle")
+        fila = pagina.locator("a[href*='/traza?'], a[href*='/traza/?']").first
+        fila.wait_for(timeout=15_000)
+        # En la demo la pregunta de la guitarra sale en más de 50 ejecuciones del mes.
+        href = pagina.locator("a", has_text="Más antiguas").first.get_attribute("href") or ""
+        assert "en=contenido" in href and "q=GUITARRA" in href, href
+        assert errores == [], errores
+    finally:
+        pagina.close()

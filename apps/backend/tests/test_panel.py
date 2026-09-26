@@ -566,7 +566,7 @@ def test_la_duracion_por_ejecucion_es_de_traza_no_suma_de_spans(store, window):
     store.insert_spans(spans)
 
     vista = panel.build(store, project, window)
-    duracion = next(m for m in vista.per_execution if m.label == "Duración por ejecución")
+    duracion = next(m for m in vista.per_execution if m.label == "Duración, mediana")
     # Un segundo de principio a fin, no los 2,5 s que suman los spans por separado.
     assert duracion.value == pytest.approx(1000, rel=0.05)
 

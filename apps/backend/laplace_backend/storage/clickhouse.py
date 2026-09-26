@@ -28,6 +28,7 @@ from .base import (
     Bucket,
     CostGroup,
     CoverageFacts,
+    Latency,
     LoopGroup,
     ModelUsage,
     ObservedPrompt,
@@ -45,6 +46,23 @@ from .base import (
     disambiguate,
     encode_cursor,
 )
+
+#: El texto en el que busca `TraceFilter.content`. **Tiene que ser idéntica** a la
+#: expresión de `idx_contenido` en `clickhouse_schema.sql`: el analizador sólo usa el
+#: índice si la consulta escribe la misma, y cualquier constante dentro —un separador
+#: entre columnas— hace que deje de reconocerla (D-144). Por eso las columnas van
+#: pegadas: casar a caballo entre dos es posible, pero no cambia qué traza se encuentra
+#: más que en casos rebuscados.
+CONTENIDO = (
+    "lowerUTF8(concat(input_messages, output_messages, tool_arguments, tool_output, "
+    "retrieval_query, retrieval_documents, input_payload, output_payload))"
+)
+
+
+def literal_like(texto: str) -> str:
+    """`texto` para un `LIKE`, sin que `%`, `_` ni la barra invertida hagan de comodín."""
+    return texto.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
 
 logger = logging.getLogger("laplace.storage")
 
@@ -517,6 +535,21 @@ class ClickHouseStore:
                 + ")"
             )
 
+        # El contenido es casi todo el disco: la subconsulta va acotada también a la
+        # ventana, y se escribe con la misma expresión que `idx_contenido` para que
+        # ClickHouse pueda saltarse los gránulos que no lo tienen (D-144).
+        if filters.content:
+            ventana = ""
+            if filters.since is not None:
+                ventana += " AND start_time >= %(since)s"
+            if filters.until is not None:
+                ventana += " AND start_time <= %(until)s"
+            clauses.append(
+                "trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE "
+                f"{CONTENIDO} LIKE %(contenido)s{acotar}{ventana})"
+            )
+            params["contenido"] = f"%{literal_like(filters.content.lower())}%"
+
         return ("WHERE " + " AND ".join(clauses) if clauses else "", params)
 
     def get_trace_spans(self, trace_id: str, project_id: str | None = None) -> list[Span]:
@@ -894,6 +927,30 @@ class ClickHouseStore:
             window,
             bucket_minutes,
         )
+
+    def trace_latency(self, project_id: str, window: Window) -> Latency:
+        # Rango más cercano sobre el array ordenado, el mismo índice que
+        # `nearest_rank` en Python: las dos cifras son de ejecuciones que existieron.
+        # La duración es la de `TIMESERIES_SQL`, de principio a fin de la traza.
+        sql = f"""
+            SELECT count() AS n, arraySort(groupArray(d)) AS o,
+                   o[toUInt64(greatest(1, ceil(0.5 * n)))]  AS p50,
+                   o[toUInt64(greatest(1, ceil(0.95 * n)))] AS p95
+            FROM (
+                SELECT trace_id,
+                       dateDiff('millisecond', min(start_time), max(end_time)) AS d
+                FROM spans FINAL
+                WHERE {WINDOW_WHERE}
+                GROUP BY trace_id
+            )
+        """
+        r = _named(
+            self._client.query(sql, parameters=self._window_params(project_id, window))
+        )[0]
+        n = int(r["n"])
+        if not n:
+            return Latency()
+        return Latency(traces=n, p50_ms=float(r["p50"]), p95_ms=float(r["p95"]))
 
     def window_facts(self, project_id: str, since: Any, until: Any) -> WindowFacts:
         params = {"project_id": project_id, "since": _utc(since), "until": _utc(until)}

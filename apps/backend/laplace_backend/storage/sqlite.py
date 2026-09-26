@@ -46,6 +46,7 @@ from .base import (
     Bucket,
     CostGroup,
     CoverageFacts,
+    Latency,
     LoopGroup,
     ModelUsage,
     ObservedPrompt,
@@ -62,9 +63,22 @@ from .base import (
     densify,
     disambiguate,
     encode_cursor,
+    nearest_rank,
 )
 
 logger = logging.getLogger("laplace.sqlite")
+
+#: El texto en el que busca `TraceFilter.content`, el mismo que en ClickHouse (D-144).
+#: `minusculas` es `str.lower`: el `lower()` de SQLite sólo sabe de ASCII y «ÁRBOL» no
+#: casaría con «árbol», que en ClickHouse (`lowerUTF8`) sí casa.
+CONTENIDO = (
+    "minusculas(input_messages || output_messages || tool_arguments || tool_output || "
+    "retrieval_query || retrieval_documents || input_payload || output_payload)"
+)
+
+
+def _minusculas(texto: str | None) -> str:
+    return texto.lower() if texto else ""
 
 #: Columnas que no son texto ni números sueltos y necesitan traducción al guardar.
 _LIST_COLUMNS = {"finish_reasons", "tags"}
@@ -506,6 +520,7 @@ class SQLiteStore:
             # se bloquearía justo cuando el usuario está mirando.
             conn.execute("PRAGMA journal_mode = WAL")
             conn.execute("PRAGMA synchronous = NORMAL")
+            conn.create_function("minusculas", 1, _minusculas, deterministic=True)
             self._local.conn = conn
         return conn
 
@@ -673,6 +688,21 @@ class SQLiteStore:
                 + acotar
                 + ")"
             )
+
+        # Lo mismo que en ClickHouse: acotada a la ventana, sin distinguir mayúsculas y
+        # con `%` y `_` literales. Aquí se recorre: en local el volumen lo permite y un
+        # índice de texto completo duplicaría el fichero (D-144).
+        if filters.content:
+            ventana = ""
+            if filters.since is not None:
+                ventana += " AND start_time >= :since"
+            if filters.until is not None:
+                ventana += " AND start_time <= :until"
+            clauses.append(
+                "trace_id IN (SELECT DISTINCT trace_id FROM spans WHERE "
+                f"instr({CONTENIDO}, :contenido) > 0{acotar}{ventana})"
+            )
+            params["contenido"] = filters.content.lower()
 
         return ("WHERE " + " AND ".join(clauses) if clauses else "", params)
 
@@ -1007,6 +1037,24 @@ class SQLiteStore:
             ],
             window,
             bucket_minutes,
+        )
+
+    def trace_latency(self, project_id: str, window: Window) -> Latency:
+        # SQLite no tiene percentiles: se traen las duraciones ordenadas y se elige en
+        # Python con el mismo rango que ClickHouse. En local son miles, no millones. La
+        # duración, redondeada al milisegundo como en `TIMESERIES_SQL`.
+        filas = self._query(
+            f"""SELECT CAST(ROUND((julianday(MAX(end_time)) - julianday(MIN(start_time)))
+                               * 86400000) AS INTEGER) AS d
+                FROM spans WHERE {WINDOW_WHERE}
+                GROUP BY trace_id ORDER BY d""",
+            self._window_params(project_id, window),
+        )
+        ordenados = [float(f["d"]) for f in filas]
+        return Latency(
+            traces=len(ordenados),
+            p50_ms=nearest_rank(ordenados, 0.5),
+            p95_ms=nearest_rank(ordenados, 0.95),
         )
 
     def window_facts(

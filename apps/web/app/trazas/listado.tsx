@@ -24,6 +24,7 @@ export function Listado({
   sort,
   cursor,
   context,
+  siguiente,
   recargar,
   onLive,
 }: {
@@ -33,6 +34,8 @@ export function Listado({
   sort: string;
   cursor: string;
   context: string;
+  /** Enlace a la página siguiente, con los mismos filtros; `null` si no hay más. */
+  siguiente: string | null;
   recargar: () => Promise<TraceSummary[]>;
   onLive: () => void;
 }) {
@@ -125,11 +128,8 @@ export function Listado({
         <span style={{ color: "var(--ink-3)" }}>
           {traces.length} trazas{page.next_cursor ? "" : " (todas las del rango)"}
         </span>
-        {page.next_cursor && (
-          <Link
-            className="btn small"
-            href={`/trazas?${context}&sort=${sort}&cursor=${encodeURIComponent(page.next_cursor)}`}
-          >
+        {siguiente && (
+          <Link className="btn small" href={siguiente}>
             Más antiguas →
           </Link>
         )}

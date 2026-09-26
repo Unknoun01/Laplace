@@ -84,7 +84,8 @@ SELECT
     if(request_model != '', concat(request_model, ' @ carga'), '')    AS price_rate,
     if(p IN (1, 3, 5),
        concat('[{{"role":"system","content":"', %(instrucciones)s,
-              '"}},{{"role":"user","content":"pregunta ', toString(t %% 997), '"}}]'),
+              '"}},{{"role":"user","content":"pregunta ', toString(t %% 997),
+              ' sobre el ticket TK', toString(t), '"}}]'),
        '')                                                            AS input_messages,
     if(p IN (1, 3, 5),
        concat('[{{"role":"assistant","content":"respuesta ', toString(n %% 5003), '"}}]'),
@@ -211,6 +212,20 @@ def medir(store: ClickHouseStore) -> dict[str, float]:
         "Lista de trazas, buscando «reservar»",
         lambda: store.list_traces(
             TraceFilter(project_id=GRANDE, since=desde, limit=50, search="reservar")
+        ),
+    )
+    # Un id que sale en una sola traza —lo que se busca de verdad— y un texto que sale
+    # en miles, donde el índice no puede descartar nada (D-144).
+    resultados["contenido raro"] = _medir(
+        "Buscar en el contenido un id («TK123456»)",
+        lambda: store.list_traces(
+            TraceFilter(project_id=GRANDE, since=desde, limit=50, content="TK123456")
+        ),
+    )
+    resultados["contenido común"] = _medir(
+        "Buscar en el contenido algo común",
+        lambda: store.list_traces(
+            TraceFilter(project_id=GRANDE, since=desde, limit=50, content="respuesta 17")
         ),
     )
     traza = store.list_traces(TraceFilter(project_id=GRANDE, since=desde, limit=1)).traces[0]

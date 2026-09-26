@@ -411,7 +411,8 @@ export interface Metric {
   previous: number | null;
   /** 0,25 = 25 % más. `null` si falta un lado o si el anterior era cero. */
   change_ratio: number | null;
-  unit: "money" | "tokens" | "count" | "duration" | string;
+  /** `ratio` es una proporción: 0,25 = 25 %. */
+  unit: "money" | "tokens" | "count" | "duration" | "ratio" | string;
   /** Por qué no hay cifra. Vacío cuando la hay. */
   unavailable: string;
 }

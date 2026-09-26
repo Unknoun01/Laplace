@@ -312,6 +312,7 @@ async def create_dataset(request: Request, body: DatasetIn) -> Dataset:
         status=body.filter.get("status") or None,
         session_id=body.filter.get("session_id") or None,
         search=body.filter.get("search") or None,
+        content=body.filter.get("content") or None,
         step_key=body.filter.get("step_key") or None,
         span_type=body.filter.get("span_type") or None,
         model=body.filter.get("model") or None,
