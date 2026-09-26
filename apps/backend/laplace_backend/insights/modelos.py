@@ -141,6 +141,9 @@ class Finding(BaseModel):
     #: Identidad del paso implicado. Es con lo que la ficha filtra «las trazas
     #: afectadas»: el título no sirve, porque lleva el llamante o una pista del prompt.
     step_key: str = ""
+    #: La última vez que ocurrió en la ventana. Si hace días que no ocurre, no se
+    #: promete ahorro por arreglarlo: se aparta como `desaparecido` (D-135).
+    last_seen: datetime | None = None
 
     #: Lo que el usuario ha dicho de él: `arreglado`, `ignorado`, o `reaparecido`
     #: cuando lo marcó como arreglado y sigue saliendo igual. Vacío si nada (D-123).

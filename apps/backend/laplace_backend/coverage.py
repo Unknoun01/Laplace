@@ -254,7 +254,14 @@ def _verdict(signals: list[Signal]) -> tuple[Level, bool]:
         return "sin-base", False
     orden = {"malo": 0, "flojo": 1, "sin-base": 2, "bien": 3}
     peor = min((s for s in cuentan), key=lambda s: orden[s.level])
-    return peor.level, peor.level in ("malo", "flojo")
+    # Delante del dinero sólo va lo que cambia cómo se lee el dinero. La versión de
+    # prompt no toca ninguna cifra del inicio: le sirve a la pestaña de Prompts, y ahí se
+    # dice. Con un solo prompt gestionado, abrir el inicio con «léelo antes que las
+    # cifras» era alarmar por algo que las cifras no necesitan (D-135).
+    delante = any(
+        s.level in ("malo", "flojo") for s in cuentan if s.key != "prompts"
+    )
+    return peor.level, delante
 
 
 def _reading(cobertura: Coverage) -> tuple[str, str]:
@@ -323,7 +330,7 @@ def _reading(cobertura: Coverage) -> tuple[str, str]:
             f"volverán a contar como uno."
         )
     return (
-        f"{aviso} Léelo antes que las cifras de abajo.",
+        f"{aviso} Léelo antes que las cifras de abajo." if cobertura.prominent else aviso,
         # El «qué hacer» ya sale debajo, en la señal que va mal: repetirlo aquí era
         # leer el mismo párrafo dos veces seguidas.
         f"{peor.consequence}{partidos}",

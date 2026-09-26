@@ -188,6 +188,12 @@ def _fixed_context_finding(
         # No se propone cachear, así que tampoco se apunta el ahorro de cachear: sería
         # prometer dinero por hacer lo que ya se está haciendo.
         ahorro = 0.0
+    if ahorro <= 0 and coste_lecturas <= 0 and get_price_table().lookup(usage.model):
+        # Hay tarifa y aun así no hay nada que recuperar cacheando: el paso manda su
+        # prefijo una vez por ejecución y la caché no sobrevive de una a otra (la
+        # suposición prudente), o el modelo no ofrece caché. Antes se llegaba aquí al
+        # «no tiene tarifa conocida» de abajo, que era falso (D-135).
+        return None
     if ahorro > 0:
         precio = f" Cachearlos ahorraría {_money(ahorro)} en esta ventana."
     elif coste_lecturas > 0:

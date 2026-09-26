@@ -10,6 +10,7 @@ from typing import Any
 
 import clickhouse_connect
 from laplace.schema import Span
+from laplace.semconv import EVAL_TAG
 
 from ..config import Settings
 from ._rows import (
@@ -59,6 +60,15 @@ _SCHEMA = Path(__file__).with_name("clickhouse_schema.sql")
 
 WINDOW_WHERE = "project_id = %(project_id)s AND start_time >= %(since)s AND start_time <= %(until)s"
 
+#: Las reglas no miran las tiradas de evaluación. Son gasto de verdad y se cuentan en el
+#: gasto, pero un experimento lanzado a propósito —el modelo caro contra el barato— no
+#: es un derroche que nadie haya visto, y el inicio lo enseñaba como tal (D-135). La
+#: etiqueta la lleva la raíz, así que se excluye por traza.
+RULES_WHERE = (
+    f"{WINDOW_WHERE} AND trace_id NOT IN (SELECT trace_id FROM spans WHERE {WINDOW_WHERE} "
+    f"AND has(tags, '{EVAL_TAG}'))"
+)
+
 #: Sobre el determinismo de estas consultas, que ya ha mordido una vez y por eso está
 #: escrito aquí arriba y no en un comentario suelto: **ninguna agregación de esta tabla
 #: puede escoger «una fila cualquiera»**. `any()` lo hace por definición, y `argMax(x, k)`
@@ -90,6 +100,7 @@ SELECT
     -- repiten lo mismo el mismo número de veces —el caso normal— devuelven un ejemplo
     -- cualquiera de las dos. SQLite desempata por el máximo del propio valor.
     argMax(dedup_hash, (n, dedup_hash)) AS hash_ejemplo,
+    max(ultima)                      AS ultima,
     uniqExact(trace_id)              AS trazas,
     sum(n)                           AS total_spans,
     sum(n - 1)                       AS extra_spans,
@@ -111,6 +122,7 @@ FROM (
         max(span_type)                     AS tipo,
         max(request_model)                 AS modelo,
         max(if(step_key != '', step_key, name)) AS paso,
+        max(start_time)                    AS ultima,
         count()                            AS n,
         sum(cost_total_usd)                AS coste,
         argMin(cost_total_usd, (start_time, span_id)) AS coste_primera,
@@ -126,7 +138,7 @@ FROM (
         sum(cost_rate_assumed)                   AS asumida,
         argMin(cost_rate_assumed, (start_time, span_id))    AS asumida_primera
     FROM spans FINAL
-    WHERE {WINDOW_WHERE} AND dedup_hash != ''
+    WHERE {RULES_WHERE} AND dedup_hash != ''
     GROUP BY trace_id, dedup_hash
     HAVING n >= %(min_repeats)s
 )
@@ -178,14 +190,19 @@ ORDER BY tramo
 #: Bucles: gemelo de `LOOP_GROUPS_SQL` de sqlite.py (D-109). Mismo criterio, mismos
 #: alias: el contrato entre los dos almacenes son los nombres de las columnas (D-066).
 LOOP_GROUPS_SQL = f"""
+-- Una vuelta se reconoce por su entrada sin números (`loop_hash`), DENTRO de una
+-- ejecución. El hallazgo, en cambio, es del PASO: agrupar también fuera por el hash
+-- abría una tarjeta por cada pregunta de usuario distinta, y con tráfico real no hay
+-- dos iguales (D-135). El hash que se devuelve es sólo un ejemplo para la ficha.
 SELECT
-    loop_hash                        AS hash_ejemplo,
+    max(loop_hash)                   AS hash_ejemplo,
+    max(ultima)                      AS ultima,
     max(etiqueta)                    AS nombre,
     max(pista)                       AS pista,
     max(sitio)                       AS sitio,
     max(tipo)                        AS tipo,
     max(modelo)                      AS modelo,
-    max(paso)                        AS paso,
+    paso_clave                       AS paso,
     uniqExact(trace_id)              AS trazas,
     sum(n)                           AS total_spans,
     sum(n - 1)                       AS extra_spans,
@@ -207,7 +224,8 @@ FROM (
         max(step_site)                     AS sitio,
         max(span_type)                     AS tipo,
         max(request_model)                 AS modelo,
-        max(if(step_key != '', step_key, name)) AS paso,
+        max(if(step_key != '', step_key, name)) AS paso_clave,
+        max(start_time)                    AS ultima,
         count()                            AS n,
         uniqExact(dedup_hash)              AS entradas,
         uniqExact(loop_out_hash)           AS salidas,
@@ -221,12 +239,12 @@ FROM (
         min(output_tokens)                 AS tok_out_primera,
         sum(cost_unknown)                  AS sin_tarifa
     FROM spans FINAL
-    WHERE {WINDOW_WHERE} AND loop_hash != ''
+    WHERE {RULES_WHERE} AND loop_hash != ''
     GROUP BY trace_id, loop_hash
     HAVING n >= %(min_vueltas)s AND entradas > 1 AND salidas <= %(max_salidas)s
 )
-GROUP BY loop_hash
-ORDER BY extra_spans DESC, loop_hash
+GROUP BY paso_clave
+ORDER BY extra_spans DESC, paso_clave
 LIMIT %(limit)s
 """
 
@@ -243,6 +261,8 @@ SELECT
     max(if(step_label != '', step_label, name)) AS paso,
     max(step_hint)           AS pista,
     max(step_site)           AS sitio,
+    max(prompt_name)         AS prompt,
+    max(prompt_version)      AS version_prompt,
     request_model,
     count()                  AS llamadas,
     uniqExact(trace_id)      AS trazas,
@@ -266,9 +286,10 @@ SELECT
     quantileExactIf(0.5)(output_tokens, status != 'error') AS mediana_salida,
     -- `min` y no `any`: es lo que hace SQLite, y una traza de ejemplo que cambia entre
     -- almacenes manda a dos personas a mirar ejecuciones distintas del mismo hallazgo.
+    max(start_time)          AS ultima,
     min(trace_id)            AS traza_ejemplo
 FROM spans FINAL
-WHERE {WINDOW_WHERE} AND span_type = 'llm' AND request_model != ''
+WHERE {RULES_WHERE} AND span_type = 'llm' AND request_model != ''
 GROUP BY if(step_key != '', step_key, name), request_model
 HAVING llamadas >= %(min_calls)s
 ORDER BY coste DESC, paso_clave, request_model
@@ -637,6 +658,7 @@ class ClickHouseStore:
                 extra_assumed_rate_spans=int(r["extra_asumida"] or 0),
                 max_per_trace=int(r["max_por_traza"]),
                 sample_trace_id=r["traza_ejemplo"],
+                last_seen=_utc(r["ultima"]) if r["ultima"] else None,
             )
             for r in _named(self._client.query(sql, parameters=params))
         ]
@@ -671,6 +693,7 @@ class ClickHouseStore:
                 extra_output_tokens=int(r["extra_tok_out"] or 0),
                 extra_unknown_cost_spans=int(r["extra_sin_tarifa"] or 0),
                 sample_trace_id=r["traza_ejemplo"],
+                last_seen=_utc(r["ultima"]) if r["ultima"] else None,
             )
             for r in _named(self._client.query(LOOP_GROUPS_SQL, parameters=params))
         ]
@@ -690,6 +713,8 @@ class ClickHouseStore:
                 key=r["paso_clave"],
                 name=r["paso"],
                 hint=r["pista"],
+                prompt_name=r["prompt"] or "",
+                prompt_version=int(r["version_prompt"] or 0),
                 model=r["request_model"],
                 calls=int(r["llamadas"]),
                 traces=int(r["trazas"]),
@@ -710,6 +735,7 @@ class ClickHouseStore:
                 p50_duration_ms=float(r["mediana"] or 0.0),
                 p50_output_tokens=float(r["mediana_salida"] or 0.0),
                 sample_trace_id=r["traza_ejemplo"],
+                last_seen=_utc(r["ultima"]) if r["ultima"] else None,
             )
             for r in _named(self._client.query(sql, parameters=params))
         ]

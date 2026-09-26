@@ -82,6 +82,34 @@ jobs:
         env:
           LAPLACE_EXPORT: "1"
 
+  # Las pantallas en Chromium, con la demo de un mes cargada (test_pantallas.py). Los
+  # fallos que más han dolido se veían en pantalla y en ninguna aserción del backend.
+  pantallas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Interfaz exportada, como la sirve laplace ui
+        run: |
+          npm --prefix apps/web ci --no-audit --no-fund
+          LAPLACE_EXPORT=1 npm --prefix apps/web run build
+      - name: SDK, backend y Playwright
+        run: |
+          pip install -e packages/sdk-python
+          pip install -e "apps/backend[dev]" "playwright>=1.45"
+          python -m playwright install --with-deps chromium
+      - name: Pantallas
+        run: pytest -q apps/backend/tests/test_pantallas.py
+
   compose:
     runs-on: ubuntu-latest
     timeout-minutes: 5

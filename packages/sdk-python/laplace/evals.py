@@ -160,7 +160,7 @@ def run_dataset(
             f"eval:{variant}",
             type=semconv.SPAN_TYPE_AGENT,
             input=caso.input,
-            tags=["laplace-eval", f"variant:{variant}"],
+            tags=[semconv.EVAL_TAG, f"variant:{variant}"],
             metadata={"eval.case_id": caso.id, "eval.variant": variant},
         ):
             trace_id = get_current_trace_id() or ""

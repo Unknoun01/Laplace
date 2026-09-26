@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from laplace.schema import Span
+from laplace.semconv import EVAL_TAG
 
 from ._rows import (
     COLUMNS,
@@ -184,6 +185,15 @@ INDICES_TARDIOS = (
 
 WINDOW_WHERE = "project_id = :project_id AND start_time >= :since AND start_time <= :until"
 
+#: Las reglas no miran las tiradas de evaluación. Son gasto de verdad y se cuentan en el
+#: gasto, pero un experimento lanzado a propósito —el modelo caro contra el barato— no
+#: es un derroche que nadie haya visto, y el inicio lo enseñaba como tal (D-135). La
+#: etiqueta la lleva la raíz, así que se excluye por traza.
+RULES_WHERE = (
+    f"{WINDOW_WHERE} AND trace_id NOT IN (SELECT trace_id FROM spans WHERE {WINDOW_WHERE} "
+    f"AND tags LIKE '%\"{EVAL_TAG}\"%')"
+)
+
 #: El mismo paso, con la misma entrada, repetido dentro de una misma traza.
 #:
 #: Se detecta por entrada repetida y se reporta por paso (D-062). SQLite no tiene
@@ -192,7 +202,7 @@ WINDOW_WHERE = "project_id = :project_id AND start_time >= :since AND start_time
 REPEATED_GROUPS_SQL = f"""
 WITH numerados AS (
     SELECT
-        trace_id, dedup_hash, span_type, request_model, name,
+        trace_id, dedup_hash, span_type, request_model, name, start_time,
         cost_total_usd, duration_ms, input_tokens, output_tokens,
         cost_unknown, cost_rate_assumed,
         CASE WHEN step_key   != '' THEN step_key   ELSE name END AS paso,
@@ -202,7 +212,7 @@ WITH numerados AS (
             PARTITION BY trace_id, dedup_hash ORDER BY start_time, span_id
         ) AS orden
     FROM spans
-    WHERE {WINDOW_WHERE} AND dedup_hash != ''
+    WHERE {RULES_WHERE} AND dedup_hash != ''
 ),
 por_traza AS (
     SELECT
@@ -214,6 +224,7 @@ por_traza AS (
         MAX(step_site)     AS sitio,
         MAX(span_type)     AS tipo,
         MAX(request_model) AS modelo,
+        MAX(start_time)    AS ultima,
         COUNT(*)           AS n,
         SUM(CASE WHEN orden > 1 THEN cost_total_usd ELSE 0 END) AS extra_coste,
         SUM(CASE WHEN orden > 1 THEN duration_ms    ELSE 0 END) AS extra_duracion,
@@ -234,6 +245,7 @@ SELECT
     MAX(sitio)                                             AS sitio,
     MAX(tipo)                                              AS tipo,
     substr(MAX(printf('%012d', n) || dedup_hash), 13)      AS hash_ejemplo,
+    MAX(ultima)                                            AS ultima,
     COUNT(DISTINCT trace_id)                               AS trazas,
     SUM(n)                                                 AS total_spans,
     SUM(n - 1)                                             AS extra_spans,
@@ -269,7 +281,7 @@ WITH ordenadas AS (
             PARTITION BY CASE WHEN step_key != '' THEN step_key ELSE name END, request_model
         ) AS n
     FROM spans
-    WHERE {WINDOW_WHERE} AND span_type = 'llm' AND request_model != '' AND status != 'error'
+    WHERE {RULES_WHERE} AND span_type = 'llm' AND request_model != '' AND status != 'error'
 )
 SELECT
     paso_clave,
@@ -294,7 +306,8 @@ WITH por_traza AS (
         MAX(step_site)                     AS sitio,
         MAX(span_type)                     AS tipo,
         MAX(request_model)                 AS modelo,
-        MAX(CASE WHEN step_key != '' THEN step_key ELSE name END) AS paso,
+        MAX(CASE WHEN step_key != '' THEN step_key ELSE name END) AS paso_clave,
+        MAX(start_time)                    AS ultima,
         COUNT(*)                           AS n,
         COUNT(DISTINCT dedup_hash)         AS entradas,
         COUNT(DISTINCT loop_out_hash)      AS salidas,
@@ -308,18 +321,23 @@ WITH por_traza AS (
         MIN(input_tokens)                  AS tok_in_primera,
         MIN(output_tokens)                 AS tok_out_primera
     FROM spans
-    WHERE {WINDOW_WHERE} AND loop_hash != ''
+    WHERE {RULES_WHERE} AND loop_hash != ''
     GROUP BY trace_id, loop_hash
     HAVING n >= :min_vueltas AND entradas > 1 AND salidas <= :max_salidas
 )
+-- Una vuelta se reconoce por su entrada sin números (`loop_hash`), DENTRO de una
+-- ejecución. El hallazgo, en cambio, es del PASO: agrupar también fuera por el hash
+-- abría una tarjeta por cada pregunta de usuario distinta, y con tráfico real no hay
+-- dos iguales (D-135). El hash que se devuelve es sólo un ejemplo para la ficha.
 SELECT
-    loop_hash                          AS hash_ejemplo,
+    MAX(loop_hash)                     AS hash_ejemplo,
+    MAX(ultima)                        AS ultima,
     MAX(etiqueta)                      AS nombre,
     MAX(pista)                         AS pista,
     MAX(sitio)                         AS sitio,
     MAX(tipo)                          AS tipo,
     MAX(modelo)                        AS modelo,
-    MAX(paso)                          AS paso,
+    paso_clave                         AS paso,
     COUNT(DISTINCT trace_id)           AS trazas,
     SUM(n)                             AS total_spans,
     SUM(n - 1)                         AS extra_spans,
@@ -333,8 +351,8 @@ SELECT
     SUM(sin_tarifa)                    AS extra_sin_tarifa,
     MAX(trace_id)                      AS traza_ejemplo
 FROM por_traza
-GROUP BY loop_hash
-ORDER BY extra_spans DESC, loop_hash
+GROUP BY paso_clave
+ORDER BY extra_spans DESC, paso_clave
 LIMIT :limit
 """
 
@@ -345,6 +363,8 @@ SELECT
     MAX(CASE WHEN step_label != '' THEN step_label ELSE name END) AS paso,
     MAX(step_hint)                                  AS pista,
     MAX(step_site)                                  AS sitio,
+    MAX(prompt_name)                                AS prompt,
+    MAX(prompt_version)                             AS version_prompt,
     request_model,
     COUNT(*)                                        AS llamadas,
     COUNT(DISTINCT trace_id)                        AS trazas,
@@ -363,9 +383,10 @@ SELECT
     MIN(CASE WHEN status != 'error' AND input_tokens > 0 THEN input_tokens END)
                                                     AS min_entrada,
     SUM(duration_ms)                                AS duracion,
+    MAX(start_time)                                 AS ultima,
     MIN(trace_id)                                   AS traza_ejemplo
 FROM spans
-WHERE {WINDOW_WHERE} AND span_type = 'llm' AND request_model != ''
+WHERE {RULES_WHERE} AND span_type = 'llm' AND request_model != ''
 GROUP BY paso_clave, request_model
 HAVING llamadas >= :min_calls
 ORDER BY coste DESC, paso_clave, request_model
@@ -800,6 +821,7 @@ class SQLiteStore:
                 extra_assumed_rate_spans=int(r["extra_asumida"] or 0),
                 max_per_trace=int(r["max_por_traza"]),
                 sample_trace_id=r["traza_ejemplo"],
+                last_seen=utc(r["ultima"]) if r["ultima"] else None,
             )
             for r in self._query(REPEATED_GROUPS_SQL, params)
         ]
@@ -832,6 +854,7 @@ class SQLiteStore:
                 extra_output_tokens=int(r["extra_tok_out"] or 0),
                 extra_unknown_cost_spans=int(r["extra_sin_tarifa"] or 0),
                 sample_trace_id=r["traza_ejemplo"],
+                last_seen=utc(r["ultima"]) if r["ultima"] else None,
             )
             for r in self._query(LOOP_GROUPS_SQL, params)
         ]
@@ -851,6 +874,8 @@ class SQLiteStore:
                 name=r["paso"],
                 hint=r["pista"] or "",
                 site=r["sitio"] or "",
+                prompt_name=r["prompt"] or "",
+                prompt_version=int(r["version_prompt"] or 0),
                 model=r["request_model"],
                 calls=int(r["llamadas"]),
                 traces=int(r["trazas"]),
@@ -869,6 +894,7 @@ class SQLiteStore:
                 min_input_tokens=int(r["min_entrada"] or 0),
                 duration_ms=float(r["duracion"] or 0.0),
                 sample_trace_id=r["traza_ejemplo"],
+                last_seen=utc(r["ultima"]) if r["ultima"] else None,
             )
             for r in self._query(MODEL_USAGE_SQL, params)
         ]

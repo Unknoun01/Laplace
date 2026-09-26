@@ -148,3 +148,8 @@ SYSTEM_AZURE_OPENAI = "az.ai.openai"
 SYSTEM_GOOGLE = "gcp.gemini"
 SYSTEM_MISTRAL = "mistral_ai"
 SYSTEM_COHERE = "cohere"
+
+
+#: Etiqueta de la raíz de cada ejecución lanzada por `run_dataset`. El backend la usa
+#: para que un experimento hecho a propósito no salga como algo que arreglar (D-135).
+EVAL_TAG = "laplace-eval"

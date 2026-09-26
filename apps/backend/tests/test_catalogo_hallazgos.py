@@ -151,10 +151,13 @@ def almacen_con_los_cuatro_tipos(tmp_path):
 
     # Reglas 2 y 3 — un paso corto, con un suelo grande de entrada y sin caché, que usa
     # un modelo con alternativa más barata. Doce llamadas: pasa el mínimo de las dos.
+    # Dos por ejecución: con una sola, la caché no se reutiliza nunca y no hay contexto
+    # fijo que recuperar. Antes salía igual, diciendo que el modelo no tenía tarifa, que
+    # era falso (D-135).
     for t in range(12):
         spans.append(
             _span(
-                f"caro-{t}",
+                f"caro-{t // 2}",
                 paso="resumir",
                 clave="k-resumir",
                 entrada_tokens=3_200,

@@ -49,6 +49,7 @@ dev = [
 # estar en el grupo y nadie la echa de menos.
 markers = [
     "modelo_local: necesita un servidor de modelos local escuchando (ver docs/tests-con-modelo-local.md)",
+    "pantallas: abre la interfaz en Chromium con Playwright (se salta sin él o sin la interfaz construida)",
 ]
 filterwarnings = ["error::pytest.PytestUnknownMarkWarning"]
 

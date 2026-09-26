@@ -443,11 +443,10 @@ async def load_demo(request: Request) -> dict[str, Any]:
         raise _solo_instalacion("cargar datos de ejemplo")
     if request.app.state.settings.store != "sqlite":
         raise HTTPException(status_code=404, detail="los datos de ejemplo sólo existen en local")
-    from laplace.demo import enviar_trazas_de_ejemplo
+    from .demo import cargar_demo
 
     origen = str(request.base_url).rstrip("/")
-    enviadas = await run_in_threadpool(enviar_trazas_de_ejemplo, origen, "demo")
-    return {"project_id": "demo", "traces": enviadas}
+    return await run_in_threadpool(cargar_demo, origen, _store(request), _meta(request))
 
 
 @router.delete("/projects")

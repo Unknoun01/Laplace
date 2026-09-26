@@ -270,8 +270,11 @@ export interface Finding {
   /** Identidad exacta del paso: con ella se filtran «las trazas afectadas». */
   step_key: string;
   /** Lo que el usuario ha dicho de él (D-123). Vacío si nada. */
-  state: "" | "arreglado" | "ignorado" | "reaparecido";
+  /** `desaparecido`: dejó de ocurrir dentro del rango sin que nadie lo marcara (D-135). */
+  state: "" | "arreglado" | "ignorado" | "reaparecido" | "desaparecido";
   state_at: string | null;
+  /** Última vez que ocurrió en el rango. */
+  last_seen: string | null;
   state_note: string;
   fix_check: FixCheck | null;
 }

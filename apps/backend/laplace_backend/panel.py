@@ -635,7 +635,7 @@ def attribute(
                         else f"El paso «{etiqueta}» se lleva {_share(parte)}: cuesta más "
                         f"por ejecución que en el resto del rango."
                     ),
-                    evidence=f"{cifras.dinero_exacto(de_mas)} por encima de lo que costaba antes.",
+                    evidence=f"{cifras.dinero(de_mas)} por encima de lo que costaba antes.",
                 )
             )
 

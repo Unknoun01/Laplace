@@ -60,7 +60,9 @@ def _loop_finding(
         )
 
     return Finding(
-        id=f"bucle:{group.loop_hash}",
+        # Por paso y no por `loop_hash`: el hash es de una entrada concreta, y el
+        # hallazgo es del paso entero (D-135).
+        id=f"bucle:{group.step_key or group.loop_hash}",
         kind="bucle",
         title=f"«{group.name}» da hasta {group.max_per_trace} vueltas sin avanzar",
         lead="Cada vuelta cambia un número y la respuesta no cambia: sale por el tope.",
