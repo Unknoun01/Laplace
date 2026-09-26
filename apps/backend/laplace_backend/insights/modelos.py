@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from .. import cifras
 from ..coverage import Coverage
 from ..storage.base import Window, WindowSummary
+from ..textos import t, tn
 
 logger = logging.getLogger("laplace.insights")
 
@@ -308,11 +309,11 @@ def _scope_label(affected: int, total: int) -> str:
         return ""
     ratio = affected / total
     if ratio >= 0.995:
-        return "En todas las ejecuciones"
+        return t("alcance.todas")
     de_cada = round(ratio * 10)
     if de_cada >= 1:
-        return f"{de_cada} de cada 10 ejecuciones"
-    return f"{affected} de {total} ejecuciones"
+        return t("alcance.de_cada_10", n=de_cada)
+    return t("alcance.de_total", n=cifras.miles(affected), total=cifras.miles(total))
 
 
 def _miles(n: float) -> str:
@@ -321,27 +322,35 @@ def _miles(n: float) -> str:
 
 
 def _seconds(ms: float) -> str:
-    """Una espera, con coma española: «4,6 s», nunca «4.6 s» (D-120)."""
+    """Una espera con los separadores del idioma: «4,6 s» en español, «4.6 s» en inglés."""
     if ms < 1000:
         return f"{_miles(round(ms))} ms"
     return f"{cifras.decimal(ms / 1000)} s"
 
 
-def span_label(days: float) -> str:
-    """Una duración en palabras: «12 minutos», «1 hora», «5,2 horas», «2,5 días»."""
+def _medida(days: float) -> tuple[str, float] | None:
+    """La unidad que se lee mejor y la cifra en ella, o `None` si es menos de un minuto.
+
+    Espejo de `medir()` en `apps/web/lib/format.ts`.
+    """
     if days >= 1:
-        if abs(days - 1) < 0.05:
-            return "1 día"
-        return f"{_decimal(days)} días"
+        return ("dias", 1 if abs(days - 1) < 0.05 else days)
     horas = days * 24
     if horas >= 1.5:
-        return f"{_decimal(horas)} horas"
+        return ("horas", horas)
     if horas >= 0.95:
-        return "1 hora"
+        return ("horas", 1)
     minutos = round(horas * 60)
-    if minutos <= 0:
-        return "menos de un minuto"
-    return "1 minuto" if minutos == 1 else f"{minutos} minutos"
+    return None if minutos <= 0 else ("minutos", minutos)
+
+
+def span_label(days: float) -> str:
+    """Una duración en palabras: «12 minutos», «1 hora», «5,2 horas», «2,5 días»."""
+    medida = _medida(days)
+    if medida is None:
+        return t("tiempo.menos_de_un_minuto")
+    unidad, n = medida
+    return tn(f"tiempo.{unidad}", n, n=_decimal(n))
 
 
 def _money(value: float) -> str:
@@ -361,18 +370,11 @@ def window_label(days: float) -> str:
     exactamente lo que hacía la proyección mensual sobre una hora de datos. Vive aquí
     porque lo usan la API, las alertas y —traducido a TypeScript— la interfaz.
     """
-    texto = span_label(days)
-    if texto == "menos de un minuto":
-        return texto
-    if texto == "1 hora":
-        return "la última hora"
-    if texto == "1 día":
-        return "el último día"
-    if texto == "1 minuto":
-        return "el último minuto"
-    if texto.endswith("horas"):
-        return f"las últimas {texto}"
-    return f"los últimos {texto}"
+    medida = _medida(days)
+    if medida is None:
+        return t("tiempo.menos_de_un_minuto")
+    unidad, n = medida
+    return tn(f"ventana.{unidad}", n, n=_decimal(n))
 
 
 def _floor_flags(unknown: int, assumed: int, models: Any = ()) -> dict[str, Any]:
@@ -404,12 +406,11 @@ def _projection_sentence(finding: Finding) -> str:
     problema que arregla D-073.
     """
     if finding.monthly_saving_usd is None:
-        return (
-            f" No se proyecta a mes: el mínimo para proyectar es "
-            f"{span_label(MIN_DAYS_FOR_PROJECTION)} de datos, y de momento hay "
-            f"{span_label(finding.observed_days)}."
+        return t(
+            "proyeccion.no",
+            minimo=span_label(MIN_DAYS_FOR_PROJECTION),
+            hay=span_label(finding.observed_days),
         )
-    return (
-        f" La proyección mensual extrapola ese ritmo de "
-        f"{window_label(finding.observed_days)} a {DAYS_PER_MONTH} días."
+    return t(
+        "proyeccion.si", ventana=window_label(finding.observed_days), dias=DAYS_PER_MONTH
     )
