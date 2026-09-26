@@ -2441,3 +2441,12 @@ servidor que responde como OpenAI, exportando a `laplace ui`. Lo que salió:
 El paquete fino `@laplace/sdk` (`init`, `observe`, `getPrompt`) espera a que el usuario
 reserve el scope en npm. Mutaciones comprobadas: no convertir los ids, quitar la grafía
 `parentSpanId`, no leer `gen_ai.provider.name` y no leer `parts`; todas en rojo.
+
+### D-140 — La prueba inestable era un servidor falso que no leía el cuerpo
+`test_el_notificador_no_sigue_redirecciones` fallaba una de cada catorce veces con
+`ConnectionAbortedError` (36 de 500 en un bucle). Su servidor falso contestaba 302 sin
+leer el cuerpo del POST y cerraba; en Windows, cerrar un socket con datos sin leer manda
+un RST, y el cliente veía la conexión anulada antes de leer la respuesta. El fallo era de
+la prueba, no del notificador: ahora el servidor lee el cuerpo antes de contestar. 0 de
+2.000 en el mismo bucle, y la prueba sigue mordiendo: con un `build_opener()` que sí
+sigue redirecciones se pone en rojo.

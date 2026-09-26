@@ -391,6 +391,11 @@ def test_el_notificador_no_sigue_redirecciones():
 
     class Redirige(http.server.BaseHTTPRequestHandler):
         def do_POST(self):  # noqa: N802
+            # Leer el cuerpo antes de contestar. Si no, el socket se cierra con datos sin
+            # leer, Windows manda un RST y el cliente ve «conexión anulada» en vez del
+            # 302: fallaba una de cada catorce veces, y era la prueba inestable que la
+            # hoja de ruta tenía sin identificar (D-140).
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
             self.send_response(302)
             self.send_header("Location", "http://169.254.169.254/latest/meta-data")
             self.end_headers()
