@@ -14,6 +14,5 @@ Cuando llegue, tiene que cumplir lo mismo que el de Python:
   `@anthropic-ai/sdk`.
 - No romper nunca el programa que observa.
 
-Mientras tanto, cualquier proceso de Node instrumentado con OpenTelemetry estándar ya
-puede exportar a Laplace apuntando `OTEL_EXPORTER_OTLP_ENDPOINT` al backend: la ingesta
-es OTLP puro.
+Mientras tanto, un agente en Node se instrumenta con OpenInference u OpenLLMetry y se
+apunta a Laplace: la guía, probada, está en [`docs/typescript.md`](../../docs/typescript.md).

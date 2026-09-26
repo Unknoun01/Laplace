@@ -2410,7 +2410,34 @@ esos dos proveedores. Debajo va ahora la tabla comunitaria de LiteLLM
 
 Pendiente: los hallazgos y el panel no distinguen todavía cifras con tarifa no
 verificada (sí el span, la traza y la ficha técnica), y la traza agregada no lleva la
-marca. Pruebas en `test_precios_litellm.py` (23); ocho mutaciones comprobadas —que
+marca. Pruebas en `test_precios_litellm.py` (22); ocho mutaciones comprobadas —que
 LiteLLM mande, pelar antes, quitar la marca, convertirla en asumida, dejar entrar los
 modelos gratis o los que no son de texto, no derivar la marca al leer y no pasar a
 millones— y todas ponen alguna en rojo.
+
+### D-139 — Agentes en TypeScript: la guía, y dos fallos de la ingesta que destapó
+La guía (`docs/typescript.md`) no se ha escrito de memoria: un agente en Node con
+`openai` 7.23 se ha instrumentado con OpenInference-js y con OpenLLMetry-js, contra un
+servidor que responde como OpenAI, exportando a `laplace ui`. Lo que salió:
+
+* **El exportador JSON de Node guardaba ids inventados.** OTLP/JSON manda los ids de
+  traza y de span en hexadecimal; el JSON genérico de protobuf los espera en base64. Un
+  id hexadecimal de 32 caracteres también es base64 válido, así que se leía sin error y
+  se guardaba un id de 24 bytes que no existía. Ahora se pasan a base64 antes de leer,
+  en las dos grafías de los campos; se distinguen por el largo (32/16 caracteres en
+  hexadecimal, 24/12 en base64), así que lo que ya venía en base64 sigue valiendo.
+  `test_otlp_json.py`.
+* **Las convenciones GenAI nuevas.** OpenLLMetry-js 0.27 ya manda `gen_ai.provider.name`
+  en vez de `gen_ai.system`, y los mensajes con el texto en `parts` en vez de `content`.
+  Lo primero dejaba el proveedor vacío; lo segundo dejaba la huella del paso sin
+  instrucciones, así que dos pasos con prompts distintos caían en uno. Se leen los dos.
+  Los mensajes se siguen guardando en crudo, como dice el contrato.
+* **Lo que no se puede arreglar desde aquí.** OpenLLMetry-js no manda los tokens leídos
+  de caché de OpenAI aunque la respuesta los traiga: el coste sale por encima de la
+  factura y Laplace no tiene cómo saberlo. La guía lo dice y recomienda OpenInference
+  para OpenAI. Y con estos instrumentadores sólo llegan las instrucciones, no el camino
+  de llamada, así que dos pasos con el mismo prompt se agrupan juntos.
+
+El paquete fino `@laplace/sdk` (`init`, `observe`, `getPrompt`) espera a que el usuario
+reserve el scope en npm. Mutaciones comprobadas: no convertir los ids, quitar la grafía
+`parentSpanId`, no leer `gen_ai.provider.name` y no leer `parts`; todas en rojo.

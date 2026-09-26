@@ -11,6 +11,7 @@ que el estándar no hace y que el producto necesita:
 
 from __future__ import annotations
 
+import base64
 import gzip
 import hashlib
 import json
@@ -68,6 +69,44 @@ def _gunzip(body: bytes, maximo: int) -> bytes:
     return salida + descompresor.flush()
 
 
+#: Campos de id en OTLP/JSON, en las dos grafías que acepta el parser, con su largo en
+#: bytes. La especificación los manda en hexadecimal; el JSON genérico de protobuf, en
+#: base64. Por el largo no se confunden: 16 bytes son 32 caracteres en hexadecimal y 24
+#: en base64, y 8 bytes son 16 y 12.
+_CAMPOS_ID = {
+    "traceId": 16,
+    "trace_id": 16,
+    "spanId": 8,
+    "span_id": 8,
+    "parentSpanId": 8,
+    "parent_span_id": 8,
+}
+_HEX = re.compile(r"^[0-9a-fA-F]*$")
+
+
+def _ids_a_base64(datos: Any) -> Any:
+    """Pasa a base64 los ids que vienen en hexadecimal, como manda OTLP/JSON.
+
+    Es lo que envía el exportador por defecto de OpenTelemetry para Node. Un id
+    hexadecimal de 32 caracteres también es base64 válido, así que sin esto se leía sin
+    error y se guardaba **otro** id: las trazas de un agente en TypeScript llegaban con
+    ids inventados y el árbol deshecho.
+    """
+    if isinstance(datos, list):
+        return [_ids_a_base64(x) for x in datos]
+    if not isinstance(datos, dict):
+        return datos
+    salida = {}
+    for clave, valor in datos.items():
+        largo = _CAMPOS_ID.get(clave)
+        if largo and isinstance(valor, str) and len(valor) == largo * 2 and _HEX.match(valor):
+            valor = base64.b64encode(bytes.fromhex(valor)).decode("ascii")
+        elif isinstance(valor, (dict, list)):
+            valor = _ids_a_base64(valor)
+        salida[clave] = valor
+    return salida
+
+
 def decode_request(
     body: bytes,
     content_type: str = "",
@@ -85,9 +124,9 @@ def decode_request(
 
     request = ExportTraceServiceRequest()
     if "json" in (content_type or "").lower():
-        from google.protobuf.json_format import Parse
+        from google.protobuf.json_format import ParseDict
 
-        Parse(body.decode("utf-8"), request)
+        ParseDict(_ids_a_base64(json.loads(body.decode("utf-8"))), request)
     else:
         request.ParseFromString(body)
     return request
@@ -234,11 +273,21 @@ def _system_text(messages: list[dict[str, Any]]) -> str:
         if str(message.get("role", "")).lower() not in ROLES_DE_INSTRUCCIONES:
             continue
         content = message.get("content")
+        if content is None and isinstance(message.get("parts"), list):
+            # Las convenciones GenAI nuevas llevan el texto en `parts`, no en `content`.
+            content = _texto_de_parts(message["parts"])
         if isinstance(content, str):
             partes.append(content)
         elif content is not None:
             partes.append(json.dumps(content, sort_keys=True, ensure_ascii=False, default=str))
     return "\n".join(partes)
+
+
+def _texto_de_parts(parts: list[Any]) -> Any:
+    """El texto de un mensaje en `parts`, si todo son partes de texto; si no, tal cual."""
+    if parts and all(isinstance(p, dict) and p.get("type") == "text" for p in parts):
+        return "".join(str(p.get("content", "")) for p in parts)
+    return parts
 
 
 def _tool_names(raw: Any) -> list[str]:
@@ -526,7 +575,9 @@ def _build_llm(attrs: dict[str, Any], prices: Any) -> LLMAttributes:
         finish = [finish]
 
     return LLMAttributes(
-        system=_str_or_none(attrs.get(semconv.GEN_AI_SYSTEM)),
+        # `gen_ai.provider.name` es el nombre que le dan las convenciones GenAI nuevas,
+        # y el que ya manda OpenLLMetry-js.
+        system=_str_or_none(attrs.get(semconv.GEN_AI_SYSTEM) or attrs.get("gen_ai.provider.name")),
         request_model=request_model,
         response_model=response_model,
         response_id=_str_or_none(attrs.get(semconv.GEN_AI_RESPONSE_ID)),
