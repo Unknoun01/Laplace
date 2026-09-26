@@ -61,7 +61,7 @@ function Contenido() {
           Lo que cuesta una ejecución de tu agente. Es la cifra que importa: un gasto que
           sube porque hay más trabajo no es un problema, y esto lo separa.
         </p>
-        <div className="mgrid">
+        <div className="mgrid seis">
           {panel.per_execution.map((m) => (
             <MetricCard key={m.label} metric={m} currency={panel.currency} destacada />
           ))}
@@ -183,7 +183,10 @@ function QuienGasta({ project, days, currency }: { project: string; days: number
   );
 }
 
-/** «0 %» para un usuario que sí gasta algo se lee como que no gasta nada. */
+/**
+ * «0 %» para algo que sí ocurre se lee como que no ocurre nada: un usuario que gasta, o
+ * un agente que falla de vez en cuando.
+ */
 function porcentajeDelGasto(ratio: number): string {
   if (ratio > 0 && ratio < 0.001) return "< 0,1 %";
   return `${decimal(ratio * 100)} %`;
@@ -238,6 +241,8 @@ function formatear(value: number, unit: string, currency: string): string {
   if (unit === "money") return money(value, currency);
   if (unit === "tokens") return tokens(Math.round(value));
   if (unit === "duration") return duration(value);
+  // Ejecuciones con error: un 0,05 % no es «0 %», que se leería como que no falla nada.
+  if (unit === "ratio") return porcentajeDelGasto(value);
   return number(Math.round(value * 10) / 10);
 }
 

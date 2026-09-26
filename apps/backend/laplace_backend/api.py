@@ -131,6 +131,9 @@ async def list_traces(
     session_id: str | None = None,
     user_id: str | None = None,
     search: str | None = None,
+    #: Texto a buscar dentro de prompts, respuestas y herramientas. Con menos de tres
+    #: caracteres casa casi todo y ningún índice ayuda (D-144).
+    content: str | None = Query(None, min_length=3, max_length=200),
     #: Identidad exacta de un paso: la que trae cada hallazgo en `step_key`.
     step_key: str | None = None,
     span_type: str | None = None,
@@ -156,6 +159,7 @@ async def list_traces(
         session_id=session_id,
         user_id=user_id,
         search=search,
+        content=content,
         step_key=step_key,
         span_type=span_type,
         sort=sort,

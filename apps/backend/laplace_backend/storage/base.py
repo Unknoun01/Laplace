@@ -6,6 +6,7 @@ punto 7) entrará por esta misma interfaz sin tocar la API ni el frontend (D-015
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from typing import Any, Protocol, runtime_checkable
@@ -34,6 +35,10 @@ class TraceFilter:
     user_id: str | None = None
     #: Busca en el nombre de los spans y en el id de la traza.
     search: str | None = None
+    #: Busca en el contenido: prompts, respuestas, argumentos y salidas de herramientas,
+    #: consultas y documentos recuperados, entrada y salida de cada paso. Sin distinguir
+    #: mayúsculas y sólo dentro de la ventana, que es lo que la hace asumible (D-144).
+    content: str | None = None
     #: Identidad exacta de un paso (`step_key`, o el nombre si no la tiene). Es lo que
     #: usa «Ver las trazas afectadas» de un hallazgo: buscar por texto confundía
     #: `consultar_manual` con `consultar_manual_cacheado`, y en los hallazgos cuyo
@@ -253,6 +258,32 @@ class ModelUsage:
     #: Última vez que se vio en la ventana. Lo que dejó de ocurrir no se proyecta como
     #: ahorro futuro: sería prometer dinero por arreglar algo que ya no pasa (D-135).
     last_seen: datetime | None = None
+
+
+@dataclass
+class Latency:
+    """Lo que tarda una ejecución de principio a fin, en la ventana (D-145).
+
+    Mediana y p95, no media: con agentes, unas pocas ejecuciones colgadas llevan la
+    media a una cifra que no es la espera de nadie. `None` si no hubo ejecuciones.
+    """
+
+    traces: int = 0
+    p50_ms: float | None = None
+    p95_ms: float | None = None
+
+
+def nearest_rank(ordenados: list[float], q: float) -> float | None:
+    """Percentil de rango más cercano: el valor en la posición `ceil(q·n)`.
+
+    Es el de una ejecución que existió, no una interpolación entre dos, y se calcula
+    igual en los dos almacenes: ClickHouse lo hace con el mismo índice sobre su array.
+    """
+    if not ordenados:
+        return None
+    rango = max(1, math.ceil(round(q * len(ordenados), 9)))
+    return ordenados[min(rango, len(ordenados)) - 1]
+
 
 @dataclass
 class Bucket:
@@ -619,6 +650,9 @@ class SpanStore(Protocol):
         self, project_id: str, window: Window, bucket_minutes: int
     ) -> list[Bucket]:
         """La ventana troceada en tramos, agregada por ejecución (panel, Fase 4)."""
+
+    def trace_latency(self, project_id: str, window: Window) -> Latency:
+        """Mediana y p95 de la duración de las ejecuciones (panel, D-145)."""
 
     def window_facts(
         self, project_id: str, since: datetime, until: datetime

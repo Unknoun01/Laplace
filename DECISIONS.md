@@ -2558,3 +2558,74 @@ Medido contra ClickHouse con 2 millones de spans: primera apertura 2,6 s; despu�
 que tarda** (unos 4 s con 10 millones al día); los preagregados siguen siendo la vía si
 eso llega a importar. Pruebas en `test_diagnostico_precalculado.py`, con reloj
 inyectado; seis mutaciones comprobadas.
+
+### D-144 — Buscar dentro de prompts, respuestas y herramientas
+La lista de trazas buscaba en el nombre de los pasos y en el id. Lo que se busca de
+verdad está en el contenido: el número de pedido del que se quejó un cliente, la frase
+que el modelo no debía decir, el vuelo que devolvió una herramienta. `TraceFilter.content`
+(y `?content=` en `/api/traces`, de 3 a 200 caracteres) busca en mensajes de entrada y
+salida, argumentos y salidas de herramientas, consulta y documentos recuperados, y
+entrada y salida de cada paso. Sin distinguir mayúsculas, también con tildes; `%` y `_`
+son literales; el nombre del paso **no** es contenido (para eso está `search`). Se
+filtran trazas, no spans, como en los demás filtros (D-123).
+
+* **Sólo se recorre la ventana.** El contenido es casi todo el disco, así que la
+  subconsulta va acotada a `since`/`until` además del proyecto. Un texto que sólo está en
+  un span fuera de la ventana no encuentra su traza, a propósito.
+* **ClickHouse: `idx_contenido`, `ngrambf_v1(4, 65536, 2, 0)` sobre
+  `lowerUTF8(concat(...))` y consulta con `LIKE`.** Medido con 2 millones de spans en el
+  proyecto grande: buscar un id («TK123456») pasa de 1,17 s a 0,19 s (26 de 995
+  gránulos); el índice ocupa 55 MB, un 5 % de la tabla. Con bloques de 3 bytes se leían
+  41 de 86 gránulos en la prueba pequeña (los trozos de un id están en casi todos), con 4,
+  uno; `tokenbf_v1` no sirve para subcadenas. **Trampa:** el analizador nuevo de la 24.8
+  sólo usa el índice si la consulta escribe la misma expresión, y cualquier constante
+  dentro —un `'\n'` entre columnas, `concatWithSeparator`— hace que deje de reconocerla.
+  Por eso las columnas van pegadas (`CONTENIDO` en `clickhouse.py`, idéntica a la del
+  esquema) y una prueba mira el `EXPLAIN`. Un texto que sale en miles de trazas no puede
+  descartar gránulos: 1,7 s con 2 millones de spans a la semana, que es lo que cuesta
+  recorrerlos. Instalaciones anteriores: `ADD INDEX IF NOT EXISTS`, sin materializar en el
+  arranque; las partes nuevas lo traen y las viejas se recorren.
+* **SQLite: se recorre, sin FTS5.** La hoja de ruta decía FTS5; medido con 100.000 spans
+  de unos 3 KB (430 MB), buscar un id tarda 2,7 s y la búsqueda por nombre que ya existía
+  2,2 s: lo que pesa es agregar las trazas, no leer el texto. Un índice de trigramas
+  duplicaría el fichero y pediría disparadores frágiles con `INSERT OR REPLACE`. Las
+  minúsculas las hace `str.lower` registrado como función, porque el `lower()` de SQLite
+  sólo sabe de ASCII y «ÁRBOL» no casaba con «árbol».
+* **Interfaz:** un selector junto al buscador, «En nombres e id» / «En prompts y
+  respuestas». Y un fallo que ya estaba: el enlace «Más antiguas» sólo llevaba proyecto y
+  días, así que la página siguiente perdía la búsqueda y todos los demás filtros.
+
+Pruebas en `test_busqueda_contenido.py` (los dos almacenes) y en `test_pantallas.py`;
+nueve mutaciones comprobadas, entre ellas quitar la ventana, las minúsculas, el escape
+y poner un separador en la expresión.
+
+### D-145 — Mediana, p95 y errores en el Panel, en lugar de la duración media
+El Panel decía la duración **media** por ejecución. Con agentes la media no es la espera
+de nadie: unas pocas ejecuciones colgadas la disparan. Ahora las métricas por ejecución
+son coste, tokens, pasos, **duración mediana, duración p95 y ejecuciones con error**
+(unidad `ratio`), cada una contra el periodo anterior cuando lo hay (D-107).
+
+* **Percentil de rango más cercano** (`nearest_rank`, posición `ceil(q·n)`): es la
+  duración de una ejecución que existió, no una interpolación entre dos, y sale idéntica
+  en los dos almacenes. ClickHouse lo calcula con el mismo índice sobre
+  `arraySort(groupArray(...))`; SQLite trae las duraciones ordenadas y elige en Python.
+  La duración es la de la traza de principio a fin, la misma que en `TIMESERIES_SQL`.
+* **Coste:** una consulta más por periodo, 0,3 s con 2 millones de spans a la semana.
+  Los percentiles no se pueden sumar tramo a tramo, así que no salen de la serie. La del
+  periodo anterior sólo se lanza si hay comparación.
+* **Errores:** salen de los tramos, que ya contaban trazas con error; de cero a algo no
+  da «infinito por ciento», da «sin comparación».
+
+Pruebas en `test_panel_latencia.py` (los dos almacenes) y la paridad del Panel, que
+compara todas las métricas por ejecución; nueve mutaciones comprobadas, entre ellas
+redondear el rango hacia abajo en cada almacén.
+
+### D-146 — La demo llega hasta ahora
+La demo generaba de hace treinta días a ayer a medianoche: `range(dias, 0, -1)` nunca
+pasaba por el día de hoy, aunque el bucle ya tenía el `continue` para no pasar de ahora.
+El Diagnóstico aparta como «ya no ocurre» lo que no se ha visto en el último día (D-135),
+así que cargada por la mañana la demo tenía siete problemas pendientes y cargada por la
+tarde los siete salían resueltos. Era la prueba inestable de `test_pantallas.py` apuntada
+en la hoja de ruta: no fallaba por tiempo de carga, fallaba según la hora. Ahora el
+bucle incluye hoy hasta el momento de la carga. `test_demo_hoy.py` recorre el bucle de
+verdad sin red, a las 00:30, 09:30, 16:30 y 23:30.

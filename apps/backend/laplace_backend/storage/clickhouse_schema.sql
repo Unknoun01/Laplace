@@ -118,7 +118,11 @@ CREATE TABLE IF NOT EXISTS spans
     INDEX idx_trace_id trace_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_start_time start_time TYPE minmax GRANULARITY 1,
     INDEX idx_session    session_id TYPE bloom_filter(0.01) GRANULARITY 4,
-    INDEX idx_dedup      dedup_hash TYPE bloom_filter(0.01) GRANULARITY 4
+    INDEX idx_dedup      dedup_hash TYPE bloom_filter(0.01) GRANULARITY 4,
+    -- La búsqueda en el contenido (D-144). Bloques de 4 bytes: con 3 casi todos los
+    -- gránulos tienen todos los trozos de un id y no se descarta ninguno. La expresión
+    -- es `CONTENIDO` de clickhouse.py, letra por letra.
+    INDEX idx_contenido lowerUTF8(concat(input_messages, output_messages, tool_arguments, tool_output, retrieval_query, retrieval_documents, input_payload, output_payload)) TYPE ngrambf_v1(4, 65536, 2, 0) GRANULARITY 1
 )
 ENGINE = ReplacingMergeTree(ingested_at)
 PARTITION BY toYYYYMM(start_time)
@@ -187,3 +191,9 @@ ALTER TABLE spans MODIFY COLUMN output_payload String CODEC(ZSTD(3));
 ALTER TABLE spans MODIFY COLUMN metadata String CODEC(ZSTD(3));
 ALTER TABLE spans MODIFY COLUMN events String CODEC(ZSTD(3));
 ALTER TABLE spans MODIFY COLUMN attributes String CODEC(ZSTD(3));
+
+-- Instalaciones anteriores a la búsqueda en el contenido (D-144). Como el de trace_id, no
+-- se materializa en el arranque: las partes nuevas lo traen, y en las viejas la búsqueda
+-- funciona igual, recorriéndolas. Para tenerlo ya en todo:
+-- ALTER TABLE spans MATERIALIZE INDEX idx_contenido
+ALTER TABLE spans ADD INDEX IF NOT EXISTS idx_contenido lowerUTF8(concat(input_messages, output_messages, tool_arguments, tool_output, retrieval_query, retrieval_documents, input_payload, output_payload)) TYPE ngrambf_v1(4, 65536, 2, 0) GRANULARITY 1;

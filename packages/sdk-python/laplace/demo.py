@@ -361,7 +361,10 @@ def generar_mes(
 
     init(project=project, endpoint=endpoint, service_name="vuelos-laplace-atencion")
     with en_el_pasado(fin - timedelta(days=dias)) as reloj:
-        for dias_atras in range(dias, 0, -1):
+        # Hasta hoy incluido, sin pasar de ahora (el `continue` de abajo). Terminar en
+        # ayer a medianoche dejaba un hueco que, por la tarde, pasaba del día que el
+        # Diagnóstico espera antes de dar algo por resuelto (D-135, D-146).
+        for dias_atras in range(dias, -1, -1):
             dia = (fin - timedelta(days=dias_atras)).replace(
                 hour=0, minute=0, second=0, microsecond=0
             )

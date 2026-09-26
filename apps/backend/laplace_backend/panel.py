@@ -31,7 +31,7 @@ from pydantic import BaseModel, Field
 from . import cifras
 from .dinero import motivo_sin_dinero
 from .insights import observed_days, span_label, window_label
-from .storage.base import Bucket, Window, WindowFacts
+from .storage.base import Bucket, Latency, Window, WindowFacts
 
 logger = logging.getLogger("laplace.panel")
 
@@ -93,7 +93,8 @@ class Metric(BaseModel):
     previous: float | None = None
     #: Variación relativa: 0,25 = 25 % más. `None` si falta alguno de los dos lados.
     change_ratio: float | None = None
-    #: Formato para la interfaz: `money`, `tokens`, `count`, `duration`.
+    #: Formato para la interfaz: `money`, `tokens`, `count`, `duration`, `ratio` (0,25
+    #: = 25 %).
     unit: str = "count"
     #: Por qué no hay cifra. Vacío cuando la hay.
     unavailable: str = ""
@@ -243,6 +244,7 @@ class _Aggregate:
     cost_usd: float = 0.0
     tokens: int = 0
     duration_ms: float = 0.0
+    error_traces: int = 0
 
     @classmethod
     def of(cls, buckets: list[Bucket]) -> _Aggregate:
@@ -252,6 +254,7 @@ class _Aggregate:
             cost_usd=sum(b.cost_usd for b in buckets),
             tokens=sum(b.input_tokens + b.output_tokens for b in buckets),
             duration_ms=sum(b.duration_ms_sum for b in buckets),
+            error_traces=sum(b.error_traces for b in buckets),
         )
 
     def per_trace(self, total: float) -> float | None:
@@ -289,10 +292,16 @@ def _metric(
 
 
 def _per_execution_metrics(
-    actual: _Aggregate, anterior: _Aggregate | None, sin_dinero: str = ""
+    actual: _Aggregate,
+    anterior: _Aggregate | None,
+    sin_dinero: str = "",
+    latencia: Latency | None = None,
+    latencia_anterior: Latency | None = None,
 ) -> list[Metric]:
     sin_datos = "no hay ejecuciones en este rango"
     prev = anterior or _Aggregate()
+    lat = latencia or Latency()
+    lat_b = latencia_anterior if anterior else None
 
     def par(campo: str) -> tuple[float | None, float | None]:
         return (
@@ -303,7 +312,7 @@ def _per_execution_metrics(
     coste_a, coste_b = par("cost_usd")
     tok_a, tok_b = par("tokens")
     pasos_a, pasos_b = par("spans")
-    dur_a, dur_b = par("duration_ms")
+    err_a, err_b = par("error_traces")
 
     return [
         # Sin una sola tarifa conocida no hay cifra que dar: un 0 aquí se lee como
@@ -317,7 +326,23 @@ def _per_execution_metrics(
         ),
         _metric("Tokens por ejecución", "tokens", tok_a, tok_b, unavailable=sin_datos),
         _metric("Pasos por ejecución", "count", pasos_a, pasos_b, unavailable=sin_datos),
-        _metric("Duración por ejecución", "duration", dur_a, dur_b, unavailable=sin_datos),
+        # Mediana y p95, no media (D-145): tres ejecuciones colgadas entre cien llevan
+        # la media a una cifra que no es la espera de nadie.
+        _metric(
+            "Duración, mediana",
+            "duration",
+            lat.p50_ms,
+            lat_b.p50_ms if lat_b else None,
+            unavailable=sin_datos,
+        ),
+        _metric(
+            "Duración, p95",
+            "duration",
+            lat.p95_ms,
+            lat_b.p95_ms if lat_b else None,
+            unavailable=sin_datos,
+        ),
+        _metric("Ejecuciones con error", "ratio", err_a, err_b, unavailable=sin_datos),
     ]
 
 
@@ -798,7 +823,7 @@ def _aligned(window: Window, bucket_minutes: int) -> Window:
 
 
 def build(store: Any, project_id: str, window: Window) -> Panel:
-    """El panel entero. Dos consultas de serie más dos por pico investigado."""
+    """El panel entero. Dos consultas de serie, una o dos de latencia y dos por pico."""
     ancho_min = bucket_minutes_for(window.days)
     ancho = timedelta(minutes=ancho_min)
     window = _aligned(window, ancho_min)
@@ -814,6 +839,8 @@ def build(store: Any, project_id: str, window: Window) -> Panel:
     anterior = _Aggregate.of(anteriores)
     sin_comparacion = comparable(anteriores)
     hay_anterior = anterior.traces > 0 and not sin_comparacion
+    latencia = store.trace_latency(project_id, window)
+    latencia_anterior = store.trace_latency(project_id, previa) if hay_anterior else None
 
     indices, base_unitaria, sin_picos = find_spikes(buckets)
     # `resumen` hace falta antes que los picos: el sobrecoste de un pico es un suelo si
@@ -842,7 +869,11 @@ def build(store: Any, project_id: str, window: Window) -> Panel:
         bucket_minutes=ancho_min,
         has_previous=hay_anterior,
         per_execution=_per_execution_metrics(
-            actual, anterior if hay_anterior else None, sin_dinero
+            actual,
+            anterior if hay_anterior else None,
+            sin_dinero,
+            latencia,
+            latencia_anterior,
         ),
         totals=_total_metrics(actual, anterior if hay_anterior else None, sin_dinero),
         reading=read_out(

@@ -185,6 +185,8 @@ export async function getFinding(
 export interface TraceQuery {
   project_id?: string;
   search?: string;
+  /** Texto dentro de prompts, respuestas y herramientas; al menos 3 caracteres. */
+  content?: string;
   /** Identidad exacta de un paso, la que trae cada hallazgo en `step_key`. */
   step_key?: string;
   user_id?: string;

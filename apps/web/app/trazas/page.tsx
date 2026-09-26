@@ -15,6 +15,9 @@ const SORTS = [
   { value: "duration", label: "Más lentas" },
 ];
 
+/** Lo mismo que pide la API: con menos, casi todo casa y el índice no ayuda (D-144). */
+const MINIMO_CONTENIDO = 3;
+
 const TYPES = [
   { value: "", label: "Cualquier paso" },
   { value: "llm", label: "Con llamada a modelo" },
@@ -35,6 +38,13 @@ function Contenido() {
   const days = parseDays(params.get("days") ?? undefined);
   const sort = SORTS.some((s) => s.value === params.get("sort")) ? params.get("sort")! : "cost";
   const q = params.get("q") ?? "";
+  // Dónde se busca: en nombres e ids (rápido) o dentro de prompts, respuestas y
+  // herramientas (D-144). El contenido pide tres caracteres: con menos casa casi todo.
+  const enContenido = params.get("en") === "contenido";
+  const corta = enContenido && q.length > 0 && q.length < MINIMO_CONTENIDO;
+  const texto = enContenido
+    ? { content: q.length >= MINIMO_CONTENIDO ? q : undefined }
+    : { search: q || undefined };
   // El filtro por paso llega desde la ficha de un hallazgo: identidad exacta, no texto.
   const step = params.get("step") ?? "";
   const stepLabel = params.get("step_label") ?? "";
@@ -56,7 +66,7 @@ function Contenido() {
       listTraces({
         project_id: project,
         since: windowStart(days),
-        search: q || undefined,
+        ...texto,
         step_key: step || undefined,
         status: status || undefined,
         span_type: type || undefined,
@@ -71,7 +81,7 @@ function Contenido() {
       getOverview(project, days, senal).catch(() => null),
     ]);
     return { project, page, overview };
-  }, [pedido, days, sort, q, step, status, type, model, minCostRaw, session, user, cursor]);
+  }, [pedido, days, sort, q, enContenido, step, status, type, model, minCostRaw, session, user, cursor]);
 
   if (estado.fase === "cargando") return <TableSkeleton />;
   if (estado.fase === "sin-backend") return <BackendDown />;
@@ -107,10 +117,14 @@ function Contenido() {
           type="search"
           name="q"
           defaultValue={q}
-          placeholder="Buscar por paso, herramienta o id de traza"
+          placeholder={enContenido ? "Buscar un pedido, una frase, un id…" : "Buscar por paso, herramienta o id de traza"}
           className="field grow"
           aria-label="Buscar"
         />
+        <select name="en" defaultValue={enContenido ? "contenido" : ""} className="field" aria-label="Dónde buscar">
+          <option value="">En nombres e id</option>
+          <option value="contenido">En prompts y respuestas</option>
+        </select>
         <select name="status" defaultValue={status} className="field" aria-label="Estado">
           <option value="">Cualquier estado</option>
           <option value="error">Sólo con error</option>
@@ -163,6 +177,12 @@ function Contenido() {
         </button>
       </form>
 
+      {corta && (
+        <p className="filtro-paso">
+          <span>Para buscar en prompts y respuestas escribe al menos {MINIMO_CONTENIDO} caracteres.</span>
+        </p>
+      )}
+
       {step && (
         <p className="filtro-paso">
           {/* Filtra por el paso, no por la repetición: puede haber ejecuciones que pasen
@@ -196,7 +216,7 @@ function Contenido() {
               exportarTrazas(project, {
                 project_id: project,
                 since: windowStart(days),
-                search: q || undefined,
+                ...texto,
                 step_key: step || undefined,
                 status: status || undefined,
                 span_type: type || undefined,
@@ -217,7 +237,7 @@ function Contenido() {
           context={context}
           filter={{
             since: windowStart(days),
-            search: q || undefined,
+            ...texto,
             step_key: step || undefined,
             status: status || undefined,
             span_type: type || undefined,
@@ -248,6 +268,7 @@ function Contenido() {
           sort={sort}
           cursor={cursor}
           context={context}
+          siguiente={page.next_cursor ? paginaSiguiente(params, project, days, sort, page.next_cursor) : null}
           onLive={() => {
             // El modo en vivo sólo tiene sentido con las más recientes delante: sobre
             // un orden por coste, «lo nuevo» no va arriba, y añadir filas al principio
@@ -261,7 +282,7 @@ function Contenido() {
             listTraces({
               project_id: project,
               since: windowStart(days),
-              search: q || undefined,
+              ...texto,
               step_key: step || undefined,
               status: status || undefined,
               span_type: type || undefined,
@@ -274,6 +295,25 @@ function Contenido() {
       )}
     </main>
   );
+}
+
+/**
+ * La página siguiente con **todos** los filtros activos. Antes el enlace sólo llevaba el
+ * proyecto y los días, y al pasar de página se perdían la búsqueda, el estado y el resto.
+ */
+function paginaSiguiente(
+  params: { toString(): string },
+  project: string,
+  days: number,
+  sort: string,
+  cursor: string,
+): string {
+  const next = new URLSearchParams(params.toString());
+  next.set("project", project);
+  next.set("days", String(days));
+  next.set("sort", sort);
+  next.set("cursor", cursor);
+  return `/trazas?${next.toString()}`;
 }
 
 /** Los mismos parámetros sin uno de los filtros. */

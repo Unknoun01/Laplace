@@ -1689,6 +1689,11 @@ h2.sub {
   font-size: var(--fs-xl);
   line-height: 1.2;
 }
+/* Las seis por ejecución, de tres en tres: con el mínimo de 180 px quedaban cuatro y
+   dos sueltas debajo. */
+.mgrid.seis {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
 .mgrid.small .mcard b {
   font-size: var(--fs-lg);
 }
