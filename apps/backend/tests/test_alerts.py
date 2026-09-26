@@ -215,7 +215,7 @@ def test_el_mensaje_agrupa_todo_el_proyecto_y_lleva_dinero_y_enlace():
     )
     assert texto.count("•") == 2, "un mensaje por proyecto, no uno por hallazgo"
     assert "Modelo caro" in texto and "Contexto" in texto
-    assert "$5,00" in texto, "coma decimal española, como todo el producto (D-120)"
+    assert "5,00 US$" in texto, "coma decimal española, como todo el producto (D-120)"
     assert "http://laplace.local/problema?id=a" in texto
     assert "al mes" in texto
 
@@ -231,7 +231,7 @@ def test_una_cifra_no_fiable_se_anuncia_como_suelo_y_nunca_como_total():
     decision = decide(vista, AJUSTES, {}, AHORA)
     texto = compose(vista, decision, AJUSTES, {})
 
-    assert "al menos $5,00" in texto
+    assert "al menos 5,00 US$" in texto
     assert "suelo" in texto
     assert "mayor, nunca menor" in texto
 
@@ -245,7 +245,7 @@ def test_una_cifra_con_tarifa_sin_verificar_lo_dice_y_no_es_un_suelo():
     vista = _overview(hallazgo)
     texto = compose(vista, decide(vista, AJUSTES, {}, AHORA), AJUSTES, {})
     assert "al menos" not in texto
-    assert "$5,00" in texto
+    assert "5,00 US$" in texto
     assert "tarifa sin verificar" in texto
 
 

@@ -2629,3 +2629,44 @@ tarde los siete salían resueltos. Era la prueba inestable de `test_pantallas.py
 en la hoja de ruta: no fallaba por tiempo de carga, fallaba según la hora. Ahora el
 bucle incluye hoy hasta el momento de la carga. `test_demo_hoy.py` recorre el bucle de
 verdad sin red, a las 00:30, 09:30, 16:30 y 23:30.
+
+### D-147 — Cinco idiomas: cómo viaja el idioma y cómo se escribe una cifra
+Los idiomas, elegidos por el usuario: **español, inglés, portugués (Brasil), francés y
+chino simplificado**. Esta entrada es la base; cada pantalla y el motor se traducen
+después, por tandas.
+
+* **Backend: una variable de contexto por petición** (`idioma.py`). El motor redacta
+  títulos, lecturas y avisos en muchas funciones; pasar el idioma de mano en mano habría
+  dejado siempre alguna sin él. `MiddlewareIdioma` (ASGI puro) lo fija con `?lang=` —un
+  enlace de un correo abre en el idioma del correo— o con `Accept-Language`, respetando
+  los pesos, y responde con `Content-Language` y `Vary`. Sin idioma pedido, español: la
+  API nació así y un script sin cabeceras sigue recibiendo lo mismo. Lo que corre fuera
+  de una petición lo fija con `usar()`: el Diagnóstico lleva el idioma en la clave de la
+  caché y su `calcular` lo fija, porque el renovador de D-143 no hereda el de nadie.
+* **Web: sin librería.** Todo son componentes de cliente sobre HTML estático, y
+  `next-intl` resuelve sobre todo rutas por idioma y render en servidor. `idioma.ts`
+  guarda el idioma fuera de React (lo leen `format.ts` y `api.ts`, que manda
+  `Accept-Language`); `textos.ts` tiene `t()` y `tn()` (plurales con
+  `Intl.PluralRules`); `i18n.tsx`, el proveedor, `tr()` para textos con elementos dentro
+  y el selector. El idioma sale de lo elegido en ese navegador, si no del navegador, y si
+  no, inglés. Cambiarlo **vuelve a montar la página entera**: las frases del motor hay que
+  pedirlas otra vez, y así ninguna pantalla se queda con las del idioma anterior.
+* **Catálogos:** `mensajes/es.ts` define las claves y los otros cuatro se tipan contra
+  él, así que una clave que falte no compila. `test_textos_web.py` carga los catálogos
+  con Node y exige los mismos huecos que el español (en los plurales, cualquiera de la
+  pareja): un `{n}` perdido en chino compilaría y dejaría la cifra fuera de la frase.
+* **Cifras por idioma.** En español «1.235 US$», como decía la hoja de ruta (antes
+  «$1.235»); en inglés «$1,235»; en portugués «US$ 1.235»; en francés «1 235 $US» con
+  espacio fino; en chino «US$1,235». Entre la cifra y su unidad, espacio que no parte
+  línea. Las precisiones por magnitud no cambian. Sin `Intl.NumberFormat`, cuya salida
+  cambia con la versión de ICU del navegador.
+* **El espejo se prueba de verdad.** `test_idioma.py` ejecuta `format.ts` con Node (22.6
+  o posterior quita los tipos; un gancho resuelve los imports sin extensión) y lo compara
+  con `cifras.py` valor a valor en los cinco idiomas. Antes sólo podía comprobar la
+  convención. Y se acaba la divergencia «aceptada» del redondeo: los dos redondean el
+  valor binario exacto con empate hacia arriba (`toFixed` allí, `Decimal(x).quantize(...,
+  ROUND_HALF_UP)` aquí). Hay casos que separan esto de un `Math.round` a mano.
+* **Chino:** las fuentes CJK del sistema detrás de Inter y Plex, sin descargar ninguna
+  (pesan megas y el modo local no puede depender de internet), y más interlineado.
+* **Pruebas de pantallas en español explícito:** Chromium sin interfaz anuncia `en-US`.
+  Una prueba nueva abre con el navegador en francés y cambia a inglés con el selector.

@@ -112,7 +112,9 @@ def navegador():
 
 def _abrir(navegador, url: str, ancho: str):
     w, h = ANCHOS[ancho]
-    pagina = navegador.new_page(viewport={"width": w, "height": h})
+    # En español a propósito: Chromium sin interfaz anuncia `en-US`, y los textos que se
+    # buscan abajo son los del catálogo de origen (D-147).
+    pagina = navegador.new_page(viewport={"width": w, "height": h}, locale="es-ES")
     errores: list[str] = []
     pagina.on("pageerror", lambda exc: errores.append(f"excepción: {exc}"))
     pagina.on(
@@ -206,3 +208,29 @@ def test_buscar_en_el_contenido_y_pasar_de_pagina(servidor, navegador):
         assert errores == [], errores
     finally:
         pagina.close()
+
+
+def test_el_idioma_sale_del_navegador_y_el_selector_lo_cambia(servidor, navegador):
+    """Quien abre Laplace con el navegador en francés lo ve en francés, con las cifras
+    como se escriben en francés; y lo que elija en el selector se queda (D-147)."""
+    contexto = navegador.new_context(locale="fr-FR", viewport={"width": 1440, "height": 900})
+    pagina = contexto.new_page()
+    errores: list[str] = []
+    pagina.on("pageerror", lambda exc: errores.append(str(exc)))
+    try:
+        pagina.goto(servidor + "/panel/?project=demo&days=30", wait_until="networkidle")
+        nav = pagina.locator("nav.nav")
+        nav.get_by_text("Tableau de bord").wait_for(timeout=15_000)
+        assert pagina.evaluate("document.documentElement.lang") == "fr-FR"
+        pagina.wait_for_function(
+            "() => document.querySelector('.mgrid .mcard b')?.textContent.includes('$US')",
+            timeout=15_000,
+        )
+
+        pagina.locator("select.idioma").select_option("en")
+        nav.get_by_text("Dashboard").wait_for(timeout=15_000)
+        pagina.reload(wait_until="networkidle")
+        nav.get_by_text("Dashboard").wait_for(timeout=15_000)
+        assert errores == [], errores
+    finally:
+        contexto.close()

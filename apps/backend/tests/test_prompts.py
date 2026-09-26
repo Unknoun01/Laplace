@@ -118,7 +118,7 @@ def test_con_casos_suficientes_la_linea_junta_coste_y_acierto():
         {"human": (47, 3)},
     )
     assert "v8" in metrica.headline
-    assert "$0,004" in metrica.headline
+    assert "0,004 US$" in metrica.headline
     assert "94 %" in metrica.headline
 
 

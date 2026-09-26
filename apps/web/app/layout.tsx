@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { IBM_Plex_Mono, Inter } from "next/font/google";
 import { Suspense } from "react";
 import { TopBar } from "@/components/TopBar";
+import { ProveedorIdioma } from "@/lib/i18n";
 import "./globals.css";
 
 /**
@@ -57,12 +58,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           este atributo diverge a propósito entre servidor y cliente. */}
       <body data-mode="simple" suppressHydrationWarning>
         <script dangerouslySetInnerHTML={{ __html: RESTORE_MODE }} />
-        <div className="shell wide">
-          <Suspense fallback={<div className="topbar" />}>
-            <TopBar />
-          </Suspense>
-          {children}
-        </div>
+        <ProveedorIdioma>
+          <div className="shell wide">
+            <Suspense fallback={<div className="topbar" />}>
+              <TopBar />
+            </Suspense>
+            {children}
+          </div>
+        </ProveedorIdioma>
       </body>
     </html>
   );
