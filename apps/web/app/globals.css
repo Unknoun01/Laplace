@@ -444,11 +444,15 @@ body[data-mode="pro"] .simple-only {
   gap: 34px;
   flex-wrap: wrap;
 }
+/* Inter con cifras tabulares y no la monoespaciada: en una mono la coma ocupa una celda
+   entera, y a este tamaño «$14,64» se leía «$14 , 64». La mono se queda en las
+   columnas, que es donde alinear sirve de algo. */
 .big {
-  font-family: var(--mono);
+  font-family: var(--sans);
+  font-variant-numeric: tabular-nums;
   font-size: var(--fs-display);
-  font-weight: 500;
-  letter-spacing: -0.05em;
+  font-weight: 600;
+  letter-spacing: -0.035em;
   line-height: 0.95;
 }
 .big.good {
@@ -767,6 +771,15 @@ body[data-mode="pro"] .simple-only {
 }
 .d-cost div b.neutral {
   color: var(--ink);
+}
+/* Una frase («En todas las ejecuciones») en el sitio de una cifra: letra de texto y
+   más pequeña, o se lee como un número y se parte en dos líneas. */
+.d-cost div b.frase {
+  font-family: var(--sans);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.3;
 }
 /* Verde teal para el dinero que ya te has ahorrado: es la única cifra de esta fila
    que no es un coste, y leerla en ámbar la haría parecer un problema. */
@@ -3003,7 +3016,7 @@ fieldset.sin-marco:disabled {
 }
 .diag .big {
   font-size: clamp(var(--fs-4xl), 6.2vw, var(--fs-hero));
-  letter-spacing: -0.055em;
+  letter-spacing: -0.04em;
   line-height: 0.9;
 }
 .diag .pair-lbl {
@@ -3168,7 +3181,10 @@ fieldset.sin-marco:disabled {
 @media (max-width: 1024px) {
   .diag {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "aviso" "hero" "rail" "lista";
+    /* Lo que hay que arreglar va justo debajo de la cifra: en estrecho, el carril
+       delante empujaba la lista fuera de la primera pantalla. La cobertura mala no se
+       pierde por esto: va en «aviso», arriba del todo (D-096). */
+    grid-template-areas: "aviso" "hero" "lista" "rail";
   }
   .diag > .hero {
     padding-bottom: var(--sp-6);
@@ -3176,7 +3192,7 @@ fieldset.sin-marco:disabled {
   }
   .diag-rail {
     position: static;
-    padding: 0 0 var(--sp-8);
+    padding: var(--sp-8) 0 0;
     grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   }
 }

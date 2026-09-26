@@ -100,13 +100,15 @@ export function TopBar() {
       </div>
 
       <nav className="nav">
-        <Link href={`/${query}`} aria-current={pathname === "/" ? "page" : undefined}>
+        <Link href={`/${query}`} aria-current={
+            pathname === "/" || pathname.startsWith("/problema") ? "page" : undefined
+          }>
           Diagnóstico
         </Link>
         <Link
           href={`/trazas${query}`}
           aria-current={
-            pathname.startsWith("/traza") || pathname.startsWith("/problema")
+            pathname.startsWith("/traza")
               ? "page"
               : undefined
           }

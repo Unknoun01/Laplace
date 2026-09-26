@@ -2245,3 +2245,43 @@ cambian: cambia de dónde salen los colores.
   resplandores (`filter: blur(55px)`) como pseudo-elementos de `.shell`, sin marcado nuevo.
 * **Tipografía.** Inter para el texto; IBM Plex Mono se queda para las cifras. La cifra del
   héroe sube a 88 px (`--fs-hero`) con tracking negativo y baja con el ancho.
+
+## 2026-09-26 — Fase 1 de la auditoría: lo que la pantalla afirmaba sin ser cierto
+
+### D-134 — Llamadas simultáneas, la ficha del modelo caro, generadores y el paquete
+La auditoría de septiembre recorrió la app con la demo delante y encontró cosas que
+ninguna prueba veía. Cada arreglo lleva la suya.
+
+* **Prompts afirmaba un cambio que no ocurrió.** `responder` llama tres veces al modelo
+  desde el mismo sitio —clasificar, extraer, contestar— y la pestaña contaba «3 juegos de
+  instrucciones» con las mismas 16 ejecuciones y las mismas fechas. El camino de llamada
+  no basta para separar «otro prompt» de «otra llamada»: lo que las separa es que
+  convivan en una misma ejecución, porque una versión no corre junto a la anterior dentro
+  de una traza. `co_occurring_step_keys` lo pregunta a los dos almacenes (con paridad) y
+  el paso se marca como llamadas simultáneas. Con mezcla, no se afirma cambio: es el lado
+  seguro.
+* **La ficha del modelo caro explicaba un paso cualquiera.** «Los modelos grandes se pagan
+  sobre todo por lo que escriben», de un paso que recibe 20.000 tokens y contesta 19. El
+  porqué sale ahora del reparto real del coste, y con más de 4.000 tokens de entrada por
+  llamada avisa de que ese es el caso donde un modelo pequeño más se equivoca. El título
+  deja de decir «paso muy corto» (lo corto es la respuesta) y se quita «cuando exista la
+  capa de evaluación», que existe desde la Fase 5.
+* **Comillas.** La pista del prompt va entre “” dentro de los «» del título, que es la
+  norma: antes salían tres niveles de «» seguidos.
+* **Dinero entre un céntimo y un dólar**, con dos cifras significativas en los dos
+  runtimes: «$0,0692 al mes» pasa a «$0,069». La cifra grande va en Inter con cifras
+  tabulares: en la monoespaciada la coma ocupaba una celda y se leía «$14 , 64». La
+  posición del símbolo se decide con la internacionalización, por idioma.
+* **Interfaz.** «En todas las ejecuciones» deja de pintarse como una cifra; la ficha de un
+  problema marca Diagnóstico y no Trazas; en móvil la lista va justo después de la cifra
+  y el carril debajo.
+* **Id corto.** La lista enseña 12 caracteres y la URL exigía 32. Con el proyecto dicho,
+  un prefijo único abre la traza; sin proyecto no se busca por prefijo.
+* **`@observe` y los generadores.** El span se cerraba al crear el generador, así que el
+  paso duraba cero y lo que se llamaba al iterar colgaba de otro padre: el caso normal de
+  un agente con streaming. Ahora el span se abre sin activar, se activa sólo mientras
+  corre el cuerpo y se cierra al agotarlo, cortarlo (sin error) o fallar.
+* **El paquete.** `pip install "laplace-trace[ui]"` dependía de un `laplace-backend` que no
+  estaba publicado. `paquete.yml` construye los dos wheels con la interfaz dentro, los
+  instala en un entorno limpio sin el repositorio, arranca `laplace ui` y le pide la
+  interfaz y la API; con una etiqueta `v*` publica por Trusted Publishing.

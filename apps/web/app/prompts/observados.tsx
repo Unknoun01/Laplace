@@ -65,7 +65,7 @@ export function Observados({
       <p className="lead">
         {managed
           ? "Esto sale de las trazas, no de la gestión de prompts: son los juegos de instrucciones con los que se ha visto ejecutar cada paso. Sirve para ver si algo cambió por fuera de aquí."
-          : "Cada paso de tu agente, y los juegos de instrucciones con los que se le ha visto ejecutar en este rango. Dos instrucciones distintas bajo el mismo paso son un cambio de prompt: no sabemos el texto entero —sólo guardamos el principio—, pero sí cuándo cambió y qué costó."}
+          : "Cada paso de tu agente, y los juegos de instrucciones con los que se le ha visto ejecutar en este rango. Si un paso cambia de instrucciones entre una ejecución y otra, es un cambio de prompt: no sabemos el texto entero —sólo guardamos el principio—, pero sí cuándo cambió y qué costó."}
       </p>
       {vista.observed.map((paso) => (
         <PasoObservado key={paso.label} paso={paso} />
@@ -89,13 +89,16 @@ export function PasoObservado({ paso }: { paso: ObservedStep }) {
           <small>
             {paso.unstable
               ? "no son versiones"
-              : paso.variants.length === 1
-                ? "juego de instrucciones"
-                : "juegos de instrucciones"}
+              : paso.concurrent
+                ? "llamadas en cada ejecución"
+                : paso.variants.length === 1
+                  ? "juego de instrucciones"
+                  : "juegos de instrucciones"}
           </small>
         </div>
       </div>
 
+      {paso.concurrent && <p className="disclaimer">{paso.note}</p>}
       {paso.unstable ? (
         <p className="unattributed">{paso.note}</p>
       ) : (

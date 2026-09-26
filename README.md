@@ -58,19 +58,20 @@ Ajustes se puede fijar uno.
 
 ## Qué detecta hoy
 
-Tres reglas deterministas, sin modelo de por medio
-([`insights.py`](apps/backend/laplace_backend/insights.py)):
+Cuatro reglas deterministas, sin modelo de por medio
+([`insights/`](apps/backend/laplace_backend/insights/), una por módulo):
 
 | Regla | Qué busca | Cómo calcula el ahorro |
 |-------|-----------|------------------------|
 | Repetición | El mismo paso, con la misma entrada, 3+ veces en una ejecución | Coste íntegro de las copias sobrantes |
+| Bucle | El mismo paso llamado una y otra vez sin que su resultado avance, aunque la entrada cambie (un contador de intentos) | Coste de las vueltas que no aportaron nada |
 | Modelo caro | Un paso con salida media corta que usa un modelo con alternativa más barata | Diferencia de tarifa sobre los tokens reales |
 | Contexto fijo | Un prompt con un suelo grande de tokens que se reenvía sin caché | Diferencia entre tarifa normal y de caché, menos lo que cuesta escribirla |
 
 Cinco cosas que **no** hace, a propósito: no inventa dinero donde no lo hay (un bucle de
 herramientas no gasta tokens, así que enseña el tiempo perdido y lo dice), no cuenta dos
 veces el mismo ahorro cuando dos reglas se solapan, no afirma que un modelo más barato
-acertará igual (eso exige evaluaciones, que todavía no existen), no presenta como
+acertará igual (eso lo dicen las evaluaciones, y la ficha lleva a ellas), no presenta como
 completo un total al que le faltan pasos cuyo modelo no tiene tarifa conocida, y **no
 proyecta un mes desde una hora de datos**: por debajo de un día observado enseña lo
 gastado de verdad con su ventana, y dice cuánto falta para la previsión (D-073).

@@ -128,8 +128,8 @@ function Contenido() {
         <Caveats overview={overview} ventana={ventana} casiTodo={casiTodo} />
       </section>
 
-      {/* El contexto que matiza la cifra, en su carril (D-132). En estrecho cae justo
-          debajo del héroe, que es donde estaba. */}
+      {/* El contexto que matiza la cifra, en su carril (D-132). En estrecho va debajo de
+          la lista: lo primero, después de la cifra, es qué arreglar. */}
       <aside className="diag-rail" aria-label="Contexto">
         <LineaPresupuesto budget={budget} query={query} />
 

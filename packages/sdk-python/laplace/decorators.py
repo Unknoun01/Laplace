@@ -135,6 +135,36 @@ def _bind_arguments(func: Callable[..., Any], args: tuple, kwargs: dict) -> Any:
 # ---------------------------------------------------------------------------------
 
 
+def _preparar(
+    otel_span: OtelSpan,
+    name: str,
+    *,
+    span_type: str,
+    input: Any,  # noqa: A002
+    session_id: str | None,
+    user_id: str | None,
+    tags: list[str] | None,
+    metadata: dict[str, Any] | None,
+) -> None:
+    """Los atributos con los que nace un span propio, venga de `span()` o de un generador."""
+    _apply_common(
+        otel_span,
+        span_type=span_type,
+        session_id=session_id,
+        user_id=user_id,
+        tags=tags,
+        metadata=metadata,
+    )
+    if span_type == semconv.SPAN_TYPE_TOOL:
+        _set(otel_span, semconv.GEN_AI_OPERATION_NAME, semconv.OPERATION_EXECUTE_TOOL)
+        _set(otel_span, semconv.GEN_AI_TOOL_NAME, name)
+    elif span_type == semconv.SPAN_TYPE_AGENT:
+        _set(otel_span, semconv.GEN_AI_OPERATION_NAME, semconv.OPERATION_INVOKE_AGENT)
+        _set(otel_span, semconv.GEN_AI_AGENT_NAME, name)
+    if input is not None:
+        _record_input(otel_span, span_type, input)
+
+
 @contextmanager
 def span(
     name: str,
@@ -158,22 +188,16 @@ def span(
     with tracer.start_as_current_span(name, kind=SpanKind.INTERNAL) as otel_span, _pasos.entrar(
         name
     ):
-        _apply_common(
+        _preparar(
             otel_span,
+            name,
             span_type=type,
+            input=input,
             session_id=session_id,
             user_id=user_id,
             tags=tags,
             metadata=metadata,
         )
-        if type == semconv.SPAN_TYPE_TOOL:
-            _set(otel_span, semconv.GEN_AI_OPERATION_NAME, semconv.OPERATION_EXECUTE_TOOL)
-            _set(otel_span, semconv.GEN_AI_TOOL_NAME, name)
-        elif type == semconv.SPAN_TYPE_AGENT:
-            _set(otel_span, semconv.GEN_AI_OPERATION_NAME, semconv.OPERATION_INVOKE_AGENT)
-            _set(otel_span, semconv.GEN_AI_AGENT_NAME, name)
-        if input is not None:
-            _record_input(otel_span, type, input)
         try:
             yield otel_span
         except BaseException as exc:
@@ -221,6 +245,136 @@ def _current_span_type(current: OtelSpan) -> str:
 # ---------------------------------------------------------------------------------
 
 
+#: Trozos de salida que se guardan de un generador. Uno que produce miles de tokens de
+#: uno en uno no puede convertir su span en una lista de miles de elementos.
+MAX_TROZOS_GUARDADOS = 200
+
+
+class _Generador:
+    """Lo común a los dos envoltorios de generador.
+
+    El span no puede ser el «actual» durante toda su vida, como en `span()`: entre dos
+    `yield` manda quien itera, y lo que él llame no es hijo del generador. Por eso se
+    abre sin activar y se activa sólo mientras corre el cuerpo del generador, trozo a
+    trozo. Y se cierra al agotarlo, al cortarlo o al fallar, no al crearlo.
+    """
+
+    def __init__(
+        self,
+        fn: Callable[..., Any],
+        span_name: str,
+        comunes: dict[str, Any],
+        capture_input: bool,
+        capture_output: bool,
+        args: tuple,
+        kwargs: dict,
+    ) -> None:
+        self.nombre = span_name
+        self.tipo = comunes["type"]
+        self.capture_output = capture_output
+        self.trozos: list[Any] = []
+        self.cerrado = False
+        self.span = get_tracer().start_span(span_name, kind=SpanKind.INTERNAL)
+        try:
+            _preparar(
+                self.span,
+                span_name,
+                span_type=self.tipo,
+                input=_bind_arguments(fn, args, kwargs) if capture_input else None,
+                session_id=comunes["session_id"],
+                user_id=comunes["user_id"],
+                tags=comunes["tags"],
+                metadata=comunes["metadata"],
+            )
+        except Exception:  # noqa: BLE001 - observar nunca rompe lo observado
+            logger.debug("laplace: no se pudo preparar el span de %s", span_name, exc_info=True)
+
+    @contextmanager
+    def activo(self) -> Iterator[None]:
+        with otel_trace.use_span(self.span, end_on_exit=False), _pasos.entrar(self.nombre):
+            yield
+
+    def trozo(self, valor: Any) -> None:
+        if self.capture_output and len(self.trozos) < MAX_TROZOS_GUARDADOS:
+            self.trozos.append(valor)
+
+    def cerrar(self, exc: BaseException | None = None) -> None:
+        if self.cerrado:
+            return
+        self.cerrado = True
+        try:
+            if exc is not None:
+                _record_error(self.span, exc)
+            else:
+                if self.capture_output and self.trozos:
+                    _record_output(self.span, self.tipo, self.trozos)
+                if not _has_status(self.span):
+                    self.span.set_status(Status(StatusCode.OK))
+        finally:
+            self.span.end()
+
+
+def _envolver_generador(fn, span_name, comunes, capture_input, capture_output):
+    @functools.wraps(fn)
+    def gen_wrapper(*args: Any, **kwargs: Any) -> Any:
+        estado = _Generador(fn, span_name, comunes, capture_input, capture_output, args, kwargs)
+        interno = fn(*args, **kwargs)
+        enviado: Any = None
+        try:
+            while True:
+                try:
+                    with estado.activo():
+                        valor = interno.send(enviado)
+                except StopIteration as fin:
+                    estado.cerrar()
+                    return fin.value
+                estado.trozo(valor)
+                enviado = yield valor
+        except GeneratorExit:
+            # Quien itera ha dejado de leer: no es un fallo del paso.
+            with estado.activo():
+                interno.close()
+            estado.cerrar()
+            raise
+        except BaseException as exc:
+            estado.cerrar(exc)
+            raise
+        finally:
+            estado.cerrar()
+
+    return gen_wrapper
+
+
+def _envolver_generador_async(fn, span_name, comunes, capture_input, capture_output):
+    @functools.wraps(fn)
+    async def agen_wrapper(*args: Any, **kwargs: Any) -> Any:
+        estado = _Generador(fn, span_name, comunes, capture_input, capture_output, args, kwargs)
+        interno = fn(*args, **kwargs)
+        enviado: Any = None
+        try:
+            while True:
+                try:
+                    with estado.activo():
+                        valor = await interno.asend(enviado)
+                except StopAsyncIteration:
+                    estado.cerrar()
+                    return
+                estado.trozo(valor)
+                enviado = yield valor
+        except GeneratorExit:
+            with estado.activo():
+                await interno.aclose()
+            estado.cerrar()
+            raise
+        except BaseException as exc:
+            estado.cerrar(exc)
+            raise
+        finally:
+            estado.cerrar()
+
+    return agen_wrapper
+
+
 def _default_name(fn: Callable[..., Any]) -> str:
     """Nombre visible del span.
 
@@ -254,12 +408,31 @@ def observe(
         @laplace.observe(type="tool")
         def buscar(query: str) -> list[str]: ...
 
-    Funciona con funciones síncronas y corrutinas. Si algo falla dentro del SDK, la
+    Funciona con funciones síncronas, corrutinas y generadores (también asíncronos): el
+    span de un generador dura hasta que se termina de iterar. Si algo falla dentro del SDK, la
     función decorada se ejecuta igualmente: observar nunca puede romper lo observado.
     """
 
     def decorate(fn: F) -> F:
         span_name = name or _default_name(fn)
+        comunes = {
+            "type": type,
+            "session_id": session_id,
+            "user_id": user_id,
+            "tags": tags,
+            "metadata": metadata,
+        }
+
+        # Los generadores van antes que las corrutinas: una función `async def` con
+        # `yield` es un generador asíncrono, no una corrutina, y no se puede `await`.
+        if inspect.isasyncgenfunction(fn):
+            return _envolver_generador_async(  # type: ignore[return-value]
+                fn, span_name, comunes, capture_input, capture_output
+            )
+        if inspect.isgeneratorfunction(fn):
+            return _envolver_generador(  # type: ignore[return-value]
+                fn, span_name, comunes, capture_input, capture_output
+            )
 
         if inspect.iscoroutinefunction(fn):
 

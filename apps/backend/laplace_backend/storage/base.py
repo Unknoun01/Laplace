@@ -590,6 +590,14 @@ class SpanStore(Protocol):
     def observed_prompts(self, project_id: str, window: Window) -> list[ObservedPrompt]:
         """Juegos de instrucciones vistos en las trazas, sin gestión de prompts."""
 
+    def co_occurring_step_keys(self, project_id: str, window: Window) -> set[str]:
+        """Claves de paso que conviven con otra del mismo camino en una ejecución.
+
+        Es lo que separa «el prompt cambió» de «este sitio hace varias llamadas con
+        prompts distintos»: una versión nueva no corre junto a la anterior dentro de la
+        misma traza, y dos llamadas distintas sí.
+        """
+
     def coverage(self, project_id: str, window: Window) -> CoverageFacts:
         """Cuántas llamadas de la ventana entiende Laplace, y cuántas no."""
 

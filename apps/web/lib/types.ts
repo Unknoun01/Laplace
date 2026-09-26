@@ -720,6 +720,8 @@ export interface ObservedStep {
   traces: number;
   /** Las instrucciones cambian casi por ejecución: son plantilla, no versiones. */
   unstable: boolean;
+  /** Las huellas corren juntas en la misma ejecución: llamadas distintas, no versiones. */
+  concurrent: boolean;
   note: string;
 }
 

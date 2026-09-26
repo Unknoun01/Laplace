@@ -46,9 +46,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/laplace-dev/laplace"
-Documentation = "https://github.com/laplace-dev/laplace/tree/main/docs"
-Source = "https://github.com/laplace-dev/laplace"
+Homepage = "https://github.com/Unknoun01/Laplace"
+Documentation = "https://github.com/Unknoun01/Laplace/tree/master/docs"
+Source = "https://github.com/Unknoun01/Laplace"
 
 [tool.hatch.version]
 path = "laplace/version.py"

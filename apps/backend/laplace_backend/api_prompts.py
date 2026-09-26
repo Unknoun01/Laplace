@@ -179,7 +179,10 @@ async def list_prompts(
     observados = await run_in_threadpool(
         _store(request).observed_prompts, project_id, ventana
     )
-    vista.observed = observed_steps(observados)
+    simultaneas = await run_in_threadpool(
+        _store(request).co_occurring_step_keys, project_id, ventana
+    )
+    vista.observed = observed_steps(observados, simultaneous=simultaneas)
     if not observados:
         vista.observed_unavailable = (
             "Todavía no hay llamadas a modelos con instrucciones que mirar en este "
