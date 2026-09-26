@@ -43,6 +43,11 @@ export interface Cost {
    * datos, modo rápido) y se cobró el estándar. El coste real podría ser mayor.
    */
   rate_assumed: boolean;
+  /**
+   * La tarifa sale de la tabla comunitaria de LiteLLM, no de la página del proveedor
+   * (D-138). No es un suelo: puede quedarse corta o pasarse.
+   */
+  rate_unverified: boolean;
   rate_note: string;
   /** Tarifa aplicada: `<modelo de la tabla> @ <versión de la tabla>`. */
   rate: string;

@@ -112,7 +112,11 @@ export function SpanAttributes({ span }: { span: Span }) {
     ]);
     rows.push(["laplace.usage.cache_write_tokens", String(span.llm.usage.cache_write_tokens)]);
     if (span.llm.cost.rate) rows.push(["tarifa aplicada", span.llm.cost.rate]);
-    if (span.llm.cost.rate_assumed) rows.push(["tarifa asumida", span.llm.cost.rate_note]);
+    if (span.llm.cost.rate_unverified) {
+      rows.push(["tarifa no verificada", span.llm.cost.rate_note]);
+    } else if (span.llm.cost.rate_assumed) {
+      rows.push(["tarifa asumida", span.llm.cost.rate_note]);
+    }
   }
   if (span.session_id) rows.push(["laplace.session.id", span.session_id]);
   if (span.user_id) rows.push(["laplace.user.id", span.user_id]);

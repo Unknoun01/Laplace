@@ -470,6 +470,7 @@ def _coste(prices: Any, model: str | None, usage: TokenUsage, tier: str, region:
         cache_saving_usd=breakdown.cache_saving_usd,
         unknown=breakdown.unknown,
         rate_assumed=breakdown.assumed,
+        rate_unverified=breakdown.unverified,
         rate_note=breakdown.note,
         rate=breakdown.rate,
     )

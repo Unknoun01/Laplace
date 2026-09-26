@@ -132,7 +132,10 @@ def test_ningun_sufijo_de_palabra_cambia_de_modelo_a_espaldas_del_precio():
     ],
 )
 def test_identificadores_reales_se_resuelven(identificador, esperado):
-    price = get_price_table().lookup(identificador)
+    # Sólo la capa verificada: con la de LiteLLM debajo, un nombre de Bedrock que
+    # LiteLLM conoce resuelve a su propia entrada, que es lo correcto y se prueba en
+    # `test_precios_litellm.py`. Aquí se prueba cómo se pelan los adornos (D-138).
+    price = PriceTable.load(PRICES_PATH).lookup(identificador)
     assert price is not None, identificador
     assert price.model == esperado
 

@@ -28,6 +28,8 @@ from laplace.schema import (
     TraceSummary,
 )
 
+from ..pricing import es_no_verificada
+
 logger = logging.getLogger("laplace.storage")
 
 #: Orden de columnas de la tabla `spans`. Los inserts se construyen contra esta lista,
@@ -271,6 +273,7 @@ def row_to_span(r: dict[str, Any]) -> Span:
                 rate_assumed=bool(r["cost_rate_assumed"]),
                 rate_note=r["price_note"],
                 rate=r["price_rate"],
+                rate_unverified=es_no_verificada(r["price_rate"]),
             ),
             billing_tier=r["billing_tier"] or "standard",
             billing_region=r["billing_region"] or "global",

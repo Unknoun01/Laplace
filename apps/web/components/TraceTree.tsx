@@ -327,17 +327,26 @@ function Metrics({ node }: { node: TraceTreeNode }) {
           <b>{number(llm.usage.output_tokens)}</b>
           <small>{llm.usage.estimated ? "tokens salida (estimados)" : "tokens salida"}</small>
         </div>
-        <div className={llm.cost.unknown || llm.cost.rate_assumed ? "warn" : undefined}>
+        <div
+          className={
+            llm.cost.unknown || llm.cost.rate_assumed || llm.cost.rate_unverified
+              ? "warn"
+              : undefined
+          }
+        >
           <b>
             {llm.cost.unknown ? "?" : money(llm.cost.total_usd, llm.cost.currency)}
-            {llm.cost.rate_assumed && !llm.cost.unknown && "+"}
+            {/* Un «+» es un suelo, y sobre una tarifa sin verificar no se puede afirmar. */}
+            {llm.cost.rate_assumed && !llm.cost.unknown && !llm.cost.rate_unverified && "+"}
           </b>
           <small title={llm.cost.rate_note || undefined}>
             {llm.cost.unknown
               ? "no sabemos el precio"
-              : llm.cost.rate_assumed
-                ? "coste mínimo (tarifa asumida)"
-                : "coste"}
+              : llm.cost.rate_unverified
+                ? "coste (tarifa no verificada)"
+                : llm.cost.rate_assumed
+                  ? "coste mínimo (tarifa asumida)"
+                  : "coste"}
           </small>
         </div>
         {/* La caché sólo aparece cuando hay caché: sin ella, esto sería ruido. */}
@@ -449,7 +458,11 @@ function Attributes({ span }: { span: Span }) {
     ]);
     if (span.llm.cost.rate) rows.push(["tarifa aplicada", span.llm.cost.rate]);
     if (span.llm.cost.unknown) rows.push(["tarifa aplicada", "ninguna: modelo desconocido"]);
-    if (span.llm.cost.rate_assumed) rows.push(["tarifa asumida", span.llm.cost.rate_note]);
+    if (span.llm.cost.rate_unverified) {
+      rows.push(["tarifa no verificada", span.llm.cost.rate_note]);
+    } else if (span.llm.cost.rate_assumed) {
+      rows.push(["tarifa asumida", span.llm.cost.rate_note]);
+    }
     if (span.llm.usage.cached_input_tokens) {
       rows.push([
         "laplace.usage.cached_input_tokens",

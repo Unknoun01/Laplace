@@ -96,6 +96,9 @@ class Cost(_Model):
     #: largo, residencia de datos, modo rápido) y se ha cobrado el estándar. El coste
     #: podría ser mayor; `rate_note` dice por qué.
     rate_assumed: bool = False
+    #: True cuando la tarifa sale de la tabla comunitaria de LiteLLM y no de la página
+    #: del proveedor (D-138). No es un suelo: puede quedarse corta o pasarse.
+    rate_unverified: bool = False
     rate_note: str = ""
     #: Tarifa aplicada, para auditarla: `<modelo de la tabla> @ <versión de la tabla>`.
     rate: str = ""

@@ -2369,3 +2369,48 @@ quitar `developer`, no leer la escritura de caché, no marcar el flujo fallido, 
 span al preparar el gestor, mover el atributo del gestor, no leer la respuesta cruda, no
 esperarla en asíncrono, leer también la de streaming, escribir el cero medido y dejar los
 avisos de Pydantic. Fuera: `client.beta.*`.
+
+### D-138 — La tabla de LiteLLM como capa no verificada
+La tabla propia tiene 56 modelos de OpenAI y Anthropic transcritos a mano y con fecha.
+Todo lo demás —Gemini, Mistral, DeepSeek, lo que pase por Bedrock, Azure u OpenRouter—
+salía como «coste desconocido»: honrado, pero sin cifra para casi cualquiera que no use
+esos dos proveedores. Debajo va ahora la tabla comunitaria de LiteLLM
+(`pricing/litellm_prices.json`, unos 3.200 modelos de texto).
+
+* **Cómo se convierte.** De USD por token a USD por millón; sólo modos de texto (`chat`,
+  `responses`, `completion`); entrada, salida, lectura y escritura de caché (5 min y 1 h)
+  y modo prioritario. Los tramos de contexto largo, lotes y regiones de LiteLLM no se
+  cargan. **Un modelo a cero en entrada y salida no entra**: para Laplace «cuesta cero» es
+  una afirmación, y la de un modelo local no la ha verificado nadie (D-108).
+* **Quién manda.** El nombre tal cual, primero en la verificada y después en LiteLLM;
+  sólo entonces se pelan los adornos del gateway y se repite. Así un snapshot que LiteLLM
+  tenga como entrada exacta no le gana al modelo base verificado, pero un nombre de
+  gateway que LiteLLM conoce sí se cobra con su precio. Eso cambia una cosa que ya
+  estaba mal: `eu.anthropic.claude-…` en Bedrock regional cuesta un 10 % más, igual que
+  las zonas de datos de Azure o el recargo de OpenRouter, y se cobraba en silencio a la
+  tarifa verificada del proveedor directo, por debajo de la factura. La prueba de
+  identificadores de `test_pricing.py` pasa a mirar sólo la capa verificada, que es lo
+  que prueba (cómo se pelan los adornos). Las tarifas propias del usuario mandan sobre
+  las dos capas.
+* **Cómo se dice.** `Cost.rate_unverified`, aparte de `rate_assumed`. Asumida quiere decir
+  suelo («coste mínimo», con «+»), y una tarifa de LiteLLM puede quedarse corta o pasarse:
+  llamarla suelo sería afirmar lo que no se sabe. No lleva columna nueva: `rate` termina
+  en `@ litellm <fecha>` y los dos almacenes derivan la marca de ahí al leer, con prueba
+  de paridad. La interfaz dice «coste (tarifa no verificada)» y la nota lleva la fecha de
+  descarga. La capa no entra en `stale_sources`: la que caduca a los 30 días es la
+  verificada.
+* **Cómo se renueva.** `scripts/precios_litellm.py` descarga, convierte y escribe la capa
+  sólo si cambian los modelos, y con `--informe` compara las dos capas tal como las usa el
+  producto. `precios-litellm.yml` lo corre los lunes y abre una PR con ese informe. La
+  verificada no se toca nunca desde ahí: una discrepancia es un motivo para volver a la
+  página del proveedor. En la primera descarga (26 de septiembre) no hay ninguna por
+  encima del 1 % en los nombres directos, lo que no sustituye a reverificar la tabla antes
+  del 7 de octubre.
+* **Coste.** Con 3.200 prefijos más, cada búsqueda se recuerda mientras vive la tabla.
+
+Pendiente: los hallazgos y el panel no distinguen todavía cifras con tarifa no
+verificada (sí el span, la traza y la ficha técnica), y la traza agregada no lleva la
+marca. Pruebas en `test_precios_litellm.py` (23); ocho mutaciones comprobadas —que
+LiteLLM mande, pelar antes, quitar la marca, convertirla en asumida, dejar entrar los
+modelos gratis o los que no son de texto, no derivar la marca al leer y no pasar a
+millones— y todas ponen alguna en rojo.
