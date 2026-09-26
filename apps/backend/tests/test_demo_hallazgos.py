@@ -200,8 +200,9 @@ def test_lo_que_dejo_de_ocurrir_no_se_promete_como_ahorro(tmp_path, almacen):
     """
     from datetime import timedelta
 
-    from laplace_backend.storage.base import Window
     from test_catalogo_hallazgos import AHORA
+
+    from laplace_backend.storage.base import Window
 
     if almacen == "nube":
         from test_prompts import _nube
