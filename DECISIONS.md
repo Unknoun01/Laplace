@@ -2323,3 +2323,49 @@ se guardan otra vez en crudo. Nombres contrastados contra
 `openinference-semantic-conventions` y `opentelemetry-semantic-conventions-ai`. Pruebas en
 `test_convenciones.py`, incluida una que exige que el motor encuentre una repetición en
 tráfico que nunca ha visto el SDK de Laplace.
+
+### D-137 — Las otras puertas al modelo: Responses API, `parse`, `messages.stream()` y la respuesta cruda
+Sólo se instrumentaban `chat.completions.create` y `messages.create`, y un agente llama al
+modelo por más sitios. Una llamada que no pasa por el parche no existe para Laplace: ni
+coste ni hallazgos, y la cobertura no puede avisar porque ni siquiera ve el span.
+
+* **La Responses API de OpenAI** (`responses.create` y `.parse`, síncrono, asíncrono y
+  streaming), que es la que usa el Agents SDK. `instructions` se une como mensaje de
+  sistema, igual que el `system` de Anthropic, porque es la mitad de la identidad del
+  paso. Los mensajes con partes `input_text`/`output_text` se aplanan a texto si todas
+  son texto; las llamadas a herramientas se guardan enteras. `finish_reasons` guarda el
+  motivo del corte (`max_output_tokens`) y si no lo hay, el estado. En streaming no hace
+  falta `include_usage`: el evento final trae la respuesta entera con su uso. Un flujo
+  que acaba en `response.failed` se cierra como error aunque por fuera haya terminado
+  bien, y sin uso se estima y se marca.
+* **`chat.completions.parse`, `responses.parse` y `messages.parse`** van directos a la
+  red sin pasar por `create`, así que llevan su propio parche. Los ayudantes
+  `chat.completions.stream()` y `responses.stream()` no: llaman a `create` por dentro, y
+  parchearlos contaría la llamada dos veces. Hay una prueba que lo exige.
+* **`messages.stream()` de Anthropic** no llama a nada: devuelve un gestor que lanza la
+  petición al entrar en el `with`. El span se abre en esa petición y no al preparar el
+  gestor (uno que no se abre no ha llamado al modelo), y el flujo crudo se envuelve con el
+  mismo acumulador de `create(stream=True)`, así que `get_final_message()`, `text_stream`
+  e iterar pasan todos por él. La petición vive en un atributo privado del gestor: si
+  una versión lo mueve, se avisa en el log y las pruebas contra el SDK real lo detectan.
+* **El rol `developer`** cuenta como instrucciones en la huella del paso. Es el nombre que
+  OpenAI da al prompt de sistema desde los modelos de razonamiento, y sin él todo el
+  tráfico que lo use caía en un único paso.
+* **`with_raw_response` costaba cero dólares.** Nuestro parche recibía la respuesta HTTP
+  sin parsear, el span salía con cero tokens *medidos* y la llamada no costaba nada.
+  LiteLLM llama así a OpenAI siempre. Ahora se parsea en el parche —el cliente guarda el
+  resultado, y el `.parse()` del usuario recibe el mismo objeto sin releer nada— sólo
+  cuando la cabecera dice que el cuerpo ya está leído. La de `with_streaming_response`
+  no se toca, porque el cuerpo es del usuario: ahí, y en cualquier respuesta sin uso, la
+  entrada se estima y el span se marca como estimado. Una respuesta sin uso ya no puede
+  ser una llamada gratis.
+* **Sin ruido en el proceso ajeno.** Volcar una salida estructurada hacía que Pydantic
+  avisara en cada llamada; `dump_model` pide `warnings=False`.
+
+Pruebas en `test_proveedores_otras_rutas.py` (34), contra `openai` 3.13 y `anthropic` 1.5
+con el transporte falso. Dieciséis mutaciones, y todas ponen alguna en rojo: quitar cada
+parche (cuatro), parchear también `responses.stream()`, dejar de unir `instructions`,
+quitar `developer`, no leer la escritura de caché, no marcar el flujo fallido, abrir el
+span al preparar el gestor, mover el atributo del gestor, no leer la respuesta cruda, no
+esperarla en asíncrono, leer también la de streaming, escribir el cero medido y dejar los
+avisos de Pydantic. Fuera: `client.beta.*`.

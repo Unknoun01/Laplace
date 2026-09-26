@@ -19,8 +19,16 @@ logger = logging.getLogger("laplace")
 _patched = False
 
 
+#: Los métodos que llaman al modelo. `stream()` y `parse()` van directos a la red sin
+#: pasar por `create`, así que cada uno necesita su parche y ninguno cuenta dos veces.
+_METODOS = ("create", "parse", "stream")
+
+
 def instrument() -> bool:
-    """Parchea `messages.create` (sync y async). Idempotente."""
+    """Parchea `messages.create`, `messages.parse` y `messages.stream` (sync y async).
+
+    Idempotente.
+    """
     global _patched
     if _patched:
         return True
@@ -29,13 +37,19 @@ def instrument() -> bool:
     except Exception:  # noqa: BLE001 - anthropic no instalado: no es un error
         return False
 
-    sync_cls = getattr(messages_module, "Messages", None)
-    async_cls = getattr(messages_module, "AsyncMessages", None)
-
-    if sync_cls is not None and not getattr(sync_cls.create, "_laplace_patched", False):
-        sync_cls.create = _wrap_sync(sync_cls.create)
-    if async_cls is not None and not getattr(async_cls.create, "_laplace_patched", False):
-        async_cls.create = _wrap_async(async_cls.create)
+    for cls_name, asincrono in (("Messages", False), ("AsyncMessages", True)):
+        cls = getattr(messages_module, cls_name, None)
+        if cls is None:
+            continue
+        for metodo in _METODOS:
+            original = getattr(cls, metodo, None)
+            if original is None or getattr(original, "_laplace_patched", False):
+                continue
+            if metodo == "stream":
+                envolver = _wrap_stream_async if asincrono else _wrap_stream_sync
+            else:
+                envolver = _wrap_async if asincrono else _wrap_sync
+            setattr(cls, metodo, envolver(original))
 
     _patched = True
     logger.debug("laplace: anthropic instrumentado")
@@ -51,9 +65,10 @@ def uninstrument() -> None:
         return
     for cls_name in ("Messages", "AsyncMessages"):
         cls = getattr(messages_module, cls_name, None)
-        original = getattr(getattr(cls, "create", None), "_laplace_original", None)
-        if cls is not None and original is not None:
-            cls.create = original
+        for metodo in _METODOS:
+            original = getattr(getattr(cls, metodo, None), "_laplace_original", None)
+            if cls is not None and original is not None:
+                setattr(cls, metodo, original)
     _patched = False
 
 
@@ -149,6 +164,7 @@ def _finish(span: OtelSpan, kwargs: dict[str, Any], response: Any) -> None:
             **_usage_tokens(response),
         )
         c.record_billing(span, tier=tier, region=region)
+        st.record_missing_usage(span, response, _input_messages(kwargs))
         span.set_status(Status(StatusCode.OK))
     except Exception:  # noqa: BLE001
         logger.debug("laplace: fallo al leer la respuesta de anthropic", exc_info=True)
@@ -240,7 +256,7 @@ def _wrap_sync(original: Any) -> Any:
         if kwargs.get("stream"):
             # El span lo cierra el propio stream cuando termine de consumirse.
             return st.wrap(response, span, _AnthropicStream(kwargs), is_async=False)
-        _finish(span, kwargs, response)
+        _finish(span, kwargs, c.readable(response, kwargs))
         span.end()
         return response
 
@@ -262,9 +278,104 @@ def _wrap_async(original: Any) -> Any:
             raise
         if kwargs.get("stream"):
             return st.wrap(response, span, _AnthropicStream(kwargs), is_async=True)
-        _finish(span, kwargs, response)
+        _finish(span, kwargs, await c.readable_async(response, kwargs))
         span.end()
         return response
+
+    wrapper._laplace_patched = True  # type: ignore[attr-defined]
+    wrapper._laplace_original = original  # type: ignore[attr-defined]
+    return wrapper
+
+
+# ---------------------------------------------------------------------------------
+# `messages.stream()`: el gestor de contexto
+# ---------------------------------------------------------------------------------
+#
+# `stream()` no llama a nada: prepara la petición y devuelve un gestor que la lanza al
+# entrar en el `with`. Por eso no se abre el span aquí —un gestor que nunca se abre no
+# ha llamado al modelo— sino en la propia petición, que se sustituye por una que abre
+# el span y devuelve el flujo crudo envuelto. `MessageStream` lee de ese flujo para
+# todo (iterar, `text_stream`, `get_final_message()`), así que todos los caminos pasan
+# por nuestro acumulador, y al cerrarlo se cierra el span.
+#
+# La petición vive en un atributo privado del gestor. Si una versión futura lo mueve,
+# no se rompe nada del usuario: se avisa en el log y esa llamada no se ve. Las pruebas
+# contra el SDK real lo detectan al actualizarlo.
+
+_PETICION = {
+    False: "_MessageStreamManager__api_request",
+    True: "_AsyncMessageStreamManager__api_request",
+}
+
+
+def _sustituir_peticion(gestor: Any, asincrono: bool, nueva: Any) -> None:
+    atributo = _PETICION[asincrono]
+    if not hasattr(gestor, atributo):
+        logger.warning(
+            "laplace: esta versión de anthropic ha cambiado messages.stream(); "
+            "esas llamadas no se van a ver"
+        )
+        return
+    original = getattr(gestor, atributo)
+    setattr(gestor, atributo, nueva(original))
+
+
+def _wrap_stream_sync(original: Any) -> Any:
+    @functools.wraps(original)
+    def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
+        gestor = original(self, *args, **kwargs)
+
+        def envolver(peticion: Any) -> Any:
+            def lanzar() -> Any:
+                span = _start_span(kwargs)
+                try:
+                    crudo = peticion()
+                except BaseException as exc:
+                    span.record_exception(exc)
+                    span.set_status(Status(StatusCode.ERROR, f"{type(exc).__name__}: {exc}"))
+                    span.end()
+                    raise
+                return st.wrap(crudo, span, _AnthropicStream(kwargs), is_async=False)
+
+            return lanzar
+
+        try:
+            _sustituir_peticion(gestor, False, envolver)
+        except Exception:  # noqa: BLE001 - nunca romper la llamada del usuario
+            logger.debug("laplace: no se pudo envolver messages.stream()", exc_info=True)
+        return gestor
+
+    wrapper._laplace_patched = True  # type: ignore[attr-defined]
+    wrapper._laplace_original = original  # type: ignore[attr-defined]
+    return wrapper
+
+
+def _wrap_stream_async(original: Any) -> Any:
+    @functools.wraps(original)
+    def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
+        gestor = original(self, *args, **kwargs)
+
+        def envolver(peticion: Any) -> Any:
+            # En el cliente asíncrono la petición es una corrutina ya creada que el
+            # gestor espera al entrar: se sustituye por otra que la espera dentro.
+            async def lanzar() -> Any:
+                span = _start_span(kwargs)
+                try:
+                    crudo = await peticion
+                except BaseException as exc:
+                    span.record_exception(exc)
+                    span.set_status(Status(StatusCode.ERROR, f"{type(exc).__name__}: {exc}"))
+                    span.end()
+                    raise
+                return st.wrap(crudo, span, _AnthropicStream(kwargs), is_async=True)
+
+            return lanzar()
+
+        try:
+            _sustituir_peticion(gestor, True, envolver)
+        except Exception:  # noqa: BLE001
+            logger.debug("laplace: no se pudo envolver messages.stream()", exc_info=True)
+        return gestor
 
     wrapper._laplace_patched = True  # type: ignore[attr-defined]
     wrapper._laplace_original = original  # type: ignore[attr-defined]

@@ -221,11 +221,17 @@ def loop_hash(span_type: str, name: str, payload: Any, *, ignorar_numeros: bool 
 STEP_HINT_CHARS = 80
 
 
+#: Los roles que llevan las instrucciones fijas. `developer` es el nombre que les da
+#: OpenAI desde los modelos de razonamiento; sin él, todo el tráfico que lo use caería
+#: en un único paso por muy distintas que fueran sus instrucciones.
+ROLES_DE_INSTRUCCIONES = frozenset({"system", "developer"})
+
+
 def _system_text(messages: list[dict[str, Any]]) -> str:
     """El texto de los mensajes de sistema, que es la parte fija de un prompt."""
     partes: list[str] = []
     for message in messages:
-        if str(message.get("role", "")).lower() != "system":
+        if str(message.get("role", "")).lower() not in ROLES_DE_INSTRUCCIONES:
             continue
         content = message.get("content")
         if isinstance(content, str):

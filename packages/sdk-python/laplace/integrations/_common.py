@@ -21,6 +21,7 @@ _PARAM_ATTRS = {
     "top_k": semconv.GEN_AI_REQUEST_TOP_K,
     "max_tokens": semconv.GEN_AI_REQUEST_MAX_TOKENS,
     "max_completion_tokens": semconv.GEN_AI_REQUEST_MAX_TOKENS,
+    "max_output_tokens": semconv.GEN_AI_REQUEST_MAX_TOKENS,
     "frequency_penalty": semconv.GEN_AI_REQUEST_FREQUENCY_PENALTY,
     "presence_penalty": semconv.GEN_AI_REQUEST_PRESENCE_PENALTY,
     "seed": semconv.GEN_AI_REQUEST_SEED,
@@ -208,6 +209,60 @@ def record_response(
         set_attr(span, semconv.GEN_AI_OUTPUT_MESSAGES, body)
 
 
+#: Cabecera con la que los dos clientes piden la respuesta cruda. `true` (OpenAI) y
+#: `raw` (Anthropic) son `with_raw_response`, con el cuerpo ya leído; `stream` es
+#: `with_streaming_response`, que se entrega sin leer a propósito.
+_CABECERA_CRUDA = "X-Stainless-Raw-Response"
+_CRUDA_LEIDA = ("true", "raw")
+
+
+def _pide_cruda_leida(kwargs: dict[str, Any]) -> bool:
+    if kwargs.get("stream"):
+        return False
+    cabeceras = kwargs.get("extra_headers") or {}
+    try:
+        return str(cabeceras.get(_CABECERA_CRUDA, "")).lower() in _CRUDA_LEIDA
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def readable(response: Any, kwargs: dict[str, Any]) -> Any:
+    """La respuesta parseada, también cuando el usuario pidió la cruda.
+
+    Por `with_raw_response` nuestro parche recibe la respuesta HTTP sin parsear, y
+    LiteLLM llama así a OpenAI siempre. Se parsea aquí porque el cliente guarda el
+    resultado: cuando el usuario llame a `.parse()` recibe el mismo objeto, sin volver
+    a leer nada. La de `with_streaming_response` no se toca: leerla antes que el
+    usuario le cambiaría lo que recibe.
+    """
+    if not _pide_cruda_leida(kwargs):
+        return response
+    try:
+        parsed = response.parse()
+    except Exception:  # noqa: BLE001 - nunca romper la llamada del usuario
+        logger.debug("laplace: no se pudo leer la respuesta cruda", exc_info=True)
+        return response
+    if hasattr(parsed, "__await__"):
+        # Cliente asíncrono: quien la espera es `readable_async`.
+        parsed.close()
+        return response
+    return parsed
+
+
+async def readable_async(response: Any, kwargs: dict[str, Any]) -> Any:
+    """Lo mismo para el cliente asíncrono, donde `.parse()` puede ser una corrutina."""
+    if not _pide_cruda_leida(kwargs):
+        return response
+    try:
+        parsed = response.parse()
+        if hasattr(parsed, "__await__"):
+            parsed = await parsed
+    except Exception:  # noqa: BLE001
+        logger.debug("laplace: no se pudo leer la respuesta cruda", exc_info=True)
+        return response
+    return parsed
+
+
 def _as_list(value: Any) -> list[Any]:
     if isinstance(value, (list, tuple)):
         return list(value)
@@ -225,7 +280,18 @@ def getattr_path(obj: Any, path: str, default: Any = None) -> Any:
 
 
 def dump_model(obj: Any) -> Any:
-    """Convierte la respuesta del proveedor a algo plano, sin perder información."""
+    """Convierte la respuesta del proveedor a algo plano, sin perder información.
+
+    Sin avisos de Pydantic: al volcar una salida estructurada (`parsed` lleva dentro una
+    clase del usuario) Pydantic avisa en cada llamada, y ese ruido saldría en el proceso
+    de quien nos instala.
+    """
+    volcar = getattr(obj, "model_dump", None)
+    if callable(volcar):
+        try:
+            return volcar(warnings=False)
+        except Exception:  # noqa: BLE001 - una versión sin `warnings=`: se sigue abajo
+            pass
     for attr in ("model_dump", "dict", "to_dict"):
         method = getattr(obj, attr, None)
         if callable(method):
