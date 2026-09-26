@@ -51,6 +51,22 @@ MARCA_NO_VERIFICADA = " @ litellm "
 
 def es_no_verificada(rate: str | None) -> bool:
     return MARCA_NO_VERIFICADA in (rate or "")
+
+
+def modelos_no_verificados(models: Any) -> list[str]:
+    """De esos modelos, los que se cobran con la capa de LiteLLM.
+
+    Para lo agregado —un hallazgo, una traza— se decide con la tabla en vigor y no
+    span a span: la marca va por modelo, y así no hace falta una columna más en los dos
+    almacenes (D-141). Si la tabla cambia, lo guardado se recalcula (D-123).
+    """
+    tabla = get_price_table()
+    salida = set()
+    for modelo in models or ():
+        precio = tabla.lookup(modelo) if modelo else None
+        if precio is not None and not precio.verified:
+            salida.add(str(modelo))
+    return sorted(salida)
 _MILLION = 1_000_000.0
 
 #: Metro de facturación pedido por quien hizo la llamada.

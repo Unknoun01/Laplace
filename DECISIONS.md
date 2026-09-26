@@ -2450,3 +2450,36 @@ un RST, y el cliente veía la conexión anulada antes de leer la respuesta. El f
 la prueba, no del notificador: ahora el servidor lee el cuerpo antes de contestar. 0 de
 2.000 en el mismo bucle, y la prueba sigue mordiendo: con un `build_opener()` que sí
 sigue redirecciones se pone en rojo.
+
+### D-141 — Cerrar la Fase 3: el doble conteo, el nodo de LangGraph y la tarifa sin verificar en lo agregado
+* **`laplace.init()` junto a otro instrumentador de LLM contaba cada llamada dos veces.**
+  Se vio con LangGraph + OpenInference: ocho llamadas para cuatro, en trazas separadas y
+  sin id de respuesta con el que emparejarlas en la ingesta. Ahora, en cada llamada, el
+  parche mira si hay un instrumentador de OpenInference (cualquiera: la familia es sólo
+  de IA) o de OpenLLMetry (una lista de los de LLM y frameworks de agentes; ahí también
+  viven `requests` o `httpx`, que no cuentan) importado **y activo**, y si lo hay cede:
+  llama al original sin abrir span y avisa una vez en el log, nombrando el
+  instrumentador y cómo evitarlo. Se mira en cada llamada y no en `init()` porque lo
+  normal es instrumentar el framework después. `defer_to_others=False` (o
+  `LAPLACE_DEFER_TO_OTHERS=false`) lo desactiva para quien mande ese instrumentador a
+  otra parte. Lo que se pierde al ceder: las llamadas directas que no pasen por el
+  framework, y la atribución de versión de prompt y el sitio del SDK para las que sí;
+  es el precio de no inflar el gasto, que era el error caro. Contrastado de nuevo con
+  el agente de LangGraph: cuatro llamadas en dos trazas y un aviso. La clase base de
+  los instrumentadores pasa a las dependencias de desarrollo para probarlo.
+  `test_convivencia.py`.
+* **El nodo de LangGraph es el sitio del paso.** OpenInference no dice desde dónde se
+  llama, pero deja `metadata.langgraph_node`; se usa como padre del paso cuando el SDK
+  no ha dicho otra cosa. Dos nodos con el mismo prompt ya no se juntan.
+* **La tarifa sin verificar llega a lo agregado.** Los hallazgos llevan
+  `cost_unverified` y `unverified_rate_models`, la traza agregada `rate_unverified`, y lo
+  dicen la tarjeta, la ficha, la cabecera de la traza y la alerta de Slack («tarifa sin
+  verificar», nunca «al menos»: no es un suelo). Se decide por modelo con la tabla en
+  vigor y no span a span, así que no hace falta otra columna en los dos almacenes; lo
+  guardado se recalcula cuando cambia una tarifa propia (D-123), pero no cuando se
+  despliega una tabla nueva, y ese es el hueco que queda.
+
+Mutaciones comprobadas: no ceder nunca, quitar un nombre de la lista, avisar en cada
+llamada, ceder a un instrumentador apagado, ceder a cualquier `opentelemetry.
+instrumentation.*`, pisar el sitio del SDK con el nodo, no pasar el modelo a la marca,
+no marcar la traza agregada y convertir la marca en suelo; todas en rojo.

@@ -265,6 +265,9 @@ export interface Finding {
   cost_is_floor: boolean;
   unknown_cost_spans: number;
   assumed_rate_spans: number;
+  /** La cifra usa tarifas de LiteLLM sin verificar (D-138). No es un suelo. */
+  cost_unverified: boolean;
+  unverified_rate_models: string[];
   difficulty: Difficulty;
   difficulty_label: string;
   scope_label: string;

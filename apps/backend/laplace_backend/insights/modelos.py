@@ -129,6 +129,10 @@ class Finding(BaseModel):
     cost_is_floor: bool = False
     unknown_cost_spans: int = 0
     assumed_rate_spans: int = 0
+    #: El dinero sale, en parte o entero, de tarifas de LiteLLM sin verificar (D-138).
+    #: No es un suelo: puede quedarse corto o pasarse, y quien afirme la cifra lo dice.
+    cost_unverified: bool = False
+    unverified_rate_models: list[str] = Field(default_factory=list)
 
     difficulty: Difficulty = "easy"
     difficulty_label: str = ""
@@ -371,7 +375,7 @@ def window_label(days: float) -> str:
     return f"los últimos {texto}"
 
 
-def _floor_flags(unknown: int, assumed: int) -> dict[str, Any]:
+def _floor_flags(unknown: int, assumed: int, models: Any = ()) -> dict[str, Any]:
     """Marcas de «esta cifra es un suelo», compartidas por las tres reglas.
 
     Un paso cuyo modelo no está en la tabla aporta cero al dinero del hallazgo, y uno
@@ -379,10 +383,16 @@ def _floor_flags(unknown: int, assumed: int) -> dict[str, Any]:
     casos la cifra se queda corta. Se marcan aquí, en un solo sitio, porque quien la
     afirma —la pantalla o una alerta a Slack— tiene que poder saberlo sin recalcular.
     """
+    from ..pricing import modelos_no_verificados
+
+    no_verificados = modelos_no_verificados(models)
     return {
         "unknown_cost_spans": unknown,
         "assumed_rate_spans": assumed,
         "cost_is_floor": bool(unknown or assumed),
+        # Aparte del suelo: una tarifa sin verificar no dice «al menos» (D-141).
+        "cost_unverified": bool(no_verificados),
+        "unverified_rate_models": no_verificados,
     }
 
 

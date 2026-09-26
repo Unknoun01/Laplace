@@ -160,7 +160,7 @@ def _modelo_caro_sin_tarifa(
         monthly_saving_usd=None,
         observed_days=days,
         costs_money=False,
-        **_floor_flags(usage.unknown_cost_spans, usage.assumed_rate_spans),
+        **_floor_flags(usage.unknown_cost_spans, usage.assumed_rate_spans, [usage.model]),
         difficulty="easy",
         difficulty_label="Cambiar el nombre del modelo",
         scope_label=_scope_label(usage.traces, summary.traces),
@@ -231,7 +231,9 @@ def _expensive_model_finding(
         window_waste_usd=ahorro,
         monthly_saving_usd=_to_monthly(ahorro, base),
         observed_days=days,
-        **_floor_flags(usage.unknown_cost_spans, usage.assumed_rate_spans),
+        **_floor_flags(
+            usage.unknown_cost_spans, usage.assumed_rate_spans, [usage.model, cheaper.model]
+        ),
         difficulty="easy",
         difficulty_label="Cambiar el nombre del modelo",
         scope_label=_scope_label(usage.traces, summary.traces),

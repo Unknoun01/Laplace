@@ -275,7 +275,9 @@ function Head({ summary }: { summary: TraceSummary }) {
           <span>
             {summary.unknown_cost_spans > 0
               ? `coste (faltan ${summary.unknown_cost_spans} pasos sin tarifa)`
-              : "coste"}
+              : summary.cost.rate_unverified
+                ? "coste (tarifa no verificada)"
+                : "coste"}
           </span>
         </div>
         <div>

@@ -385,3 +385,72 @@ def test_la_marca_sobrevive_igual_en_la_nube(tmp_path):
         assert alli.llm.cost.model_dump() == aqui.llm.cost.model_dump()
     finally:
         nube.delete_project(proyecto)
+
+
+# ---------------------------------------------------------------------------------
+# Los hallazgos y la traza también lo dicen (D-141)
+# ---------------------------------------------------------------------------------
+
+
+def _repeticion_con(modelo: str, tmp_path):
+    """Cuatro ejecuciones con la misma llamada tres veces: una repetición de libro."""
+    from datetime import datetime, timedelta, timezone
+
+    from helpers import exporter, ingest
+    from opentelemetry import trace as otel_trace
+
+    from laplace_backend import insights
+    from laplace_backend.storage.base import Window
+    from laplace_backend.storage.sqlite import SQLiteStore
+
+    exporter.clear()
+    tracer = otel_trace.get_tracer("prueba")
+    for _ in range(4):
+        with tracer.start_as_current_span("agente"):
+            for _ in range(3):
+                with tracer.start_as_current_span(f"chat {modelo}") as span:
+                    for clave, valor in {
+                        "laplace.span.type": "llm",
+                        "gen_ai.system": "vertex_ai",
+                        "gen_ai.request.model": modelo,
+                        "gen_ai.usage.input_tokens": 5_000,
+                        "gen_ai.usage.output_tokens": 50,
+                        "gen_ai.input.messages": json.dumps(
+                            [{"role": "user", "content": "¿Cuánto equipaje?"}]
+                        ),
+                    }.items():
+                        span.set_attribute(clave, valor)
+    spans = ingest()
+    exporter.clear()
+    store = SQLiteStore(tmp_path / "l.db")
+    store.migrate()
+    store.insert_spans(spans)
+    ahora = datetime.now(timezone.utc)
+    ventana = Window(since=ahora - timedelta(hours=1), until=ahora + timedelta(hours=1), days=1)
+    proyecto = spans[0].project_id
+    hallazgos = [f for f in insights.detect(store, proyecto, ventana) if f.kind == "repeticion"]
+    assert hallazgos, "la regla tiene que ver la repetición"
+    return hallazgos[0], store, proyecto, spans
+
+
+def test_un_hallazgo_con_tarifa_de_litellm_lo_dice(tmp_path):
+    hallazgo, *_ = _repeticion_con("gemini-2.5-pro", tmp_path)
+    assert hallazgo.window_waste_usd > 0
+    assert hallazgo.cost_unverified is True
+    assert hallazgo.unverified_rate_models == ["gemini-2.5-pro"]
+    # Y no por eso es un suelo: no verificada no quiere decir «al menos».
+    assert hallazgo.cost_is_floor is False
+
+
+def test_un_hallazgo_con_tarifa_verificada_no_dice_nada(tmp_path):
+    hallazgo, *_ = _repeticion_con("gpt-5.6-luna", tmp_path)
+    assert hallazgo.cost_unverified is False
+    assert hallazgo.unverified_rate_models == []
+
+
+def test_la_traza_agregada_lo_dice(tmp_path):
+    _, store, proyecto, spans = _repeticion_con("gemini-2.5-pro", tmp_path)
+    from laplace_backend.storage.base import TraceFilter
+
+    trazas = store.list_traces(TraceFilter(project_id=proyecto)).traces
+    assert trazas and all(t.cost.rate_unverified for t in trazas)

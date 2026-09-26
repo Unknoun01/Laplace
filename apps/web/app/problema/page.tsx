@@ -159,6 +159,14 @@ function Contenido() {
                 podemos confirmar, así que la cifra real puede ser mayor, nunca menor.
               </>
             )}
+            {finding.cost_unverified && (
+              <>
+                {" "}
+                La tarifa de {finding.unverified_rate_models.join(", ")} no la hemos
+                verificado: sale de la tabla comunitaria de LiteLLM y puede no coincidir
+                con tu factura, por arriba o por abajo.
+              </>
+            )}
           </p>
         ) : (
           <p>

@@ -173,6 +173,10 @@ def _openinference(attrs: dict[str, Any], salida: dict[str, Any]) -> None:
     metadatos = _json(attrs.get("metadata"))
     if isinstance(metadatos, dict) and metadatos:
         _poner(salida, semconv.LAPLACE_METADATA, json.dumps(metadatos, ensure_ascii=False))
+        # Con LangGraph, el nodo es el «desde dónde» del paso: sin él, dos nodos con el
+        # mismo prompt de sistema se juntaban en uno (D-141).
+        if tipo_final == semconv.SPAN_TYPE_LLM:
+            _poner(salida, semconv.LAPLACE_STEP_PARENT, metadatos.get("langgraph_node"))
 
 
 def _mensajes(attrs: dict[str, Any], prefijo: str) -> str | None:

@@ -39,6 +39,7 @@ def init(
     disabled: bool | None = None,
     batch: bool = True,
     headers: dict[str, str] | None = None,
+    defer_to_others: bool | None = None,
 ) -> LaplaceConfig:
     """Configura Laplace. Llamar una vez, al arrancar el proceso.
 
@@ -71,6 +72,8 @@ def init(
         cfg.disabled = disabled
     if headers:
         cfg.headers.update(headers)
+    if defer_to_others is not None:
+        cfg.defer_to_others = defer_to_others
 
     _config = cfg
 
