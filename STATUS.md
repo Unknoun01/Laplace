@@ -161,15 +161,42 @@ Lo que sostiene esas casillas, en concreto:
 
 ## Qué queda
 
-**Diagnóstico automático (Fase 3).** Pasarle la traza entera a un modelo para que diga la
-causa probable de un fallo y sugiera el arreglo. El hueco sigue donde estaba desde la
-Fase 0 —en el contrato, en el esquema de Postgres y en la API, devolviendo `null`—, así
-que cuando llegue no hay migración.
+El orden y el detalle están en [`docs/HOJA_DE_RUTA.md`](docs/HOJA_DE_RUTA.md), que es
+el documento que se mantiene al día. En corto: cerrar la Fase 3 (el paquete fino de
+TypeScript, que espera el nombre en npm, y decidir qué hacer con el doble conteo de
+abajo), escala en ClickHouse, internacionalización y margen por cliente. El diagnóstico
+automático con modelo sigue con su hueco reservado en el contrato, el esquema y la API.
 
-El otro hueco reservado ya está cerrado: la atribución de picos tenía guardado el tipo de
-causa para la versión de prompt y entró sin tocar nada más, por la misma puerta que las
-demás causas —algo que aparece en las trazas del tramo y no aparecía antes— y no por la
-hora del despliegue (D-092).
+## Con un framework de verdad: LangGraph, y un agente en Node
+
+Probado el 26 de septiembre con `langgraph` 1.2.12, `langchain-openai` 1.6.6 y
+`openinference-instrumentation-langchain` 0.1.76: un agente `create_react_agent` con
+una herramienta, dos preguntas, contra un servidor que responde como OpenAI (pide la
+herramienta y después contesta), exportando a `laplace ui`. Y en Node, `openai` 7.23 con
+OpenInference-js 4.2.7 y con OpenLLMetry-js 0.27 (D-139).
+
+* **Sólo con OpenInference se ve casi todo.** El árbol entero (LangGraph → agent →
+  call_model → ChatOpenAI, y tools → franquicia), cada llamada con modelo, tokens,
+  lecturas de caché y coste exacto, y la herramienta como herramienta. Lo que falta es
+  el sitio de llamada: el paso se reconoce por sus instrucciones y no por desde dónde se
+  llama, así que dos nodos con el mismo prompt se juntan. OpenInference manda el nodo de
+  LangGraph en `metadata.langgraph_node`, y ese es el candidato obvio para rellenarlo.
+* **Sólo con `laplace.init()` se ve la mitad.** Cada llamada llega como una traza suelta
+  de un span, con su coste bien, pero sin árbol y sin la herramienta: sin `@observe` el
+  SDK no sabe qué hay alrededor de la llamada. Es lo esperado, pero es lo primero que va
+  a ver quien lo pruebe con LangGraph.
+* **Con los dos a la vez, cada llamada se cuenta dos veces.** Ocho llamadas para cuatro,
+  en trazas distintas: el instrumentador de LangChain no deja su span como activo, así
+  que el nuestro no cuelga de él, y no manda el id de respuesta, así que tampoco se
+  pueden emparejar en la ingesta. **Está sin arreglar** y es una decisión: avisar, dejar
+  de parchear OpenAI cuando hay otro instrumentador de LLM activo (y perder las llamadas
+  directas que no pasen por él), o emparejar por contenido y tiempo.
+* **En Node**, OpenInference-js se ve igual de bien que en Python. OpenLLMetry-js no
+  manda los tokens leídos de caché de OpenAI, así que ese coste sale por encima de la
+  factura sin que Laplace pueda saberlo. Y la prueba destapó dos fallos de la ingesta
+  que ya están arreglados: los ids de OTLP/JSON y las convenciones GenAI nuevas (D-139).
+* **Sin hallazgos, y es lo correcto:** con cuatro llamadas no hay muestra, y la cobertura
+  lo dice («hacen falta 10»).
 
 ## El repaso honesto
 
@@ -302,8 +329,9 @@ Lo que **no** demuestran, punto por punto:
    defecto (D-008b), no hay rollups, cada consulta lleva `FINAL` y los payloads se guardan
    enteros sin retención ni TTL. Con una semana de un agente real, algo se pondrá lento y
    no sé qué.
-3. **Sólo Python.** `packages/sdk-js` es un README. Cualquiera con un agente en
-   TypeScript se queda fuera en la primera frase.
+3. **TypeScript, sin SDK propio.** Un agente en Node se ve con OpenInference-js u
+   OpenLLMetry-js apuntados a Laplace, con una guía probada (`docs/typescript.md`),
+   pero sin gestión de prompts ni el resto de ayudas del SDK de Python.
 4. **El wheel publicable no se ha construido nunca.** `laplace ui` dentro del paquete
    depende de `scripts/build_ui.py` ejecutado antes de empaquetar; si se olvida, el primer
    `pip install` de un desconocido arranca la API y no sirve interfaz.

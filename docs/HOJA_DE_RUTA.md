@@ -2,7 +2,7 @@
 
 Documento de traspaso entre sesiones. Última actualización: 26 de septiembre de 2026.
 Léelo entero antes de tocar nada; después lee `STATUS.md` y las últimas entradas de
-`DECISIONS.md` (D-134 a D-136).
+`DECISIONS.md` (D-134 a D-140).
 
 ## 1. Qué es y hacia dónde va
 
@@ -34,7 +34,7 @@ probada: `laplace ui` (un proceso + SQLite) y Docker (ClickHouse + Postgres + Ne
 - **Por fases:** una rama por fase y un commit por bloque. Se enseña al usuario y se fusiona a `master` sólo cuando lo aprueba (`git merge --no-ff`).
 - **Nada entra sin su prueba.** Primero la prueba en rojo, después el arreglo.
 - **Hay que comprobar que la prueba muerde:** romper el código a propósito y verla fallar.
-- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-137**.
+- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-141**.
 - **Todo en español:** código, comentarios, commits y textos.
 - **Los commits terminan con** `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - **Reglas del producto que no se tocan:**
@@ -57,7 +57,7 @@ probada: `laplace ui` (un proceso + SQLite) y Docker (ClickHouse + Postgres + Ne
 - **Servidor local:** la configuración «local» de `.claude/launch.json` (puerto 8100). Tras tocar Python hay que reiniciarlo.
 - **Demo:** `.venv/Scripts/python.exe -m laplace.cli demo --endpoint http://127.0.0.1:8100` carga un mes de datos.
 - **Pantallas:** `test_pantallas.py` usa Playwright con Chromium, ya instalados en `.venv`.
-- **Estado al cerrar esta sesión:** 575 pruebas pasan, 0 fallan y 4 se saltan (las que necesitan clave de proveedor).
+- **Estado al cerrar esta sesión:** 646 pruebas pasan, 0 fallan y 4 se saltan (las que necesitan clave de proveedor).
 
 ## 3. Hecho
 
@@ -90,26 +90,23 @@ probada: `laplace ui` (un proceso + SQLite) y Docker (ClickHouse + Postgres + Ne
   - Una repetición o un bucle cuyo nombre comparten varios pasos lleva la pista de sus instrucciones.
 - **Pantallas en Chromium**, en CI.
 
-**Fase 3, en curso en la rama `fase3-integraciones`, sin fusionar:**
-- **Hecho (D-136):** `ingest/convenciones.py` traduce OpenInference y OpenLLMetry. Pruebas en `test_convenciones.py`.
+**Fase 3, en la rama `fase3-integraciones`:**
+- **D-136, fusionado:** `ingest/convenciones.py` traduce OpenInference y OpenLLMetry.
+- **D-137:** Responses API de OpenAI (`create` y `parse`, sync, async y streaming), `chat.completions.parse`, `messages.stream()` y `messages.parse` de Anthropic. El rol `developer` cuenta como instrucciones. `with_raw_response` se lee (antes costaba cero medido) y una respuesta sin uso se estima. `test_proveedores_otras_rutas.py`.
+- **D-138:** la tabla de LiteLLM como capa no verificada (`pricing/litellm_prices.json`, ~3.200 modelos), con `Cost.rate_unverified` aparte de la tarifa asumida, el nombre de gateway cobrado con su precio, `scripts/precios_litellm.py` y el trabajo semanal `precios-litellm.yml`. `test_precios_litellm.py`.
+- **D-139:** guía de TypeScript probada (`docs/typescript.md`); OTLP/JSON con ids en hexadecimal; `gen_ai.provider.name` y mensajes en `parts`. `test_otlp_json.py`.
+- **D-140:** la prueba inestable era `test_el_notificador_no_sigue_redirecciones` (servidor falso que no leía el cuerpo).
+- **Contraste con LangGraph y con Node:** en `STATUS.md`, «Con un framework de verdad».
 
 ## 4. Pendiente, por orden
 
-### Fase 3: integraciones (terminar)
-1. **SDK de OpenAI:**
-   - instrumentar `client.responses.create` (síncrono, asíncrono y streaming): la Responses API, que es la que usa el Agents SDK;
-   - instrumentar `chat.completions.parse`.
-
-   Hoy sólo está `chat.completions.create` (`packages/sdk-python/laplace/integrations/openai.py`).
-2. **SDK de Anthropic:** instrumentar el ayudante `client.messages.stream()` (gestor de contexto). Hoy sólo está `messages.create`.
-3. **Tabla de precios:**
-   - La base amplia sale de la tabla de LiteLLM (`model_prices_and_context_window.json`), cargada como capa inferior.
-   - Encima va la capa verificada propia (`pricing/model_prices.json`), que manda cuando coinciden.
-   - Todo lo que salga sólo de LiteLLM se marca como «tarifa no verificada», igual que ya se marca la tarifa asumida.
-   - Hoy hay 56 modelos, sólo de OpenAI y Anthropic. La versión `2026.09.07b` caduca el 7 de octubre y hay tests que fallan solos cuando pasa.
-   - Añadir un trabajo semanal en CI que compare las tarifas y abra una PR.
-4. **Guía para agentes en TypeScript:** usar OpenLLMetry-js u OpenInference-js y apuntarlos a Laplace. Después, un paquete fino `@laplace/sdk` con `init`, `observe` y `getPrompt` (hay que reservar el scope de npm; `laplace` está cogido).
-5. Contrastar con trazas reales de al menos un framework (por ejemplo LangGraph con `openinference-instrumentation-langchain`) y anotar en `STATUS.md` qué se ve y qué no.
+### Fase 3: integraciones (lo que queda)
+1. **Decidir con el usuario el doble conteo** de `laplace.init()` junto a un instrumentador de OpenInference u OpenLLMetry: cada llamada sale dos veces (ver `STATUS.md`). Opciones: avisar, no parchear OpenAI/Anthropic cuando hay otro instrumentador de LLM activo, o emparejar por contenido y tiempo en la ingesta.
+2. **Reverificar la tabla verificada antes del 7 de octubre** (versión `2026.09.07b`): hay tests que fallan solos cuando caduca. El informe de LiteLLM del 26 de septiembre no ve diferencias en los nombres directos, pero eso no sustituye a ir a las páginas.
+3. **Sitio de llamada desde LangGraph:** usar `metadata.langgraph_node` de OpenInference como `step_site`.
+4. **Hallazgos y panel con tarifa no verificada:** hoy la marca llega al span, a la traza y a la ficha técnica, pero no a los hallazgos ni a la traza agregada.
+5. **Paquete fino `@laplace/sdk`** con `init`, `observe` y `getPrompt`, cuando el usuario reserve el scope de npm.
+6. Sin probar todavía: Anthropic por OpenInference-js/OpenLLMetry-js, el AI SDK de Vercel, LangChain.js, y `client.beta.*` en Python.
 
 ### Fase 4: escala y rendimiento (ClickHouse)
 - `async_insert=1, wait_for_async_insert=1` en las inserciones: hoy se hace una inserción síncrona por petición.
@@ -168,7 +165,6 @@ probada: `laplace ui` (un proceso + SQLite) y Docker (ClickHouse + Postgres + Ne
   - SSO/SAML, SCIM y verificación de correo.
 
 ## 5. Deuda y detalles sueltos
-- **Hay una prueba inestable sin identificar.** El 26 de septiembre, una pasada completa dio «1 failed, 583 passed» y la siguiente, sin cambios, 584 en verde. Pasar la suite con `-rf` hasta que vuelva a fallar y ver cuál es: las sospechosas son `test_pantallas.py` (tiempos) y cualquiera que dependa del reloj.
 - `globals.css` tiene 3.265 líneas en un solo fichero: partirlo.
 - Al cargar se piden dos veces `/api/projects` y `/api/auth/me`.
 - `/health` en modo local dice `clickhouse: true, postgres: true`.
