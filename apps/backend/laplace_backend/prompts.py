@@ -34,6 +34,7 @@ from .evals import MATERIAL_COST_CHANGE, Rate, SourceComparison, compare_rates, 
 from .panel import MIN_TRACES_FOR_COMPARISON
 from .pasos import hay_homonimos, nombre_de_paso
 from .storage.base import ObservedPrompt, PromptUsage
+from .textos import t, tn
 
 logger = logging.getLogger("laplace.prompts")
 
@@ -57,7 +58,6 @@ MAX_OBSERVED_VARIANTS = 8
 
 #: La coletilla del coste, que se repite en cada lectura. El acierto lleva margen porque
 #: es una muestra; el coste no, porque es la factura de lo que se ejecutó.
-_SIN_MARGEN = "El coste no lleva margen: no es una muestra, es lo que se gastó."
 
 
 # ---------------------------------------------------------------------------------
@@ -115,12 +115,10 @@ def diff_versions(before: str, after: str) -> Diff:
 
     partes = []
     if diff.added:
-        partes.append(f"{diff.added} {'línea añadida' if diff.added == 1 else 'líneas añadidas'}")
+        partes.append(tn("prompts.diff.anadidas", diff.added))
     if diff.removed:
-        partes.append(
-            f"{diff.removed} {'línea quitada' if diff.removed == 1 else 'líneas quitadas'}"
-        )
-    diff.summary = ", ".join(partes) if partes else "sin cambios en el texto"
+        partes.append(tn("prompts.diff.quitadas", diff.removed))
+    diff.summary = ", ".join(partes) if partes else t("prompts.diff.sin_cambios")
     return diff
 
 
@@ -254,7 +252,7 @@ def _money(x: float) -> str:
 
 
 def _pct(x: float) -> str:
-    return f"{abs(x) * 100:.0f} %"
+    return cifras.porcentaje(abs(x))
 
 
 Verdicts = dict[tuple[str, int], dict[str, tuple[int, int]]]
@@ -327,7 +325,7 @@ def metrics_for(
     numero = version.version if version else (usage.version if usage else 0)
     metrica = VersionMetrics(
         version=numero,
-        label=label or (f"v{numero}" if numero else "reserva"),
+        label=label or (f"v{numero}" if numero else t("prompts.reserva")),
         created_at=version.created_at if version else None,
         author=version.author if version else "",
         notes=version.notes if version else "",
@@ -335,11 +333,9 @@ def metrics_for(
         text=(version.text if version and with_text else ""),
     )
     if usage is None or usage.traces == 0:
-        metrica.cost_unavailable = (
-            "esta versión no ha corrido ninguna ejecución en el rango elegido"
-        )
+        metrica.cost_unavailable = t("prompts.sin_trafico")
         metrica.rates = _rates_for(0, {})
-        metrica.headline = f"{metrica.label} · sin tráfico en este rango"
+        metrica.headline = t("prompts.titular.sin_trafico", version=metrica.label)
         return metrica
 
     metrica.traces = usage.traces
@@ -359,11 +355,13 @@ def metrics_for(
         if mejor is not None and mejor.value is not None
         else f"{mejor.passed}/{mejor.judged}"
         if mejor is not None and mejor.judged
-        else "sin anotar"
+        else t("prompts.sin_anotar")
     )
-    metrica.headline = (
-        f"{metrica.label} · {suelo}{_money(metrica.cost_per_execution_usd)} por ejecución "
-        f"· {acierto}"
+    metrica.headline = t(
+        "prompts.titular",
+        version=metrica.label,
+        coste=f"{suelo}{_money(metrica.cost_per_execution_usd)}",
+        acierto=acierto,
     )
     return metrica
 
@@ -395,15 +393,9 @@ def compare_versions(a: VersionMetrics, b: VersionMetrics) -> PromptComparison:
     coste_a, coste_b = a.cost_per_execution_usd, b.cost_per_execution_usd
     flojo = min(a.traces, b.traces) < MIN_TRACES_FOR_COST
     if coste_a is None or coste_b is None or coste_a <= 0:
-        comparacion.cost_unavailable = (
-            "alguna de las dos versiones no tiene tráfico en este rango, así que no hay "
-            "dos costes que comparar"
-        )
+        comparacion.cost_unavailable = t("prompts.coste.sin_trafico")
     elif flojo:
-        comparacion.cost_unavailable = (
-            f"una de las dos versiones tiene menos de {MIN_TRACES_FOR_COST} ejecuciones "
-            f"en el rango: la diferencia de coste sería la que hay entre dos anécdotas"
-        )
+        comparacion.cost_unavailable = t("prompts.coste.pocas", minimo=MIN_TRACES_FOR_COST)
     else:
         comparacion.cost_change = (coste_b - coste_a) / coste_a
 
@@ -414,15 +406,17 @@ def compare_versions(a: VersionMetrics, b: VersionMetrics) -> PromptComparison:
 def _cost_phrase(comparacion: PromptComparison, b: VersionMetrics) -> str:
     if comparacion.cost_change is None:
         if b.cost_per_execution_usd is None:
-            return "todavía no se sabe lo que cuesta"
-        suelo = "al menos " if b.cost_is_floor else ""
-        return f"cuesta {suelo}{_money(b.cost_per_execution_usd)} por ejecución"
+            return t("prompts.coste.no_se_sabe")
+        return t(
+            "prompts.coste.cuesta_suelo" if b.cost_is_floor else "prompts.coste.cuesta",
+            coste=_money(b.cost_per_execution_usd),
+        )
     cambio = comparacion.cost_change
     if cambio < -MATERIAL_COST_CHANGE:
-        return f"cuesta un {_pct(cambio)} menos por ejecución"
+        return t("prompts.coste.menos", pct=_pct(cambio))
     if cambio > MATERIAL_COST_CHANGE:
-        return f"cuesta un {_pct(cambio)} más por ejecución"
-    return "cuesta prácticamente lo mismo"
+        return t("prompts.coste.mas", pct=_pct(cambio))
+    return t("prompts.coste.igual")
 
 
 def _reading(
@@ -435,44 +429,40 @@ def _reading(
     que equivocarse.
     """
     frase_coste = _cost_phrase(comparacion, b)
-    detalle_coste = (
-        f"v{a.version}: {_money(a.cost_per_execution_usd or 0.0)} por ejecución sobre "
-        f"{a.traces} {'ejecución' if a.traces == 1 else 'ejecuciones'}. "
-        f"v{b.version}: {_money(b.cost_per_execution_usd or 0.0)} sobre {b.traces} "
-        f"{'ejecución' if b.traces == 1 else 'ejecuciones'}. "
-        f"{comparacion.cost_unavailable or _SIN_MARGEN}"
+    detalle_coste = t(
+        "prompts.detalle_coste",
+        a=a.version,
+        coste_a=_money(a.cost_per_execution_usd or 0.0),
+        trazas_a=tn("prompts.ejecuciones", a.traces),
+        b=b.version,
+        coste_b=_money(b.cost_per_execution_usd or 0.0),
+        trazas_b=tn("prompts.ejecuciones", b.traces),
+        nota=comparacion.cost_unavailable or t("prompts.sin_margen"),
     )
 
     con_base = [c for c in comparacion.by_source if c.verdict != "sin-base"]
     if not con_base:
         return (
-            f"v{b.version} {frase_coste}; del acierto todavía no se puede decir nada.",
-            f"Ninguna fuente de veredicto tiene casos suficientes sobre estas dos "
-            f"versiones. {detalle_coste} Para saber si además acierta igual hacen falta "
-            f"ejecuciones anotadas de las dos.",
+            t("prompts.lectura.sin_base.titulo", b=b.version, coste=frase_coste),
+            t("prompts.lectura.sin_base.detalle", detalle=detalle_coste),
         )
 
     peor = next((c for c in con_base if c.verdict == "peor"), None)
     if peor is not None:
         return (
-            f"v{b.version} acierta menos que v{a.version}, aunque {frase_coste}.",
+            t("prompts.lectura.peor", a=a.version, b=b.version, coste=frase_coste),
             f"{peor.detail} {detalle_coste}",
         )
     mejor = next((c for c in con_base if c.verdict == "mejor"), None)
     if mejor is not None:
         return (
-            f"v{b.version} acierta más que v{a.version} y {frase_coste}.",
+            t("prompts.lectura.mejor", a=a.version, b=b.version, coste=frase_coste),
             f"{mejor.detail} {detalle_coste}",
         )
     return (
-        f"v{b.version} acierta igual —hasta donde se puede saber— y {frase_coste}.",
+        t("prompts.lectura.igual", b=b.version, coste=frase_coste),
         f"{con_base[0].detail} {detalle_coste}",
     )
-
-
-# ---------------------------------------------------------------------------------
-# Montaje de una ficha
-# ---------------------------------------------------------------------------------
 
 
 def build_card(
@@ -542,16 +532,13 @@ def _comparison_for(card: PromptCard) -> tuple[PromptComparison | None, str]:
     nueva respecto de la más vieja, vaya cuál vaya puesta.
     """
     if card.production_version is None:
-        return None, "este prompt todavía no tiene ninguna versión en producción"
+        return None, t("prompts.par.sin_produccion")
 
     produccion = next(
         (v for v in card.versions if v.version == card.production_version), None
     )
     if produccion is None or produccion.traces == 0:
-        return None, (
-            "la versión en producción todavía no ha corrido ninguna ejecución en este "
-            "rango, así que no hay nada suyo que comparar"
-        )
+        return None, t("prompts.par.produccion_sin_trafico")
 
     otras = [
         v
@@ -559,10 +546,7 @@ def _comparison_for(card: PromptCard) -> tuple[PromptComparison | None, str]:
         if v.traces > 0 and v.version > 0 and v.version != produccion.version
     ]
     if not otras:
-        return None, (
-            "no hay ninguna otra versión con tráfico en este rango: la de producción es "
-            "la única que ha corrido, y compararla consigo misma no diría nada"
-        )
+        return None, t("prompts.par.sin_otra")
 
     # La más cercana, y a igualdad de distancia gana la anterior: «qué he cambiado» se
     # pregunta más veces que «qué me queda por delante».
@@ -640,12 +624,13 @@ def observed_steps(
     simultaneas = simultaneous or set()
     por_paso: dict[tuple[str, str], list[ObservedPrompt]] = {}
     for fila in observed:
-        etiqueta = fila.step_label or "(sin nombre)"
+        etiqueta = fila.step_label or t("prompts.sin_nombre")
         por_paso.setdefault((etiqueta, fila.site or ""), []).append(fila)
 
     # Un nombre que aparece con más de un camino necesita decir de dónde viene: dos
     # bloques titulados igual se leen como un duplicado, no como dos pasos distintos.
-    homonimos = hay_homonimos([(p.step_label or "(sin nombre)", p.site or "") for p in observed])
+    sin_nombre = t("prompts.sin_nombre")
+    homonimos = hay_homonimos([(p.step_label or sin_nombre, p.site or "") for p in observed])
 
     salida: list[ObservedStep] = []
     for (etiqueta_base, sitio), filas in por_paso.items():
@@ -661,22 +646,13 @@ def observed_steps(
         )
         if len(filas) > MAX_OBSERVED_VARIANTS:
             paso.unstable = True
-            paso.note = (
-                f"Las instrucciones de este paso cambian casi en cada ejecución "
-                f"({len(filas)} variantes distintas). Casi seguro llevan datos variables "
-                f"dentro —una fecha, un nombre, el contexto del usuario—, así que no son "
-                f"versiones de un prompt: son un prompt con plantilla. Sácalos a "
-                f"variables y Laplace podrá contarte qué versión cuesta qué."
-            )
+            paso.note = t("prompts.inestable", n=len(filas))
             salida.append(paso)
             continue
 
         if juntas and len(filas) > 1:
             paso.concurrent = True
-            paso.note = (
-                "Estas instrucciones corren juntas en la misma ejecución: son llamadas "
-                "distintas desde el mismo sitio de tu código, no versiones de un prompt."
-            )
+            paso.note = t("prompts.simultaneas")
 
         for fila in filas:
             paso.variants.append(

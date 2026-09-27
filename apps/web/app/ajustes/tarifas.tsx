@@ -5,6 +5,7 @@ import { deleteCustomPrice, getCustomPrices, setCustomPrice } from "@/lib/api";
 import { money } from "@/lib/format";
 import type { CustomPrices } from "@/lib/types";
 import { Aviso } from "./aviso";
+import { t } from "@/lib/textos";
 
 export function Tarifas({ inicial }: { inicial: CustomPrices }) {
   const [precios, setPrecios] = useState(inicial);
@@ -25,42 +26,34 @@ export function Tarifas({ inicial }: { inicial: CustomPrices }) {
       });
       setNuevo({ model: "", input: "", output: "" });
       await recargar(
-        `Tarifa de ${model} guardada. ${r.repriced_spans} llamadas ya guardadas tienen ahora su coste.`,
+        t("aj.tar.guardada", { modelo: model, n: r.repriced_spans }),
       );
     } catch (e) {
-      setMsg({ ok: false, texto: e instanceof Error ? e.message : "no se ha podido guardar" });
+      setMsg({ ok: false, texto: e instanceof Error ? e.message : t("seg.error.guardar") });
     }
   }
 
   async function quitar(model: string) {
     try {
       await deleteCustomPrice(model);
-      await recargar(`Tarifa de ${model} quitada.`);
+      await recargar(t("aj.tar.quitada", { modelo: model }));
     } catch (e) {
-      setMsg({ ok: false, texto: e instanceof Error ? e.message : "no se ha podido quitar" });
+      setMsg({ ok: false, texto: e instanceof Error ? e.message : t("aj.error.quitar") });
     }
   }
 
   const propias = Object.entries(precios.models);
   return (
     <section className="sec">
-      <h3>Tarifas propias</h3>
-      <p className="lead">
-        Para un modelo que no está en nuestra tabla, o uno con precio negociado. En dólares
-        por millón de tokens, de la página del proveedor. Al guardarla se recalcula también
-        lo que ya habías enviado. Si el modelo corre en tu máquina, no le pongas precio: no
-        te cobra nadie.
-      </p>
+      <h3>{t("aj.tar.titulo")}</h3>
+      <p className="lead">{t("aj.tar.lead")}</p>
       {!precios.editable && (
-        <p className="muted">
-          Las tarifas valen para toda la instalación: sólo las puede cambiar una clave de
-          instalación.
-        </p>
+        <p className="muted">{t("aj.tar.instalacion")}</p>
       )}
 
       {precios.unpriced.length > 0 && (
         <p>
-          Sin tarifa ahora mismo:{" "}
+          {t("aj.tar.sin_tarifa")}{" "}
           {precios.unpriced.map((m) => (
             <button
               key={m}
@@ -79,9 +72,9 @@ export function Tarifas({ inicial }: { inicial: CustomPrices }) {
         <table className="tabla-simple">
           <thead>
             <tr>
-              <th>Modelo</th>
-              <th>Entrada</th>
-              <th>Salida</th>
+              <th>{t("aj.tar.modelo")}</th>
+              <th>{t("aj.tar.entrada")}</th>
+              <th>{t("aj.tar.salida")}</th>
               <th />
             </tr>
           </thead>
@@ -94,7 +87,7 @@ export function Tarifas({ inicial }: { inicial: CustomPrices }) {
                 <td>
                   {precios.editable && (
                     <button type="button" className="btn small" onClick={() => quitar(m)}>
-                      Quitar
+                      {t("comun.quitar")}
                     </button>
                   )}
                 </td>
@@ -107,7 +100,7 @@ export function Tarifas({ inicial }: { inicial: CustomPrices }) {
       {precios.editable && (
         <div className="ab">
           <label className="grow">
-            <small>Modelo</small>
+            <small>{t("aj.tar.modelo")}</small>
             <input
               className="field"
               value={nuevo.model}
@@ -116,7 +109,7 @@ export function Tarifas({ inicial }: { inicial: CustomPrices }) {
             />
           </label>
           <label>
-            <small>Entrada ($/M)</small>
+            <small>{t("aj.tar.entrada_m")}</small>
             <input
               className="field"
               inputMode="decimal"
@@ -126,7 +119,7 @@ export function Tarifas({ inicial }: { inicial: CustomPrices }) {
             />
           </label>
           <label>
-            <small>Salida ($/M)</small>
+            <small>{t("aj.tar.salida_m")}</small>
             <input
               className="field"
               inputMode="decimal"
@@ -141,7 +134,7 @@ export function Tarifas({ inicial }: { inicial: CustomPrices }) {
             disabled={!nuevo.model.trim() || !nuevo.input || !nuevo.output}
             onClick={() => guardar(nuevo.model.trim(), nuevo.input, nuevo.output)}
           >
-            Guardar tarifa
+            {t("aj.tar.guardar")}
           </button>
         </div>
       )}

@@ -12,6 +12,7 @@ from laplace.schema import Trace, TraceListPage
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceResponse
 from starlette.concurrency import run_in_threadpool
 
+from . import idioma
 from .auth import identity_of
 from .cache_diagnostico import CacheDiagnostico
 from .config import get_settings
@@ -264,7 +265,12 @@ async def get_overview(
     gestiona = bool(await run_in_threadpool(_metadata(request).list_prompts, project_id))
     estados = await run_in_threadpool(leer_estados, _metadata(request), project_id)
     segundos = get_settings().cache_diagnostico_s
-    clave = (project_id, days, gestiona, json.dumps(estados, sort_keys=True, default=str))
+    # El idioma va en la clave: el Diagnóstico lleva frases redactadas, y el de quien lo
+    # pidió en inglés no puede servírsele a quien lo pide en español (D-147).
+    lengua = idioma.actual()
+    clave = (
+        project_id, days, gestiona, lengua, json.dumps(estados, sort_keys=True, default=str)
+    )
     guardado = CACHE_DIAGNOSTICO.leer(clave, segundos)
     if guardado is not None:
         return guardado
@@ -272,10 +278,12 @@ async def get_overview(
 
     def calcular() -> Overview:
         # La ventana se calcula al llamar, no al definir: al renovarse en segundo plano
-        # tiene que terminar en el ahora de ese momento (D-143).
-        return overview(
-            store, project_id, _window(days), has_managed_prompts=gestiona, states=estados
-        )
+        # tiene que terminar en el ahora de ese momento (D-143). Y el idioma se fija
+        # aquí: el renovador no viene de ninguna petición y no hereda el de nadie.
+        with idioma.usar(lengua):
+            return overview(
+                store, project_id, _window(days), has_managed_prompts=gestiona, states=estados
+            )
 
     resultado = await run_in_threadpool(calcular)
     CACHE_DIAGNOSTICO.guardar(clave, resultado, segundos, calcular)

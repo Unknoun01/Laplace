@@ -48,6 +48,11 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+      # Node ejecuta `format.ts` y los catálogos de la web en las pruebas del espejo
+      # (D-147). Sin él se saltarían; aquí, con LAPLACE_EXIGIR_NODE, fallan.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       - name: Instalar SDK y backend
         run: |
           pip install -e packages/sdk-python
@@ -56,6 +61,8 @@ jobs:
         run: ruff check apps/backend packages/sdk-python
       - name: Pruebas (con ClickHouse y Postgres)
         run: pytest -q apps/backend/tests
+        env:
+          LAPLACE_EXIGIR_NODE: "1"
 
   web:
     runs-on: ubuntu-latest

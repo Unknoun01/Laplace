@@ -34,7 +34,7 @@ probada: `laplace ui` (un proceso + SQLite) y Docker (ClickHouse + Postgres + Ne
 - **Por fases:** una rama por fase y un commit por bloque. Se enseña al usuario y se fusiona a `master` sólo cuando lo aprueba (`git merge --no-ff`).
 - **Nada entra sin su prueba.** Primero la prueba en rojo, después el arreglo.
 - **Hay que comprobar que la prueba muerde:** romper el código a propósito y verla fallar.
-- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-147**.
+- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-149**.
 - **Todo en español:** código, comentarios, commits y textos.
 - **Los commits terminan con** `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - **Reglas del producto que no se tocan:**
@@ -57,7 +57,7 @@ probada: `laplace ui` (un proceso + SQLite) y Docker (ClickHouse + Postgres + Ne
 - **Servidor local:** la configuración «local» de `.claude/launch.json` (puerto 8100). Tras tocar Python hay que reiniciarlo.
 - **Demo:** `.venv/Scripts/python.exe -m laplace.cli demo --endpoint http://127.0.0.1:8100` carga un mes de datos.
 - **Pantallas:** `test_pantallas.py` usa Playwright con Chromium, ya instalados en `.venv`.
-- **Estado al cerrar esta sesión:** 723 pruebas pasan, 0 fallan y 4 se saltan (las que necesitan clave de proveedor).
+- **Estado al cerrar esta sesión:** 767 pruebas pasan, 0 fallan y 4 se saltan (las que necesitan clave de proveedor). Las del espejo con la web necesitan Node 22.6 o posterior.
 - **Prueba de carga:** `python scripts/carga.py --spans 10000000` genera un día de tráfico en ClickHouse y mide las pantallas; `--borrar` lo quita. Con 10 millones hacen falta unos 8 GB para Docker.
 
 ## 3. Hecho
@@ -117,11 +117,7 @@ probada: `laplace ui` (un proceso + SQLite) y Docker (ClickHouse + Postgres + Ne
 4. **Pendiente, sin máquina para ello:** medir con semanas de histórico (hace falta una máquina con más memoria) para decidir sobre acotar por tiempo las subconsultas de `_where` y sobre `FINAL` con partes sin fusionar. Descartado con números: la clave de ordenación nueva y la tabla `trace_id → proyecto` (abrir una traza ya tarda 0,03 s) y lanzar las lecturas en paralelo.
 
 ### Fase 5: interfaz e internacionalización
-- **i18n en cinco idiomas:**
-  - `next-intl` en la web;
-  - en el backend, claves de mensaje con parámetros en lugar de frases hechas (los títulos de los hallazgos salen del motor);
-  - formato de números y moneda por idioma (en español `14,64 US$`, en inglés `$14.64`), sin romper el espejo `cifras.py` ↔ `format.ts`;
-  - cuidado con las fuentes para el chino.
+- **Hecho (D-147, D-148): cinco idiomas** (español, inglés, portugués de Brasil, francés y chino simplificado) en el motor y en todas las pantallas, con cifras por idioma y el espejo `cifras.py` ↔ `format.ts` comprobado valor a valor. Pendiente: los mensajes de error de la API (`HTTPException.detail`).
 - **Menos texto:**
   - una frase y un «¿por qué?» plegable;
   - las guardas se muestran como un distintivo de confianza, no como un párrafo;

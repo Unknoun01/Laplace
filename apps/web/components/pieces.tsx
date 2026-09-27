@@ -2,6 +2,8 @@ import Link from "next/link";
 import { duration, money, moneyShort, tokens } from "@/lib/format";
 import { Euros } from "@/lib/moneda";
 import type { Finding, SpanType } from "@/lib/types";
+import { tr } from "@/lib/i18n";
+import { t } from "@/lib/textos";
 
 /** Punto de color por tipo de span. El mismo código en todo el producto. */
 export function KindDot({ type, failed }: { type: SpanType | string; failed?: boolean }) {
@@ -48,19 +50,17 @@ export function GapBar({
       <div
         className="gapbar"
         role="img"
-        aria-label={`${money(necessary, currency)} de coste necesario, ${money(
-          avoidable,
-          currency,
-        )} evitable`}
+        aria-label={t("piezas.gap.aria", {
+          necesario: money(necessary, currency),
+          evitable: money(avoidable, currency),
+        })}
       >
         <i className="keep" style={{ width: `${100 - share}%` }} />
         <i className="save" style={{ width: `${share}%` }} />
       </div>
       <div className="gaplbl">
-        <span>{money(necessary, currency)} de trabajo real</span>
-        <span>
-          <b>{money(avoidable, currency)}</b> que estás tirando
-        </span>
+        <span>{t("piezas.gap.real", { coste: money(necessary, currency) })}</span>
+        <span>{tr("piezas.gap.tirando", { coste: <b>{money(avoidable, currency)}</b> })}</span>
       </div>
     </>
   );
@@ -95,7 +95,7 @@ export function FindingCard({
   return (
     <Link href={href} className={`card${flojo ? " low" : ""}${finding.state ? ` st-${finding.state}` : ""}`}>
       {rank !== undefined && (
-        <span className="rank" aria-label={`Puesto ${rank}`}>
+        <span className="rank" aria-label={t("piezas.puesto", { n: rank })}>
           {rank}
         </span>
       )}
@@ -117,12 +117,12 @@ export function FindingCard({
               una vez la cabecera de la sección: repetirla en cada tarjeta es ruido. */}
           <small>
             {enTokens
-              ? "tokens de más"
+              ? t("piezas.tokens_de_mas")
               : flojo
-              ? "de espera evitable"
+              ? t("piezas.espera")
               : proyecta
-              ? "al mes"
-              : "ya gastado"}
+              ? t("piezas.al_mes")
+              : t("piezas.ya_gastado")}
           </small>
         </div>
       </div>
@@ -132,13 +132,13 @@ export function FindingCard({
       <p className="pro">{finding.summary}</p>
       {finding.state === "reaparecido" && finding.fix_check && (
         <p className="estado reaparecido">
-          <strong>Lo marcaste como arreglado y sigue saliendo.</strong>{" "}
+          <strong>{t("piezas.reaparecido")}</strong>{" "}
           {finding.fix_check.headline}
         </p>
       )}
       {finding.state === "arreglado" && finding.fix_check && (
         <p className="estado arreglado">
-          <strong>Marcado como arreglado.</strong> {finding.fix_check.headline}
+          <strong>{t("piezas.marcado")}</strong> {finding.fix_check.headline}
         </p>
       )}
       {share !== undefined && (
@@ -153,15 +153,15 @@ export function FindingCard({
         {finding.scope_label && <span className="meta">{finding.scope_label}</span>}
         {/* Con tokens de más sí cuesta dinero: lo que no sabemos es cuánto. Decir «no
             cuesta dinero» ahí convertía «no lo sabemos» en «es gratis» (D-107). */}
-        {enTokens && <span className="meta">Gasta tokens; sin tarifa para ponerle precio</span>}
+        {enTokens && <span className="meta">{t("piezas.sin_tarifa")}</span>}
         {!flojo && finding.cost_is_floor && (
-          <span className="meta">Es un suelo: el coste real puede ser mayor</span>
+          <span className="meta">{t("piezas.suelo")}</span>
         )}
         {!flojo && finding.cost_unverified && (
-          <span className="meta">Con tarifa sin verificar</span>
+          <span className="meta">{t("piezas.sin_verificar")}</span>
         )}
         <span className="meta ver" aria-hidden>
-          Ver cómo arreglarlo →
+          {t("piezas.ver_arreglo")}
         </span>
       </footer>
       <div className="techline pro">

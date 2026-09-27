@@ -4,6 +4,7 @@ import { useState } from "react";
 import { type Org, createKey, revokeKey } from "@/lib/api";
 import { timestamp } from "@/lib/format";
 import { Aviso, useAviso } from "./aviso";
+import { t } from "@/lib/textos";
 
 export function Claves({ org, onChange }: { org: Org; onChange: () => void }) {
   const [proyecto, setProyecto] = useState(org.projects[0] ?? "");
@@ -16,14 +17,11 @@ export function Claves({ org, onChange }: { org: Org; onChange: () => void }) {
 
   return (
     <section className="sec">
-      <h3>Claves de API</h3>
-      <p className="lead">
-        Una clave por proyecto: es con lo que tu agente manda trazas. Escribe un nombre de
-        proyecto nuevo para crearlo.
-      </p>
+      <h3>{t("cla.titulo")}</h3>
+      <p className="lead">{t("cla.lead")}</p>
       <div className="ab">
         <label className="grow">
-          <small>Proyecto</small>
+          <small>{t("cla.proyecto")}</small>
           <input
             className="field"
             list="proyectos-org"
@@ -38,21 +36,21 @@ export function Claves({ org, onChange }: { org: Org; onChange: () => void }) {
           </datalist>
         </label>
         <label className="grow">
-          <small>Para qué es</small>
+          <small>{t("cla.para_que")}</small>
           <input
             className="field"
             value={nombre}
             onChange={(e) => setNombre(e.target.value)}
-            placeholder="ingesta producción"
+            placeholder={t("cla.para_que_placeholder")}
           />
         </label>
         <label>
-          <small>Caduca</small>
+          <small>{t("cla.caduca")}</small>
           <select className="field" value={dias} onChange={(e) => setDias(Number(e.target.value))}>
-            <option value={0}>nunca</option>
-            <option value={30}>en 30 días</option>
-            <option value={90}>en 90 días</option>
-            <option value={365}>en un año</option>
+            <option value={0}>{t("cla.nunca")}</option>
+            <option value={30}>{t("cla.30")}</option>
+            <option value={90}>{t("cla.90")}</option>
+            <option value={365}>{t("cla.365")}</option>
           </select>
         </label>
         <button
@@ -76,14 +74,13 @@ export function Claves({ org, onChange }: { org: Org; onChange: () => void }) {
             }
           }}
         >
-          Crear clave
+          {t("cla.crear")}
         </button>
       </div>
       {nueva && (
         <div className="una-vez">
           <p>
-            <strong>Cópiala ahora:</strong> sólo se guarda su huella y no se puede volver a
-            ver. Si la pierdes, revócala y crea otra.
+            <strong>{t("cla.copiala")}</strong> {t("cla.copiala.texto")}
           </p>
           <Copiable texto={nueva.key} />
           <pre>{`import laplace
@@ -98,10 +95,10 @@ laplace.init(
         <table className="tabla-simple ancha">
           <thead>
             <tr>
-              <th>Proyecto</th>
-              <th>Nombre</th>
-              <th>Último uso</th>
-              <th>Caduca</th>
+              <th>{t("cla.proyecto")}</th>
+              <th>{t("cla.col.nombre")}</th>
+              <th>{t("cla.col.ultimo")}</th>
+              <th>{t("cla.caduca")}</th>
               <th />
             </tr>
           </thead>
@@ -113,22 +110,22 @@ laplace.init(
                   {k.name}
                   {k.created_by && <small className="muted"> · {k.created_by}</small>}
                 </td>
-                <td className="num">{k.last_used_at ? timestamp(k.last_used_at) : "nunca"}</td>
+                <td className="num">{k.last_used_at ? timestamp(k.last_used_at) : t("cla.nunca")}</td>
                 <td className={`num${k.expires_at && k.expires_at < ahora ? " verr" : ""}`}>
-                  {k.expires_at ? timestamp(k.expires_at) : "no caduca"}
+                  {k.expires_at ? timestamp(k.expires_at) : t("cla.no_caduca")}
                 </td>
                 <td>
                   <button
                     type="button"
                     className="btn small danger"
                     onClick={async () => {
-                      if (!window.confirm(`¿Revocar «${k.name}»? Deja de servir al momento.`))
+                      if (!window.confirm(t("cla.revocar_confirm", { nombre: k.name })))
                         return;
-                      if (await intentar(() => revokeKey(org.id, k.id), "Clave revocada."))
+                      if (await intentar(() => revokeKey(org.id, k.id), t("cla.revocada")))
                         onChange();
                     }}
                   >
-                    Revocar
+                    {t("cla.revocar")}
                   </button>
                 </td>
               </tr>
@@ -137,7 +134,7 @@ laplace.init(
         </table>
       )}
       <p className="disclaimer">
-        Para rotar una clave: crea la nueva, cámbiala en tu agente y revoca la vieja.
+        {t("cla.rotar")}
       </p>
       <Aviso {...msg} />
     </section>
@@ -163,7 +160,7 @@ export function Copiable({ texto }: { texto: string }) {
           }
         }}
       >
-        {copiado ? "Copiado" : "Copiar"}
+        {copiado ? t("cla.copiado") : t("cla.copiar")}
       </button>
     </div>
   );

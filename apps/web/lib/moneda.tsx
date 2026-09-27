@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { money } from "./format";
 
 /**
  * El equivalente en euros, con el tipo de cambio que pone el usuario (D-123).
@@ -47,13 +48,8 @@ export function useTipoEuro(): number | null {
 
 export function euros(usd: number, tipo: number): string {
   const valor = usd * tipo;
-  const decimales = Math.abs(valor) >= 100 ? 0 : Math.abs(valor) >= 1 ? 2 : 4;
-  const texto = new Intl.NumberFormat("es-ES", {
-    useGrouping: "always",
-    minimumFractionDigits: decimales === 4 ? 0 : decimales,
-    maximumFractionDigits: decimales,
-  } as unknown as Intl.NumberFormatOptions).format(valor);
-  return `≈ ${texto} €`;
+  // Con el formato de euros del idioma (D-147): «≈ 12,40 €», «≈ €12.40».
+  return `≈ ${money(valor, "EUR")}`;
 }
 
 /** «≈ 1,38 €» al lado de una cifra en dólares, o nada si no hay tipo puesto. */

@@ -1,14 +1,17 @@
+"use client";
+
 import Link from "next/link";
+import { t } from "@/lib/textos";
 
 export default function NotFound() {
   return (
     <main className="reading">
       <div className="state">
-        <h2>Esta página no existe</h2>
-        <p>El enlace puede estar mal, o apuntar a algo que ya no está.</p>
+        <h2>{t("nf.titulo")}</h2>
+        <p>{t("nf.texto")}</p>
         <div className="actions">
           <Link href="/" className="btn primary">
-            Ir al diagnóstico
+            {t("nf.ir")}
           </Link>
         </div>
       </div>

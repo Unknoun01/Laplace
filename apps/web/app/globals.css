@@ -171,6 +171,19 @@
   --sans: var(--font-sans), "Inter", system-ui, -apple-system, sans-serif;
 }
 
+/* Chino (D-147): Inter y Plex no tienen caracteres CJK. Se nombran las fuentes del
+   sistema de cada plataforma en vez de descargar una: una CJK pesa varios MB y el modo
+   local no puede depender de internet. Las letras latinas siguen saliendo de Inter. */
+:root:lang(zh) {
+  --cjk: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC",
+    "Noto Sans CJK SC", "Source Han Sans SC";
+  --sans: var(--font-sans), "Inter", var(--cjk), system-ui, sans-serif;
+  --mono: var(--font-mono), "IBM Plex Mono", var(--cjk), ui-monospace, Consolas, monospace;
+}
+:lang(zh) body {
+  line-height: 1.65;
+}
+
 
 * {
   box-sizing: border-box;

@@ -20,6 +20,7 @@ import { Aviso } from "./aviso";
 import { Tarifas } from "./tarifas";
 import { Apariencia, Moneda } from "./preferencias";
 import { Alertas } from "./alertas";
+import { t } from "@/lib/textos";
 
 /**
  * Ajustes del proyecto (D-123): lo que el usuario decide y antes sólo se podía decir
@@ -57,15 +58,12 @@ function Contenido() {
   return (
     <main className="reading ajustes">
       <section className="sec" style={{ paddingBottom: 0 }}>
-        <h2>Ajustes de «{project}»</h2>
-        <p className="lead">
-          Presupuesto, avisos, tarifas y datos. Cada bloque se guarda por su cuenta.
-        </p>
+        <h2>{t("aj.titulo", { proyecto: project })}</h2>
+        <p className="lead">{t("aj.lead")}</p>
       </section>
       {!permisos.administrar && (
         <p className="solo-lectura">
-          Presupuesto, alertas y borrar el proyecto los cambia un admin de la
-          organización. Tu rol ({permisos.rol}) permite verlos.
+          {t("aj.solo_lectura", { rol: permisos.rol ?? "" })}
         </p>
       )}
       {/* Deshabilitado y no escondido: saber qué avisa y a quién también le sirve a
@@ -94,29 +92,26 @@ function Presupuesto({ project, inicial }: { project: string; inicial: Budget })
       const nuevo = await setBudget(project, importe);
       setB(nuevo);
       setValor(importe ? String(importe) : "");
-      setMsg({ ok: true, texto: importe ? "Presupuesto guardado." : "Presupuesto quitado." });
+      setMsg({ ok: true, texto: importe ? t("aj.pres.guardado") : t("aj.pres.quitado") });
     } catch (e) {
-      setMsg({ ok: false, texto: e instanceof Error ? e.message : "no se ha podido guardar" });
+      setMsg({ ok: false, texto: e instanceof Error ? e.message : t("seg.error.guardar") });
     }
   }
 
   const pct = budget.ratio === null ? 0 : Math.min(budget.ratio, 1) * 100;
   return (
     <section className="sec">
-      <h3>Presupuesto mensual</h3>
-      <p className="lead">
-        Sobre el mes natural, que es el que factura el proveedor. Avisa al 80 % y al 100 %
-        por los canales de abajo, una vez cada uno por mes.
-      </p>
+      <h3>{t("aj.pres.titulo")}</h3>
+      <p className="lead">{t("aj.pres.lead")}</p>
       <p className={`budget-line ${budget.status}`}>{budget.headline}</p>
       {budget.ratio !== null && (
-        <div className="sbar budget" role="img" aria-label={`${Math.round(pct)} por ciento`}>
+        <div className="sbar budget" role="img" aria-label={t("avisos.pct_aria", { n: Math.round(pct) })}>
           <i style={{ width: `${pct}%` }} />
         </div>
       )}
       <div className="ab">
         <label>
-          <small>Dólares al mes</small>
+          <small>{t("aj.pres.dolares")}</small>
           <input
             className="field"
             inputMode="decimal"
@@ -133,11 +128,11 @@ function Presupuesto({ project, inicial }: { project: string; inicial: Budget })
           onClick={() => guardar(Number(valor.replace(",", ".")) || null)}
           disabled={!valor}
         >
-          Guardar
+          {t("comun.guardar")}
         </button>
         {budget.monthly_usd !== null && (
           <button type="button" className="btn" onClick={() => guardar(null)}>
-            Quitar
+            {t("comun.quitar")}
           </button>
         )}
       </div>
@@ -157,23 +152,22 @@ function Datos({ project, instancia }: { project: string; instancia: Instance })
       await deleteProject(project);
       window.location.href = "/";
     } catch (e) {
-      setMsg({ ok: false, texto: e instanceof Error ? e.message : "no se ha podido borrar" });
+      setMsg({ ok: false, texto: e instanceof Error ? e.message : t("aj.error.borrar") });
     }
   }
 
   return (
     <section className="sec">
-      <h3>Datos</h3>
+      <h3>{t("aj.datos")}</h3>
       <p className="lead">
         {instancia.retention_days > 0
-          ? `Esta instalación guarda las trazas ${instancia.retention_days} días; lo anterior se borra solo cada día.`
-          : "Esta instalación guarda las trazas para siempre. Para borrar lo antiguo de forma automática, arráncala con LAPLACE_RETENTION_DAYS."}
+          ? t("aj.datos.retencion", { n: instancia.retention_days })
+          : t("aj.datos.siempre")}
       </p>
       <div className="peligro">
         <p>
-          <strong>Borrar «{project}» entero.</strong> Trazas, anotaciones, conjuntos de
-          casos, prompts, presupuesto y alertas. No se puede deshacer. Escribe el nombre del
-          proyecto para confirmarlo.
+          <strong>{t("aj.borrar.titulo", { proyecto: project })}</strong>{" "}
+          {t("aj.borrar.texto")}
         </p>
         <div className="ab" style={{ margin: 0 }}>
           <input
@@ -181,7 +175,7 @@ function Datos({ project, instancia }: { project: string; instancia: Instance })
             value={confirmacion}
             onChange={(e) => setConfirmacion(e.target.value)}
             placeholder={project}
-            aria-label="Nombre del proyecto para confirmar"
+            aria-label={t("aj.borrar.aria")}
           />
           <button
             type="button"
@@ -189,7 +183,7 @@ function Datos({ project, instancia }: { project: string; instancia: Instance })
             disabled={confirmacion !== project}
             onClick={borrar}
           >
-            Borrar el proyecto
+            {t("aj.borrar.boton")}
           </button>
         </div>
       </div>

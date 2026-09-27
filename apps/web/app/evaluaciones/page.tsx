@@ -7,6 +7,7 @@ import { ApiError, judgeStatus, listDatasets, listProjects, listRuns, parseDays 
 import type { Dataset, JudgeStatus, RunSummary } from "@/lib/types";
 import { Conjuntos, Tiradas } from "./conjuntos";
 import { Experimento } from "./experimento";
+import { t } from "@/lib/textos";
 
 /**
  * Evaluaciones: «¿mi agente responde bien?», frente a Diagnóstico, que responde a
@@ -83,12 +84,8 @@ function Contenido() {
   return (
     <main className="reading">
       <section className="hero">
-        <h1>¿Tu agente «{project}» responde bien?</h1>
-        <p className="lead">
-          Diagnóstico te dice si cuesta lo que debe. Esto te dice si acierta, y sobre todo
-          si la versión nueva acierta igual y cuesta menos, que es lo que se mira antes de
-          desplegar y no cuando algo ya ha fallado.
-        </p>
+        <h1>{t("ev.titulo", { proyecto: project })}</h1>
+        <p className="lead">{t("ev.lead")}</p>
       </section>
 
       <Experimento

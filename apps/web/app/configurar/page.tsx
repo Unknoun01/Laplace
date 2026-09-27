@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { Cargando } from "@/components/states";
 import { getMe, setupInstallation } from "@/lib/api";
+import { tr } from "@/lib/i18n";
+import { t } from "@/lib/textos";
 
 /**
  * Configurar la instalación: la primera cuenta (D-127).
@@ -34,7 +36,7 @@ export default function ConfigurarPage() {
       await setupInstallation({ ...f, email: f.email.trim(), token: f.token.trim() });
       window.location.href = "/organizacion";
     } catch (err) {
-      setError(err instanceof Error ? err.message : "no se ha podido configurar");
+      setError(err instanceof Error ? err.message : t("conf.error"));
       setEnviando(false);
     }
   }
@@ -55,20 +57,18 @@ export default function ConfigurarPage() {
   return (
     <main className="auth">
       <form className="auth-card" onSubmit={crear}>
-        <h1>Configura esta instalación</h1>
-        <p className="muted">
-          Todavía no hay ninguna cuenta. La primera administra la instalación entera y se
-          queda con los proyectos que ya tengan datos.
-        </p>
-        {campo("token", "Código de configuración", { required: true, autoFocus: true })}
+        <h1>{t("conf.titulo")}</h1>
+        <p className="muted">{t("conf.texto")}</p>
+        {campo("token", t("conf.codigo"), { required: true, autoFocus: true })}
         <p className="hint">
-          Está en el log del servidor, en la línea «no hay ninguna cuenta todavía». Con
-          Docker: <code>docker compose logs backend | grep configurar</code>
+          {tr("conf.codigo.ayuda", {
+            comando: <code>docker compose logs backend | grep configurar</code>,
+          })}
         </p>
-        {campo("org_name", "Nombre de tu organización", { placeholder: "Mi empresa" })}
-        {campo("name", "Tu nombre", { autoComplete: "name" })}
-        {campo("email", "Email", { type: "email", required: true, autoComplete: "username" })}
-        {campo("password", "Contraseña (10 caracteres o más)", {
+        {campo("org_name", t("conf.org"), { placeholder: t("conf.org_placeholder") })}
+        {campo("name", t("conf.nombre"), { autoComplete: "name" })}
+        {campo("email", t("org.email"), { type: "email", required: true, autoComplete: "username" })}
+        {campo("password", t("conf.contrasena"), {
           type: "password",
           required: true,
           minLength: 10,
@@ -76,7 +76,7 @@ export default function ConfigurarPage() {
         })}
         {error && <p className="verr">{error}</p>}
         <button type="submit" className="btn primary" disabled={enviando}>
-          {enviando ? "Creando…" : "Crear la cuenta de administración"}
+          {enviando ? t("conf.creando") : t("conf.crear")}
         </button>
       </form>
     </main>

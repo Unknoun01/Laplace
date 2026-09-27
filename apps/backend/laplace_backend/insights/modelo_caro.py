@@ -10,6 +10,7 @@ from typing import Literal
 from .. import cifras
 from ..pricing import get_price_table
 from ..storage.base import ModelUsage, WindowSummary
+from ..textos import t
 from .modelos import (
     MAX_OUTPUT_TOKENS_FOR_CHEAP_TASK,
     MIN_CALLS_FOR_MODEL_RULE,
@@ -126,32 +127,26 @@ def _modelo_caro_sin_tarifa(
     ahorro_ms = (ms_actual - ms_rapido) * usage.calls
 
     if motivo == "sin_tarifa":
-        porque = (
-            f" Cuánto dinero, no lo sabemos: {usage.model} no tiene tarifa conocida."
-        )
-        sin_dinero = f"{usage.model} no está en la tabla de precios"
+        porque = t("caro.lento.porque.sin_tarifa", modelo=usage.model)
+        sin_dinero = t("hallazgo.fuera_de_tabla", modelo=usage.model)
     else:
-        porque = (
-            f" Cuánto dinero te ahorraría, no lo sabemos: {usage.model} ya es el más barato "
-            f"de los que conocemos, así que no hay con qué comparar su precio. Lo que sí "
-            f"está medido es el tiempo."
-        )
-        sin_dinero = (
-            f"{usage.model} ya es el más barato de la tabla: no hay precio con el que "
-            f"comparar, así que aquí sólo se puede afirmar el tiempo"
-        )
+        porque = t("caro.lento.porque.sin_alternativa", modelo=usage.model)
+        sin_dinero = t("caro.lento.sin_dinero.sin_alternativa", modelo=usage.model)
 
     return Finding(
         id=f"modelo_caro:{usage.key}:{usage.model}",
         kind="modelo_caro",
-        title=f"Respuestas cortas con el modelo más lento: «{usage.name}»",
-        lead=f"{nombre_rapido}, que ya usas, respondería lo mismo en menos tiempo.",
-        summary=(
-            f"«{usage.name}» responde con {salida:.0f} tokens en una llamada normal y usa "
-            f"{usage.model}, que en tu propio tráfico tarda "
-            f"{cifras.decimal(ms_actual / ms_rapido)} veces "
-            f"más por llamada que {nombre_rapido}, un modelo que ya usas. Cambiarlo te "
-            f"ahorraría {_seconds(ahorro_ms)} en esta ventana.{porque}"
+        title=t("caro.lento.titulo", paso=usage.name),
+        lead=t("caro.lento.lead", rapido=nombre_rapido),
+        summary=t(
+            "caro.lento.resumen",
+            paso=usage.name,
+            salida=cifras.miles(salida),
+            modelo=usage.model,
+            veces=cifras.decimal(ms_actual / ms_rapido),
+            rapido=nombre_rapido,
+            espera=_seconds(ahorro_ms),
+            porque=porque,
         ),
         window_waste_usd=0.0,
         window_waste_ms=ahorro_ms,
@@ -162,17 +157,24 @@ def _modelo_caro_sin_tarifa(
         costs_money=False,
         **_floor_flags(usage.unknown_cost_spans, usage.assumed_rate_spans, [usage.model]),
         difficulty="easy",
-        difficulty_label="Cambiar el nombre del modelo",
+        difficulty_label=t("dificultad.cambiar_modelo"),
         scope_label=_scope_label(usage.traces, summary.traces),
         tech=[
-            TechItem(label="paso", value=usage.name),
-            TechItem(label="modelo", value=f"{usage.model} → {nombre_rapido}"),
-            TechItem(label="llamadas", value=str(usage.calls)),
+            TechItem(label=t("tec.paso"), value=usage.name),
+            TechItem(label=t("tec.modelo"), value=f"{usage.model} → {nombre_rapido}"),
+            TechItem(label=t("tec.llamadas"), value=str(usage.calls)),
             TechItem(
-                label="salida mediana", value=f"{_salida_tipica(usage):.0f} tok"
+                label=t("tec.salida_mediana"),
+                value=t("tec.tok", n=cifras.miles(_salida_tipica(usage))),
             ),
-            TechItem(label="salida media", value=f"{usage.avg_output_tokens:.0f} tok"),
-            TechItem(label="ms por llamada", value=f"{ms_actual:.0f} vs {ms_rapido:.0f}"),
+            TechItem(
+                label=t("tec.salida_media"),
+                value=t("tec.tok", n=cifras.miles(usage.avg_output_tokens)),
+            ),
+            TechItem(
+                label=t("tec.ms_por_llamada"),
+                value=t("tec.ms_vs", a=cifras.miles(ms_actual), b=cifras.miles(ms_rapido)),
+            ),
         ],
         sample_trace_id=usage.sample_trace_id,
         step_key=usage.key,
@@ -216,17 +218,19 @@ def _expensive_model_finding(
         return None
 
     veces = actual.total_usd / alternativo.total_usd if alternativo.total_usd else 0
-    veces_txt = f"{veces:.0f} veces" if veces >= 2 else "algo"
+    veces_txt = t("caro.veces", n=cifras.miles(veces)) if veces >= 2 else t("caro.algo")
 
     return Finding(
         id=f"modelo_caro:{usage.key}:{usage.model}",
         kind="modelo_caro",
-        title=f"Usas el modelo caro para respuestas cortas: «{usage.name}»",
-        lead=f"Con {price.alternative}, el mismo trabajo costaría {veces_txt} menos.",
-        summary=(
-            f"Ese paso responde con {_salida_tipica(usage):.0f} tokens en una llamada normal, "
-            f"que es una respuesta muy breve. Con {price.alternative} en lugar de "
-            f"{usage.model}, el mismo trabajo costaría {veces_txt} menos."
+        title=t("caro.titulo", paso=usage.name),
+        lead=t("caro.lead", barato=price.alternative, veces=veces_txt),
+        summary=t(
+            "caro.resumen",
+            salida=cifras.miles(_salida_tipica(usage)),
+            barato=price.alternative,
+            modelo=usage.model,
+            veces=veces_txt,
         ),
         window_waste_usd=ahorro,
         monthly_saving_usd=_to_monthly(ahorro, base),
@@ -235,16 +239,20 @@ def _expensive_model_finding(
             usage.unknown_cost_spans, usage.assumed_rate_spans, [usage.model, cheaper.model]
         ),
         difficulty="easy",
-        difficulty_label="Cambiar el nombre del modelo",
+        difficulty_label=t("dificultad.cambiar_modelo"),
         scope_label=_scope_label(usage.traces, summary.traces),
         tech=[
-            TechItem(label="paso", value=usage.name),
-            TechItem(label="modelo", value=f"{usage.model} → {price.alternative}"),
-            TechItem(label="llamadas", value=str(usage.calls)),
+            TechItem(label=t("tec.paso"), value=usage.name),
+            TechItem(label=t("tec.modelo"), value=f"{usage.model} → {price.alternative}"),
+            TechItem(label=t("tec.llamadas"), value=str(usage.calls)),
             TechItem(
-                label="salida mediana", value=f"{_salida_tipica(usage):.0f} tok"
+                label=t("tec.salida_mediana"),
+                value=t("tec.tok", n=cifras.miles(_salida_tipica(usage))),
             ),
-            TechItem(label="salida media", value=f"{usage.avg_output_tokens:.0f} tok"),
+            TechItem(
+                label=t("tec.salida_media"),
+                value=t("tec.tok", n=cifras.miles(usage.avg_output_tokens)),
+            ),
         ],
         sample_trace_id=usage.sample_trace_id,
         step_key=usage.key,
@@ -262,62 +270,52 @@ def _modelo_lento_detail(
     D-114 dice cuál de los dos es.
     """
     rapido = next(
-        (t.value.split("→")[-1].strip() for t in finding.tech if t.label == "modelo"), ""
+        (i.value.split("→")[-1].strip() for i in finding.tech if i.label == t("tec.modelo")),
+        "",
     )
     detalle = FindingDetail(**finding.model_dump())
 
-    detalle.what_happens = (
-        f"El paso «{usage.name}» ha hecho {_miles(usage.calls)} llamadas a {usage.model} en la "
-        f"ventana analizada, y responde con {_salida_tipica(usage):.0f} tokens en una normal: "
-        f"una etiqueta o una frase corta, no un texto elaborado. En tu propio tráfico hay "
-        f"un modelo que tarda bastante menos por llamada."
+    detalle.what_happens = t(
+        "caro.lento.que_pasa",
+        paso=usage.name,
+        llamadas=_miles(usage.calls),
+        modelo=usage.model,
+        salida=cifras.miles(_salida_tipica(usage)),
     )
-    detalle.why = (
-        "Un paso que sólo tiene que decidir entre unas pocas opciones no necesita el "
-        "modelo más capaz, y el más capaz suele ser también el más lento. Cuando un "
-        "agente crece, todos los pasos heredan el modelo con el que se empezó a "
-        "probar.\n\n"
-        f"{finding.cost_unavailable.capitalize()}, así que aquí no te prometemos dinero: "
-        f"te enseñamos el tiempo, que está medido llamada a llamada."
-    )
-    detalle.detection_explanation = (
-        f"Regla activa: **un paso `llm` cuya salida mediana es de "
-        f"{MAX_SALIDA_TRIVIAL_SIN_TARIFA} tokens o menos y que tarda al menos "
-        f"{MIN_VECES_MAS_LENTO} veces más por llamada que otro modelo que ya usas** —con "
-        f"{MIN_CALLS_MODELO_RAPIDO} llamadas como mínimo, para que la comparación no salga "
-        f"de una muestra suelta. Se comparan **medianas**, no medias: una generación "
-        f"desbocada mueve la media de un paso que normalmente contesta tres palabras. La "
-        f"alternativa sale de tu propio tráfico, nunca de una lista nuestra de modelos."
+    motivo = finding.cost_unavailable
+    detalle.why = t("caro.lento.por_que", motivo=motivo[:1].upper() + motivo[1:])
+    detalle.detection_explanation = t(
+        "caro.lento.deteccion",
+        maximo=MAX_SALIDA_TRIVIAL_SIN_TARIFA,
+        veces=cifras.decimal(MIN_VECES_MAS_LENTO),
+        llamadas=MIN_CALLS_MODELO_RAPIDO,
     )
     detalle.detection_query = query.strip()
 
     detalle.fix_steps = [
         FixStep(
-            title=f"Prueba ese paso con {rapido}" if rapido else "Prueba con el otro modelo",
-            body=(
-                "Es un cambio de una palabra y afecta sólo a ese paso. Lo proponemos porque "
-                "ya lo usas en otro sitio, no porque lo hayamos elegido nosotros."
+            title=(
+                t("caro.lento.arreglo.probar.titulo", rapido=rapido)
+                if rapido
+                else t("caro.lento.arreglo.probar.otro")
             ),
-            code=f'model="{rapido}"  # antes: "{usage.model}"' if rapido else None,
+            body=t("caro.lento.arreglo.probar.texto"),
+            code=t("caro.codigo.antes", nuevo=rapido, viejo=usage.model) if rapido else None,
         ),
         FixStep(
-            title="Comprueba que la calidad aguanta",
-            body=(
-                "Un modelo más rápido no siempre decide igual. Pasa unos cuantos casos "
-                "reales por los dos y compáralos en Evaluaciones antes de dejarlo fijo."
-            ),
+            title=t("caro.arreglo.calidad.titulo"),
+            body=t("caro.lento.arreglo.calidad.texto"),
         ),
     ]
-    detalle.savings_calculation = (
-        f"{_miles(usage.calls)} llamadas en {window_label(finding.observed_days)}, a "
-        f"{_seconds(usage.p50_duration_ms)} de mediana cada una. Con el modelo rápido de tu "
-        f"tráfico se recuperan {_seconds(finding.window_waste_ms)} en esta ventana. No hay "
-        f"cifra en dólares y no la inventamos: {finding.cost_unavailable}."
+    detalle.savings_calculation = t(
+        "caro.lento.ahorro",
+        llamadas=_miles(usage.calls),
+        ventana=window_label(finding.observed_days),
+        mediana=_seconds(usage.p50_duration_ms),
+        ahorro=_seconds(finding.window_waste_ms),
+        motivo=finding.cost_unavailable,
     )
-    detalle.savings_note = (
-        "El tiempo está medido, no estimado. Lo que no se puede afirmar aquí es el dinero, "
-        "y por eso no aparece ninguno."
-    )
+    detalle.savings_note = t("caro.lento.nota")
     return detalle
 
 
@@ -341,33 +339,21 @@ def _por_que_modelo_caro(usage: ModelUsage, alternativa: str) -> str:
         cached_input_tokens=usage.cached_input_tokens,
     )
     parte_entrada = coste.input_usd / coste.total_usd if coste.total_usd else 0.0
-    cierre = (
-        "Esto no es un fallo: es lo que pasa cuando un agente crece y todos los pasos "
-        "heredan el modelo con el que se empezó a probar."
-    )
+    cierre = t("caro.por_que.cierre")
 
     if parte_entrada >= 0.5:
-        explicacion = (
-            f"El {cifras.porcentaje(parte_entrada)} de lo que cuesta este paso es lo que "
-            f"recibe, no lo que responde: {_miles(round(usage.avg_input_tokens))} tokens "
-            f"de entrada por llamada para una respuesta de {_salida_tipica(usage):.0f}. Con "
-            f"{alternativa or 'un modelo más barato'} cada token de entrada cuesta mucho "
-            f"menos, así que el ahorro sale casi entero de ahí."
+        explicacion = t(
+            "caro.por_que.entrada",
+            parte=cifras.porcentaje(parte_entrada),
+            entrada=_miles(round(usage.avg_input_tokens)),
+            salida=cifras.miles(_salida_tipica(usage)),
+            barato=alternativa or t("caro.un_modelo_barato"),
         )
     else:
-        explicacion = (
-            "Los modelos grandes se pagan sobre todo por lo que escriben. Cuando un paso "
-            "sólo tiene que decidir entre unas pocas opciones o extraer un dato, casi todo "
-            "lo que pagas es capacidad que no se usa."
-        )
+        explicacion = t("caro.por_que.salida")
 
     if usage.avg_input_tokens >= CONTEXTO_LARGO_TOKENS:
-        riesgo = (
-            "Ojo con este caso: el paso contesta con mucho contexto delante, y leer "
-            "documentos largos para dar una respuesta corta es donde un modelo pequeño se "
-            "equivoca más que al clasificar o extraer un dato. El ahorro es real; que "
-            "responda igual de bien hay que comprobarlo antes de cambiarlo."
-        )
+        riesgo = t("caro.por_que.riesgo")
         return f"{explicacion}\n\n{riesgo}\n\n{cierre}"
     return f"{explicacion}\n\n{cierre}"
 
@@ -388,53 +374,49 @@ def _expensive_model_detail(
 
     detalle = FindingDetail(**finding.model_dump())
 
-    detalle.what_happens = (
-        f"El paso «{usage.name}» ha hecho {_miles(usage.calls)} llamadas a {usage.model} "
-        f"en la ventana "
-        f"analizada. Una llamada normal responde con {_salida_tipica(usage):.0f} tokens, que es "
-        f"lo que ocupa una etiqueta o una frase corta, no un texto elaborado."
+    detalle.what_happens = t(
+        "caro.que_pasa",
+        paso=usage.name,
+        llamadas=_miles(usage.calls),
+        modelo=usage.model,
+        salida=cifras.miles(_salida_tipica(usage)),
     )
     detalle.why = _por_que_modelo_caro(usage, price.alternative if price else "")
-    detalle.detection_explanation = (
-        f"Regla activa: **un paso `llm` con al menos {MIN_CALLS_FOR_MODEL_RULE} llamadas y una "
-        f"salida media de {MAX_OUTPUT_TOKENS_FOR_CHEAP_TASK} tokens o menos**, cuyo modelo "
-        f"tiene una alternativa más barata de la misma familia en la tabla de precios. El "
-        f"ahorro se recalcula con los tokens reales, no con una estimación."
+    detalle.detection_explanation = t(
+        "caro.deteccion",
+        llamadas=MIN_CALLS_FOR_MODEL_RULE,
+        maximo=MAX_OUTPUT_TOKENS_FOR_CHEAP_TASK,
     )
     detalle.detection_query = query.strip()
 
     modelo_alt = price.alternative if price else ""
     detalle.fix_steps = [
         FixStep(
-            title=f"Cambia el modelo de ese paso a {modelo_alt}",
-            body=(
-                "Es un cambio de una palabra. Afecta sólo a ese paso: el resto del agente "
-                "sigue con el modelo que ya tenía."
-            ),
-            code=f'model="{modelo_alt}"  # antes: "{usage.model}"',
+            title=t("caro.arreglo.cambiar.titulo", barato=modelo_alt),
+            body=t("caro.arreglo.cambiar.texto"),
+            code=t("caro.codigo.antes", nuevo=modelo_alt, viejo=usage.model),
         ),
         FixStep(
-            title="Comprueba que la calidad aguanta",
-            body=(
-                "Un modelo más pequeño no siempre decide igual. Guarda las ejecuciones "
-                "reales de este paso como conjunto de casos (más abajo) y lánzalas con el "
-                "modelo nuevo: Evaluaciones te dirá si acierta igual antes de dejarlo fijo."
-            ),
+            title=t("caro.arreglo.calidad.titulo"),
+            body=t("caro.arreglo.calidad.texto"),
         ),
     ]
 
     if price and cheaper:
-        detalle.savings_calculation = (
-            f"{_miles(usage.input_tokens)} tokens de entrada y {_miles(usage.output_tokens)} de "
-            f"salida en {window_label(finding.observed_days)}. Con {usage.model}: "
-            f"${price.input}/1M entrada y ${price.output}/1M salida. Con "
-            f"{price.alternative}: ${cheaper.input}/1M y "
-            f"${cheaper.output}/1M. La diferencia sobre esos mismos tokens es "
-            f"{cifras.dinero_exacto(finding.window_waste_usd)} en "
-            f"{window_label(finding.observed_days)}.{_projection_sentence(finding)}"
+        ventana = window_label(finding.observed_days)
+        detalle.savings_calculation = t(
+            "caro.ahorro",
+            entrada=_miles(usage.input_tokens),
+            salida=_miles(usage.output_tokens),
+            ventana=ventana,
+            modelo=usage.model,
+            p_entrada=cifras.dinero(price.input),
+            p_salida=cifras.dinero(price.output),
+            barato=price.alternative,
+            b_entrada=cifras.dinero(cheaper.input),
+            b_salida=cifras.dinero(cheaper.output),
+            diferencia=cifras.dinero_exacto(finding.window_waste_usd),
+            proyeccion=_projection_sentence(finding),
         )
-    detalle.savings_note = (
-        "El ahorro es aritmética sobre los tokens que ya has gastado. Lo que no podemos "
-        "medir todavía es si el modelo pequeño acierta igual en tu caso: eso hay que probarlo."
-    )
+    detalle.savings_note = t("caro.nota")
     return detalle

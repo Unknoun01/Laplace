@@ -1,3 +1,4 @@
+import { idiomaActual } from "./idioma";
 import type {
   Annotation,
   AnnotationVerdict,
@@ -92,6 +93,9 @@ function cabeceras(extra?: Record<string, string>): Record<string, string> {
     // Toda petición la lleva: el backend la exige en las escrituras con cookie, y un
     // formulario de otro sitio no puede ponerla sin pasar por CORS (D-127).
     "X-Laplace": "1",
+    // Las frases del motor —títulos, lecturas, avisos— se redactan en el backend: tienen
+    // que llegar en el idioma de la pantalla (D-147).
+    "Accept-Language": idiomaActual(),
   };
 }
 
@@ -138,9 +142,9 @@ async function get<T>(path: string, params?: Params, senal?: AbortSignal): Promi
 
 /** Los rangos que ofrece el selector de la barra superior. */
 export const RANGES = [
-  { days: 1, label: "24 horas" },
-  { days: 7, label: "7 días" },
-  { days: 30, label: "30 días" },
+  { days: 1, label: "rango.1" },
+  { days: 7, label: "rango.7" },
+  { days: 30, label: "rango.30" },
 ] as const;
 
 export const DEFAULT_DAYS = 7;

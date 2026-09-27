@@ -5,6 +5,7 @@ import { annotate, deleteAnnotation } from "@/lib/api";
 import { usePermisos } from "@/lib/permisos";
 import { money } from "@/lib/format";
 import type { Annotation } from "@/lib/types";
+import { t } from "@/lib/textos";
 
 /**
  * Marcar una traza como buena o mala.
@@ -56,7 +57,7 @@ export function Verdicts({
         onChange?.([...annotations.filter((a) => a.source !== "human"), nueva]);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "no se ha podido guardar");
+      setError(e instanceof Error ? e.message : t("seg.error.guardar"));
     } finally {
       setGuardando(false);
     }
@@ -70,22 +71,22 @@ export function Verdicts({
           className={`vbtn pass${humana?.verdict === "pass" ? " on" : ""}`}
           onClick={() => marcar("pass")}
           disabled={guardando || !escribir}
-          title={escribir ? "Marcar esta ejecución como buena" : "Tu rol sólo permite ver"}
+          title={escribir ? t("ver.buena") : t("ver.solo_ver")}
         >
-          Bien
+          {t("ver.bien")}
         </button>
         <button
           type="button"
           className={`vbtn fail${humana?.verdict === "fail" ? " on" : ""}`}
           onClick={() => marcar("fail")}
           disabled={guardando || !escribir}
-          title={escribir ? "Marcar esta ejecución como mala" : "Tu rol sólo permite ver"}
+          title={escribir ? t("ver.mala") : t("ver.solo_ver")}
         >
-          Mal
+          {t("ver.mal")}
         </button>
         {!compact && (
           <button type="button" className="vbtn ghost" onClick={() => setAbierto((v) => !v)}>
-            {abierto ? "Ocultar comentario" : humana?.comment ? "Ver comentario" : "Comentar"}
+            {abierto ? t("ver.ocultar") : humana?.comment ? t("ver.ver") : t("ver.comentar")}
           </button>
         )}
         {maquina && <JudgeChip annotation={maquina} />}
@@ -96,19 +97,16 @@ export function Verdicts({
           <textarea
             value={comentario}
             onChange={(e) => setComentario(e.target.value)}
-            placeholder="Qué falló, o por qué está bien. Se guarda al marcar."
+            placeholder={t("ver.placeholder")}
             rows={2}
           />
-          <small>
-            El comentario se guarda con el veredicto: vuelve a pulsar «Bien» o «Mal»
-            después de escribirlo.
-          </small>
+          <small>{t("ver.nota", { bien: t("ver.bien"), mal: t("ver.mal") })}</small>
         </div>
       )}
 
       {!compact && maquina?.comment && (
         <p className="jreason">
-          <span className="jtag">juez</span> {maquina.comment}
+          <span className="jtag">{t("ver.juez")}</span> {maquina.comment}
         </p>
       )}
       {/* El error se enseña siempre, también en compacto. Un guardado que falla en
@@ -117,7 +115,7 @@ export function Verdicts({
       {error &&
         (compact ? (
           <span className="verr" title={error}>
-            no se ha guardado
+            {t("ver.no_guardado")}
           </span>
         ) : (
           <p className="verr">{error}</p>
@@ -141,13 +139,20 @@ export function JudgeChip({ annotation }: { annotation: Annotation }) {
       title={
         juez
           ? `${juez.model} · prompt ${juez.prompt_version} · ${juez.input_tokens}+${juez.output_tokens} tokens`
-          : "veredicto de máquina"
+          : t("ver.maquina")
       }
     >
-      juez: {annotation.verdict === "pass" ? "bien" : annotation.verdict === "fail" ? "mal" : "?"}
+      {t("ver.juez_dice", {
+        v:
+          annotation.verdict === "pass"
+            ? t("ver.bien_min")
+            : annotation.verdict === "fail"
+              ? t("ver.mal_min")
+              : "?",
+      })}
       {juez && (
         <em className="pro">
-          {juez.cost_unknown ? " coste desconocido" : ` ${money(juez.cost_usd)}`}
+          {juez.cost_unknown ? t("ver.coste_desconocido") : ` ${money(juez.cost_usd)}`}
         </em>
       )}
     </span>
@@ -162,10 +167,10 @@ export function VerdictDots({ annotations }: { annotations: Annotation[] }) {
   return (
     <span className="vdots">
       {humana && (
-        <i className={`vdot ${humana.verdict}`} title={`persona: ${humana.verdict}`} />
+        <i className={`vdot ${humana.verdict}`} title={t("ver.persona", { v: humana.verdict })} />
       )}
       {maquina && (
-        <i className={`vdot judge ${maquina.verdict}`} title={`juez: ${maquina.verdict}`} />
+        <i className={`vdot judge ${maquina.verdict}`} title={t("ver.juez_dice", { v: maquina.verdict })} />
       )}
     </span>
   );

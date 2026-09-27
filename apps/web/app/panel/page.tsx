@@ -5,9 +5,12 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { BackendDown, Cargando, NeedsKey, NoProject, NoTracesYet, NotYours } from "@/components/states";
 import { getBreakdown, getPanel, listProjects, parseDays } from "@/lib/api";
-import { dayHour, decimal, duration, money, number, spanLabel, tokens } from "@/lib/format";
+import { dayHour, decimal, duration, money, number, porcentaje, spanLabel, tokens } from "@/lib/format";
 import type { Breakdown, Metric, Panel, Spike } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
+import { tr } from "@/lib/i18n";
+import { t, tn } from "@/lib/textos";
+import { ETIQUETAS, idiomaActual } from "@/lib/idioma";
 
 /**
  * Panel: coste por unidad de trabajo y atribución de picos.
@@ -47,20 +50,15 @@ function Contenido() {
   return (
     <main className="reading">
       <section className="hero">
-        <h1>
-          Tu agente «{project}», por unidad de trabajo
-        </h1>
+        <h1>{t("panel.titulo", { proyecto: project })}</h1>
 
         <div className={`verdict ${panel.reading.verdict}`}>
           <b>{panel.reading.headline}</b>
           <p>{panel.reading.detail}</p>
         </div>
 
-        <h2 className="sub">Por ejecución</h2>
-        <p className="lead">
-          Lo que cuesta una ejecución de tu agente. Es la cifra que importa: un gasto que
-          sube porque hay más trabajo no es un problema, y esto lo separa.
-        </p>
+        <h2 className="sub">{t("panel.por_ejecucion")}</h2>
+        <p className="lead">{t("panel.por_ejecucion.lead")}</p>
         <div className="mgrid seis">
           {panel.per_execution.map((m) => (
             <MetricCard key={m.label} metric={m} currency={panel.currency} destacada />
@@ -69,10 +67,8 @@ function Contenido() {
 
         <Chart panel={panel} />
 
-        <h2 className="sub">Totales, como contexto</h2>
-        <p className="lead">
-          Van aquí abajo a propósito: por sí solos no dicen si algo va mal.
-        </p>
+        <h2 className="sub">{t("panel.totales")}</h2>
+        <p className="lead">{t("panel.totales.lead")}</p>
         <div className="mgrid small">
           {panel.totals.map((m) => (
             <MetricCard key={m.label} metric={m} currency={panel.currency} />
@@ -105,33 +101,32 @@ function QuienGasta({ project, days, currency }: { project: string; days: number
     setDatos(null);
     getBreakdown(project, days, by)
       .then((d) => vigente && setDatos(d))
-      .catch((e) => vigente && setError(e instanceof Error ? e.message : "no se ha podido cargar"));
+      .catch((e) => vigente && setError(e instanceof Error ? e.message : t("panel.error.cargar")));
     return () => {
       vigente = false;
     };
   }, [project, days, by]);
 
-  const nombre = by === "user" ? "usuario" : "sesión";
   const context = `project=${encodeURIComponent(project)}&days=${days}`;
   return (
     <section className="sec">
       <div className="sec-head">
-        <h2>Quién gasta más</h2>
-        <div className="seg" role="group" aria-label="Agrupar por">
+        <h2>{t("panel.quien")}</h2>
+        <div className="seg" role="group" aria-label={t("panel.agrupar")}>
           <button type="button" aria-pressed={by === "user"} onClick={() => setBy("user")}>
-            Usuarios
+            {t("panel.usuarios")}
           </button>
           <button type="button" aria-pressed={by === "session"} onClick={() => setBy("session")}>
-            Sesiones
+            {t("panel.sesiones")}
           </button>
         </div>
       </div>
       {error && <p className="verr">{error}</p>}
       {datos && datos.groups.length === 0 && (
         <p className="lead">
-          Ninguna ejecución de este rango dice de qué {nombre} es. Con{" "}
-          <code>laplace.set_context({by === "user" ? "user_id" : "session_id"}=…)</code> en tu
-          agente, aquí verás a quién se le va el gasto.
+          {tr(by === "user" ? "panel.sin_usuario" : "panel.sin_sesion", {
+            codigo: <code>laplace.set_context({by === "user" ? "user_id" : "session_id"}=…)</code>,
+          })}
         </p>
       )}
       {datos && datos.groups.length > 0 && (
@@ -139,11 +134,11 @@ function QuienGasta({ project, days, currency }: { project: string; days: number
           <table className="tabla-simple ancha">
             <thead>
               <tr>
-                <th>{by === "user" ? "Usuario" : "Sesión"}</th>
-                <th>Ejecuciones</th>
-                <th>Por ejecución</th>
-                <th>Total</th>
-                <th>Del gasto</th>
+                <th>{by === "user" ? t("panel.col.usuario") : t("panel.col.sesion")}</th>
+                <th>{t("panel.col.ejecuciones")}</th>
+                <th>{t("panel.col.por_ejecucion")}</th>
+                <th>{t("panel.col.total")}</th>
+                <th>{t("panel.col.del_gasto")}</th>
               </tr>
             </thead>
             <tbody>
@@ -173,8 +168,10 @@ function QuienGasta({ project, days, currency }: { project: string; days: number
           </table>
           {datos.untagged_traces > 0 && (
             <p className="disclaimer">
-              Además, {number(datos.untagged_traces)} ejecuciones sin {nombre} (
-              {money(datos.untagged_cost_usd, currency)}).
+              {t(by === "user" ? "panel.sin_etiqueta_usuario" : "panel.sin_etiqueta_sesion", {
+                n: number(datos.untagged_traces),
+                coste: money(datos.untagged_cost_usd, currency),
+              })}
             </p>
           )}
         </>
@@ -188,8 +185,8 @@ function QuienGasta({ project, days, currency }: { project: string; days: number
  * un agente que falla de vez en cuando.
  */
 function porcentajeDelGasto(ratio: number): string {
-  if (ratio > 0 && ratio < 0.001) return "< 0,1 %";
-  return `${decimal(ratio * 100)} %`;
+  if (ratio > 0 && ratio < 0.001) return t("panel.menos_de", { x: porcentaje(0.001, 1) });
+  return porcentaje(ratio, 1);
 }
 
 /**
@@ -224,11 +221,10 @@ function MetricCard({
         <>
           <b className="num">{formatear(metric.value, metric.unit, currency)}</b>
           {cambio === null ? (
-            <span className="why">sin comparación</span>
+            <span className="why">{t("panel.sin_comparacion")}</span>
           ) : (
             <span className={`delta${clase}`}>
-              {cambio > 0 ? "+" : ""}
-              {(cambio * 100).toFixed(0)} % vs. el periodo anterior
+              {t("panel.vs_anterior", { cambio: `${cambio > 0 ? "+" : ""}${porcentaje(cambio)}` })}
             </span>
           )}
         </>
@@ -274,14 +270,13 @@ function Chart({ panel }: { panel: Panel }) {
   return (
     <div className="chart">
       <div className="chart-head">
-        <span>
-          Coste por ejecución, en tramos de {spanLabel(panel.bucket_minutes / 1440)}
-        </span>
+        <span>{t("panel.grafica.titulo", { tramo: spanLabel(panel.bucket_minutes / 1440) })}</span>
         <span className="legend">
-          <i className="bar" /> coste por ejecución <i className="vol" /> ejecuciones
+          <i className="bar" /> {t("panel.grafica.coste")} <i className="vol" />{" "}
+          {t("panel.grafica.ejecuciones")}
         </span>
       </div>
-      <svg viewBox={`0 0 ${ancho} ${alto}`} role="img" aria-label="Coste por ejecución por tramo">
+      <svg viewBox={`0 0 ${ancho} ${alto}`} role="img" aria-label={t("panel.grafica.aria")}>
         {tramos.map((b, i) => {
           const x = i * paso;
           const volumen = (b.traces / topeTrazas) * alto;
@@ -306,7 +301,11 @@ function Chart({ panel }: { panel: Panel }) {
                   className={b.is_spike ? "bar spike" : "bar"}
                 >
                   <title>
-                    {`${dayHour(b.start)} · ${money(unitario)} por ejecución · ${b.traces} ejecuciones`}
+                    {t("panel.grafica.punto", {
+                      fecha: dayHour(b.start),
+                      coste: money(unitario),
+                      n: b.traces,
+                    })}
                   </title>
                 </rect>
               )}
@@ -317,14 +316,11 @@ function Chart({ panel }: { panel: Panel }) {
       <div className="chart-foot">
         <span>
           {dayHour(tramos[0].start)}
-          {recortado && " · desde el primer dato"}
+          {recortado && t("panel.grafica.desde")}
         </span>
         <span>{dayHour(tramos[tramos.length - 1].start)}</span>
       </div>
-      <p className="disclaimer">
-        Los tramos sin ejecuciones se quedan en blanco. No es coste cero: es que no hubo
-        nada que ejecutar, y pintarlo como cero dibujaría una bajada que no ha existido.
-      </p>
+      <p className="disclaimer">{t("panel.grafica.nota")}</p>
     </div>
   );
 }
@@ -334,12 +330,8 @@ function Spikes({ panel }: { panel: Panel }) {
   if (panel.spikes.length === 0) {
     return (
       <section className="sec">
-        <h2>Picos</h2>
-        <p className="lead">
-          {panel.spikes_unavailable ||
-            "Ningún tramo se sale de lo normal en este rango. El coste por ejecución se " +
-              "mantiene dentro de lo que cuesta habitualmente."}
-        </p>
+        <h2>{t("panel.picos")}</h2>
+        <p className="lead">{panel.spikes_unavailable || t("panel.picos.ninguno")}</p>
       </section>
     );
   }
@@ -347,14 +339,9 @@ function Spikes({ panel }: { panel: Panel }) {
   return (
     <section className="sec">
       <h2>
-        {panel.spikes.length === 1
-          ? "Un tramo se sale de lo normal"
-          : `${panel.spikes.length} tramos se salen de lo normal`}
+        {tn("panel.picos.n", panel.spikes.length)}
       </h2>
-      <p className="lead">
-        Tramos en los que cada ejecución costó mucho más que de costumbre. Del más caro al
-        menos.
-      </p>
+      <p className="lead">{t("panel.picos.lead")}</p>
       {panel.spikes.map((spike) => (
         <SpikeCard key={spike.start} spike={spike} panel={panel} />
       ))}
@@ -374,23 +361,26 @@ function SpikeCard({ spike, panel }: { spike: Spike; panel: Panel }) {
     <article className="card static">
       <div className="card-top">
         <h3>
-          Empezó el {dayHour(spike.start)}, y duró hasta las{" "}
-          {new Date(spike.end).toLocaleTimeString("es-ES", {
-            hour: "2-digit",
-            minute: "2-digit",
+          {t("panel.pico.cuando", {
+            inicio: dayHour(spike.start),
+            fin: new Date(spike.end).toLocaleTimeString(ETIQUETAS[idiomaActual()], {
+              hour: "2-digit",
+              minute: "2-digit",
+            }),
           })}
         </h3>
         <div className="price">
           {money(spike.excess_usd, panel.currency)}
-          <small>de más</small>
+          <small>{t("panel.pico.de_mas")}</small>
         </div>
       </div>
       <p>
-        En ese tramo cada ejecución costó{" "}
-        <strong>{money(spike.cost_per_trace_usd, panel.currency)}</strong>, frente a los{" "}
-        {money(spike.baseline_cost_per_trace_usd, panel.currency)} de costumbre:{" "}
-        <strong>{decimal(spike.times_baseline)} veces más</strong> sobre{" "}
-        {number(spike.traces)} {spike.traces === 1 ? "ejecución" : "ejecuciones"}.
+        {tr(spike.traces === 1 ? "panel.pico.texto_one" : "panel.pico.texto_other", {
+          coste: <strong>{money(spike.cost_per_trace_usd, panel.currency)}</strong>,
+          base: money(spike.baseline_cost_per_trace_usd, panel.currency),
+          veces: <strong>{t("panel.pico.veces", { n: decimal(spike.times_baseline) })}</strong>,
+          n: number(spike.traces),
+        })}
       </p>
 
       {spike.causes.length > 0 ? (
@@ -404,7 +394,7 @@ function SpikeCard({ spike, panel }: { spike: Spike; panel: Panel }) {
                 <>
                   {" "}
                   <Link href={`/prompts?project=${encodeURIComponent(spike.traces_query.project_id ?? "")}&days=${panel.days}`}>
-                    ver ese prompt
+                    {t("panel.pico.ver_prompt")}
                   </Link>
                 </>
               )}
@@ -418,18 +408,18 @@ function SpikeCard({ spike, panel }: { spike: Spike; panel: Panel }) {
 
       <footer>
         <Link href={`/trazas?${filtro.toString()}`} className="btn">
-          Ver las trazas de ese tramo
+          {t("panel.pico.ver_trazas")}
         </Link>
         <span className="chip where">
-          Ordenadas por coste, de la más cara a la más barata
+          {t("panel.pico.orden")}
         </span>
       </footer>
       <div className="techline pro">
         <span>
-          tramo <b>{spike.start}</b>
+          {t("panel.pico.tramo")} <b>{spike.start}</b>
         </span>
         <span>
-          línea base <b>mediana de los tramos con ejecuciones</b>
+          {t("panel.pico.base")} <b>{t("panel.pico.mediana")}</b>
         </span>
       </div>
     </article>

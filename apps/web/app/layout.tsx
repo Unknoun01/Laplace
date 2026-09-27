@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { IBM_Plex_Mono, Inter } from "next/font/google";
 import { Suspense } from "react";
 import { TopBar } from "@/components/TopBar";
+import { ProveedorIdioma } from "@/lib/i18n";
 import "./globals.css";
 
 /**
@@ -26,9 +27,7 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  // Cada pantalla pone el suyo: con todas las pestañas llamadas «Laplace» no había
-  // forma de distinguir la traza de la ficha en la barra del navegador.
-  title: { default: "Laplace", template: "%s · Laplace" },
+  // El título lo pone `ProveedorIdioma`, en el idioma de la pantalla (D-147).
   description: "Observabilidad y optimización de agentes de IA.",
 };
 
@@ -57,12 +56,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           este atributo diverge a propósito entre servidor y cliente. */}
       <body data-mode="simple" suppressHydrationWarning>
         <script dangerouslySetInnerHTML={{ __html: RESTORE_MODE }} />
-        <div className="shell wide">
-          <Suspense fallback={<div className="topbar" />}>
-            <TopBar />
-          </Suspense>
-          {children}
-        </div>
+        <ProveedorIdioma>
+          <div className="shell wide">
+            <Suspense fallback={<div className="topbar" />}>
+              <TopBar />
+            </Suspense>
+            {children}
+          </div>
+        </ProveedorIdioma>
       </body>
     </html>
   );

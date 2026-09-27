@@ -5,6 +5,7 @@ import { useState } from "react";
 import { clearFindingState, createDataset, setFindingState } from "@/lib/api";
 import { duration, money, number, timestamp, tokens } from "@/lib/format";
 import type { FindingDetail } from "@/lib/types";
+import { t } from "@/lib/textos";
 
 /**
  * Lo que el usuario dice de este hallazgo, y lo que se ha medido después (D-123).
@@ -23,7 +24,7 @@ export function EstadoHallazgo({ project, finding }: { project: string; finding:
       await setFindingState({ project_id: project, finding_id: finding.id, status, note: nota });
       window.location.reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "no se ha podido guardar");
+      setError(e instanceof Error ? e.message : t("seg.error.guardar"));
     }
   }
 
@@ -32,7 +33,7 @@ export function EstadoHallazgo({ project, finding }: { project: string; finding:
       await clearFindingState(project, finding.id);
       window.location.reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "no se ha podido deshacer");
+      setError(e instanceof Error ? e.message : t("seg.error.deshacer"));
     }
   }
 
@@ -40,16 +41,16 @@ export function EstadoHallazgo({ project, finding }: { project: string; finding:
     const check = finding.fix_check;
     const titulo =
       finding.state === "ignorado"
-        ? "Lo has marcado como ignorado"
+        ? t("seg.titulo.ignorado")
         : finding.state === "reaparecido"
-          ? "Lo marcaste como arreglado, y sigue saliendo"
-          : "Lo has marcado como arreglado";
+          ? t("seg.titulo.reaparecido")
+          : t("seg.titulo.arreglado");
     return (
       <section className={`block estado-hallazgo ${finding.state}`}>
         <h2>{titulo}</h2>
         {finding.state_at && (
           <p className="muted">
-            El {timestamp(finding.state_at)}.
+            {t("seg.fecha", { fecha: timestamp(finding.state_at) })}
             {finding.state_note && ` «${finding.state_note}»`}
           </p>
         )}
@@ -59,28 +60,28 @@ export function EstadoHallazgo({ project, finding }: { project: string; finding:
             {check.before_per_run !== null && check.after_per_run !== null && (
               <div className="antes-despues">
                 <div>
-                  <small>Antes, por ejecución</small>
+                  <small>{t("seg.antes")}</small>
                   <b className="num">{porEjecucion(check.before_per_run, check.unit)}</b>
-                  <small>{number(check.runs_before)} ejecuciones</small>
+                  <small>{t("seg.ejecuciones", { n: number(check.runs_before) })}</small>
                 </div>
                 <div aria-hidden className="arrow">
                   →
                 </div>
                 <div>
-                  <small>Después</small>
+                  <small>{t("seg.despues")}</small>
                   <b className="num">{porEjecucion(check.after_per_run, check.unit)}</b>
-                  <small>{number(check.runs_after)} ejecuciones</small>
+                  <small>{t("seg.ejecuciones", { n: number(check.runs_after) })}</small>
                 </div>
               </div>
             )}
           </>
         )}
         {finding.state === "ignorado" && (
-          <p>No cuenta en el evitable del inicio ni manda alertas.</p>
+          <p>{t("seg.ignorado.nota")}</p>
         )}
         <div className="actions" style={{ paddingTop: 12 }}>
           <button type="button" className="btn" onClick={deshacer}>
-            Deshacer y devolverlo a la lista
+            {t("seg.deshacer")}
           </button>
         </div>
         {error && <p className="verr">{error}</p>}
@@ -90,17 +91,14 @@ export function EstadoHallazgo({ project, finding }: { project: string; finding:
 
   return (
     <section className="block estado-hallazgo">
-      <h2>¿Ya lo has arreglado?</h2>
-      <p>
-        Márcalo y lo comprobamos: comparamos lo que costaba cada ejecución antes con lo que
-        cuesta después. Si sigue saliendo igual, vuelve a la lista.
-      </p>
+      <h2>{t("seg.ya_arreglado")}</h2>
+      <p>{t("seg.ya_arreglado.texto")}</p>
       {ignorando && (
         <input
           className="field"
           value={nota}
           onChange={(e) => setNota(e.target.value)}
-          placeholder="Por qué no es un problema (opcional)"
+          placeholder={t("seg.nota.placeholder")}
           style={{ width: "100%", marginBottom: 10 }}
         />
       )}
@@ -108,19 +106,19 @@ export function EstadoHallazgo({ project, finding }: { project: string; finding:
         {ignorando ? (
           <>
             <button type="button" className="btn" onClick={() => marcar("ignorado")}>
-              Ignorar este problema
+              {t("seg.ignorar")}
             </button>
             <button type="button" className="btn" onClick={() => setIgnorando(false)}>
-              Cancelar
+              {t("comun.cancelar")}
             </button>
           </>
         ) : (
           <>
             <button type="button" className="btn primary" onClick={() => marcar("arreglado")}>
-              Lo he arreglado: compruébalo
+              {t("seg.arreglado.boton")}
             </button>
             <button type="button" className="btn" onClick={() => setIgnorando(true)}>
-              No es un problema para mí
+              {t("seg.no_problema")}
             </button>
           </>
         )}
@@ -149,7 +147,8 @@ export function ProbarAntes({
 }) {
   const alternativa =
     finding.tech
-      .find((t) => t.label === "modelo")
+      // El valor con «→» es el cambio de modelo; la etiqueta llega traducida (D-148).
+      .find((item) => item.value.includes("→"))
       ?.value.split("→")
       .pop()
       ?.trim() ?? "";
@@ -167,32 +166,27 @@ export function ProbarAntes({
       });
       setCreado(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "no se ha podido crear");
+      setError(e instanceof Error ? e.message : t("seg.error.crear"));
     }
   }
 
   return (
     <section className="block">
-      <h2>Antes de cambiarlo, compruébalo</h2>
-      <p>
-        El ahorro está medido; que {alternativa || "el modelo barato"} responda igual de
-        bien, no. Guarda las ejecuciones reales de este paso como conjunto de casos y
-        lánzalas con el modelo nuevo: Evaluaciones te dirá si acierta igual y cuánto cuesta
-        menos.
-      </p>
+      <h2>{t("seg.probar.titulo")}</h2>
+      <p>{t("seg.probar.texto", { modelo: alternativa || t("seg.probar.barato") })}</p>
       {creado ? (
         <>
           <pre>{`import laplace
 laplace.init(project="${project}")
 laplace.run_dataset("${nombre}", mi_agente, variant="${alternativa || "modelo-barato"}")`}</pre>
           <p>
-            <Link href={`/evaluaciones${query}`}>Ir a Evaluaciones →</Link>
+            <Link href={`/evaluaciones${query}`}>{t("seg.probar.ir")}</Link>
           </p>
         </>
       ) : (
         <div className="actions" style={{ paddingTop: 0 }}>
           <button type="button" className="btn" onClick={crear}>
-            Crear el conjunto «{nombre}» con estas ejecuciones
+            {t("seg.probar.crear", { nombre })}
           </button>
         </div>
       )}
@@ -203,6 +197,6 @@ laplace.run_dataset("${nombre}", mi_agente, variant="${alternativa || "modelo-ba
 
 export function porEjecucion(valor: number, unidad: "usd" | "tokens" | "ms"): string {
   if (unidad === "usd") return money(valor);
-  if (unidad === "tokens") return `${tokens(valor)} tokens`;
+  if (unidad === "tokens") return t("seg.tokens", { n: tokens(valor) });
   return duration(valor);
 }

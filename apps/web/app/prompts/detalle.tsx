@@ -6,6 +6,8 @@ import { addPromptVersion, deletePrompt, promptDiff } from "@/lib/api";
 import { timestamp } from "@/lib/format";
 import { usePermisos } from "@/lib/permisos";
 import type { Diff, PromptCard } from "@/lib/types";
+import { tr } from "@/lib/i18n";
+import { t } from "@/lib/textos";
 
 export function Detalle({
   prompt,
@@ -52,7 +54,7 @@ export function Detalle({
       setTexto("");
       onChange();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "no se ha podido guardar");
+      setError(e instanceof Error ? e.message : t("seg.error.guardar"));
     } finally {
       setGuardando(false);
     }
@@ -60,10 +62,10 @@ export function Detalle({
 
   return (
     <div className="prompt-det">
-      <h3 className="sub">Qué cambió</h3>
+      <h3 className="sub">{t("pr.que_cambio")}</h3>
       <div className="ab">
         <label>
-          <small>De</small>
+          <small>{t("pr.de")}</small>
           <select className="field" value={a} onChange={(e) => setA(Number(e.target.value))}>
             {guardadas.map((v) => (
               <option key={v.version} value={v.version}>
@@ -73,7 +75,7 @@ export function Detalle({
           </select>
         </label>
         <label>
-          <small>A</small>
+          <small>{t("pr.a")}</small>
           <select className="field" value={b} onChange={(e) => setB(Number(e.target.value))}>
             {guardadas.map((v) => (
               <option key={v.version} value={v.version}>
@@ -97,52 +99,46 @@ export function Detalle({
           ))}
         </div>
       ) : (
-        <p className="disclaimer">
-          Elige dos versiones distintas para ver el diff. Con una sola no hay nada que
-          comparar.
-        </p>
+        <p className="disclaimer">{t("pr.elige_dos")}</p>
       )}
 
       {elegida && (
         <>
-          <h3 className="sub">El texto de la v{elegida.version}</h3>
+          <h3 className="sub">{t("pr.texto_v", { n: elegida.version })}</h3>
           <pre>{elegida.text}</pre>
         </>
       )}
 
       <fieldset className="sin-marco" disabled={!escribir}>
-      <h3 className="sub">Guardar una versión nueva</h3>
-      <p className="lead">
-        Guardar no despliega. Son dos gestos distintos a propósito: es lo que te deja
-        preparar una versión con calma y lo que hace que exista el botón de volver atrás.
-      </p>
+      <h3 className="sub">{t("pr.guardar_nueva")}</h3>
+      <p className="lead">{t("pr.guardar_nueva.lead")}</p>
       <textarea
         className="field"
         rows={6}
         value={texto}
-        placeholder="El texto del prompt. Usa {{variable}} para lo que cambie en cada llamada."
+        placeholder={t("pr.texto.placeholder")}
         onChange={(e) => setTexto(e.target.value)}
       />
       <div className="actions">
         <button type="button" className="btn" onClick={guardar} disabled={guardando || !texto.trim()}>
-          {guardando ? "Guardando…" : "Guardar versión"}
+          {guardando ? t("pr.guardando") : t("pr.guardar")}
         </button>
-        <span className="chip where">Queda guardada, no servida</span>
+        <span className="chip where">{t("pr.guardada")}</span>
       </div>
       {error && <p className="verr">{error}</p>}
       </fieldset>
 
       {prompt.deploys.length > 0 && (
         <div className="pro">
-          <h3 className="sub">Historial de despliegues</h3>
+          <h3 className="sub">{t("pr.historial")}</h3>
           <div className="tbl-scroll">
             <table className="tbl">
               <thead>
                 <tr>
-                  <th>Cuándo</th>
-                  <th>Versión</th>
-                  <th>Quién</th>
-                  <th>Nota</th>
+                  <th>{t("pr.col.cuando")}</th>
+                  <th>{t("pr.col.version")}</th>
+                  <th>{t("pr.col.quien")}</th>
+                  <th>{t("pr.col.nota")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -151,7 +147,7 @@ export function Detalle({
                     <td>{timestamp(d.at)}</td>
                     <td>
                       v{d.version}
-                      {d.rollback && <span className="chip where mini">vuelta atrás</span>}
+                      {d.rollback && <span className="chip where mini">{t("pr.vuelta_atras")}</span>}
                     </td>
                     <td>{d.actor || "—"}</td>
                     <td>{d.note || "—"}</td>
@@ -161,9 +157,10 @@ export function Detalle({
             </table>
           </div>
           <p className="disclaimer">
-            Este historial cuenta la historia; <strong>no</strong> atribuye picos. Para eso
-            el <Link href={`/panel${query}`}>panel</Link> usa la versión que aparece en las
-            trazas del tramo, que es un hecho medido y no una coincidencia de horarios.
+            {tr("pr.historial.nota", {
+              no: <strong>{t("pr.no")}</strong>,
+              panel: <Link href={`/panel${query}`}>{t("pr.panel")}</Link>,
+            })}
           </p>
         </div>
       )}
@@ -178,10 +175,10 @@ export function Detalle({
             onChange();
           }}
         >
-          Borrar este prompt
+          {t("pr.borrar")}
         </button>
         <span className="chip where">
-          Las trazas no se tocan: seguirán diciendo con qué versión corrieron
+          {t("pr.borrar.nota")}
         </span>
       </div>
     </div>

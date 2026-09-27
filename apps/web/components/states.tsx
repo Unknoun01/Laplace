@@ -10,6 +10,8 @@ import {
   loadDemo,
   olvidarClave,
 } from "@/lib/api";
+import { tr } from "@/lib/i18n";
+import { t } from "@/lib/textos";
 
 /**
  * El endpoint al que apuntar el SDK: el origen desde el que se está sirviendo esta
@@ -30,15 +32,17 @@ function endpointActual(): string {
 export function BackendDown({ mensaje }: { mensaje?: string }) {
   return (
     <div className="state bad">
-      <h2>No podemos conectar con el backend</h2>
+      <h2>{t("estado.sin_backend.titulo")}</h2>
       <p>
-        No responde. Si estás en local, arráncalo con <code>laplace ui</code>; si es la
-        instalación completa, con <code>docker compose up</code>.
+        {tr("estado.sin_backend.texto", {
+          local: <code>laplace ui</code>,
+          docker: <code>docker compose up</code>,
+        })}
       </p>
       {mensaje && <pre>{mensaje}</pre>}
       <div className="actions">
         <a href="." className="btn primary">
-          Reintentar
+          {t("estado.reintentar")}
         </a>
       </div>
     </div>
@@ -82,11 +86,8 @@ export function CargandoDiagnostico() {
 export function NoProject() {
   return (
     <div className="state">
-      <h2>Todavía no hay ningún proyecto</h2>
-      <p>
-        En cuanto tu agente envíe su primera ejecución, aparecerá aquí. Instrumentarlo es
-        una línea:
-      </p>
+      <h2>{t("estado.sin_proyecto.titulo")}</h2>
+      <p>{t("estado.sin_proyecto.texto")}</p>
       <pre>
         {`import laplace\n\nlaplace.init(\n    project=\"mi-agente\",\n    endpoint=\"${endpointActual()}\",\n)`}
       </pre>
@@ -110,9 +111,9 @@ function PrimerProyecto() {
   if (!me?.user) return null;
   return (
     <p style={{ marginTop: 14 }}>
-      En esta instalación el agente necesita una clave para enviar trazas.{" "}
-      <Link href="/organizacion">Créala en Organización</Link>: ahí mismo sale el
-      fragmento de arriba con la clave puesta.
+      {tr("estado.primer_proyecto", {
+        enlace: <Link href="/organizacion">{t("estado.primer_proyecto.enlace")}</Link>,
+      })}
     </p>
   );
 }
@@ -142,27 +143,22 @@ function CargarDemo() {
       await loadDemo();
       window.location.href = "/?project=demo";
     } catch (e) {
-      setError(e instanceof Error ? e.message : "no se han podido cargar");
+      setError(e instanceof Error ? e.message : t("estado.demo.error"));
       setCargando(false);
     }
   }
 
   return (
     <div style={{ marginTop: 18 }}>
-      <p>
-        ¿Sólo quieres verlo funcionando? Carga unas trazas de ejemplo —datos inventados, en
-        un proyecto aparte llamado «demo»— y mira qué detecta.
-      </p>
+      <p>{t("estado.demo.texto")}</p>
       {local ? (
         <div className="actions" style={{ paddingTop: 8 }}>
           <button type="button" className="btn primary" onClick={cargar} disabled={cargando}>
-            {cargando ? "Cargando…" : "Cargar datos de ejemplo"}
+            {cargando ? t("estado.demo.cargando") : t("estado.demo.boton")}
           </button>
         </div>
       ) : (
-        <p>
-          Desde una terminal: <code>laplace demo</code>.
-        </p>
+        <p>{tr("estado.demo.terminal", { comando: <code>laplace demo</code> })}</p>
       )}
       {error && <p className="verr">{error}</p>}
     </div>
@@ -172,12 +168,8 @@ function CargarDemo() {
 export function NoTracesYet({ project }: { project: string }) {
   return (
     <div className="state">
-      <h2>Esperando la primera ejecución de «{project}»</h2>
-      <p>
-        El proyecto existe pero no ha llegado ninguna traza en el rango que estás mirando.
-        Prueba a ampliar el rango en la barra de arriba, o lanza tu agente con Laplace
-        activado.
-      </p>
+      <h2>{t("estado.sin_trazas.titulo", { proyecto: project })}</h2>
+      <p>{t("estado.sin_trazas.texto")}</p>
       <pre>
         {`import laplace\n\nlaplace.init(\n    project=\"${project}\",\n    endpoint=\"${endpointActual()}\",\n)`}
       </pre>
@@ -202,15 +194,9 @@ export function NothingToFix({
   return (
     <div className={`state ${aviso ? "warn" : "good"}`}>
       <h2>
-        {aviso
-          ? "No hemos encontrado nada que arreglar, pero no hemos podido mirarlo todo"
-          : "No estás tirando dinero ahora mismo"}
+        {aviso ? t("estado.nada.titulo_con_aviso") : t("estado.nada.titulo")}
       </h2>
-      <p>
-        Hemos buscado llamadas repetidas, pasos que usan un modelo más caro del que
-        necesitan y contexto que se reenvía sin hacer falta. No hay nada de eso en este
-        rango.
-      </p>
+      <p>{t("estado.nada.texto")}</p>
       {aviso && <p className="whynot">{aviso}</p>}
       {children}
     </div>
@@ -248,11 +234,11 @@ export function NeedsKey({ mensaje }: { mensaje?: string }) {
 
   return (
     <div className="state">
-      <h2>Esta instalación pide una clave</h2>
+      <h2>{t("estado.clave.titulo")}</h2>
       <p>
         {mensaje && mensaje !== "credencial inválida"
           ? mensaje
-          : "Si no tienes una, la crea quien administra esta organización, en Organización → Claves."}
+          : t("estado.clave.sin_clave")}
       </p>
       <div className="actions">
         <input
@@ -273,18 +259,14 @@ export function NeedsKey({ mensaje }: { mensaje?: string }) {
               .catch((e: Error) => setFallo(e.message));
           }}
         >
-          Guardar y entrar
+          {t("estado.clave.guardar")}
         </button>
         <a href="/entrar" className="btn">
-          Entrar con tu cuenta
+          {t("estado.clave.con_cuenta")}
         </a>
       </div>
       {fallo && <p className="disclaimer">{fallo}</p>}
-      <p className="disclaimer">
-        Se comprueba y se guarda en una cookie que sólo ve este Laplace: ni la página ni
-        ningún script pueden leerla, y nunca va en la URL —lo que va en la URL acaba en
-        los logs de cualquier proxy por el que pase—.
-      </p>
+      <p className="disclaimer">{t("estado.clave.cookie")}</p>
     </div>
   );
 }
@@ -293,8 +275,8 @@ export function NeedsKey({ mensaje }: { mensaje?: string }) {
 export function NotYours({ mensaje }: { mensaje?: string }) {
   return (
     <div className="state">
-      <h2>Tu clave no da acceso a este proyecto</h2>
-      <p>{mensaje || "Esta clave sirve para otro proyecto de esta instalación."}</p>
+      <h2>{t("estado.ajeno.titulo")}</h2>
+      <p>{mensaje || t("estado.ajeno.texto")}</p>
       <div className="actions">
         <button
           type="button"
@@ -303,7 +285,7 @@ export function NotYours({ mensaje }: { mensaje?: string }) {
             olvidarClave().finally(() => window.location.reload());
           }}
         >
-          Usar otra clave
+          {t("estado.ajeno.otra")}
         </button>
       </div>
     </div>
@@ -317,7 +299,7 @@ export function NotFound({ title, body, back }: { title: string; body: string; b
       <p>{body}</p>
       <div className="actions">
         <Link href={back} className="btn">
-          Volver
+          {t("estado.volver")}
         </Link>
       </div>
     </div>

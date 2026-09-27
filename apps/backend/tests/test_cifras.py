@@ -11,9 +11,10 @@ No era un descuido en un sitio: había **tres** formateadores de dinero —uno e
 Es la misma enfermedad que `pasos.py` curó para los nombres de paso: sin un sitio que
 sepa hacerlo, cada pantalla se lo inventa.
 
-La convención, y es una sola: **punto para los millares, coma para los decimales**, que
-es la española, y el símbolo de moneda delante. Lo que este fichero comprueba no es que
-esté bonito, es que no vuelva a haber dos.
+La convención es una por idioma (D-147); aquí se prueba la española —punto para los
+millares, coma para los decimales, «14,64 US$»— y en `test_idioma.py` las otras cuatro y
+el espejo con la web. Lo que este fichero comprueba no es que esté bonito, es que no
+vuelva a haber dos.
 """
 
 from __future__ import annotations
@@ -25,6 +26,13 @@ import re
 from pathlib import Path
 
 from laplace_backend import alerts, cifras, insights, panel, prompts
+
+NBSP = " "
+
+
+def usd(cifra: str) -> str:
+    """Un importe en dólares, escrito en español: «14,64 US$»."""
+    return f"{cifra}{NBSP}US$"
 
 #: La raíz del repositorio, para no depender de desde dónde se lance pytest.
 _RAIZ = Path(__file__).resolve().parents[3]
@@ -39,22 +47,22 @@ def test_los_millares_van_con_punto():
 def test_los_decimales_van_con_coma():
     assert cifras.decimal(7.5) == "7,5"
     assert cifras.decimal(7.0) == "7", "el «,0» sobra"
-    assert cifras.porcentaje(0.934) == "93 %"
+    assert cifras.porcentaje(0.934) == f"93{NBSP}%"
 
 
 def test_el_dinero_lleva_las_dos_cosas_a_la_vez():
     """Un importe grande necesita millares y uno pequeño necesita decimales, y los dos
     separadores tienen que poder convivir en la misma cifra sin ambigüedad."""
-    assert cifras.dinero(1234.5) == "$1.234"
-    assert cifras.dinero(5.0) == "$5,00"
-    assert cifras.dinero(0.0042) == "$0,0042"
+    assert cifras.dinero(1234.4) == usd("1.234")
+    assert cifras.dinero(5.0) == usd("5,00")
+    assert cifras.dinero(0.0042) == usd("0,0042")
     # Entre el céntimo y el dólar, dos cifras significativas: la tarjeta decía
-    # «$0,0692 al mes», cuatro decimales que nadie lee.
-    assert cifras.dinero(0.0692) == "$0,069"
-    assert cifras.dinero(0.4687) == "$0,47"
-    assert cifras.dinero(0.5) == "$0,50", "como la web: los céntimos de un precio se escriben"
-    assert cifras.dinero(0.0000371) == "$0,000037"
-    assert cifras.dinero(0) == "$0"
+    # «0,0692 US$ al mes», cuatro decimales que nadie lee.
+    assert cifras.dinero(0.0692) == usd("0,069")
+    assert cifras.dinero(0.4687) == usd("0,47")
+    assert cifras.dinero(0.5) == usd("0,50"), "como la web: los céntimos de un precio se escriben"
+    assert cifras.dinero(0.0000371) == usd("0,000037")
+    assert cifras.dinero(0) == usd("0")
 
 
 def test_por_debajo_del_centimo_no_se_redondea_a_cero():
@@ -62,8 +70,9 @@ def test_por_debajo_del_centimo_no_se_redondea_a_cero():
     minúsculo y el de un mes no. `$0,00` se lee como «no cuesta nada», que es justo la
     afirmación que D-073 y D-107 prohíben."""
     escrito = cifras.dinero(0.0000371)
-    assert escrito != "$0,00"
-    assert escrito.rstrip("0") == escrito, "y sin ceros de relleno a la derecha"
+    assert escrito != usd("0,00")
+    cifra = escrito.removesuffix(NBSP + "US$")
+    assert cifra.rstrip("0") == cifra, "y sin ceros de relleno a la derecha"
 
 
 def test_una_cifra_de_dinero_nunca_lleva_punto_decimal():
@@ -74,7 +83,7 @@ def test_una_cifra_de_dinero_nunca_lleva_punto_decimal():
     """
     for valor in (0.0000009, 0.000037, 0.0042, 0.5, 5.0, 99.99, 1234.5, 987654.0):
         escrito = cifras.dinero(valor)
-        entero = escrito.lstrip("$").split(",")[0]
+        entero = escrito.removesuffix(NBSP + "US$").split(",")[0]
         assert re.fullmatch(r"\d{1,3}(\.\d{3})*", entero), (
             f"{valor} se escribe {escrito!r}: la parte entera no es un millar español"
         )
@@ -114,34 +123,21 @@ def test_nadie_mas_formatea_dinero_por_su_cuenta():
     )
 
 
-def test_la_web_no_puede_volver_al_punto_decimal_ingles():
-    """El espejo, hasta donde se puede comprobar desde aquí sin mentir.
+def test_la_web_no_redondea_por_su_cuenta():
+    """El espejo valor a valor está en `test_idioma.py`, que ejecuta `format.ts` con Node.
+    Lo que queda aquí es el guardia del patrón que creó el problema: `toFixed` con
+    decimales escribe siempre el punto inglés, sea cual sea el idioma de la página. Sólo
+    `format.ts` puede usarlo, dentro de `fijo()`, que después pone los separadores.
 
-    `apps/web/lib/format.ts` tiene su copia porque corre en otro runtime (D-069), y esta
-    prueba **no** compara valor por valor: comprobaría una réplica escrita aquí, no la
-    función de allí, que es como no comprobar nada. Lo que sí se puede exigir es la
-    convención, que es de donde vino el fallo: si alguien vuelve a `toFixed` a secas, la
-    web escribe el punto decimal inglés al lado de las cifras que el backend escribe en
-    español, y las dos se leen en la misma tarjeta.
-
-    **Divergencia conocida y aceptada:** con importes de 100 $ o más, Python redondea el
-    medio al par y JavaScript hacia arriba, así que un 1.234,50 $ exacto se escribe
-    «$1.234» en una frase del backend y «$1.235» en una tarjeta. Sólo ocurre en el medio
-    exacto de un dólar, y la alternativa —reimplementar el redondeo de uno en el otro—
-    cuesta más de lo que arregla. Queda escrito para que quien lo vea sepa que está
-    mirado.
+    `toFixed(0)` no emite separador y se deja: prohibirlo sería ruido, y un guardia que
+    salta donde no hay nada acaba silenciado.
     """
-    fuente = (_RAIZ / "apps/web/lib/format.ts").read_text(encoding="utf-8")
-    assert 'const LOCALE = "es-ES"' in fuente
-    assert "toLocaleString(LOCALE" in fuente
-
-    # Se prohíbe `toFixed` con decimales, que es el que escribe el punto inglés.
-    # `toFixed(0)` no emite separador y se deja: prohibirlo sería ruido, y un guardia
-    # que salta donde no hay nada acaba silenciado.
     culpables = [
         (fichero.as_posix(), numero, linea.strip())
         for fichero in (_RAIZ / "apps/web").rglob("*.ts*")
-        if ".next" not in fichero.as_posix() and "node_modules" not in fichero.as_posix()
+        if ".next" not in fichero.as_posix()
+        and "node_modules" not in fichero.as_posix()
+        and fichero.name != "format.ts"
         for numero, linea in enumerate(fichero.read_text(encoding="utf-8").splitlines(), 1)
         if re.search(r"\.toFixed\(\s*[1-9]", linea)
     ]
@@ -149,6 +145,8 @@ def test_la_web_no_puede_volver_al_punto_decimal_ingles():
         "`toFixed` con decimales escribe siempre el punto decimal inglés, sea cual sea "
         f"el idioma de la página: es el patrón que creó el problema. {culpables}"
     )
+    formato = (_RAIZ / "apps/web/lib/format.ts").read_text(encoding="utf-8")
+    assert formato.count(".toFixed(") == 1, "en format.ts, sólo dentro de `fijo()`"
 
 
 def test_identificador_quita_el_llamante_y_la_pista():

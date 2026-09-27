@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { DEFAULT_DAYS, type Me, RANGES, getMe, listProjects, logout } from "@/lib/api";
+import { SelectorIdioma } from "@/lib/i18n";
+import { t } from "@/lib/textos";
 import type { ProjectStats } from "@/lib/types";
 
 /**
@@ -60,6 +62,9 @@ export function TopBar() {
           <Logo />
           Laplace
         </span>
+        <div className="pick">
+          <SelectorIdioma />
+        </div>
       </header>
     );
   }
@@ -86,11 +91,11 @@ export function TopBar() {
         </span>
         <select
           className="ctx proyecto"
-          aria-label="Proyecto"
+          aria-label={t("barra.proyecto")}
           value={project}
           onChange={(event) => setParam("project", event.target.value)}
         >
-          {projects.length === 0 && <option value="">Sin proyectos</option>}
+          {projects.length === 0 && <option value="">{t("barra.sin_proyectos")}</option>}
           {projects.map((p) => (
             <option key={p.id} value={p.id}>
               {p.id}
@@ -103,7 +108,7 @@ export function TopBar() {
         <Link href={`/${query}`} aria-current={
             pathname === "/" || pathname.startsWith("/problema") ? "page" : undefined
           }>
-          Diagnóstico
+          {t("nav.diagnostico")}
         </Link>
         <Link
           href={`/trazas${query}`}
@@ -113,44 +118,45 @@ export function TopBar() {
               : undefined
           }
         >
-          Trazas
+          {t("nav.trazas")}
         </Link>
         <Link href={`/panel${query}`} aria-current={pathname === "/panel" ? "page" : undefined}>
-          Panel
+          {t("nav.panel")}
         </Link>
         <Link
           href={`/evaluaciones${query}`}
           aria-current={pathname === "/evaluaciones" ? "page" : undefined}
         >
-          Evaluaciones
+          {t("nav.evaluaciones")}
         </Link>
         <Link
           href={`/prompts${query}`}
           aria-current={pathname === "/prompts" ? "page" : undefined}
         >
-          Prompts
+          {t("nav.prompts")}
         </Link>
         <Link
           href={`/ajustes${query}`}
           aria-current={pathname === "/ajustes" ? "page" : undefined}
         >
-          Ajustes
+          {t("nav.ajustes")}
         </Link>
       </nav>
 
       <div className="pick">
         <select
           className="ctx"
-          aria-label="Rango temporal"
+          aria-label={t("barra.rango")}
           value={days}
           onChange={(event) => setParam("days", event.target.value)}
         >
           {RANGES.map((r) => (
             <option key={r.days} value={r.days}>
-              {r.label}
+              {t(r.label)}
             </option>
           ))}
         </select>
+        <SelectorIdioma />
         <ModeToggle />
         {me?.user && <MenuUsuario me={me} />}
       </div>
@@ -181,7 +187,7 @@ function MenuUsuario({ me }: { me: Me }) {
   const inicial = (user.name || user.email).trim().charAt(0).toUpperCase();
   return (
     <details className="usuario">
-      <summary title={user.email} aria-label={`Tu cuenta: ${user.email}`}>
+      <summary title={user.email} aria-label={t("barra.tu_cuenta", { email: user.email })}>
         {inicial}
       </summary>
       <div className="usuario-menu">
@@ -189,7 +195,7 @@ function MenuUsuario({ me }: { me: Me }) {
           {user.name && <strong>{user.name}</strong>}
           <span>{user.email}</span>
         </p>
-        <Link href="/organizacion">Organización y cuenta</Link>
+        <Link href="/organizacion">{t("barra.organizacion")}</Link>
         <button
           type="button"
           onClick={async () => {
@@ -200,7 +206,7 @@ function MenuUsuario({ me }: { me: Me }) {
             }
           }}
         >
-          Salir
+          {t("barra.salir")}
         </button>
       </div>
     </details>
@@ -242,10 +248,10 @@ function ModeToggle() {
       role="switch"
       aria-checked={pro}
       onClick={() => change(!pro)}
-      title="Enseña la capa técnica: consultas, atributos, identificadores"
+      title={t("barra.avanzado_ayuda")}
     >
       <i aria-hidden />
-      Avanzado
+      {t("barra.avanzado")}
     </button>
   );
 }

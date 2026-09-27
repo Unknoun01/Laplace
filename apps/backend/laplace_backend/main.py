@@ -21,6 +21,7 @@ from .api_evals import router as evals_router
 from .api_prompts import router as prompts_router
 from .auth import AuthMiddleware
 from .config import Settings, get_settings
+from .idioma import MiddlewareIdioma
 from .limites import CabecerasSeguridad, LimiteCuerpo
 from .storage.base import SpanStore
 
@@ -346,6 +347,8 @@ app.add_middleware(
 # autenticación ni nadie lea una petición enorme.
 app.add_middleware(LimiteCuerpo, maximo=get_settings().max_body_bytes)
 app.add_middleware(CabecerasSeguridad)
+# El idioma, lo primero: hasta el 413 del tope al cuerpo se dice en el idioma pedido.
+app.add_middleware(MiddlewareIdioma)
 
 
 @app.middleware("http")

@@ -20,7 +20,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from . import presupuesto
+from . import idioma, presupuesto
 from .alerts import CLAVE_AJUSTES, webhook_valido
 from .auth import identity_of
 from .ingest.otlp import recalcular_coste
@@ -150,6 +150,7 @@ async def put_budget(request: Request, body: BudgetIn) -> presupuesto.Budget:
 #: Lo que la interfaz puede poner. Los secretos —URLs de webhook— se aceptan pero no
 #: se devuelven nunca enteros.
 _CAMPOS_ALERTA = (
+    "language",
     "webhook_url",
     "generic_webhook_url",
     "email_to",
@@ -241,6 +242,8 @@ async def put_alert_settings(request: Request, body: AlertSettingsIn) -> dict[st
     cambios = body.model_dump(exclude_unset=True, exclude={"project_id"})
     if "threshold" in cambios:
         cambios["min_usd"] = cambios.pop("threshold")
+    # Los avisos salen en el idioma de quien los configura (D-148).
+    cambios["language"] = idioma.actual()
     local = request.app.state.settings.store == "sqlite"
     for campo in ("webhook_url", "generic_webhook_url"):
         url = (cambios.get(campo) or "").strip()

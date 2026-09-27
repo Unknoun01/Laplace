@@ -10,6 +10,7 @@ from typing import Any
 from .. import cifras
 from ..pricing import get_price_table
 from ..storage.base import ModelUsage, WindowSummary
+from ..textos import t
 from .modelos import (
     _MILLION,
     MAX_OUTPUT_TOKENS_FOR_CHEAP_TASK,
@@ -179,10 +180,13 @@ def _fixed_context_finding(
         return None  # la caché se lo lleva casi todo y lo que cuesta leerla es menor
 
     de_cache = (
-        f"De ellos, {_miles(usage.cached_input_tokens)} sí se sirven de caché; "
-        f"{_miles(sin_cachear)} no."
+        t(
+            "contexto.de_cache.parte",
+            cacheados=_miles(usage.cached_input_tokens),
+            sin_cachear=_miles(sin_cachear),
+        )
         if usage.cached_input_tokens
-        else "Ninguno se está sirviendo de caché."
+        else t("contexto.de_cache.ninguno")
     )
     if parte < MIN_PARTE_SIN_CACHEAR:
         # No se propone cachear, así que tampoco se apunta el ahorro de cachear: sería
@@ -195,21 +199,20 @@ def _fixed_context_finding(
         # «no tiene tarifa conocida» de abajo, que era falso (D-135).
         return None
     if ahorro > 0:
-        precio = f" Cachearlos ahorraría {_money(ahorro)} en esta ventana."
+        precio = t("contexto.precio.cachear", ahorro=_money(ahorro))
     elif coste_lecturas > 0:
         # Aquí no se propone cachear —ya lo está— sino mandar menos.
         parte_txt = (
-            f", el {coste_lecturas / summary.total_cost_usd:.0%} de lo que gastas"
+            t(
+                "contexto.precio.parte",
+                parte=cifras.porcentaje(coste_lecturas / summary.total_cost_usd),
+            )
             if summary.total_cost_usd > 0
             else ""
         )
-        precio = (
-            f" La caché ya está haciendo su trabajo, pero **leerla también se cobra**: "
-            f"esas lecturas son {_money(coste_lecturas)}{parte_txt}. Eso no baja "
-            f"cacheando mejor; baja mandando menos."
-        )
+        precio = t("contexto.precio.lecturas", coste=_money(coste_lecturas), parte=parte_txt)
     else:
-        precio = " Cuánto dinero es, no lo sabemos: ese modelo no tiene tarifa conocida."
+        precio = t("contexto.precio.sin_tarifa")
 
     # El dinero del hallazgo es lo que de verdad se puede recuperar: lo que ahorraría
     # cachear lo que no se cachea, más lo que cuestan las lecturas del prefijo fijo.
@@ -218,36 +221,42 @@ def _fixed_context_finding(
     return Finding(
         id=f"contexto_fijo:{usage.key}:{usage.model}",
         kind="contexto_fijo",
-        title=(
-            f"Reenvías los mismos {_miles(usage.min_input_tokens)} tokens en cada llamada"
+        title=t("contexto.titulo", tokens=_miles(usage.min_input_tokens)),
+        summary=t(
+            "contexto.resumen",
+            paso=usage.name,
+            tokens=_miles(usage.min_input_tokens),
+            llamadas=_miles(usage.calls),
+            de_cache=de_cache,
+            precio=precio,
         ),
-        summary=(
-            f"Todas las llamadas del paso «{usage.name}» empiezan con al menos "
-            f"{_miles(usage.min_input_tokens)} tokens idénticos: instrucciones, ejemplos o "
-            f"catálogo que no cambian. Los envías {_miles(usage.calls)} veces. "
-            f"{de_cache}{precio}"
-        ),
-        lead="Instrucciones o catálogo que no cambian, y se pagan enteros en cada llamada.",
+        lead=t("contexto.lead"),
         window_waste_usd=ahorro,
         window_waste_tokens=sin_cachear,
-        cost_unavailable=(
-            "" if ahorro > 0 else f"{usage.model} no está en la tabla de precios"
-        ),
+        cost_unavailable="" if ahorro > 0 else t("hallazgo.fuera_de_tabla", modelo=usage.model),
         costs_money=ahorro > 0,
         monthly_saving_usd=_to_monthly(ahorro, base) if ahorro > 0 else None,
         observed_days=days,
         **_floor_flags(usage.unknown_cost_spans, usage.assumed_rate_spans, [usage.model]),
         difficulty="mid",
-        difficulty_label="Un rato de trabajo",
+        difficulty_label=t("dificultad.un_rato"),
         scope_label=_scope_label(usage.traces, summary.traces),
         tech=[
-            TechItem(label="paso", value=usage.name),
-            TechItem(label="entrada fija", value=f"{usage.min_input_tokens} tok"),
-            TechItem(label="entrada media", value=f"{usage.avg_input_tokens:.0f} tok"),
-            TechItem(label="llamadas", value=str(usage.calls)),
-            TechItem(label="reenviado", value=f"{reenviado} tok"),
-            TechItem(label="servido de caché", value=f"{usage.cached_input_tokens} tok"),
-            TechItem(label="sin cachear", value=f"{sin_cachear} tok ({parte:.0%})"),
+            TechItem(label=t("tec.paso"), value=usage.name),
+            TechItem(label=t("tec.entrada_fija"), value=t("tec.tok", n=usage.min_input_tokens)),
+            TechItem(
+                label=t("tec.entrada_media"),
+                value=t("tec.tok", n=cifras.miles(usage.avg_input_tokens)),
+            ),
+            TechItem(label=t("tec.llamadas"), value=str(usage.calls)),
+            TechItem(label=t("tec.reenviado"), value=t("tec.tok", n=reenviado)),
+            TechItem(
+                label=t("tec.servido_cache"), value=t("tec.tok", n=usage.cached_input_tokens)
+            ),
+            TechItem(
+                label=t("tec.sin_cachear"),
+                value=t("tec.tok_parte", n=sin_cachear, parte=cifras.porcentaje(parte)),
+            ),
         ],
         sample_trace_id=usage.sample_trace_id,
         step_key=usage.key,
@@ -262,79 +271,59 @@ def _fixed_context_detail(
     price = table.lookup(encadenado or usage.model)
     detalle = FindingDetail(**finding.model_dump())
 
-    detalle.what_happens = (
-        f"En las {_miles(usage.calls)} llamadas del paso «{usage.name}», la más corta ya lleva "
-        f"{_miles(usage.min_input_tokens)} tokens de entrada. Ese suelo es la parte que no "
-        f"cambia "
-        f"nunca: las instrucciones y los ejemplos que van pegados a cada petición."
+    detalle.what_happens = t(
+        "contexto.que_pasa",
+        llamadas=_miles(usage.calls),
+        paso=usage.name,
+        tokens=_miles(usage.min_input_tokens),
     )
-    detalle.why = (
-        "El modelo no recuerda nada entre llamadas, así que hay que reenviarle el contexto "
-        "cada vez. Lo que sí se puede evitar es pagarlo a precio completo: los proveedores "
-        "cobran mucho menos por la parte del prompt que ya han visto, si se la marcas.\n\n"
-        "La otra vía es no enviar lo que no se usa: si el catálogo entero está en las "
-        "instrucciones pero cada consulta sólo necesita un trozo, se puede buscar ese trozo "
-        "y mandarlo solo."
-    )
-    detalle.detection_explanation = (
-        f"Regla activa: **un paso `llm` con al menos {MIN_CALLS_FOR_CONTEXT_RULE} llamadas "
-        f"cuyo mínimo de tokens de entrada supera {_miles(MIN_FIXED_INPUT_TOKENS)}, y que no está "
-        f"usando caché de prompt** (`laplace.usage.cached_input_tokens` y "
-        f"`laplace.usage.cache_write_tokens` a cero). El mínimo se "
-        f"usa como suelo del prompt fijo: es una aproximación conservadora, porque la parte "
-        f"común real puede ser mayor."
+    detalle.why = t("contexto.por_que")
+    detalle.detection_explanation = t(
+        "contexto.deteccion",
+        llamadas=MIN_CALLS_FOR_CONTEXT_RULE,
+        minimo=_miles(MIN_FIXED_INPUT_TOKENS),
     )
     detalle.detection_query = query.strip()
 
     detalle.fix_steps = [
         FixStep(
-            title="Activa la caché de prompt",
-            body=(
-                "Marca la parte fija de tus instrucciones para que el proveedor la reutilice. "
-                "Es el cambio más barato: no toca lo que el agente hace, sólo lo que cuesta."
-            ),
-            code=(
-                "# Anthropic\n"
-                'system=[{"type": "text", "text": INSTRUCCIONES,\n'
-                '         "cache_control": {"type": "ephemeral"}}]'
-            ),
+            title=t("contexto.arreglo.cache.titulo"),
+            body=t("contexto.arreglo.cache.texto"),
+            code=t("contexto.arreglo.cache.codigo"),
         ),
         FixStep(
-            title="Manda sólo lo que hace falta",
-            body=(
-                "Si esas instrucciones incluyen un catálogo o un manual, busca el fragmento "
-                "que responde a cada petición y envía sólo ese. Cuesta más trabajo, pero "
-                "reduce la entrada de verdad en lugar de abaratarla."
-            ),
+            title=t("contexto.arreglo.menos.titulo"),
+            body=t("contexto.arreglo.menos.texto"),
         ),
     ]
     cuentas = _cache_arithmetic(usage)
     if price is not None and cuentas is not None:
         lecturas, escrituras, _ = cuentas
         escritura_txt = (
-            f" Menos {_miles(escrituras)} tokens de escritura de caché a "
-            f"${price.cache_write}/1M (una por ejecución), que sobre la tarifa de entrada "
-            f"cuestan {cifras.dinero_exacto(_coste_de_escribir(price, escrituras))}."
+            t(
+                "contexto.escritura.cobra",
+                tokens=_miles(escrituras),
+                precio=cifras.dinero(price.cache_write),
+                coste=cifras.dinero_exacto(_coste_de_escribir(price, escrituras)),
+            )
             if price.cache_write is not None
-            else " Este proveedor no cobra aparte por escribir en caché."
+            else t("contexto.escritura.gratis")
         )
-        detalle.savings_calculation = (
-            f"{_miles(usage.min_input_tokens)} tokens fijos × "
-            f"{usage.calls - max(usage.traces, 1)} llamadas que ya encontrarían la caché "
-            f"caliente = {_miles(lecturas)} tokens que pasarían de ${price.input}/1M a "
-            f"${price.cached_input}/1M.{escritura_txt} Neto: "
-            f"{cifras.dinero_exacto(finding.window_waste_usd)} en "
-            f"{window_label(finding.observed_days)}.{_projection_sentence(finding)}"
+        detalle.savings_calculation = t(
+            "contexto.ahorro",
+            tokens=_miles(usage.min_input_tokens),
+            llamadas=_miles(usage.calls - max(usage.traces, 1)),
+            lecturas=_miles(lecturas),
+            entrada=cifras.dinero(price.input),
+            cacheada=cifras.dinero(price.cached_input),
+            escritura=escritura_txt,
+            neto=cifras.dinero_exacto(finding.window_waste_usd),
+            ventana=window_label(finding.observed_days),
+            proyeccion=_projection_sentence(finding),
         )
     if encadenado:
-        detalle.savings_calculation += (
-            f" Las tarifas son las de {encadenado}, no las de {usage.model}: a este paso "
-            f"ya le recomendamos cambiar de modelo, y sumar los dos ahorros a tarifa cara "
-            f"sería contar dos veces la misma mejora."
+        detalle.savings_calculation += t(
+            "contexto.encadenado", barato=encadenado, modelo=usage.model
         )
-    detalle.savings_note = (
-        "Es una estimación conservadora: suponemos que la parte fija del prompt es al menos "
-        "la llamada más corta que hemos visto, que el proveedor acepta cachearla, y que la "
-        "caché no sobrevive de una ejecución a la siguiente. Si aguanta más, ahorrarás más."
-    )
+    detalle.savings_note = t("contexto.nota")
     return detalle

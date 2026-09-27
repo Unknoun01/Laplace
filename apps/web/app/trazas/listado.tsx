@@ -8,6 +8,8 @@ import { duration, money, relative, timestamp, tokens } from "@/lib/format";
 import type { Annotation, TraceListPage, TraceSummary } from "@/lib/types";
 import { usePermisos } from "@/lib/permisos";
 import { LIVE_INTERVAL_MS, type Live, useLive } from "@/lib/useLive";
+import { tr } from "@/lib/i18n";
+import { t, tn } from "@/lib/textos";
 
 /**
  * La tabla, con el modo en vivo.
@@ -71,7 +73,7 @@ export function Listado({
           {activo ? (
             <Latido live={live} />
           ) : (
-            `${traces.length} trazas${live.recibidas > 0 ? " · en pausa" : ""}`
+            `${t("lista.n_trazas", { n: traces.length })}${live.recibidas > 0 ? t("lista.en_pausa") : ""}`
           )}
         </span>
         <button
@@ -80,12 +82,12 @@ export function Listado({
           onClick={puedeVivir ? () => setEnVivo((v) => !v) : onLive}
           title={
             puedeVivir
-              ? `Se comprueba cada ${LIVE_INTERVAL_MS / 1000} segundos`
-              : "El modo en vivo necesita el orden por más recientes: al pulsar se cambia"
+              ? t("lista.cada", { n: LIVE_INTERVAL_MS / 1000 })
+              : t("lista.vivo.necesita")
           }
         >
           <i aria-hidden />
-          {activo ? "En vivo · pausar" : "Ver en vivo"}
+          {activo ? t("lista.vivo.pausar") : t("lista.vivo.ver")}
         </button>
       </div>
 
@@ -93,16 +95,16 @@ export function Listado({
         <table className="tbl">
           <thead>
             <tr>
-              <th>Traza</th>
-              <th className="pro">Modelos</th>
-              <th className="r hide-sm">Pasos</th>
-              <th className="r hide-sm simple-only">Tokens</th>
-              <th className="r pro">Entrada</th>
-              <th className="r pro">Salida</th>
-              <th className="r">Coste</th>
-              <th className="r hide-sm">Duración</th>
-              <th className="r hide-sm">Cuándo</th>
-              <th className="r">¿Bien?</th>
+              <th>{t("lista.col.traza")}</th>
+              <th className="pro">{t("lista.col.modelos")}</th>
+              <th className="r hide-sm">{t("lista.col.pasos")}</th>
+              <th className="r hide-sm simple-only">{t("lista.col.tokens")}</th>
+              <th className="r pro">{t("lista.col.entrada")}</th>
+              <th className="r pro">{t("lista.col.salida")}</th>
+              <th className="r">{t("lista.col.coste")}</th>
+              <th className="r hide-sm">{t("lista.col.duracion")}</th>
+              <th className="r hide-sm">{t("lista.col.cuando")}</th>
+              <th className="r">{t("lista.col.bien")}</th>
             </tr>
           </thead>
           <tbody>
@@ -126,11 +128,12 @@ export function Listado({
 
       <div className="pager">
         <span style={{ color: "var(--ink-3)" }}>
-          {traces.length} trazas{page.next_cursor ? "" : " (todas las del rango)"}
+          {t("lista.n_trazas", { n: traces.length })}
+          {page.next_cursor ? "" : t("lista.todas")}
         </span>
         {siguiente && (
           <Link className="btn small" href={siguiente}>
-            Más antiguas →
+            {t("lista.antiguas")}
           </Link>
         )}
       </div>
@@ -140,16 +143,16 @@ export function Listado({
 
 /** El estado del modo en vivo, dicho en una línea. */
 export function Latido({ live }: { live: Live }) {
-  if (live.fallando) return <>El backend no responde; se sigue intentando.</>;
+  if (live.fallando) return <>{t("lista.sin_backend")}</>;
   return (
     <>
       {live.recibidas > 0
-        ? `${live.recibidas} ${live.recibidas === 1 ? "traza nueva" : "trazas nuevas"} desde que lo encendiste.`
-        : "Esperando trazas nuevas."}
+        ? tn("lista.nuevas", live.recibidas)
+        : t("lista.esperando")}
       {live.ultima && (
         <span className="pro">
           {" "}
-          Última comprobación: {timestamp(live.ultima.toISOString())}.
+          {t("lista.ultima", { fecha: timestamp(live.ultima.toISOString()) })}
         </span>
       )}
     </>
@@ -179,11 +182,11 @@ export function Row({
       <td>
         <Link href={`/traza?${context}&id=${trace.trace_id}`}>
           <span>
-            <i className={`dot ${failed ? "error" : "ok"}`} aria-label={failed ? "con error" : "ok"} />
-            {trace.root_name || "(sin nombre)"}
+            <i className={`dot ${failed ? "error" : "ok"}`} aria-label={failed ? t("lista.con_error") : "ok"} />
+            {trace.root_name || t("lista.sin_nombre")}
             {looping && (
-              <span className="badge" style={{ marginLeft: 9 }} title="Repite pasos con la misma entrada">
-                bucle
+              <span className="badge" style={{ marginLeft: 9 }} title={t("lista.bucle.ayuda")}>
+                {t("lista.bucle")}
               </span>
             )}
             {failed && (
@@ -191,7 +194,7 @@ export function Row({
                 className="badge"
                 style={{ marginLeft: 9, background: "var(--rose-bg)", color: "var(--rose)", borderColor: "var(--rose-line)" }}
               >
-                {trace.error_count} error{trace.error_count > 1 ? "es" : ""}
+                {tn("lista.errores", trace.error_count)}
               </span>
             )}
           </span>
@@ -200,7 +203,7 @@ export function Row({
           <div className="meta">
             <span className="simple-only">{trace.trace_id.slice(0, 12)}</span>
             <span className="pro">{trace.trace_id}</span>
-            {trace.session_id ? ` · sesión ${trace.session_id}` : ""}
+            {trace.session_id ? t("lista.sesion", { id: trace.session_id }) : ""}
           </div>
         </Link>
       </td>
@@ -213,7 +216,7 @@ export function Row({
       </td>
       <td className="r pro">{tokens(trace.usage.input_tokens)}</td>
       <td className="r pro">{tokens(trace.usage.output_tokens)}</td>
-      <td className="r money" title={trace.unknown_cost_spans > 0 ? "coste incompleto" : undefined}>
+      <td className="r money" title={trace.unknown_cost_spans > 0 ? t("lista.coste_incompleto") : undefined}>
         {money(trace.cost.total_usd, trace.cost.currency)}
         {trace.unknown_cost_spans > 0 && <span style={{ color: "var(--amber)" }}> +?</span>}
       </td>
@@ -266,7 +269,7 @@ export function GuardarConjunto({
       await createDataset({ project_id: project, name: nombre.trim(), filter, limit: 50 });
       setEstado("hecho");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "no se ha podido crear");
+      setError(e instanceof Error ? e.message : t("seg.error.crear"));
       setEstado("");
     }
   }
@@ -275,22 +278,22 @@ export function GuardarConjunto({
   if (estado === "hecho") {
     return (
       <p className="guardar-conjunto">
-        Conjunto «{nombre.trim()}» creado con este filtro.{" "}
-        <Link href={`/evaluaciones?${context}`}>Ir a Evaluaciones</Link>
+        {t("conj.creado", { nombre: nombre.trim() })}{" "}
+        <Link href={`/evaluaciones?${context}`}>{t("conj.ir")}</Link>
       </p>
     );
   }
 
   return (
     <details className="guardar-conjunto">
-      <summary>Guardar estas trazas como conjunto de casos</summary>
+      <summary>{t("conj.guardar")}</summary>
       <div className="ab">
         <input
           className="field grow"
           value={nombre}
           onChange={(e) => setNombre(e.target.value)}
-          placeholder="Nombre, p. ej. regresiones-checkout"
-          aria-label="Nombre del conjunto"
+          placeholder={t("conj.nombre.placeholder")}
+          aria-label={t("conj.nombre.aria")}
         />
         <button
           type="button"
@@ -298,7 +301,7 @@ export function GuardarConjunto({
           onClick={guardar}
           disabled={estado === "creando" || !nombre.trim()}
         >
-          {estado === "creando" ? "Creando…" : "Guardar (hasta 50)"}
+          {estado === "creando" ? t("conj.creando") : t("conj.boton")}
         </button>
       </div>
       {error && <p className="verr">{error}</p>}
