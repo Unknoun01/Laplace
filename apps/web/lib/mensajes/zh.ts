@@ -792,4 +792,7 @@ export const zh: Mensajes = {
   "err.titulo": "加载此页面时出错",
   "err.texto": "我们无法准备数据。通常只是暂时的：请重试，如果仍然如此，请检查后端是否正常运行。",
   "prob.paso_titulo": "{titulo}。",
+  // Errores de la API que no traen una frase propia.
+  "api.fallo": "{ruta} 返回错误 {estado}",
+  "api.no_valida": "请求无效：{campos}",
 };

@@ -2712,3 +2712,39 @@ evaluaciones, los avisos y todas las pantallas de la web.
 (`HTTPException.detail`, que la web enseña tal cual en algunos formularios); el prompt del
 juez, que es para un modelo y no para una pantalla; los datos de la demo, que son el
 agente de un cliente hispanohablante; la línea de órdenes y los logs.
+
+### D-149 — Los errores de la API, en el idioma de la petición
+D-148 dejó en español los `HTTPException.detail`, y la web los enseña tal cual en sus
+formularios: una contraseña corta, una invitación caducada o un prompt repetido salían en
+español en mitad de una pantalla en chino. Ahora cada error sale del catálogo
+(`error.*`, y `estado.*` para los tres `detail` de estado: juez apagado, alertas apagadas
+y prompt desplegado), igual que las frases del motor.
+
+* **Todos los caminos, también los que no pasan por una ruta.** El 401 del middleware de
+  autenticación, el 413 del tope de tamaño (`limites.py`) y el del cuerpo OTLP
+  descomprimido contestan sin llegar a la ruta; funcionan porque `MiddlewareIdioma` es el
+  más externo. Una prueba lo comprueba con peticiones de verdad, y moverlo por dentro
+  del de autenticación la hace fallar (comprobado).
+* **Los validadores** (`validar_contrasena`, `motivo_correo_invalido`) devuelven el
+  motivo ya traducido, porque la ruta lo pasa tal cual a `detail`.
+* **Frases enteras, no trozos.** `_solo_instalacion("cambiar una tarifa")` pegaba la
+  acción delante de «afecta a todos los proyectos…»; ahora es una clave por acción. Lo
+  mismo con el rol que falta («hace falta ser admin»): una clave por rol.
+* **`MetadataUnavailable` se queda en el log.** Lo que dice («postgres no responde: …»)
+  es para quien opera la instalación; a la pantalla le llega «la base de metadatos no
+  está disponible ahora mismo; si era un cambio, no se ha guardado», traducido.
+* **Guardia** (`test_errores_api.py`): lee con `ast` las rutas, `auth`, `cuentas`,
+  `limites`, `main` y la ingesta, y falla con cualquier literal con aspecto de frase
+  dentro de un `HTTPException`, un `AuthError`, un `CuerpoDemasiadoGrande`, un cuerpo con
+  `"detail"` o lo que devuelven los validadores. Encontró uno que se me había pasado
+  (««x» no es una dirección de correo válida»).
+* **Web:** el mensaje de respaldo («500 en /api/…») pasa por el catálogo, y un 422 de
+  FastAPI, que trae una lista de campos en vez de una frase, ya no se enseña como
+  «[object Object]» sino como «La petición no es válida: name, project_id».
+* **Un código donde hacía falta distinguir un caso.** `NeedsKey` escondía el mensaje
+  «credencial inválida» comparando el texto, que en inglés ya no casaba. `AuthError`
+  lleva ahora un `code` opcional que sale en la respuesta (`"credencial_invalida"`), y
+  la web lo lee en `ApiError.code`. El resto de errores no lo necesitan todavía.
+
+Sin idioma pedido la API sigue contestando en español, como un script sin cabeceras
+esperaba (D-147).

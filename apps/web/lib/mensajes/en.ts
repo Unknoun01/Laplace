@@ -794,4 +794,7 @@ export const en: Mensajes = {
   "err.titulo": "Something went wrong loading this screen",
   "err.texto": "We couldn't prepare the data. It's usually momentary: try again and, if it persists, check that the backend is up.",
   "prob.paso_titulo": "{titulo}.",
+  // Errores de la API que no traen una frase propia.
+  "api.fallo": "Error {estado} on {ruta}",
+  "api.no_valida": "The request isn't valid: {campos}",
 };

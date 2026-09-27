@@ -15,6 +15,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from .textos import t
+
 
 class _Demasiado(Exception):
     pass
@@ -22,7 +24,7 @@ class _Demasiado(Exception):
 
 async def _responder_413(send: Any, maximo: int) -> None:
     cuerpo = json.dumps(
-        {"detail": f"la petición pasa del tope de {maximo // (1024 * 1024)} MiB"},
+        {"detail": t("error.peticion_grande", mib=maximo // (1024 * 1024))},
         ensure_ascii=False,
     ).encode("utf-8")
     await send(

@@ -794,4 +794,7 @@ export const pt: Mensajes = {
   "err.titulo": "Algo falhou ao carregar esta tela",
   "err.texto": "Não conseguimos preparar os dados. Costuma ser coisa de um momento: tente de novo e, se continuar igual, verifique se o backend está no ar.",
   "prob.paso_titulo": "{titulo}.",
+  // Errores de la API que no traen una frase propia.
+  "api.fallo": "Erro {estado} em {ruta}",
+  "api.no_valida": "A requisição não é válida: {campos}",
 };

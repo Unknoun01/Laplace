@@ -25,6 +25,7 @@ from .evals import Comparison, RunSummary, compare, summarize_run
 from .judge import JudgeConfig, JudgeUnavailable, build_prompt, judge_trace
 from .storage.base import TraceFilter
 from .storage.metadata import MetadataUnavailable, new_id
+from .textos import t
 from .tree import trace_io
 
 logger = logging.getLogger("laplace.api.evals")
@@ -73,7 +74,9 @@ def _guard(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
     except MetadataUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        # Lo que dice («postgres no responde: …») es para quien opera: al log.
+        logger.warning("sin base de metadatos: %s", exc)
+        raise HTTPException(status_code=503, detail=t("error.metadatos")) from exc
 
 
 # ---------------------------------------------------------------------------------
@@ -108,7 +111,7 @@ async def create_annotation(request: Request, body: AnnotationIn) -> Annotation:
     if not await run_in_threadpool(
         _store(request).get_trace_spans, body.trace_id, body.project_id
     ):
-        raise HTTPException(status_code=404, detail="esa traza no está en este proyecto")
+        raise HTTPException(status_code=404, detail=t("error.traza_de_otro_proyecto"))
     anotacion = Annotation(
         id=new_id("an"),
         trace_id=body.trace_id,
@@ -131,7 +134,7 @@ async def delete_annotation(request: Request, annotation_id: str) -> dict[str, b
         _guard, _meta(request).delete_annotation, annotation_id, _alcance(request)
     )
     if not borrada:
-        raise HTTPException(status_code=404, detail="esa anotación ya no existe")
+        raise HTTPException(status_code=404, detail=t("error.anotacion_no_existe"))
     return {"deleted": True}
 
 
@@ -178,12 +181,7 @@ async def judge_status(request: Request) -> dict[str, Any]:
         "system": config.system,
         "model": config.model if config.enabled else "",
         "max_batch": request.app.state.settings.evals_judge_max_batch,
-        "detail": (
-            ""
-            if config.enabled
-            else "El juez está apagado. Enciéndelo con LAPLACE_EVALS_JUDGE_ENABLED=true "
-            "y LAPLACE_EVALS_JUDGE_API_KEY. Anotar a mano funciona sin configurar nada."
-        ),
+        "detail": "" if config.enabled else t("estado.juez_apagado"),
     }
 
 
@@ -204,7 +202,7 @@ async def run_judge(request: Request, body: JudgeIn) -> dict[str, Any]:
     if body.run_id:
         tirada = await run_in_threadpool(meta.get_run, body.run_id)
         if tirada is None or tirada.project_id != body.project_id:
-            raise HTTPException(status_code=404, detail="esa tirada no existe")
+            raise HTTPException(status_code=404, detail=t("error.tirada_no_existe"))
         ids = [i.trace_id for i in tirada.items if not i.failed]
         casos = {
             c.id: c
@@ -220,11 +218,7 @@ async def run_judge(request: Request, body: JudgeIn) -> dict[str, Any]:
     if len(ids) > tope:
         raise HTTPException(
             status_code=400,
-            detail=(
-                f"{len(ids)} trazas pasan del tope de {tope}. Es un freno de mano a "
-                f"propósito: juzgar cuesta dinero. Sube LAPLACE_EVALS_JUDGE_MAX_BATCH "
-                f"si de verdad quieres gastar eso."
-            ),
+            detail=t("error.tope_juez", n=len(ids), tope=tope),
         )
 
     store = _store(request)
@@ -276,7 +270,7 @@ async def judge_prompt(request: Request, project_id: str, trace_id: str) -> dict
     """
     spans = await run_in_threadpool(_store(request).get_trace_spans, trace_id, project_id)
     if not spans:
-        raise HTTPException(status_code=404, detail="traza no encontrada")
+        raise HTTPException(status_code=404, detail=t("error.traza_no_encontrada"))
     from .judge import SYSTEM_PROMPT
 
     return {"system": SYSTEM_PROMPT, "user": build_prompt(spans)}
@@ -324,7 +318,7 @@ async def create_dataset(request: Request, body: DatasetIn) -> Dataset:
     if not pagina.traces:
         raise HTTPException(
             status_code=400,
-            detail="ese filtro no selecciona ninguna traza, así que el conjunto estaría vacío",
+            detail=t("error.filtro_vacio"),
         )
 
     ahora = datetime.now(timezone.utc)
@@ -383,7 +377,7 @@ async def get_dataset(request: Request, dataset_id: str) -> dict[str, Any]:
     meta = _meta(request)
     conjunto = await run_in_threadpool(meta.get_dataset, dataset_id)
     if conjunto is None or _de_otro(request, conjunto.project_id):
-        raise HTTPException(status_code=404, detail="ese conjunto no existe")
+        raise HTTPException(status_code=404, detail=t("error.conjunto_no_existe"))
     casos = await run_in_threadpool(meta.list_dataset_items, dataset_id)
     return {
         "dataset": conjunto.model_dump(mode="json"),
@@ -397,7 +391,7 @@ async def delete_dataset(request: Request, dataset_id: str) -> dict[str, bool]:
         _guard, _meta(request).delete_dataset, dataset_id, _alcance(request)
     )
     if not borrado:
-        raise HTTPException(status_code=404, detail="ese conjunto no existe")
+        raise HTTPException(status_code=404, detail=t("error.conjunto_no_existe"))
     return {"deleted": True}
 
 
@@ -421,7 +415,7 @@ async def create_run(request: Request, body: RunIn) -> EvalRun:
     meta = _meta(request)
     conjunto = await run_in_threadpool(meta.get_dataset, body.dataset_id)
     if conjunto is None or conjunto.project_id != body.project_id:
-        raise HTTPException(status_code=404, detail="ese conjunto no existe")
+        raise HTTPException(status_code=404, detail=t("error.conjunto_no_existe"))
     tirada = EvalRun(
         id=new_id("run"),
         project_id=body.project_id,
@@ -497,14 +491,11 @@ async def compare_runs(
         or run_a.project_id != project_id
         or run_b.project_id != project_id
     ):
-        raise HTTPException(status_code=404, detail="alguna de las dos tiradas no existe")
+        raise HTTPException(status_code=404, detail=t("error.tiradas_no_existen"))
     if run_a.dataset_id != run_b.dataset_id:
         raise HTTPException(
             status_code=400,
-            detail=(
-                "las dos tiradas son de conjuntos distintos: comparar el acierto sobre "
-                "casos diferentes no dice nada"
-            ),
+            detail=t("error.tiradas_distintas"),
         )
 
     conjunto = await run_in_threadpool(meta.get_dataset, run_a.dataset_id)

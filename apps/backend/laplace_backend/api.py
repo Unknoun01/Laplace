@@ -24,6 +24,7 @@ from .panel import build as build_panel
 from .pricing import get_price_table, reload_price_table
 from .seguimiento import aplicar_estados, leer_estados
 from .storage.base import TraceFilter, Window, decode_cursor
+from .textos import t
 from .tree import build_tree, summarize
 
 logger = logging.getLogger("laplace.api")
@@ -69,7 +70,7 @@ async def ingest_traces(request: Request) -> Response:
         raise HTTPException(status_code=413, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         logger.warning("petición OTLP ilegible: %s", exc)
-        raise HTTPException(status_code=400, detail="petición OTLP ilegible") from exc
+        raise HTTPException(status_code=400, detail=t("error.otlp_ilegible")) from exc
 
     # Fuera del bucle de eventos: traducir un lote grande son decenas de milisegundos de
     # CPU, y mientras tanto no avanzaba ninguna otra petición (D-142).
@@ -85,10 +86,7 @@ async def ingest_traces(request: Request) -> Response:
     if ajenos:
         raise HTTPException(
             status_code=403,
-            detail=(
-                f"esta clave no puede escribir en {', '.join(ajenos)}. Comprueba el "
-                f"`project` de laplace.init(): tiene que ser el del proyecto de la clave."
-            ),
+            detail=t("error.otlp_proyecto_ajeno", proyectos=", ".join(ajenos)),
         )
 
     if spans:
@@ -98,7 +96,7 @@ async def ingest_traces(request: Request) -> Response:
         except Exception as exc:  # noqa: BLE001
             # 503 y no 500: el exportador reintenta, y el span es idempotente al escribir.
             logger.exception("fallo al escribir spans")
-            raise HTTPException(status_code=503, detail="almacenamiento no disponible") from exc
+            raise HTTPException(status_code=503, detail=t("error.almacenamiento")) from exc
 
         projects = {span.project_id for span in spans}
         for project_id in projects:
@@ -220,7 +218,7 @@ async def get_trace(
                 _store(request).get_trace_spans, trace_id, alcance
             )
     if not spans:
-        raise HTTPException(status_code=404, detail="traza no encontrada")
+        raise HTTPException(status_code=404, detail=t("error.traza_no_encontrada"))
 
     metadata = _metadata(request)
     return Trace(
@@ -307,7 +305,7 @@ async def get_finding(
         finding_detail, _store(request), project_id, _window(days), finding_id
     )
     if found is None:
-        raise HTTPException(status_code=404, detail="ese problema ya no aparece en esta ventana")
+        raise HTTPException(status_code=404, detail=t("error.problema_no_aparece"))
     # El estado que le haya puesto el usuario, con su comprobación si lo marcó como
     # arreglado: la ficha es donde se lee si el arreglo ha servido (D-123).
     estados = await run_in_threadpool(leer_estados, _metadata(request), project_id)
@@ -386,11 +384,7 @@ async def alerts_status(
     if runner is None or not any(runner.config_for(pid).enabled for pid in proyectos):
         return {
             "enabled": False,
-            "detail": (
-                "Las alertas están apagadas. Pon un canal en Ajustes, o enciéndelas para "
-                "toda la instalación con LAPLACE_ALERTS_ENABLED=true y "
-                "LAPLACE_ALERTS_SLACK_WEBHOOK con tu webhook entrante de Slack."
-            ),
+            "detail": t("estado.alertas_apagadas"),
             "projects": [],
         }
 
@@ -447,11 +441,7 @@ async def pricing_reload(request: Request) -> dict[str, Any]:
     if not identidad.sees_everything:
         raise HTTPException(
             status_code=403,
-            detail=(
-                "recargar la tabla de precios afecta a todos los proyectos de esta "
-                "instalación, así que pide una clave de instalación y no la de un "
-                "proyecto"
-            ),
+            detail=t("error.solo_instalacion.precios"),
         )
     table = await run_in_threadpool(reload_price_table)
     return {"models": len(table.models)}

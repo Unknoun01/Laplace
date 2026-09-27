@@ -211,7 +211,7 @@ export function NothingToFix({
  * sale, porque un formulario que pide un secreto sin explicar cuál es lo que hace que
  * la gente pegue el primero que encuentra.
  */
-export function NeedsKey({ mensaje }: { mensaje?: string }) {
+export function NeedsKey({ mensaje, codigo }: { mensaje?: string; codigo?: string }) {
   const [valor, setValor] = useState("");
   const [fallo, setFallo] = useState("");
   const [me, setMe] = useState<Me | null>(null);
@@ -236,7 +236,8 @@ export function NeedsKey({ mensaje }: { mensaje?: string }) {
     <div className="state">
       <h2>{t("estado.clave.titulo")}</h2>
       <p>
-        {mensaje && mensaje !== "credencial inválida"
+        {/* «Credencial inválida» no ayuda a nadie a conseguir una: se explica de dónde sale. */}
+        {mensaje && codigo !== "credencial_invalida"
           ? mensaje
           : t("estado.clave.sin_clave")}
       </p>

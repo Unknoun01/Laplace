@@ -34,6 +34,7 @@ from laplace.schema import (
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
 
 from ..pricing import get_price_table
+from ..textos import t
 from .convenciones import TRADUCIDOS, normalizar
 
 logger = logging.getLogger("laplace.ingest")
@@ -65,7 +66,7 @@ def _gunzip(body: bytes, maximo: int) -> bytes:
     descompresor = zlib.decompressobj(16 + zlib.MAX_WBITS)
     salida = descompresor.decompress(body, maximo)
     if descompresor.unconsumed_tail:
-        raise CuerpoDemasiadoGrande(f"el cuerpo descomprimido pasa de {maximo} bytes")
+        raise CuerpoDemasiadoGrande(t("error.cuerpo_grande_descomprimido", bytes=maximo))
     return salida + descompresor.flush()
 
 
@@ -120,7 +121,7 @@ def decode_request(
     if "gzip" in (content_encoding or "").lower():
         body = _gunzip(body, max_bytes) if max_bytes else gzip.decompress(body)
     if max_bytes and len(body) > max_bytes:
-        raise CuerpoDemasiadoGrande(f"el cuerpo pasa de {max_bytes} bytes")
+        raise CuerpoDemasiadoGrande(t("error.cuerpo_grande", bytes=max_bytes))
 
     request = ExportTraceServiceRequest()
     if "json" in (content_type or "").lower():

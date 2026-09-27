@@ -28,6 +28,7 @@ from .pricing import custom_prices, get_price_table, set_custom_prices
 from .seguimiento import clave
 from .storage.base import Window
 from .storage.metadata import MetadataUnavailable
+from .textos import t
 
 logger = logging.getLogger("laplace.api.ajustes")
 
@@ -47,7 +48,9 @@ def _guard(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
     except MetadataUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        # Lo que dice («postgres no responde: …») es para quien opera: al log.
+        logger.warning("sin base de metadatos: %s", exc)
+        raise HTTPException(status_code=503, detail=t("error.metadatos")) from exc
 
 
 def _solo_instalacion(que: str) -> HTTPException:
@@ -58,8 +61,7 @@ def _solo_instalacion(que: str) -> HTTPException:
     """
     return HTTPException(
         status_code=403,
-        detail=f"{que} afecta a todos los proyectos de esta instalación, así que pide "
-        "una clave de instalación y no la de un proyecto",
+        detail=t(f"error.solo_instalacion.{que}"),
     )
 
 
@@ -175,16 +177,16 @@ def motivo_correo_invalido(valor: str) -> str:
     from email.utils import getaddresses
 
     if any(c in valor for c in "\r\n\0"):
-        return "la dirección de correo no puede llevar saltos de línea"
+        return t("error.correo_saltos")
     direcciones = [d for _, d in getaddresses([valor]) if d]
     if not direcciones:
-        return "esa dirección de correo no es válida"
+        return t("error.correo_invalido")
     if len(direcciones) > MAX_DESTINATARIOS:
-        return f"como mucho {MAX_DESTINATARIOS} destinatarios"
+        return t("error.correo_demasiados", n=MAX_DESTINATARIOS)
     for d in direcciones:
         usuario, arroba, dominio = d.rpartition("@")
         if not arroba or not usuario or "." not in dominio or " " in d:
-            return f"«{d}» no es una dirección de correo válida"
+            return t("error.correo_direccion", direccion=d)
     return ""
 
 
@@ -250,15 +252,12 @@ async def put_alert_settings(request: Request, body: AlertSettingsIn) -> dict[st
         if url and not webhook_valido(url, permitir_local=local):
             raise HTTPException(
                 status_code=400,
-                detail=(
-                    "el webhook tiene que ser https hacia un host público"
-                    + (" (o contra esta misma máquina)" if local else "")
-                ),
+                detail=t("error.webhook_publico_o_local" if local else "error.webhook_publico"),
             )
     if (cambios.get("webhook_url") or "").strip() and "slack.com" not in cambios["webhook_url"]:
         raise HTTPException(
             status_code=400,
-            detail="eso no parece un webhook de Slack; ponlo como webhook genérico",
+            detail=t("error.webhook_no_slack"),
         )
     correo = (cambios.get("email_to") or "").strip()
     if correo:
@@ -277,7 +276,7 @@ async def test_alert(request: Request, project_id: str) -> dict[str, Any]:
     que el webhook está bien antes de que haga falta de verdad."""
     llegado = await run_in_threadpool(request.app.state.alerts.send_test, project_id)
     if llegado is None:
-        raise HTTPException(status_code=400, detail="no hay ningún canal puesto, o está silenciado")
+        raise HTTPException(status_code=400, detail=t("error.sin_canal"))
     return {"delivered": llegado}
 
 
@@ -393,7 +392,7 @@ async def get_custom_prices(request: Request) -> dict[str, Any]:
 @router.put("/pricing/custom")
 async def put_custom_price(request: Request, body: PriceIn) -> dict[str, Any]:
     if not identity_of(request).sees_everything:
-        raise _solo_instalacion("cambiar una tarifa")
+        raise _solo_instalacion("cambiar_tarifa")
     modelos = custom_prices()
     entrada: dict[str, Any] = {"input": body.input, "output": body.output}
     if body.cached_input is not None:
@@ -407,10 +406,10 @@ async def put_custom_price(request: Request, body: PriceIn) -> dict[str, Any]:
 @router.delete("/pricing/custom")
 async def delete_custom_price(request: Request, model: str) -> dict[str, Any]:
     if not identity_of(request).sees_everything:
-        raise _solo_instalacion("quitar una tarifa")
+        raise _solo_instalacion("quitar_tarifa")
     modelos = custom_prices()
     if modelos.pop(model, None) is None:
-        raise HTTPException(status_code=404, detail="ese modelo no tiene tarifa propia")
+        raise HTTPException(status_code=404, detail=t("error.modelo_sin_tarifa_propia"))
     await run_in_threadpool(_guard, _guardar_tarifas, _meta(request), modelos)
     recalculados = await run_in_threadpool(_recalcular, _store(request), model)
     return {"model": model, "repriced_spans": recalculados}
@@ -443,9 +442,9 @@ async def load_demo(request: Request) -> dict[str, Any]:
     lo último que alguien espera de un botón.
     """
     if not identity_of(request).sees_everything:
-        raise _solo_instalacion("cargar datos de ejemplo")
+        raise _solo_instalacion("demo")
     if request.app.state.settings.store != "sqlite":
-        raise HTTPException(status_code=404, detail="los datos de ejemplo sólo existen en local")
+        raise HTTPException(status_code=404, detail=t("error.demo_solo_local"))
     from .demo import cargar_demo
 
     origen = str(request.base_url).rstrip("/")
@@ -460,7 +459,7 @@ async def delete_project(request: Request, project_id: str, confirm: str) -> dic
     un `DELETE` escrito a mano con el id equivocado no se lleva nada por delante.
     """
     if confirm != project_id:
-        raise HTTPException(status_code=400, detail="confirm tiene que repetir el proyecto")
+        raise HTTPException(status_code=400, detail=t("error.confirmar_proyecto"))
     # Primero lo mutable, claves incluidas, y en una transacción; después las trazas.
     # Al revés, si fallaba lo segundo quedaba un proyecto sin trazas pero con sus claves
     # vivas escribiendo en él. Así, si falla lo primero no se ha borrado nada, y si falla
@@ -472,10 +471,7 @@ async def delete_project(request: Request, project_id: str, confirm: str) -> dic
         logger.exception("borrado de %s a medias: faltan las trazas", project_id)
         raise HTTPException(
             status_code=503,
-            detail=(
-                "se han borrado los ajustes, prompts, conjuntos y claves, pero no las "
-                "trazas. Repite el borrado para terminarlo."
-            ),
+            detail=t("error.borrado_a_medias"),
         ) from exc
     # Con cuentas, el proyecto deja de ser de su organización y queda escrito quién lo
     # borró (D-127). En local no hay ni una cosa ni la otra.

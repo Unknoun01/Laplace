@@ -801,6 +801,9 @@ export const es = {
   "err.titulo": "Algo ha fallado al cargar esta pantalla",
   "err.texto": "No hemos podido preparar los datos. Suele ser cosa de un momento: vuelve a intentarlo y, si sigue igual, revisa que el backend esté en pie.",
   "prob.paso_titulo": "{titulo}.",
+  // Errores de la API que no traen una frase propia.
+  "api.fallo": "Error {estado} en {ruta}",
+  "api.no_valida": "La petición no es válida: {campos}",
 } as const;
 
 export type Clave = keyof typeof es;

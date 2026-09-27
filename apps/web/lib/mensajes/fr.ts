@@ -796,4 +796,7 @@ export const fr: Mensajes = {
   "err.titulo": "Un problème est survenu au chargement de cet écran",
   "err.texto": "Nous n’avons pas pu préparer les données. C’est généralement passager : réessayez et, si cela persiste, vérifiez que le backend fonctionne.",
   "prob.paso_titulo": "{titulo}.",
+  // Errores de la API que no traen una frase propia.
+  "api.fallo": "Erreur {estado} sur {ruta}",
+  "api.no_valida": "La requête n’est pas valide : {campos}",
 };

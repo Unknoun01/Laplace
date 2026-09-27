@@ -38,7 +38,7 @@ function Contenido() {
 
   if (estado.fase === "cargando") return <Cargando />;
   if (estado.fase === "sin-backend") return <BackendDown />;
-  if (estado.fase === "sin-clave") return <NeedsKey mensaje={estado.error.message} />;
+  if (estado.fase === "sin-clave") return <NeedsKey mensaje={estado.error.message} codigo={estado.error.code} />;
   if (estado.fase === "sin-permiso") return <NotYours mensaje={estado.error.message} />;
   if (estado.fase === "error") return <BackendDown mensaje={estado.error.message} />;
 
