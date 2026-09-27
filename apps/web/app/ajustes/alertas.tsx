@@ -4,6 +4,7 @@ import { useState } from "react";
 import { setAlertSettings, testAlert } from "@/lib/api";
 import type { AlertSettings } from "@/lib/types";
 import { Aviso } from "./aviso";
+import { t } from "@/lib/textos";
 
 export function Alertas({ project, inicial }: { project: string; inicial: AlertSettings }) {
   const [a, setA] = useState(inicial);
@@ -21,7 +22,7 @@ export function Alertas({ project, inicial }: { project: string; inicial: AlertS
       setSlack("");
       setWebhook("");
     } catch (e) {
-      setMsg({ ok: false, texto: e instanceof Error ? e.message : "no se ha podido guardar" });
+      setMsg({ ok: false, texto: e instanceof Error ? e.message : t("seg.error.guardar") });
     }
   }
 
@@ -30,28 +31,24 @@ export function Alertas({ project, inicial }: { project: string; inicial: AlertS
       const r = await testAlert(project);
       setMsg(
         r.delivered
-          ? { ok: true, texto: "Mensaje de prueba enviado. Míralo en el canal." }
-          : { ok: false, texto: "No ha llegado por ningún canal. Revisa las direcciones." },
+          ? { ok: true, texto: t("aj.al.prueba_ok") }
+          : { ok: false, texto: t("aj.al.prueba_mal") },
       );
     } catch (e) {
-      setMsg({ ok: false, texto: e instanceof Error ? e.message : "no se ha podido probar" });
+      setMsg({ ok: false, texto: e instanceof Error ? e.message : t("aj.al.error.probar") });
     }
   }
 
   return (
     <section className="sec">
-      <h3>Alertas</h3>
-      <p className="lead">
-        Un mensaje cuando un problema pasa del umbral en dinero ya gastado. Nunca se repite
-        el mismo aviso dentro del periodo de calma, y lo que marques como arreglado o
-        ignorado no avisa.
-      </p>
+      <h3>{t("aj.al.titulo")}</h3>
+      <p className="lead">{t("aj.al.lead")}</p>
       <p className={a.enabled ? "vok" : "muted"}>
         {a.muted
-          ? "Silenciadas para este proyecto."
+          ? t("aj.al.silenciadas")
           : a.enabled
-            ? "Activas."
-            : "Apagadas: pon al menos un canal."}
+            ? t("aj.al.activas")
+            : t("aj.al.apagadas")}
       </p>
 
       <div className="canales">
@@ -61,45 +58,47 @@ export function Alertas({ project, inicial }: { project: string; inicial: AlertS
           valor={slack}
           setValor={setSlack}
           placeholder="https://hooks.slack.com/services/…"
-          guardar={() => guardar({ webhook_url: slack.trim() }, "Webhook de Slack guardado.")}
-          quitar={() => guardar({ webhook_url: "" }, "Slack quitado.")}
+          guardar={() => guardar({ webhook_url: slack.trim() }, t("aj.al.slack_guardado"))}
+          quitar={() => guardar({ webhook_url: "" }, t("aj.al.slack_quitado"))}
         />
         <Canal
-          titulo="Webhook (Teams, Discord, n8n…)"
+          titulo={t("aj.al.webhook_titulo")}
           actual={a.webhook}
           valor={webhook}
           setValor={setWebhook}
           placeholder="https://…"
           guardar={() =>
-            guardar({ generic_webhook_url: webhook.trim() }, "Webhook guardado.")
+            guardar({ generic_webhook_url: webhook.trim() }, t("aj.al.webhook_guardado"))
           }
-          quitar={() => guardar({ generic_webhook_url: "" }, "Webhook quitado.")}
+          quitar={() => guardar({ generic_webhook_url: "" }, t("aj.al.webhook_quitado"))}
         />
         <div className="canal">
-          <small>Correo</small>
+          <small>{t("aj.al.correo")}</small>
           <div className="ab" style={{ margin: 0 }}>
             <input
               className="field grow"
               type="email"
               value={correo}
               onChange={(e) => setCorreo(e.target.value)}
-              placeholder="equipo@empresa.com"
+              placeholder={t("aj.al.correo_placeholder")}
             />
             <button
               type="button"
               className="btn small"
               onClick={() =>
-                guardar({ email_to: correo.trim() }, correo.trim() ? "Correo guardado." : "Correo quitado.")
+                guardar(
+                  { email_to: correo.trim() },
+                  correo.trim() ? t("aj.al.correo_guardado") : t("aj.al.correo_quitado"),
+                )
               }
               disabled={!correo.trim() && !a.email_to}
             >
-              {!correo.trim() && a.email_to ? "Quitar" : "Guardar"}
+              {!correo.trim() && a.email_to ? t("comun.quitar") : t("comun.guardar")}
             </button>
           </div>
           {a.email_to && !a.email_ready && (
             <small className="verr">
-              Falta el servidor de correo de la instalación: arranca Laplace con
-              LAPLACE_SMTP_HOST, LAPLACE_SMTP_USER y LAPLACE_SMTP_PASSWORD.
+              {t("aj.al.smtp")}
             </small>
           )}
         </div>
@@ -107,7 +106,7 @@ export function Alertas({ project, inicial }: { project: string; inicial: AlertS
 
       <div className="ab">
         <label>
-          <small>Umbral (dólares ya gastados)</small>
+          <small>{t("aj.al.umbral")}</small>
           <input
             className="field"
             inputMode="decimal"
@@ -117,7 +116,7 @@ export function Alertas({ project, inicial }: { project: string; inicial: AlertS
           />
         </label>
         <label>
-          <small>Calma por problema (horas)</small>
+          <small>{t("aj.al.calma")}</small>
           <input
             className="field"
             inputMode="decimal"
@@ -135,16 +134,16 @@ export function Alertas({ project, inicial }: { project: string; inicial: AlertS
                 threshold: Number(umbral.replace(",", ".")) || 0,
                 quiet_hours: Number(calma.replace(",", ".")) || 0,
               },
-              "Umbral y calma guardados.",
+              t("aj.al.umbral_guardado"),
             )
           }
         >
-          Guardar
+          {t("comun.guardar")}
         </button>
       </div>
 
       <fieldset className="reglas">
-        <legend>Qué avisa</legend>
+        <legend>{t("aj.al.que_avisa")}</legend>
         {REGLAS.map(([clave, nombre]) => (
           <label key={clave}>
             <input
@@ -157,27 +156,27 @@ export function Alertas({ project, inicial }: { project: string; inicial: AlertS
                       ? a.muted_kinds.filter((k) => k !== clave)
                       : [...a.muted_kinds, clave],
                   },
-                  "Reglas guardadas.",
+                  t("aj.al.reglas_guardadas"),
                 )
               }
             />{" "}
-            {nombre}
+            {t(nombre)}
           </label>
         ))}
       </fieldset>
 
       <div className="actions" style={{ paddingTop: 14 }}>
         <button type="button" className="btn" onClick={probar} disabled={!a.enabled}>
-          Enviar un mensaje de prueba
+          {t("aj.al.probar")}
         </button>
         <button
           type="button"
           className="btn"
           onClick={() =>
-            guardar({ muted: !a.muted }, a.muted ? "Alertas reactivadas." : "Alertas silenciadas.")
+            guardar({ muted: !a.muted }, a.muted ? t("aj.al.reactivadas") : t("aj.al.silenciadas_ok"))
           }
         >
-          {a.muted ? "Reactivar" : "Silenciar este proyecto"}
+          {a.muted ? t("aj.al.reactivar") : t("aj.al.silenciar")}
         </button>
       </div>
       <Aviso {...msg} />
@@ -198,14 +197,14 @@ export function Canal(props: {
     <div className="canal">
       <small>
         {props.titulo}
-        {props.actual && <span className="puesto"> · puesto ({props.actual})</span>}
+        {props.actual && <span className="puesto">{t("aj.al.puesto", { actual: props.actual })}</span>}
       </small>
       <div className="ab" style={{ margin: 0 }}>
         <input
           className="field grow"
           value={props.valor}
           onChange={(e) => props.setValor(e.target.value)}
-          placeholder={props.actual ? "Pega otro para cambiarlo" : props.placeholder}
+          placeholder={props.actual ? t("aj.al.otro") : props.placeholder}
           aria-label={props.titulo}
         />
         <button
@@ -214,11 +213,11 @@ export function Canal(props: {
           onClick={props.guardar}
           disabled={!props.valor.trim()}
         >
-          Guardar
+          {t("comun.guardar")}
         </button>
         {props.actual && (
           <button type="button" className="btn small" onClick={props.quitar}>
-            Quitar
+            {t("comun.quitar")}
           </button>
         )}
       </div>
@@ -228,9 +227,9 @@ export function Canal(props: {
 
 // ---------------------------------------------------------------------------------
 
-export const REGLAS: [string, string][] = [
-  ["repeticion", "Repeticiones"],
-  ["bucle", "Bucles"],
-  ["modelo_caro", "Modelo caro"],
-  ["contexto_fijo", "Contexto sin caché"],
-];
+export const REGLAS = [
+  ["repeticion", "aj.regla.repeticion"],
+  ["bucle", "aj.regla.bucle"],
+  ["modelo_caro", "aj.regla.modelo_caro"],
+  ["contexto_fijo", "aj.regla.contexto_fijo"],
+] as const;

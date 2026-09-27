@@ -3,6 +3,7 @@
 import { duration, money, oneLine, spanLabel } from "@/lib/format";
 import { Euros } from "@/lib/moneda";
 import type { FindingDetail, Span } from "@/lib/types";
+import { t, tn } from "@/lib/textos";
 
 /**
  * La cabecera con las cifras.
@@ -25,7 +26,7 @@ export function Head({ finding }: { finding: FindingDetail }) {
             {finding.monthly_saving_usd !== null && (
               <div>
                 <b className="num">{money(finding.monthly_saving_usd, finding.currency)}</b>
-                <span>al mes si no cambia nada</span>
+                <span>{t("tec.al_mes")}</span>
               </div>
             )}
             <div>
@@ -34,20 +35,20 @@ export function Head({ finding }: { finding: FindingDetail }) {
                 {money(finding.window_waste_usd, finding.currency)}
               </b>
               <span>
-                ya gastados en {ventana} <Euros usd={finding.window_waste_usd} />
+                {t("tec.ya_gastados", { ventana })} <Euros usd={finding.window_waste_usd} />
               </span>
             </div>
           </>
         ) : (
           <div>
             <b className="num neutral">{duration(finding.window_waste_ms)}</b>
-            <span>de espera evitable en {ventana}</span>
+            <span>{t("tec.espera", { ventana })}</span>
           </div>
         )}
         {finding.scope_label && (
           <div>
             <b className="neutral frase">{finding.scope_label}</b>
-            <span>afectadas</span>
+            <span>{t("tec.afectadas")}</span>
           </div>
         )}
       </div>
@@ -75,15 +76,7 @@ export function Repetitions({ spans, bucle }: { spans: Span[]; bucle: boolean })
         <div className="reps-note">
           {/* En un bucle las entradas NO son idénticas —ésa es la diferencia con la
               repetición—, así que llamarlas así contradecía la frase de arriba. */}
-          …{rest}{" "}
-          {bucle
-            ? rest === 1
-              ? "vuelta más"
-              : "vueltas más"
-            : rest === 1
-              ? "llamada idéntica más"
-              : "llamadas idénticas más"}
-          , todas con la misma respuesta.
+          {tn(bucle ? "tec.vueltas_mas" : "tec.identicas_mas", rest)}
         </div>
       )}
     </div>
@@ -111,11 +104,11 @@ export function SpanAttributes({ span }: { span: Span }) {
       String(span.llm.usage.cached_input_tokens),
     ]);
     rows.push(["laplace.usage.cache_write_tokens", String(span.llm.usage.cache_write_tokens)]);
-    if (span.llm.cost.rate) rows.push(["tarifa aplicada", span.llm.cost.rate]);
+    if (span.llm.cost.rate) rows.push([t("tec.tarifa_aplicada"), span.llm.cost.rate]);
     if (span.llm.cost.rate_unverified) {
-      rows.push(["tarifa no verificada", span.llm.cost.rate_note]);
+      rows.push([t("tec.tarifa_no_verificada"), span.llm.cost.rate_note]);
     } else if (span.llm.cost.rate_assumed) {
-      rows.push(["tarifa asumida", span.llm.cost.rate_note]);
+      rows.push([t("tec.tarifa_asumida"), span.llm.cost.rate_note]);
     }
   }
   if (span.session_id) rows.push(["laplace.session.id", span.session_id]);

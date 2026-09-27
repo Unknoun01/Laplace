@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { t } from "@/lib/textos";
 
 export function Aviso({ ok, texto }: { ok: boolean; texto: string }) {
   if (!texto) return null;
@@ -15,7 +16,7 @@ export function useAviso() {
       setMsg({ ok: true, texto });
       return true;
     } catch (e) {
-      setMsg({ ok: false, texto: e instanceof Error ? e.message : "no se ha podido" });
+      setMsg({ ok: false, texto: e instanceof Error ? e.message : t("org.error.generico") });
       return false;
     }
   };

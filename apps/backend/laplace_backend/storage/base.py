@@ -542,7 +542,7 @@ def _segunda_pasada(filas: list[Any]) -> list[Any]:
             # Nada visible los separa: las instrucciones difieren más allá de lo que se
             # guarda. Se numeran, y la ficha enseña cada una por separado.
             for n, fila in enumerate(pendientes[1:], start=2):
-                fila.name = f"{nombre} (variante {n})"
+                fila.name = f"{nombre} (#{n})"
     return filas
 
 

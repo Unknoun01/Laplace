@@ -12,6 +12,7 @@ import { allNodes } from "@/lib/tree";
 import type { Annotation, Finding, JudgeStatus, Trace, TraceSummary } from "@/lib/types";
 import { useTitulo } from "@/lib/titulo";
 import { useApi } from "@/lib/useApi";
+import { t, tn } from "@/lib/textos";
 
 /**
  * Una traza, entera y navegable. Se llega desde el explorador o desde la ficha de un
@@ -47,8 +48,8 @@ function Contenido() {
   if (!trace) {
     return (
       <NotFound
-        title="No encontramos esa traza"
-        body="Puede que el identificador esté mal, o que la traza sea anterior a lo que se conserva."
+        title={t("traza.no_encontrada")}
+        body={t("traza.no_encontrada.texto")}
         back={`/trazas?${context}`}
       />
     );
@@ -68,7 +69,7 @@ function Contenido() {
             strokeLinejoin="round"
           />
         </svg>
-        Todas las trazas
+        {t("traza.todas")}
       </Link>
 
       <Head summary={trace.summary} />
@@ -85,9 +86,7 @@ function Contenido() {
       {aqui.length > 0 && (
         <div className="en-esta-traza">
           <strong>
-            {aqui.length === 1
-              ? "En esta ejecución pasa un problema detectado:"
-              : `En esta ejecución pasan ${aqui.length} problemas detectados:`}
+            {tn("traza.problemas", aqui.length)}
           </strong>
           <ul>
             {aqui.map((f) => (
@@ -95,7 +94,7 @@ function Contenido() {
                 <Link href={`/problema?${context}&id=${encodeURIComponent(f.id)}`}>
                   {f.title} →
                 </Link>
-                {f.state && <span className="muted"> · {f.state === "ignorado" ? "ignorado" : f.state === "reaparecido" ? "marcado como arreglado, pero sigue" : "marcado como arreglado"}</span>}
+                {f.state && <span className="muted"> · {f.state === "ignorado" ? t("traza.estado.ignorado") : f.state === "reaparecido" ? t("traza.estado.reaparecido") : t("traza.estado.arreglado")}</span>}
               </li>
             ))}
           </ul>
@@ -161,7 +160,7 @@ function Anotar({ project, trace }: { project: string; trace: Trace }) {
   return (
     <section className="anotar">
       <div className="anotar-top">
-        <span className="alabel">¿Esta ejecución está bien?</span>
+        <span className="alabel">{t("traza.bien")}</span>
         <Verdicts
           projectId={project}
           traceId={traceId}
@@ -188,17 +187,20 @@ function Anotar({ project, trace }: { project: string; trace: Trace }) {
                 setAnotaciones(actualizada?.annotations ?? anotaciones);
                 setAviso(
                   resultado.cost_unknown
-                    ? `Juzgada con ${resultado.model}. Su coste no lo sabemos: ese modelo no está en la tabla de precios.`
-                    : `Juzgada con ${resultado.model}. Ha costado ${money(resultado.cost_usd)}.`,
+                    ? t("traza.juez.sin_tarifa", { modelo: resultado.model })
+                    : t("traza.juez.coste", {
+                        modelo: resultado.model,
+                        coste: money(resultado.cost_usd),
+                      }),
                 );
               } catch (e) {
-                setAviso(e instanceof Error ? e.message : "el juez no ha podido opinar");
+                setAviso(e instanceof Error ? e.message : t("traza.juez.error"));
               } finally {
                 setJuzgando(false);
               }
             }}
           >
-            {juzgando ? "Juzgando…" : `Que opine ${juez.model}`}
+            {juzgando ? t("traza.juez.juzgando") : t("traza.juez.opine", { modelo: juez.model })}
           </button>
           <button
             type="button"
@@ -207,7 +209,7 @@ function Anotar({ project, trace }: { project: string; trace: Trace }) {
               setPrompt(prompt ? null : await judgePrompt(project, traceId))
             }
           >
-            {prompt ? "Ocultar el prompt del juez" : "Ver el prompt del juez"}
+            {prompt ? t("traza.juez.ocultar") : t("traza.juez.ver")}
           </button>
         </div>
       )}
@@ -246,7 +248,7 @@ function ExportarJSON({ trace }: { trace: Trace }) {
   };
   return (
     <button type="button" className="btn pro" onClick={descargar}>
-      Exportar traza en JSON
+      {t("traza.exportar")}
     </button>
   );
 }
@@ -257,14 +259,14 @@ function Head({ summary }: { summary: TraceSummary }) {
     <div className="d-head" style={{ paddingBottom: 18, marginBottom: 16 }}>
       <h1 style={{ fontSize: 22, maxWidth: "none" }}>
         <i className={`dot ${failed ? "error" : "ok"}`} style={{ marginRight: 10 }} aria-hidden />
-        {summary.root_name || "(sin nombre)"}
+        {summary.root_name || t("lista.sin_nombre")}
       </h1>
       <div className="d-sub" style={{ marginBottom: 12 }}>
         <span className="simple-only">{summary.trace_id.slice(0, 12)}</span>
         <span className="pro">{summary.trace_id}</span> · {summary.project_id} ·{" "}
         {timestamp(summary.start_time)}
-        {summary.session_id ? ` · sesión ${summary.session_id}` : ""}
-        {summary.user_id ? ` · usuario ${summary.user_id}` : ""}
+        {summary.session_id ? t("lista.sesion", { id: summary.session_id }) : ""}
+        {summary.user_id ? t("traza.usuario", { id: summary.user_id }) : ""}
       </div>
       <div className="d-cost">
         <div>
@@ -274,42 +276,42 @@ function Head({ summary }: { summary: TraceSummary }) {
           </b>
           <span>
             {summary.unknown_cost_spans > 0
-              ? `coste (faltan ${summary.unknown_cost_spans} pasos sin tarifa)`
+              ? t("traza.coste.faltan", { n: summary.unknown_cost_spans })
               : summary.cost.rate_unverified
-                ? "coste (tarifa no verificada)"
-                : "coste"}
+                ? t("traza.coste.sin_verificar")
+                : t("traza.coste")}
           </span>
         </div>
         <div>
           <b className="num neutral">
             {number(summary.usage.input_tokens)} / {number(summary.usage.output_tokens)}
           </b>
-          <span>tokens entrada / salida</span>
+          <span>{t("traza.tokens")}</span>
         </div>
         <div>
           <b className="num neutral">{duration(summary.duration_ms)}</b>
-          <span>duración</span>
+          <span>{t("traza.duracion")}</span>
         </div>
         <div>
           <b className="num neutral">{summary.span_count}</b>
-          <span>pasos</span>
+          <span>{t("traza.pasos")}</span>
         </div>
         <div>
           <b className="num neutral">{summary.llm_call_count}</b>
-          <span>llamadas a modelo</span>
+          <span>{t("traza.llamadas")}</span>
         </div>
         <div>
           <b className="num neutral">{summary.tool_call_count}</b>
-          <span>herramientas</span>
+          <span>{t("traza.herramientas")}</span>
         </div>
         <div className="pro">
           <b className="num neutral">{summary.models.join(", ") || "—"}</b>
-          <span>modelos</span>
+          <span>{t("traza.modelos")}</span>
         </div>
         {summary.usage.cached_input_tokens > 0 && (
           <div className="pro">
             <b className="num good">{number(summary.usage.cached_input_tokens)}</b>
-            <span>tokens servidos desde caché</span>
+            <span>{t("traza.cache_tokens")}</span>
           </div>
         )}
         {summary.cost.cache_saving_usd > 0 && (
@@ -317,13 +319,13 @@ function Head({ summary }: { summary: TraceSummary }) {
             <b className="num good">
               {money(summary.cost.cache_saving_usd, summary.cost.currency)}
             </b>
-            <span>que te ha ahorrado la caché</span>
+            <span>{t("traza.cache_ahorro")}</span>
           </div>
         )}
         {summary.assumed_rate_spans > 0 && (
           <div className="pro">
             <b className="num neutral">{summary.assumed_rate_spans}</b>
-            <span>pasos con tarifa asumida</span>
+            <span>{t("traza.asumida")}</span>
           </div>
         )}
         {summary.error_count > 0 && (
@@ -331,7 +333,7 @@ function Head({ summary }: { summary: TraceSummary }) {
             <b className="num" style={{ color: "var(--rose)" }}>
               {summary.error_count}
             </b>
-            <span>errores</span>
+            <span>{t("traza.errores")}</span>
           </div>
         )}
       </div>

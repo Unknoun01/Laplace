@@ -17,6 +17,9 @@ import { usePermisos } from "@/lib/permisos";
 import type { PromptCard, PromptsView, Rate, VersionMetrics } from "@/lib/types";
 import { Detalle } from "./detalle";
 import { SinAdoptar, Observados } from "./observados";
+import { tr } from "@/lib/i18n";
+import { porcentaje } from "@/lib/format";
+import { t, tn } from "@/lib/textos";
 
 /**
  * Prompts: qué versión está en producción, qué cambió entre una y otra, y —lo único
@@ -85,11 +88,8 @@ function Contenido() {
   return (
     <main className="reading">
       <section className="hero">
-        <h1>Los prompts de «{project}»</h1>
-        <p className="lead">
-          Cada versión con lo que costó y lo que acertó sobre el tráfico real que la
-          usó, para decidir cuál dejar en producción con las dos cifras delante.
-        </p>
+        <h1>{t("pr.titulo", { proyecto: project })}</h1>
+        <p className="lead">{t("pr.lead")}</p>
       </section>
 
       {vista.managed ? (
@@ -144,7 +144,7 @@ function Ficha({
     try {
       setDetalle(await getPrompt(prompt.id, project, days));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "no se ha podido abrir");
+      setError(e instanceof Error ? e.message : t("pr.error.abrir"));
     }
   }
 
@@ -156,7 +156,7 @@ function Ficha({
       setDetalle(await getPrompt(prompt.id, project, days));
       onChange();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "no se ha podido cambiar la versión");
+      setError(e instanceof Error ? e.message : t("pr.error.version"));
     }
   }
 
@@ -170,13 +170,13 @@ function Ficha({
           <h2>
             {ficha.name}
             {ficha.production_version !== null && (
-              <span className="chip prod">v{ficha.production_version} en producción</span>
+              <span className="chip prod">{t("pr.en_produccion", { n: ficha.production_version })}</span>
             )}
           </h2>
           {ficha.description && <p className="lead">{ficha.description}</p>}
         </div>
         <button type="button" className="btn" onClick={abrir}>
-          {abierto ? "Cerrar" : "Ver versiones y diff"}
+          {abierto ? t("pr.cerrar") : t("pr.ver_versiones")}
         </button>
       </header>
 
@@ -193,13 +193,9 @@ function Ficha({
         <div className="caveats">
           <p>
             <strong>
-              {number(ficha.fallback_traces)}{" "}
-              {ficha.fallback_traces === 1 ? "ejecución corrió" : "ejecuciones corrieron"} con
-              el texto de reserva.
+              {tn("pr.reserva", ficha.fallback_traces, { n: number(ficha.fallback_traces) })}
             </strong>{" "}
-            Quiere decir que tu agente no pudo pedirle el prompt a Laplace y usó el que
-            lleva en el código. Ese tráfico va contado aparte, no dentro de la versión en
-            producción: sumarlo ahí falsearía justo la cifra que estás mirando.
+            {t("pr.reserva.texto")}
           </p>
         </div>
       )}
@@ -207,10 +203,7 @@ function Ficha({
       <Versiones versiones={ficha.versions} onDeploy={escribir ? desplegar : undefined} />
 
       <p className="disclaimer">
-        El acierto de una versión es el de las <strong>ejecuciones enteras</strong> en las
-        que participó, no el de este prompt aislado. Una ejecución pasa por varios pasos y,
-        cuando sale mal, nadie ha medido cuál de ellos la estropeó. Es una señal útil, no
-        un reparto de culpas.
+        {tr("pr.acierto.nota", { enteras: <strong>{t("pr.acierto.enteras")}</strong> })}
       </p>
 
       {aviso && <p className="okline">{aviso}</p>}
@@ -225,10 +218,10 @@ function Ficha({
           id <b>{ficha.id}</b>
         </span>
         <span>
-          versiones <b>{ficha.version_count}</b>
+          {t("pr.tec.versiones")} <b>{ficha.version_count}</b>
         </span>
         <span>
-          creado <b>{timestamp(ficha.created_at)}</b>
+          {t("pr.tec.creado")} <b>{timestamp(ficha.created_at)}</b>
         </span>
       </div>
     </section>
@@ -269,13 +262,13 @@ function Versiones({
     <table className="tbl vers">
       <thead>
         <tr>
-          <th>Versión</th>
-          <th className="r">Por ejecución</th>
-          <th className="r">Personas</th>
-          <th className="r">Juez</th>
-          <th className="r">Ejecuciones</th>
-          <th className="r pro">Tokens/ejec.</th>
-          <th className="r hide-sm">Último uso</th>
+          <th>{t("pr.col.version")}</th>
+          <th className="r">{t("pr.col.por_ejecucion")}</th>
+          <th className="r">{t("ev.col.personas")}</th>
+          <th className="r">{t("ev.col.juez")}</th>
+          <th className="r">{t("pr.col.ejecuciones")}</th>
+          <th className="r pro">{t("pr.col.tokens")}</th>
+          <th className="r hide-sm">{t("pr.col.ultimo")}</th>
           <th />
         </tr>
       </thead>
@@ -284,7 +277,7 @@ function Versiones({
           <tr key={v.label} className={v.in_production ? "enprod" : undefined}>
             <td>
               <b>{v.label}</b>
-              {v.in_production && <span className="chip prod mini">producción</span>}
+              {v.in_production && <span className="chip prod mini">{t("pr.produccion")}</span>}
               {v.notes && <div className="meta">{v.notes}</div>}
               {v.created_at && <div className="meta pro">{timestamp(v.created_at)}</div>}
             </td>
@@ -312,7 +305,7 @@ function Versiones({
               {/* La reserva no es una versión guardada: no se puede desplegar. */}
               {v.version > 0 && !v.in_production && (
                 onDeploy && <button type="button" className="vbtn ghost" onClick={() => onDeploy(v.version)}>
-                  Poner en producción
+                  {t("pr.poner")}
                 </button>
               )}
             </td>
@@ -323,11 +316,7 @@ function Versiones({
     </div>
     {mudas.length > 0 && (
       <button type="button" className="vbtn ghost" onClick={() => setTodas(!todas)}>
-        {todas
-          ? "Ocultar las versiones sin tráfico"
-          : `Ver ${mudas.length} ${
-              mudas.length === 1 ? "versión que no corrió" : "versiones que no corrieron"
-            } en este rango`}
+        {todas ? t("pr.ocultar_mudas") : tn("pr.ver_mudas", mudas.length)}
       </button>
     )}
     </>
@@ -350,9 +339,9 @@ function Celda({ rate }: { rate?: Rate }) {
     );
   return (
     <>
-      <span>{(rate.value * 100).toFixed(0)} %</span>
+      <span>{porcentaje(rate.value)}</span>
       <div className="meta pro">
-        {(rate.low! * 100).toFixed(0)}–{(rate.high! * 100).toFixed(0)} % (Wilson)
+        {t("pr.wilson", { bajo: porcentaje(rate.low!), alto: porcentaje(rate.high!) })}
       </div>
     </>
   );
@@ -378,7 +367,7 @@ function Nuevo({ project, onChange }: { project: string; onChange: () => void })
       setTexto("");
       onChange();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "no se ha podido crear");
+      setError(e instanceof Error ? e.message : t("seg.error.crear"));
     } finally {
       setCreando(false);
     }
@@ -386,15 +375,13 @@ function Nuevo({ project, onChange }: { project: string; onChange: () => void })
 
   return (
     <section className="sec">
-      <h2>Sacar un prompt del código</h2>
+      <h2>{t("pr.nuevo")}</h2>
       <p className="lead">
-        El nombre es con el que lo pedirás: <code>laplace.get_prompt(&quot;…&quot;)</code>. La
-        primera versión se pone en producción sola; a partir de la segunda, guardar y
-        desplegar son dos gestos.
+        {tr("pr.nuevo.lead", { codigo: <code>laplace.get_prompt(&quot;…&quot;)</code> })}
       </p>
       <div className="ab">
         <label className="grow">
-          <small>Nombre</small>
+          <small>{t("pr.nombre")}</small>
           <input
             className="field"
             value={nombre}
@@ -407,7 +394,7 @@ function Nuevo({ project, onChange }: { project: string; onChange: () => void })
         className="field"
         rows={6}
         value={texto}
-        placeholder="Eres un asistente que responde en {{idioma}} y en menos de tres frases."
+        placeholder={t("pr.nuevo.placeholder")}
         onChange={(e) => setTexto(e.target.value)}
       />
       <div className="actions">
@@ -417,7 +404,7 @@ function Nuevo({ project, onChange }: { project: string; onChange: () => void })
           onClick={crear}
           disabled={creando || !nombre.trim() || !texto.trim()}
         >
-          {creando ? "Creando…" : "Crear y poner en producción"}
+          {creando ? t("conj.creando") : t("pr.crear")}
         </button>
       </div>
       {error && <p className="verr">{error}</p>}

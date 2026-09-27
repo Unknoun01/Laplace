@@ -8,22 +8,24 @@ import { getOverview, listProjects, listTraces, parseDays, windowStart } from "@
 import { descargarCsv } from "@/lib/csv";
 import { useApi } from "@/lib/useApi";
 import { Listado, GuardarConjunto } from "./listado";
+import { tr } from "@/lib/i18n";
+import { t, t as txt } from "@/lib/textos";
 
 const SORTS = [
-  { value: "cost", label: "Más caras primero" },
-  { value: "recent", label: "Más recientes" },
-  { value: "duration", label: "Más lentas" },
-];
+  { value: "cost", label: "trazas.orden.coste" },
+  { value: "recent", label: "trazas.orden.reciente" },
+  { value: "duration", label: "trazas.orden.duracion" },
+] as const;
 
 /** Lo mismo que pide la API: con menos, casi todo casa y el índice no ayuda (D-144). */
 const MINIMO_CONTENIDO = 3;
 
 const TYPES = [
-  { value: "", label: "Cualquier paso" },
-  { value: "llm", label: "Con llamada a modelo" },
-  { value: "tool", label: "Con herramienta" },
-  { value: "retrieval", label: "Con búsqueda" },
-];
+  { value: "", label: "trazas.tipo.cualquiera" },
+  { value: "llm", label: "trazas.tipo.llm" },
+  { value: "tool", label: "trazas.tipo.tool" },
+  { value: "retrieval", label: "trazas.tipo.retrieval" },
+] as const;
 
 /**
  * Explorador de trazas: la superficie de exploración libre.
@@ -101,10 +103,8 @@ function Contenido() {
   return (
     <main>
       <section className="sec" style={{ paddingBottom: 0 }}>
-        <h2>Trazas</h2>
-        <p className="lead">
-          Cada fila es una ejecución completa de tu agente. Ordenadas por lo que cuestan.
-        </p>
+        <h2>{t("trazas.titulo")}</h2>
+        <p className="lead">{t("trazas.lead")}</p>
       </section>
 
       <form method="GET" className="toolbar">
@@ -117,36 +117,36 @@ function Contenido() {
           type="search"
           name="q"
           defaultValue={q}
-          placeholder={enContenido ? "Buscar un pedido, una frase, un id…" : "Buscar por paso, herramienta o id de traza"}
+          placeholder={enContenido ? t("trazas.buscar.contenido") : t("trazas.buscar.nombres")}
           className="field grow"
-          aria-label="Buscar"
+          aria-label={t("trazas.buscar")}
         />
-        <select name="en" defaultValue={enContenido ? "contenido" : ""} className="field" aria-label="Dónde buscar">
-          <option value="">En nombres e id</option>
-          <option value="contenido">En prompts y respuestas</option>
+        <select name="en" defaultValue={enContenido ? "contenido" : ""} className="field" aria-label={t("trazas.donde")}>
+          <option value="">{t("trazas.en_nombres")}</option>
+          <option value="contenido">{t("trazas.en_contenido")}</option>
         </select>
-        <select name="status" defaultValue={status} className="field" aria-label="Estado">
-          <option value="">Cualquier estado</option>
-          <option value="error">Sólo con error</option>
-          <option value="ok">Sólo correctas</option>
+        <select name="status" defaultValue={status} className="field" aria-label={t("trazas.estado")}>
+          <option value="">{t("trazas.estado.cualquiera")}</option>
+          <option value="error">{t("trazas.estado.error")}</option>
+          <option value="ok">{t("trazas.estado.ok")}</option>
         </select>
-        <select name="type" defaultValue={type} className="field" aria-label="Tipo de paso">
-          {TYPES.map((t) => (
-            <option key={t.value} value={t.value}>
-              {t.label}
+        <select name="type" defaultValue={type} className="field" aria-label={t("trazas.tipo")}>
+          {TYPES.map((tipo) => (
+            <option key={tipo.value} value={tipo.value}>
+              {t(tipo.label)}
             </option>
           ))}
         </select>
-        <select name="sort" defaultValue={sort} className="field" aria-label="Orden">
+        <select name="sort" defaultValue={sort} className="field" aria-label={t("trazas.orden")}>
           {SORTS.map((s) => (
             <option key={s.value} value={s.value}>
-              {s.label}
+              {t(s.label)}
             </option>
           ))}
         </select>
         {/* Filtros de desarrollador: en Diagnóstico la barra se queda limpia. */}
-        <select name="model" defaultValue={model} className="field pro" aria-label="Modelo">
-          <option value="">Cualquier modelo</option>
+        <select name="model" defaultValue={model} className="field pro" aria-label={t("trazas.modelo")}>
+          <option value="">{t("trazas.modelo.cualquiera")}</option>
           {modelos.map((m) => (
             <option key={m} value={m}>
               {m}
@@ -158,10 +158,10 @@ function Contenido() {
           inputMode="decimal"
           name="min_cost"
           defaultValue={minCostRaw}
-          placeholder="Coste mínimo"
+          placeholder={t("trazas.coste_minimo")}
           className="field pro"
           style={{ width: 130 }}
-          aria-label="Coste mínimo en USD"
+          aria-label={t("trazas.coste_minimo.aria")}
         />
         <input
           type="text"
@@ -170,16 +170,16 @@ function Contenido() {
           placeholder="session.id"
           className="field pro"
           style={{ width: 150 }}
-          aria-label="Identificador de sesión"
+          aria-label={t("trazas.sesion.aria")}
         />
         <button type="submit" className="btn">
-          Filtrar
+          {t("trazas.filtrar")}
         </button>
       </form>
 
       {corta && (
         <p className="filtro-paso">
-          <span>Para buscar en prompts y respuestas escribe al menos {MINIMO_CONTENIDO} caracteres.</span>
+          <span>{t("trazas.corta", { n: MINIMO_CONTENIDO })}</span>
         </p>
       )}
 
@@ -188,21 +188,19 @@ function Contenido() {
           {/* Filtra por el paso, no por la repetición: puede haber ejecuciones que pasen
               por él sin repetirlo, y decir «las del problema» sería decir de más. */}
           <span>
-            Sólo las ejecuciones que pasan por el paso del problema: <strong>{stepLabel || step}</strong>
+            {tr("trazas.filtro.paso", { paso: <strong>{stepLabel || step}</strong> })}
           </span>
           <Link href={`/trazas?${sinPaso(params)}`} className="btn">
-            Quitar
+            {t("trazas.quitar")}
           </Link>
         </p>
       )}
 
       {user && (
         <p className="filtro-paso">
-          <span>
-            Sólo las ejecuciones del usuario <strong>{user}</strong>
-          </span>
+          <span>{tr("trazas.filtro.usuario", { usuario: <strong>{user}</strong> })}</span>
           <Link href={`/trazas?${sinParametro(params, "user")}`} className="btn">
-            Quitar
+            {t("trazas.quitar")}
           </Link>
         </p>
       )}
@@ -226,7 +224,7 @@ function Contenido() {
               })
             }
           >
-            Exportar CSV
+            {t("comun.exportar_csv")}
           </button>
         </div>
       )}
@@ -252,11 +250,11 @@ function Contenido() {
 
       {page.traces.length === 0 ? (
         <div className="state">
-          <h2>Ninguna traza coincide</h2>
-          <p>Prueba a quitar filtros o a ampliar el rango temporal en la barra de arriba.</p>
+          <h2>{t("trazas.ninguna")}</h2>
+          <p>{t("trazas.ninguna.texto")}</p>
           <div className="actions">
             <Link href={`/trazas?${context}`} className="btn">
-              Quitar filtros
+              {t("trazas.quitar_filtros")}
             </Link>
           </div>
         </div>
@@ -351,7 +349,7 @@ async function exportarTrazas(
         t.usage.input_tokens,
         t.usage.output_tokens,
         t.cost.total_usd,
-        t.unknown_cost_spans > 0 ? "sí" : "no",
+        t.unknown_cost_spans > 0 ? txt("csv.si") : txt("csv.no"),
         t.duration_ms,
         t.models.join(" "),
       ]);
@@ -359,21 +357,21 @@ async function exportarTrazas(
     cursor = pagina.next_cursor ?? undefined;
   } while (cursor && filas.length < TOPE_CSV);
   descargarCsv(
-    `laplace-${project}-trazas`,
+    `laplace-${project}-${txt("csv.nombre.trazas")}`,
     [
-      "Traza",
-      "Agente",
-      "Inicio",
-      "Estado",
-      "Sesión",
-      "Usuario",
-      "Pasos",
-      "Tokens entrada",
-      "Tokens salida",
-      "Coste (USD)",
-      "Coste incompleto",
-      "Duración (ms)",
-      "Modelos",
+      txt("csv.h.traza"),
+      txt("csv.h.agente"),
+      txt("csv.h.inicio"),
+      txt("csv.h.estado"),
+      txt("csv.h.sesion"),
+      txt("csv.h.usuario"),
+      txt("csv.h.pasos"),
+      txt("csv.h.tok_entrada"),
+      txt("csv.h.tok_salida"),
+      txt("csv.h.coste"),
+      txt("csv.h.incompleto"),
+      txt("csv.h.duracion"),
+      txt("csv.h.modelos"),
     ],
     filas.slice(0, TOPE_CSV),
   );

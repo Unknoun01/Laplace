@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { duration, exacto, money, number, pretty, tokens } from "@/lib/format";
 import { allNodes, barGeometry, flatten, timeWindow } from "@/lib/tree";
 import type { Span, Trace, TraceTreeNode } from "@/lib/types";
+import { t } from "@/lib/textos";
 
 /**
  * El árbol de ejecución, navegable.
@@ -94,11 +95,11 @@ export function TraceTree({ trace }: { trace: Trace }) {
     <div className="split">
       <section className="pane">
         <header>
-          <b>Árbol de ejecución</b>
+          <b>{t("arbol.titulo")}</b>
           <span style={{ marginRight: "auto", marginLeft: 12 }}>
-            {rows.length} de {trace.summary.span_count} pasos
+            {t("arbol.n_de", { n: rows.length, total: trace.summary.span_count })}
           </span>
-          <span className="hint">↑↓ moverse · ←→ plegar</span>
+          <span className="hint">{t("arbol.teclas")}</span>
           <button
             type="button"
             className="btn small"
@@ -106,7 +107,7 @@ export function TraceTree({ trace }: { trace: Trace }) {
               setCollapsed(allOpen ? new Set(branches.map((n) => n.span.span_id)) : new Set())
             }
           >
-            {allOpen ? "Plegar todo" : "Desplegar todo"}
+            {allOpen ? t("arbol.plegar_todo") : t("arbol.desplegar_todo")}
           </button>
         </header>
 
@@ -142,7 +143,7 @@ export function TraceTree({ trace }: { trace: Trace }) {
                     type="button"
                     className={`twist${node.children.length === 0 ? " leaf" : ""}`}
                     aria-expanded={!isCollapsed}
-                    aria-label={isCollapsed ? "desplegar" : "plegar"}
+                    aria-label={isCollapsed ? t("arbol.desplegar") : t("arbol.plegar")}
                     onClick={(event) => {
                       event.stopPropagation();
                       toggle(span.span_id);
@@ -168,7 +169,7 @@ export function TraceTree({ trace }: { trace: Trace }) {
                     <span className="badge quiet">+{node.subtree.span_count - 1}</span>
                   )}
                   {node.repeat_count > 1 && (
-                    <span className="badge" title="Misma llamada con la misma entrada">
+                    <span className="badge" title={t("arbol.misma_llamada")}>
                       ×{node.repeat_count}
                     </span>
                   )}
@@ -188,7 +189,7 @@ export function TraceTree({ trace }: { trace: Trace }) {
         {selected ? (
           <SpanPanel node={selected} />
         ) : (
-          <div style={{ padding: 24, color: "var(--ink-3)" }}>Selecciona un paso del árbol.</div>
+          <div style={{ padding: 24, color: "var(--ink-3)" }}>{t("arbol.selecciona")}</div>
         )}
       </section>
     </div>
@@ -243,10 +244,10 @@ function SpanPanel({ node }: { node: TraceTreeNode }) {
 
         {span.llm && (
           <>
-            <Block title={`Prompt (${span.llm.input_messages.length})`}>
+            <Block title={t("arbol.prompt", { n: span.llm.input_messages.length })}>
               <Messages messages={span.llm.input_messages} />
             </Block>
-            <Block title={`Respuesta (${span.llm.output_messages.length})`}>
+            <Block title={t("arbol.respuesta", { n: span.llm.output_messages.length })}>
               <Messages messages={span.llm.output_messages} />
             </Block>
           </>
@@ -254,10 +255,10 @@ function SpanPanel({ node }: { node: TraceTreeNode }) {
 
         {span.tool && (
           <>
-            <Block title="Argumentos">
+            <Block title={t("arbol.argumentos")}>
               <Payload value={span.tool.arguments} />
             </Block>
-            <Block title="Salida">
+            <Block title={t("arbol.salida")}>
               <Payload value={span.tool.output} />
             </Block>
           </>
@@ -265,10 +266,10 @@ function SpanPanel({ node }: { node: TraceTreeNode }) {
 
         {span.retrieval && (
           <>
-            <Block title="Consulta">
+            <Block title={t("arbol.consulta")}>
               <Payload value={span.retrieval.query} />
             </Block>
-            <Block title={`Documentos (${span.retrieval.documents.length})`}>
+            <Block title={t("arbol.documentos", { n: span.retrieval.documents.length })}>
               <Payload value={span.retrieval.documents} />
             </Block>
           </>
@@ -276,21 +277,21 @@ function SpanPanel({ node }: { node: TraceTreeNode }) {
 
         {!span.llm && !span.tool && !span.retrieval && (
           <>
-            <Block title="Entrada">
+            <Block title={t("arbol.entrada")}>
               <Payload value={span.input} />
             </Block>
-            <Block title="Salida">
+            <Block title={t("arbol.salida")}>
               <Payload value={span.output} />
             </Block>
           </>
         )}
 
         {span.events.length > 0 && (
-          <Block title={`Eventos (${span.events.length})`}>
+          <Block title={t("arbol.eventos", { n: span.events.length })}>
             {span.events.map((event, i) => (
               <dl className="kv" key={i}>
                 <div>
-                  <dt>evento</dt>
+                  <dt>{t("arbol.evento")}</dt>
                   <dd>{event.name}</dd>
                 </div>
                 {Object.entries(event.attributes).map(([key, value]) => (
@@ -317,15 +318,15 @@ function Metrics({ node }: { node: TraceTreeNode }) {
       <div className="metrics">
         <div>
           <b title={llm.request_model ?? ""}>{llm.request_model ?? "—"}</b>
-          <small>modelo</small>
+          <small>{t("arbol.modelo")}</small>
         </div>
         <div className={llm.usage.estimated ? "warn" : undefined}>
           <b>{number(llm.usage.input_tokens)}</b>
-          <small>{llm.usage.estimated ? "tokens entrada (estimados)" : "tokens entrada"}</small>
+          <small>{llm.usage.estimated ? t("arbol.tok_entrada_est") : t("arbol.tok_entrada")}</small>
         </div>
         <div className={llm.usage.estimated ? "warn" : undefined}>
           <b>{number(llm.usage.output_tokens)}</b>
-          <small>{llm.usage.estimated ? "tokens salida (estimados)" : "tokens salida"}</small>
+          <small>{llm.usage.estimated ? t("arbol.tok_salida_est") : t("arbol.tok_salida")}</small>
         </div>
         <div
           className={
@@ -341,31 +342,31 @@ function Metrics({ node }: { node: TraceTreeNode }) {
           </b>
           <small title={llm.cost.rate_note || undefined}>
             {llm.cost.unknown
-              ? "no sabemos el precio"
+              ? t("arbol.sin_precio")
               : llm.cost.rate_unverified
-                ? "coste (tarifa no verificada)"
+                ? t("traza.coste.sin_verificar")
                 : llm.cost.rate_assumed
-                  ? "coste mínimo (tarifa asumida)"
-                  : "coste"}
+                  ? t("arbol.coste_minimo")
+                  : t("traza.coste")}
           </small>
         </div>
         {/* La caché sólo aparece cuando hay caché: sin ella, esto sería ruido. */}
         {llm.usage.cached_input_tokens > 0 && (
           <div className="pro">
             <b>{number(llm.usage.cached_input_tokens)}</b>
-            <small>desde caché ({money(llm.cost.cache_read_usd, llm.cost.currency)})</small>
+            <small>{t("arbol.desde_cache", { coste: money(llm.cost.cache_read_usd, llm.cost.currency) })}</small>
           </div>
         )}
         {llm.usage.cache_write_tokens + llm.usage.cache_write_1h_tokens > 0 && (
           <div className="pro">
             <b>{number(llm.usage.cache_write_tokens + llm.usage.cache_write_1h_tokens)}</b>
-            <small>escritos en caché ({money(llm.cost.cache_write_usd, llm.cost.currency)})</small>
+            <small>{t("arbol.escritos_cache", { coste: money(llm.cost.cache_write_usd, llm.cost.currency) })}</small>
           </div>
         )}
         {llm.cost.cache_saving_usd > 0 && (
           <div>
             <b>{money(llm.cost.cache_saving_usd, llm.cost.currency)}</b>
-            <small>que ha ahorrado la caché</small>
+            <small>{t("arbol.ahorro_cache")}</small>
           </div>
         )}
       </div>
@@ -375,19 +376,19 @@ function Metrics({ node }: { node: TraceTreeNode }) {
     <div className="metrics">
       <div>
         <b>{node.subtree.span_count}</b>
-        <small>pasos de la rama</small>
+        <small>{t("arbol.rama.pasos")}</small>
       </div>
       <div>
         <b>{node.subtree.error_count}</b>
-        <small>con error</small>
+        <small>{t("arbol.rama.error")}</small>
       </div>
       <div>
         <b>{number(node.subtree.input_tokens + node.subtree.output_tokens)}</b>
-        <small>tokens de la rama</small>
+        <small>{t("arbol.rama.tokens")}</small>
       </div>
       <div>
         <b>{money(node.subtree.cost_usd)}</b>
-        <small>coste de la rama</small>
+        <small>{t("arbol.rama.coste")}</small>
       </div>
     </div>
   );
@@ -407,7 +408,7 @@ function Messages({ messages }: { messages: Record<string, unknown>[] }) {
   return (
     <>
       {messages.map((message, index) => {
-        const role = typeof message.role === "string" ? message.role : "mensaje";
+        const role = typeof message.role === "string" ? message.role : t("arbol.mensaje");
         const content = "content" in message ? message.content : message;
         const text = typeof content === "string" ? content : pretty(content);
         return (
@@ -430,7 +431,7 @@ function Payload({ value }: { value: unknown }) {
   return (
     <div className="msg">
       <header>
-        <span>contenido</span>
+        <span>{t("arbol.contenido")}</span>
         <Copy text={text} />
       </header>
       <pre>{text}</pre>
@@ -442,7 +443,7 @@ function Attributes({ span }: { span: Span }) {
   const rows: [string, string][] = [
     ["trace_id", span.trace_id],
     ["span_id", span.span_id],
-    ["parent_span_id", span.parent_span_id ?? "(raíz)"],
+    ["parent_span_id", span.parent_span_id ?? t("arbol.raiz")],
     ["laplace.span.type", span.type],
     ["laplace.dedup_hash", span.dedup_hash],
     ["laplace.step.key", span.step_key],
@@ -454,14 +455,14 @@ function Attributes({ span }: { span: Span }) {
   if (span.llm) {
     rows.push([
       "laplace.usage.estimated",
-      span.llm.usage.estimated ? "true (los contamos nosotros)" : "false (del proveedor)",
+      span.llm.usage.estimated ? t("arbol.estimados") : t("arbol.del_proveedor"),
     ]);
-    if (span.llm.cost.rate) rows.push(["tarifa aplicada", span.llm.cost.rate]);
-    if (span.llm.cost.unknown) rows.push(["tarifa aplicada", "ninguna: modelo desconocido"]);
+    if (span.llm.cost.rate) rows.push([t("tec.tarifa_aplicada"), span.llm.cost.rate]);
+    if (span.llm.cost.unknown) rows.push([t("tec.tarifa_aplicada"), t("arbol.ninguna")]);
     if (span.llm.cost.rate_unverified) {
-      rows.push(["tarifa no verificada", span.llm.cost.rate_note]);
+      rows.push([t("tec.tarifa_no_verificada"), span.llm.cost.rate_note]);
     } else if (span.llm.cost.rate_assumed) {
-      rows.push(["tarifa asumida", span.llm.cost.rate_note]);
+      rows.push([t("tec.tarifa_asumida"), span.llm.cost.rate_note]);
     }
     if (span.llm.usage.cached_input_tokens) {
       rows.push([
@@ -503,7 +504,7 @@ function Attributes({ span }: { span: Span }) {
 
   return (
     <details className="fold pro">
-      <summary>Atributos crudos</summary>
+      <summary>{t("arbol.atributos")}</summary>
       <dl className="kv">
         {rows.map(([key, value]) => (
           <div key={key}>
@@ -517,7 +518,7 @@ function Attributes({ span }: { span: Span }) {
 }
 
 function Empty() {
-  return <p style={{ color: "var(--ink-3)", fontSize: 13, margin: 0 }}>Sin contenido.</p>;
+  return <p style={{ color: "var(--ink-3)", fontSize: 13, margin: 0 }}>{t("arbol.sin_contenido")}</p>;
 }
 
 function Copy({ text }: { text: string }) {
@@ -534,7 +535,7 @@ function Copy({ text }: { text: string }) {
         });
       }}
     >
-      {done ? "copiado" : "copiar"}
+      {done ? t("arbol.copiado") : t("arbol.copiar")}
     </button>
   );
 }

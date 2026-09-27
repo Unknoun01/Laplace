@@ -11,6 +11,8 @@ import { dayHour, duration, money, number, percent, spanLabel, tokens, windowLab
 import type { Budget, Finding, Overview } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
 import { CasiTodoEvitable, CASI_TODO_EVITABLE, CoberturaBloque, CoberturaLinea, Caveats, SinDinero } from "./avisos";
+import { tr } from "@/lib/i18n";
+import { t, tn } from "@/lib/textos";
 
 /**
  * Inicio: el dinero primero.
@@ -75,11 +77,11 @@ function Contenido() {
       {cobertura?.prominent && <CoberturaBloque cobertura={cobertura} />}
 
       <section className="hero">
-        <h1>Tu agente «{project}»</h1>
+        <h1>{t("diag.titulo", { proyecto: project })}</h1>
         <p className="hero-sub">
           {overview.projected
-            ? `Al ritmo de ${ventana}`
-            : `En ${spanLabel(overview.observed_days)} de datos`}
+            ? t("diag.al_ritmo", { ventana })
+            : t("diag.en_datos", { tiempo: spanLabel(overview.observed_days) })}
         </p>
 
         {/* Sin una sola tarifa conocida no hay cifra que enseñar. Un «$0» grande con el
@@ -95,7 +97,7 @@ function Contenido() {
           <BigMoney
             amount={total}
             currency={overview.currency}
-            label={overview.projected ? "te costará este mes" : "te ha costado hasta ahora"}
+            label={overview.projected ? t("diag.costara") : t("diag.ha_costado")}
           />
           {ahorra && !casiTodo && (
             <>
@@ -105,7 +107,7 @@ function Contenido() {
               <BigMoney
                 amount={necesario}
                 currency={overview.currency}
-                label="si arreglas lo de abajo"
+                label={t("diag.si_arreglas")}
                 good
               />
             </>
@@ -130,7 +132,7 @@ function Contenido() {
 
       {/* El contexto que matiza la cifra, en su carril (D-132). En estrecho va debajo de
           la lista: lo primero, después de la cifra, es qué arreglar. */}
-      <aside className="diag-rail" aria-label="Contexto">
+      <aside className="diag-rail" aria-label={t("diag.contexto")}>
         <LineaPresupuesto budget={budget} query={query} />
 
         {/* Cuando la cobertura es buena no desaparece: se queda en una línea. Que el
@@ -138,26 +140,23 @@ function Contenido() {
             hace creíble el aviso el día que salga mal. */}
         {cobertura && !cobertura.prominent && (
           <div className="rail-block">
-            <h2>Cobertura</h2>
+            <h2>{t("diag.cobertura")}</h2>
             <CoberturaLinea cobertura={cobertura} />
           </div>
         )}
 
         <div className="rail-block pro">
-          <h2>Métricas</h2>
+          <h2>{t("diag.metricas")}</h2>
           <Readout
           items={[
-            [duration(overview.p95_duration_ms), "Latencia p95"],
-            [percent(overview.error_rate), "Ejecuciones con error"],
-            [tokens(overview.input_tokens + overview.output_tokens), "Tokens"],
-            [number(overview.traces), "Trazas"],
-            [number(overview.spans), "Pasos"],
-            [money(overview.cost_per_trace_usd, overview.currency), "Coste por ejecución"],
-            [
-              money(overview.window_cache_saving_usd, overview.currency),
-              "Ya ahorrado por la caché",
-            ],
-            [spanLabel(overview.observed_days), "Datos observados"],
+            [duration(overview.p95_duration_ms), t("diag.m.p95")],
+            [percent(overview.error_rate), t("diag.m.errores")],
+            [tokens(overview.input_tokens + overview.output_tokens), t("diag.m.tokens")],
+            [number(overview.traces), t("diag.m.trazas")],
+            [number(overview.spans), t("diag.m.pasos")],
+            [money(overview.cost_per_trace_usd, overview.currency), t("diag.m.coste")],
+            [money(overview.window_cache_saving_usd, overview.currency), t("diag.m.cache")],
+            [spanLabel(overview.observed_days), t("diag.m.datos")],
           ]}
           />
         </div>
@@ -169,19 +168,20 @@ function Contenido() {
           aviso={
             cobertura?.prominent ? (
               <>
-                <strong>{cobertura.headline}</strong> Con esa cobertura, «no hay nada que
-                arreglar» significa «no lo sabemos», no «está bien».
+                <strong>{cobertura.headline}</strong> {t("diag.nada.aviso")}
               </>
             ) : undefined
           }
         >
           <p style={{ marginTop: 14 }}>
-            Llevas {money(overview.window_cost_usd, overview.currency)} gastados en{" "}
-            {number(overview.traces)} ejecuciones.
+            {t("diag.nada.gastado", {
+              coste: money(overview.window_cost_usd, overview.currency),
+              ejecuciones: number(overview.traces),
+            })}
           </p>
           <div className="actions">
             <Link href={`/trazas${query}`} className="btn">
-              Ver todas las trazas
+              {t("diag.ver_trazas")}
             </Link>
           </div>
         </NothingToFix>
@@ -189,39 +189,31 @@ function Contenido() {
         <section className="sec">
           <div className="sec-head">
             <h2>
-              {overview.findings.length === 1
-                ? "Una cosa que arreglar"
-                : `${overview.findings.length} cosas que arreglar`}
+              {tn("diag.cosas", overview.findings.length)}
             </h2>
             <button
               type="button"
               className="btn small"
               onClick={() => exportarHallazgos(project, overview)}
             >
-              Exportar CSV
+              {t("comun.exportar_csv")}
             </button>
           </div>
           <p className="lead">
-            De la que más dinero te devuelve a la que menos.{" "}
+            {t("diag.orden")}{" "}
             {overview.projected
-              ? `Las cifras son la proyección a 30 días de ${ventana}.`
-              : `Las cifras son dinero ya gastado en ${ventana}.`}
+              ? t("diag.cifras_proyeccion", { ventana })
+              : t("diag.cifras_gastado", { ventana })}
           </p>
           <ListaProblemas findings={overview.findings} query={query} />
           <p className="disclaimer">
-            {overview.projected ? (
-              <>
-                Los importes son una estimación a partir de {ventana} de datos, proyectada
-                a 30 días. Si tu tráfico cambia, cambian.
-              </>
-            ) : (
-              <>
-                Los importes son dinero <strong>ya gastado</strong> en {ventana}, no una
-                proyección: no hay datos suficientes para estimar el mes.
-              </>
-            )}{" "}
-            El coste está en {overview.currency} porque es la moneda en la que facturan
-            los proveedores.
+            {overview.projected
+              ? t("diag.nota.proyeccion", { ventana })
+              : tr("diag.nota.gastado", {
+                  ya: <strong>{t("diag.nota.ya_gastado")}</strong>,
+                  ventana,
+                })}{" "}
+            {t("diag.nota.moneda", { moneda: overview.currency })}
           </p>
         </section>
       )}
@@ -269,7 +261,7 @@ function ListaProblemas({ findings, query }: { findings: Finding[]; query: strin
       {resto.length > 0 && (
         <details className="mas">
           <summary>
-            {resto.length === 1 ? "Ver uno más" : `Ver ${resto.length} más`}
+            {tn("diag.ver_mas", resto.length)}
           </summary>
           {resto.map((f, i) => tarjeta(f, VISIBLES + i + 1))}
         </details>
@@ -277,9 +269,7 @@ function ListaProblemas({ findings, query }: { findings: Finding[]; query: strin
       {tiempo.length > 0 && (
         <details className="mas tiempo" open={dinero.length === 0}>
           <summary>
-            {tiempo.length === 1
-              ? "Y uno que no cuesta dinero, sólo tiempo"
-              : `Y ${tiempo.length} que no cuestan dinero, sólo tiempo`}
+            {tn("diag.tiempo", tiempo.length)}
           </summary>
           {tiempo.map((f) => tarjeta(f))}
         </details>
@@ -298,10 +288,11 @@ function LineaPresupuesto({ budget, query }: { budget: Budget | null; query: str
   if (budget.monthly_usd === null) {
     return (
       <div className="rail-block">
-        <h2>Presupuesto</h2>
+        <h2>{t("diag.presupuesto")}</h2>
         <p className="budget-home muted">
-          <Link href={`/ajustes${query}`}>Ponle un presupuesto mensual</Link> y te avisamos
-          antes de pasarte.
+          {tr("diag.presupuesto.invitar", {
+            enlace: <Link href={`/ajustes${query}`}>{t("diag.presupuesto.enlace")}</Link>,
+          })}
         </p>
       </div>
     );
@@ -309,10 +300,10 @@ function LineaPresupuesto({ budget, query }: { budget: Budget | null; query: str
   const pct = Math.min(budget.ratio ?? 0, 1) * 100;
   return (
     <div className="rail-block">
-      <h2>Presupuesto</h2>
+      <h2>{t("diag.presupuesto")}</h2>
       <div className={`budget-home ${budget.status}`}>
         <p>{budget.headline}</p>
-        <div className="sbar budget" role="img" aria-label={`${Math.round(pct)} por ciento del presupuesto`}>
+        <div className="sbar budget" role="img" aria-label={t("diag.presupuesto.aria", { n: Math.round(pct) })}>
           <i style={{ width: `${pct}%` }} />
         </div>
       </div>
@@ -327,11 +318,11 @@ function LineaPresupuesto({ budget, query }: { budget: Budget | null; query: str
  * Plegado y al final. No desaparece del todo porque un ignorado es una decisión que se
  * puede querer revisar, y un arreglado lleva la cifra que demuestra que sirvió.
  */
-const ETIQUETA_ESTADO: Record<string, string> = {
-  arreglado: "Arreglado",
-  ignorado: "Ignorado",
-  desaparecido: "Ya no ocurre",
-};
+const ETIQUETA_ESTADO = {
+  arreglado: "estado.arreglado",
+  ignorado: "estado.ignorado",
+  desaparecido: "estado.desaparecido",
+} as const;
 
 function Apartados({
   findings,
@@ -346,27 +337,22 @@ function Apartados({
   return (
     <details className="apartados sec">
       <summary>
-        {findings.length === 1
-          ? "Un problema que ya no está pendiente"
-          : `${findings.length} problemas que ya no están pendientes`}
+        {tn("diag.apartados", findings.length)}
       </summary>
       <ul>
         {findings.map((f) => (
           <li key={f.id}>
             <span className={`chip ${f.state === "arreglado" ? "easy" : "where"}`}>
-              {ETIQUETA_ESTADO[f.state] ?? "Arreglado"}
+              {t(ETIQUETA_ESTADO[f.state as keyof typeof ETIQUETA_ESTADO] ?? "estado.arreglado")}
             </span>{" "}
             <Link href={`/problema${query}&id=${encodeURIComponent(f.id)}`}>{f.title}</Link>
             {f.state === "desaparecido" && f.last_seen && (
-              <small>
-                No ocurre desde el {dayHour(f.last_seen)}. No cuenta como ahorro: arreglarlo
-                ya no te devolvería nada.
-              </small>
+              <small>{t("diag.desaparecido", { fecha: dayHour(f.last_seen) })}</small>
             )}
             {f.fix_check && <small>{f.fix_check.headline}</small>}
             {f.state === "ignorado" && f.state_note && <small>«{f.state_note}»</small>}
             {!f.fix_check && f.state === "ignorado" && f.costs_money && (
-              <small>{money(f.window_waste_usd, currency)} en el rango, que no cuentan como evitable.</small>
+              <small>{t("diag.ignorado_coste", { coste: money(f.window_waste_usd, currency) })}</small>
             )}
           </li>
         ))}
@@ -379,28 +365,28 @@ function exportarHallazgos(project: string, overview: Overview) {
   const filas = [...overview.findings, ...overview.set_aside].map((f) => [
     f.title,
     f.kind,
-    f.state || "abierto",
+    f.state || t("csv.abierto"),
     f.costs_money ? f.window_waste_usd : null,
     f.costs_money ? f.monthly_saving_usd : null,
-    f.cost_is_floor ? "sí" : "no",
+    f.cost_is_floor ? t("csv.si") : t("csv.no"),
     f.window_waste_tokens || null,
     f.window_waste_ms ? f.window_waste_ms / 1000 : null,
     f.scope_label,
     f.difficulty_label,
   ]);
   descargarCsv(
-    `laplace-${project}-problemas`,
+    `laplace-${project}-${t("csv.nombre.problemas")}`,
     [
-      "Problema",
-      "Tipo",
-      "Estado",
-      "Ya gastado (USD)",
-      "Al mes (USD)",
-      "Es un suelo",
-      "Tokens de más",
-      "Espera evitable (s)",
-      "Ejecuciones afectadas",
-      "Arreglo",
+      t("csv.h.problema"),
+      t("csv.h.tipo"),
+      t("csv.h.estado"),
+      t("csv.h.gastado"),
+      t("csv.h.al_mes"),
+      t("csv.h.suelo"),
+      t("csv.h.tokens"),
+      t("csv.h.espera"),
+      t("csv.h.ejecuciones"),
+      t("csv.h.arreglo"),
     ],
     filas,
   );

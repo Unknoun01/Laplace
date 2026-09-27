@@ -4,6 +4,9 @@ import Link from "next/link";
 import { useState } from "react";
 import { compareRuns, runJudge } from "@/lib/api";
 import { duration, money, tokens } from "@/lib/format";
+import { tr } from "@/lib/i18n";
+import { porcentaje } from "@/lib/format";
+import { t } from "@/lib/textos";
 import type {
   Comparison,
   Dataset,
@@ -50,7 +53,7 @@ export function Experimento({
       setComp(await compareRuns(project, a, b));
     } catch (e) {
       setComp(null);
-      setError(e instanceof Error ? e.message : "no se ha podido comparar");
+      setError(e instanceof Error ? e.message : t("ev.error.comparar"));
     } finally {
       setCargando(false);
     }
@@ -63,21 +66,22 @@ export function Experimento({
     const pasos = [
       {
         hecho: datasets.length > 0,
-        titulo: "Guarda un conjunto de casos",
+        titulo: t("ev.paso1"),
         cuerpo: (
           <>
-            Ejecuciones reales de tu agente. Desde <Link href={`/trazas${query}`}>el
-            explorador</Link>, filtra y pulsa «Guardar estas trazas como conjunto», o créalo
-            aquí abajo con las más recientes.
+            {tr("ev.paso1.texto", {
+              explorador: <Link href={`/trazas${query}`}>{t("ev.explorador")}</Link>,
+              guardar: t("conj.guardar"),
+            })}
           </>
         ),
       },
       {
         hecho: runs.length >= 1,
-        titulo: "Lánzalo con la versión actual",
+        titulo: t("ev.paso2"),
         cuerpo: (
           <>
-            La tirada la lanza el SDK en tu proceso —Laplace no ejecuta tu agente—:
+            {t("ev.paso2.texto")}
             <pre>{`import laplace
 laplace.init(project="${project}")
 laplace.run_dataset("${conjunto}", mi_agente, variant="actual")`}</pre>
@@ -86,21 +90,15 @@ laplace.run_dataset("${conjunto}", mi_agente, variant="actual")`}</pre>
       },
       {
         hecho: runs.length >= 2,
-        titulo: "Y otra vez con la versión nueva",
-        cuerpo: (
-          <>
-            Otro prompt, otro modelo: la misma línea con otro <code>variant</code>. Con las
-            dos tiradas, aquí aparece la comparación de acierto y coste. El acierto sale de
-            tus anotaciones o del juez automático.
-          </>
-        ),
+        titulo: t("ev.paso3"),
+        cuerpo: <>{tr("ev.paso3.texto", { variant: <code>variant</code> })}</>,
       },
     ];
     const siguiente = pasos.findIndex((p) => !p.hecho);
     return (
       <section className="sec">
-        <h2>Comparar dos versiones</h2>
-        <p className="lead">Tres pasos, y cada uno se marca solo cuando está hecho.</p>
+        <h2>{t("ev.comparar.titulo")}</h2>
+        <p className="lead">{t("ev.comparar.pasos")}</p>
         <ol className="pasos">
           {pasos.map((p, i) => (
             <li
@@ -118,15 +116,12 @@ laplace.run_dataset("${conjunto}", mi_agente, variant="actual")`}</pre>
 
   return (
     <section className="sec">
-      <h2>Comparar dos versiones</h2>
-      <p className="lead">
-        Acierto y coste a la vez. Las dos tiradas tienen que ser del mismo conjunto:
-        comparar el acierto sobre casos distintos no diría nada.
-      </p>
+      <h2>{t("ev.comparar.titulo")}</h2>
+      <p className="lead">{t("ev.comparar.lead")}</p>
 
       <div className="ab">
         <label>
-          <small>A — la de referencia</small>
+          <small>{t("ev.a")}</small>
           <select
             className="field"
             value={a}
@@ -136,16 +131,16 @@ laplace.run_dataset("${conjunto}", mi_agente, variant="actual")`}</pre>
               setComp(null);
             }}
           >
-            <option value="">Elige una tirada</option>
+            <option value="">{t("ev.elige")}</option>
             {runs.map((r) => (
               <option key={r.run_id} value={r.run_id}>
-                {r.variant} · {r.dataset_name || r.dataset_id} · {r.cases} casos
+                {r.variant} · {r.dataset_name || r.dataset_id} · {t("ev.n_casos", { n: r.cases })}
               </option>
             ))}
           </select>
         </label>
         <label>
-          <small>B — la nueva</small>
+          <small>{t("ev.b")}</small>
           <select
             className="field"
             value={b}
@@ -155,16 +150,16 @@ laplace.run_dataset("${conjunto}", mi_agente, variant="actual")`}</pre>
             }}
             disabled={!a}
           >
-            <option value="">{a ? "Elige una tirada" : "Elige A primero"}</option>
+            <option value="">{a ? t("ev.elige") : t("ev.elige_a")}</option>
             {candidatasB.map((r) => (
               <option key={r.run_id} value={r.run_id}>
-                {r.variant} · {r.cases} casos
+                {r.variant} · {t("ev.n_casos", { n: r.cases })}
               </option>
             ))}
           </select>
         </label>
         <button type="button" className="btn primary" onClick={comparar} disabled={!a || !b || cargando}>
-          {cargando ? "Comparando…" : "Comparar"}
+          {cargando ? t("ev.comparando") : t("ev.comparar")}
         </button>
       </div>
 
@@ -180,11 +175,7 @@ laplace.run_dataset("${conjunto}", mi_agente, variant="actual")`}</pre>
           {comp.sources_disagree && (
             <div className="caveats">
               <p>
-                <strong>Las personas y el juez no dicen lo mismo.</strong> No es un fallo
-                del producto: es el dato más interesante que puede darte esta pantalla. O
-                el juez está midiendo otra cosa, o quien anotó y quien escribió el prompt
-                del juez no entienden igual «bien». Mira los casos antes de fiarte de
-                ninguno de los dos.
+                <strong>{t("ev.discrepan")}</strong> {t("ev.discrepan.texto")}
               </p>
             </div>
           )}
@@ -195,14 +186,15 @@ laplace.run_dataset("${conjunto}", mi_agente, variant="actual")`}</pre>
             ))}
           </div>
 
-          <h3 className="sub">Lo que costó cada una</h3>
+          <h3 className="sub">{t("ev.costo")}</h3>
           <p className="lead">
-            Esto no lleva margen: no es una muestra, es la factura de lo que se ejecutó.
-            Si gestionas tus prompts en Laplace, debajo de cada lado verás{" "}
-            <Link href={`/prompts?project=${encodeURIComponent(project)}`}>
-              con qué versión corrió
-            </Link>
-            , leída de las trazas y no de la etiqueta que le pusiste a la tirada.
+            {tr("ev.costo.lead", {
+              enlace: (
+                <Link href={`/prompts?project=${encodeURIComponent(project)}`}>
+                  {t("ev.costo.enlace")}
+                </Link>
+              ),
+            })}
           </p>
           <div className="ab-grid">
             <Coste lado={comp.a} etiqueta="A" />
@@ -221,10 +213,10 @@ laplace.run_dataset("${conjunto}", mi_agente, variant="actual")`}</pre>
                   await comparar();
                 }}
               >
-                Juzgar las dos tiradas con {juez.model}
+                {t("ev.juzgar_dos", { modelo: juez.model })}
               </button>
               <span className="chip where">
-                Cuesta dinero: se te dirá cuánto en cuanto termine
+                {t("ev.cuesta")}
               </span>
             </div>
           )}
@@ -237,10 +229,10 @@ laplace.run_dataset("${conjunto}", mi_agente, variant="actual")`}</pre>
               B <b>{comp.b.run_id}</b>
             </span>
             <span>
-              conjunto <b>{comp.dataset_id}</b>
+              {t("ev.tec.conjunto")} <b>{comp.dataset_id}</b>
             </span>
             <span>
-              casos <b>{comp.cases}</b>
+              {t("ev.tec.casos")} <b>{comp.cases}</b>
             </span>
           </div>
         </>
@@ -258,7 +250,8 @@ export function principal(comp: Comparison): string {
 }
 
 export function BloqueFuente({ comparacion }: { comparacion: SourceComparison }) {
-  const etiqueta = comparacion.source === "human" ? "Personas" : "Juez (modelo)";
+  const etiqueta =
+    comparacion.source === "human" ? t("ev.fuente.personas") : t("ev.fuente.juez");
   return (
     <div className={`fuente ${comparacion.source} ${comparacion.verdict}`}>
       <header>
@@ -293,14 +286,13 @@ export function Acierto({ rate, etiqueta }: { rate: Rate; etiqueta: string }) {
         </>
       ) : (
         <>
-          <b className="num">{(rate.value * 100).toFixed(0)} %</b>
+          <b className="num">{porcentaje(rate.value)}</b>
           <span className="why">
-            {rate.passed} de {rate.judged}
-            {rate.unjudged > 0 && ` · ${rate.unjudged} sin anotar`}
+            {t("ev.de", { a: rate.passed, b: rate.judged })}
+            {rate.unjudged > 0 && t("ev.sin_anotar", { n: rate.unjudged })}
           </span>
           <span className="why pro">
-            entre {(rate.low! * 100).toFixed(0)} % y {(rate.high! * 100).toFixed(0)} %
-            (Wilson, 95 %)
+            {t("ev.wilson", { bajo: porcentaje(rate.low!), alto: porcentaje(rate.high!) })}
           </span>
         </>
       )}
@@ -319,7 +311,7 @@ export function Coste({ lado, etiqueta }: { lado: VariantSide; etiqueta: string 
         {suelo}
         {lado.cost_per_case_usd === null ? "—" : money(lado.cost_per_case_usd)}
       </b>
-      <span className="why">por caso</span>
+      <span className="why">{t("ev.por_caso")}</span>
       {/* Con qué prompt corrió este lado. Sale de las trazas y no de `variant`, que es
           lo que alguien tecleó y la mitad de las veces se queda sin actualizar (D-094). */}
       {lado.prompt_versions.length > 0 && (
@@ -333,27 +325,28 @@ export function Coste({ lado, etiqueta }: { lado: VariantSide; etiqueta: string 
       )}
       <div className="techline pro" style={{ marginTop: 8 }}>
         <span>
-          total <b>{money(lado.cost_usd)}</b>
+          {t("ev.tec.total")} <b>{money(lado.cost_usd)}</b>
         </span>
         <span>
-          tokens <b>{tokens(lado.input_tokens + lado.output_tokens)}</b>
+          {t("ev.tec.tokens")} <b>{tokens(lado.input_tokens + lado.output_tokens)}</b>
         </span>
         {lado.duration_ms_per_case !== null && (
           <span>
-            duración <b>{duration(lado.duration_ms_per_case)}</b>
+            {t("ev.tec.duracion")} <b>{duration(lado.duration_ms_per_case)}</b>
           </span>
         )}
         {lado.crashed > 0 && (
           <span>
-            reventados <b>{lado.crashed}</b>
+            {t("ev.tec.reventados")} <b>{lado.crashed}</b>
           </span>
         )}
       </div>
       {lado.judge_cost_usd > 0 && (
         <p className="jcost">
-          Juzgar esta tirada costó <b>{money(lado.judge_cost_usd)}</b> aparte
-          {lado.judge_cost_unknown && " (y hay veredictos cuyo coste no sabemos)"}. Es
-          gasto nuestro, no de tu agente, y por eso va separado.
+          {tr("ev.juez_costo", {
+            coste: <b>{money(lado.judge_cost_usd)}</b>,
+            desconocido: lado.judge_cost_unknown ? t("ev.juez_desconocido") : "",
+          })}
         </p>
       )}
     </div>

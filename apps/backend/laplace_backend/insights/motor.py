@@ -172,7 +172,7 @@ def _pasos_compartidos(usos: list[ModelUsage]) -> set[str]:
 
 def _nombre_base(nombre: str) -> str:
     """El nombre de la función, sin llamante, pista, modelo ni variante."""
-    return nombre.split(" — ")[0].split(" · ")[0].split(" (variante")[0].split(" → ")[-1]
+    return nombre.split(" — ")[0].split(" · ")[0].split(" (#")[0].split(" → ")[-1]
 
 
 def _nombrar(grupos: list[Any], compartidos: set[str]) -> list[Any]:

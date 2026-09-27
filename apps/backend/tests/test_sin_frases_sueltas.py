@@ -76,8 +76,9 @@ def _ignorables(arbol: ast.AST) -> set[int]:
     for nodo in ast.walk(arbol):
         if isinstance(nodo, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
             cuerpo = nodo.body
-            if cuerpo and isinstance(cuerpo[0], ast.Expr) and isinstance(cuerpo[0].value, ast.Constant):
-                fuera.add(id(cuerpo[0].value))
+            primero = cuerpo[0] if cuerpo else None
+            if isinstance(primero, ast.Expr) and isinstance(primero.value, ast.Constant):
+                fuera.add(id(primero.value))
         llamada = None
         if isinstance(nodo, ast.Call):
             llamada = nodo
@@ -89,7 +90,9 @@ def _ignorables(arbol: ast.AST) -> set[int]:
         nombre = funcion.attr if isinstance(funcion, ast.Attribute) else getattr(funcion, "id", "")
         dueno = getattr(getattr(funcion, "value", None), "id", "")
         es_log = dueno in ("logger", "logging")
-        es_error = isinstance(nodo, ast.Raise) or nombre.endswith(("Error", "Exception", "Unavailable"))
+        es_error = isinstance(nodo, ast.Raise) or nombre.endswith(
+            ("Error", "Exception", "Unavailable")
+        )
         if es_log or es_error:
             for hijo in ast.walk(llamada):
                 fuera.add(id(hijo))

@@ -1,6 +1,8 @@
 "use client";
 
-import { money, number, spanLabel } from "@/lib/format";
+import { money, number, porcentaje, spanLabel } from "@/lib/format";
+import { tr } from "@/lib/i18n";
+import { t, tn } from "@/lib/textos";
 import type { Coverage, Overview } from "@/lib/types";
 
 /**
@@ -22,20 +24,18 @@ export function CasiTodoEvitable({
   return (
     <div className="casitodo">
       <p>
-        <strong>Casi todo lo que gastas está señalado aquí abajo:</strong>{" "}
-        {money(evitable, overview.currency)} de {money(total, overview.currency)} (
-        {Math.round((evitable / total) * 100)} %).
+        <strong>{t("avisos.casi_todo")}</strong>{" "}
+        {t("avisos.casi_todo.cifras", {
+          evitable: money(evitable, overview.currency),
+          total: money(total, overview.currency),
+          pct: porcentaje(evitable / total),
+        })}
       </p>
       {/* La explicación sigue aquí, entera, pero plegada: delante tapaba la lista de
           problemas, que es lo que se ha venido a ver (D-124). */}
       <details className="porque">
-        <summary>¿Por qué no lo presentamos como ahorro?</summary>
-        <p>
-          Porque «puedes dejar de pagar tu agente» casi nunca es lo que significa. Lo que
-          suele haber detrás es un agente pequeño o recién estrenado donde dos o tres pasos
-          son prácticamente toda la factura, y arreglarlos cambia esos pasos, no el agente
-          entero. Mira el desglose de cada problema antes de contar con esta cifra.
-        </p>
+        <summary>{t("avisos.casi_todo.porque")}</summary>
+        <p>{t("avisos.casi_todo.texto")}</p>
       </details>
     </div>
   );
@@ -100,20 +100,20 @@ export function Señales({ cobertura }: { cobertura: Coverage }) {
             <span>{s.label}</span>
             <b>
               {s.level === "no-aplica"
-                ? "no lo usas"
+                ? t("avisos.no_lo_usas")
                 : s.value === null
                   ? "—"
                   : /* espacio duro: «100 %» no puede partirse en dos líneas */
-                    `${(s.value * 100).toFixed(0)} %`}
+                    porcentaje(s.value)}
             </b>
           </div>
-          <div className="sbar" role="img" aria-label={`${(s.value ?? 0) * 100} por ciento`}>
+          <div className="sbar" role="img" aria-label={t("avisos.pct_aria", { n: Math.round((s.value ?? 0) * 100) })}>
             <i style={{ width: `${(s.value ?? 0) * 100}%` }} />
           </div>
           <small>
             {s.value === null
               ? s.unavailable
-              : `${number(s.counted)} de ${number(s.total)} llamadas`}
+              : t("avisos.de_llamadas", { n: number(s.counted), total: number(s.total) })}
           </small>
           {/* El «qué hacer» sólo cuando hace falta: si la señal va bien, es ruido. */}
           {(s.level === "malo" || s.level === "flojo") && <small className="fix">{s.fix}</small>}
@@ -148,15 +148,15 @@ export function Caveats({
     avisos.push({
       linea: (
         <>
-          <strong>Este total está incompleto:</strong> {number(overview.unknown_cost_spans)}{" "}
-          pasos sin tarifa ({overview.models_without_price.join(", ")}).
+          <strong>{t("avisos.incompleto")}</strong>{" "}
+          {t("avisos.incompleto.linea", {
+            n: number(overview.unknown_cost_spans),
+            modelos: overview.models_without_price.join(", "),
+          })}
         </>
       ),
       porque: (
-        <>
-          Su modelo no está en nuestra tabla de precios, así que no sabemos cuánto cuestan
-          y no se suman. Puedes ponerle precio en Ajustes, y se recalcula lo ya guardado.
-        </>
+<>{t("avisos.incompleto.porque")}</>
       ),
     });
   }
@@ -164,47 +164,38 @@ export function Caveats({
     avisos.push({
       linea: (
         <>
-          <strong>Es un suelo:</strong> en {number(overview.assumed_rate_spans)}{" "}
-          {overview.assumed_rate_spans === 1 ? "paso" : "pasos"} hemos cobrado la tarifa
-          estándar.
+          <strong>{t("avisos.suelo")}</strong>{" "}
+          {tn("avisos.suelo.linea", overview.assumed_rate_spans, {
+            n: number(overview.assumed_rate_spans),
+          })}
         </>
       ),
       porque: (
-        <>
-          Contexto largo, residencia de datos o modo rápido son metros aparte que la
-          respuesta del proveedor no siempre revela. El coste real puede ser algo mayor,
-          nunca menor. En cada paso, en modo avanzado, se dice cuál es la duda.
-        </>
+<>{t("avisos.suelo.porque")}</>
       ),
     });
   }
   if (overview.projected) {
     avisos.push({
       linea: (
-        <>
-          Proyección desde <strong>{ventana}</strong> de datos.
-        </>
+<>{tr("avisos.proyeccion", { ventana: <strong>{ventana}</strong> })}</>
       ),
       porque: (
-        <>
-          Es lo que llevas enviando, no el rango que pide el selector. Gasto y ahorro salen
-          de la misma base: si cambia una, cambia la otra.
-        </>
+<>{t("avisos.proyeccion.porque")}</>
       ),
     });
   } else {
     avisos.push({
       linea: (
         <>
-          <strong>Dinero ya gastado, sin proyectar.</strong> La previsión mensual aparece
-          con {spanLabel(overview.min_days_for_projection)} de datos.
+          <strong>{t("avisos.sin_proyectar")}</strong>{" "}
+          {t("avisos.sin_proyectar.linea", {
+            tiempo: spanLabel(overview.min_days_for_projection),
+          })}
         </>
       ),
       porque: (
-        <>
-          Con {ventana} de datos, multiplicar para llegar a 30 días da una cifra que no se
-          sostiene: un pico de diez minutos se convertiría en cientos de dólares.
-        </>
+<>{t("avisos.sin_proyectar.porque", { ventana })}</>
       ),
     });
   }
@@ -214,16 +205,13 @@ export function Caveats({
     avisos.push({
       linea: (
         <>
-          El ahorro estimado es el{" "}
-          <strong>{Math.round(overview.avoidable_ratio * 100)} %</strong> de lo que gastas.
+          {tr("avisos.mucho", {
+            pct: <strong>{porcentaje(overview.avoidable_ratio)}</strong>,
+          })}
         </>
       ),
       porque: (
-        <>
-          Es mucho: suele pasar en agentes pequeños o recién estrenados, donde unos pocos
-          pasos dominan la factura. Antes de darlo por bueno, mira el desglose de cada
-          problema.
-        </>
+<>{t("avisos.mucho.porque")}</>
       ),
     });
   }
@@ -252,7 +240,7 @@ export function Caveats({
 export function SinDinero({ motivo }: { motivo: string }) {
   return (
     <div className="nomoney">
-      <b>No podemos calcular el dinero</b>
+      <b>{t("avisos.sin_dinero")}</b>
       <span>{motivo}</span>
     </div>
   );

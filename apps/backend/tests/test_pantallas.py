@@ -234,3 +234,26 @@ def test_el_idioma_sale_del_navegador_y_el_selector_lo_cambia(servidor, navegado
         assert errores == [], errores
     finally:
         contexto.close()
+
+
+#: Palabras de la interfaz en español que no salen en los datos de la demo (que sí están
+#: en español: son las instrucciones y las preguntas de su agente).
+ESPANOL_DE_INTERFAZ = ("ejecución", "ejecuciones", "presupuesto", "arreglar", "guardar", "coste")
+
+
+@pytest.mark.parametrize("pantalla", ["diagnostico", "trazas", "panel", "evaluaciones", "prompts"])
+def test_en_ingles_no_queda_interfaz_en_espanol(servidor, navegador, pantalla):
+    """Una frase escrita a mano en un componente sale en español en cualquier idioma, y
+    ninguna prueba en español lo nota (D-148)."""
+    ruta, _ = PANTALLAS[pantalla]
+    contexto = navegador.new_context(locale="en-US", viewport={"width": 1440, "height": 900})
+    pagina = contexto.new_page()
+    try:
+        pagina.goto(servidor + ruta, wait_until="networkidle")
+        pagina.locator("main").wait_for(timeout=15_000)
+        pagina.wait_for_function("() => !document.querySelector('main .sk')", timeout=15_000)
+        texto = pagina.locator("main").inner_text().lower()
+        restos = [p for p in ESPANOL_DE_INTERFAZ if p in texto]
+        assert restos == [], (pantalla, restos)
+    finally:
+        contexto.close()

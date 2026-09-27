@@ -4,6 +4,7 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { Cargando } from "@/components/states";
 import { entrarConClave, getMe, login } from "@/lib/api";
+import { t } from "@/lib/textos";
 
 /**
  * Entrar (D-127). Email y contraseña; nada más en la primera pantalla.
@@ -39,7 +40,7 @@ function Contenido() {
       await login(email.trim(), contrasena);
       window.location.href = siguiente;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "no se ha podido entrar");
+      setError(err instanceof Error ? err.message : t("ent.error"));
       setEnviando(false);
     }
   }
@@ -48,9 +49,9 @@ function Contenido() {
   return (
     <main className="auth">
       <form className="auth-card" onSubmit={entrar}>
-        <h1>Entrar en Laplace</h1>
+        <h1>{t("ent.titulo")}</h1>
         <label>
-          <small>Email</small>
+          <small>{t("org.email")}</small>
           <input
             className="field"
             type="email"
@@ -62,7 +63,7 @@ function Contenido() {
           />
         </label>
         <label>
-          <small>Contraseña</small>
+          <small>{t("ent.contrasena")}</small>
           <input
             className="field"
             type="password"
@@ -74,10 +75,10 @@ function Contenido() {
         </label>
         {error && <p className="verr">{error}</p>}
         <button type="submit" className="btn primary" disabled={enviando}>
-          {enviando ? "Entrando…" : "Entrar"}
+          {enviando ? t("ent.entrando") : t("ent.entrar")}
         </button>
         <p className="muted">
-          ¿No tienes cuenta? Pide una invitación a quien administra tu organización.
+          {t("ent.sin_cuenta")}
         </p>
         <ConClave siguiente={siguiente} />
       </form>
@@ -95,7 +96,7 @@ function ConClave({ siguiente }: { siguiente: string }) {
   const [fallo, setFallo] = useState("");
   return (
     <details className="porque con-clave">
-      <summary>Tengo una clave de API</summary>
+      <summary>{t("ent.tengo_clave")}</summary>
       <div className="ab" style={{ margin: "8px 0 0" }}>
         <input
           className="field grow"
@@ -121,7 +122,7 @@ function ConClave({ siguiente }: { siguiente: string }) {
               });
           }}
         >
-          {comprobando ? "Comprobando…" : "Usar la clave"}
+          {comprobando ? t("ent.comprobando") : t("ent.usar_clave")}
         </button>
       </div>
       {fallo && <p className="disclaimer">{fallo}</p>}

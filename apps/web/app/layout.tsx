@@ -27,9 +27,7 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  // Cada pantalla pone el suyo: con todas las pestañas llamadas «Laplace» no había
-  // forma de distinguir la traza de la ficha en la barra del navegador.
-  title: { default: "Laplace", template: "%s · Laplace" },
+  // El título lo pone `ProveedorIdioma`, en el idioma de la pantalla (D-147).
   description: "Observabilidad y optimización de agentes de IA.",
 };
 

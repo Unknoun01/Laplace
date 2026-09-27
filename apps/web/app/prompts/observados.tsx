@@ -3,22 +3,16 @@
 import Link from "next/link";
 import { money, number, timestamp } from "@/lib/format";
 import type { ObservedStep, PromptsView } from "@/lib/types";
+import { tr } from "@/lib/i18n";
+import { t } from "@/lib/textos";
 
 export function SinAdoptar({ project }: { project: string }) {
   return (
     <section className="sec">
-      <h2>Todavía no gestionas ningún prompt aquí</h2>
+      <h2>{t("pr.sin_adoptar")}</h2>
+      <p className="lead">{tr("pr.sin_adoptar.1", { blame: <code>git blame</code> })}</p>
       <p className="lead">
-        Tus prompts viven en tu código, que es un sitio perfectamente razonable. Lo que se
-        pierde con eso es poder responder a «¿cuánto me costaba el de antes y cuánto
-        acertaba?», porque un <code>git blame</code> sabe qué cambió y no sabe qué pasó
-        después.
-      </p>
-      <p className="lead">
-        Si los mueves aquí, el SDK los sirve y deja escrito en cada traza con qué versión
-        se ejecutó. <strong>Laplace sigue sin ejecutar nada tuyo</strong>: sólo te da el
-        texto, y si Laplace no responde, el SDK usa la copia guardada o el texto de reserva
-        que le pases.
+        {tr("pr.sin_adoptar.2", { nada: <strong>{t("pr.sin_adoptar.nada")}</strong> })}
       </p>
       <pre>{`import laplace
 laplace.init(project="${project}")
@@ -29,10 +23,7 @@ respuesta = cliente.messages.create(
     system=sistema.render(idioma="es"),
     messages=[{"role": "user", "content": pregunta}],
 )`}</pre>
-      <p className="disclaimer">
-        Mientras tanto, aquí abajo está lo que sí se puede saber de tus trazas: qué pasos
-        han cambiado de instrucciones y cuándo.
-      </p>
+      <p className="disclaimer">{t("pr.sin_adoptar.3")}</p>
     </section>
   );
 }
@@ -53,27 +44,23 @@ export function Observados({
   if (vista.observed.length === 0) {
     return (
       <section className="sec">
-        <h2>Lo que se ve en tus trazas</h2>
-        <p className="lead">{vista.observed_unavailable || "Nada todavía."}</p>
+        <h2>{t("pr.obs.titulo")}</h2>
+        <p className="lead">{vista.observed_unavailable || t("pr.obs.nada")}</p>
       </section>
     );
   }
 
   return (
     <section className="sec">
-      <h2>Lo que se ve en tus trazas</h2>
-      <p className="lead">
-        {managed
-          ? "Esto sale de las trazas, no de la gestión de prompts: son los juegos de instrucciones con los que se ha visto ejecutar cada paso. Sirve para ver si algo cambió por fuera de aquí."
-          : "Cada paso de tu agente, y los juegos de instrucciones con los que se le ha visto ejecutar en este rango. Si un paso cambia de instrucciones entre una ejecución y otra, es un cambio de prompt: no sabemos el texto entero —sólo guardamos el principio—, pero sí cuándo cambió y qué costó."}
-      </p>
+      <h2>{t("pr.obs.titulo")}</h2>
+      <p className="lead">{managed ? t("pr.obs.gestion") : t("pr.obs.sin_gestion")}</p>
       {vista.observed.map((paso) => (
         <PasoObservado key={paso.label} paso={paso} />
       ))}
       <p className="disclaimer">
-        ¿Ves un cambio que no reconoces?{" "}
-        <Link href={`/trazas${query}`}>Ábrelo en el explorador</Link> y mira las
-        instrucciones completas de esas ejecuciones.
+        {tr("pr.obs.cambio", {
+          enlace: <Link href={`/trazas${query}`}>{t("pr.obs.abrir")}</Link>,
+        })}
       </p>
     </section>
   );
@@ -88,12 +75,12 @@ export function PasoObservado({ paso }: { paso: ObservedStep }) {
           {paso.unstable ? "—" : paso.variants.length}
           <small>
             {paso.unstable
-              ? "no son versiones"
+              ? t("pr.obs.no_versiones")
               : paso.concurrent
-                ? "llamadas en cada ejecución"
+                ? t("pr.obs.llamadas")
                 : paso.variants.length === 1
-                  ? "juego de instrucciones"
-                  : "juegos de instrucciones"}
+                  ? t("pr.obs.juego_one")
+                  : t("pr.obs.juego_other")}
           </small>
         </div>
       </div>
@@ -107,18 +94,18 @@ export function PasoObservado({ paso }: { paso: ObservedStep }) {
           <table className="tbl">
             <thead>
               <tr>
-                <th>Instrucciones (principio)</th>
-                <th className="r">Por ejecución</th>
-                <th className="r">Ejecuciones</th>
-                <th className="r hide-sm">Desde</th>
-                <th className="r hide-sm">Hasta</th>
+                <th>{t("pr.obs.col.instrucciones")}</th>
+                <th className="r">{t("pr.col.por_ejecucion")}</th>
+                <th className="r">{t("pr.col.ejecuciones")}</th>
+                <th className="r hide-sm">{t("pr.obs.col.desde")}</th>
+                <th className="r hide-sm">{t("pr.obs.col.hasta")}</th>
               </tr>
             </thead>
             <tbody>
               {paso.variants.map((v) => (
                 <tr key={v.step_key}>
                   <td>
-                    <span className="hint">{v.hint || "(sin instrucciones capturadas)"}</span>
+                    <span className="hint">{v.hint || t("pr.obs.sin_instrucciones")}</span>
                     <div className="meta pro">{v.step_key}</div>
                   </td>
                   <td className="r money">

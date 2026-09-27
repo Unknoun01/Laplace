@@ -16,7 +16,7 @@
   "alcance.de_cada_10": "{n} exécutions sur 10",
   "alcance.de_total": "{n} exécutions sur {total}",
   "proyeccion.no": " Pas de projection sur un mois : il faut au moins {minimo} de données, et pour l’instant il y a {hay}.",
-  "proyeccion.si": " La projection mensuelle extrapole le rythme {ventana} à {dias} jours.",
+  "proyeccion.si": " La projection mensuelle extrapole le rythme observé sur {ventana} à {dias} jours.",
   "repeticion.resumen.cuesta": "Au sein d’une même exécution, votre agent appelle « {paso} » avec exactement les mêmes données jusqu’à {veces} fois. Le premier appel apporte déjà la réponse ; les autres sont payés quand même.",
   "repeticion.resumen.sin_tarifa": "Au sein d’une même exécution, votre agent appelle « {paso} » avec exactement les mêmes données jusqu’à {veces} fois. Les copies en trop consomment {tokens} tokens et {espera} d’attente. Nous ne pouvons pas dire combien d’argent cela représente : ce modèle n’a pas de tarif connu.",
   "repeticion.resumen.tiempo": "Au sein d’une même exécution, votre agent appelle « {paso} » avec exactement les mêmes données jusqu’à {veces} fois. Cela ne consomme pas de tokens en plus, mais chaque tour ajoute de l’attente : {espera} perdus au total.",

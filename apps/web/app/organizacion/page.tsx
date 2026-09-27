@@ -21,10 +21,19 @@ import {
 import { timestamp } from "@/lib/format";
 import { Aviso, useAviso } from "./aviso";
 import { Claves, Copiable } from "./claves";
+import { tr } from "@/lib/i18n";
+import { t } from "@/lib/textos";
 
 const ROLES: Rol[] = ["lector", "miembro", "admin", "propietario"];
 
 const ES_ADMIN = (rol: Rol) => rol === "admin" || rol === "propietario";
+const NOMBRE_ROL = {
+  lector: "rol.lector",
+  miembro: "rol.miembro",
+  admin: "rol.admin",
+  propietario: "rol.propietario",
+} as const;
+const rolDe = (rol: Rol) => t(NOMBRE_ROL[rol] ?? "rol.lector");
 
 /**
  * La organización (D-127): quién está, con qué rol, qué claves hay y qué ha pasado.
@@ -51,7 +60,7 @@ function Contenido() {
   }, [pedida]);
 
   useEffect(() => {
-    cargar().catch((e) => setError(e instanceof Error ? e.message : "no se ha podido cargar"));
+    cargar().catch((e) => setError(e instanceof Error ? e.message : t("org.error.cargar")));
   }, [cargar]);
 
   if (error) return <BackendDown mensaje={error} />;
@@ -60,11 +69,8 @@ function Contenido() {
     return (
       <main className="reading">
         <div className="state">
-          <h2>El modo local no tiene cuentas</h2>
-          <p>
-            Es un proceso en tu máquina con tus trazas: no hay nadie más a quien darle
-            acceso. Las cuentas, los roles y las claves existen en la instalación de nube.
-          </p>
+          <h2>{t("org.local.titulo")}</h2>
+          <p>{t("org.local.texto")}</p>
         </div>
       </main>
     );
@@ -74,15 +80,15 @@ function Contenido() {
   return (
     <main className="reading ajustes">
       <section className="sec" style={{ paddingBottom: 0 }}>
-        <h2>{org ? org.name : "Tu cuenta"}</h2>
+        <h2>{org ? org.name : t("org.tu_cuenta")}</h2>
         <p className="lead">
           {org ? (
             <>
-              Eres <strong>{org.role}</strong> de esta organización.
+              {tr("org.eres", { rol: <strong>{rolDe(org.role)}</strong> })}
               {(me.orgs?.length ?? 0) > 1 && <CambiarOrg me={me} actual={org.id} />}
             </>
           ) : (
-            "No perteneces a ninguna organización todavía: pide una invitación."
+            t("org.sin_org")
           )}
         </p>
       </section>
@@ -104,7 +110,7 @@ function CambiarOrg({ me, actual }: { me: Me; actual: string }) {
         className="field"
         value={actual}
         onChange={(e) => (window.location.href = `/organizacion?org=${e.target.value}`)}
-        aria-label="Organización"
+        aria-label={t("org.org")}
       >
         {me.orgs?.map((o) => (
           <option key={o.id} value={o.id}>
@@ -121,13 +127,13 @@ function Miembros({ org, yo, onChange }: { org: Org; yo: string; onChange: () =>
   const admin = ES_ADMIN(org.role);
   return (
     <section className="sec">
-      <h3>Miembros</h3>
+      <h3>{t("org.miembros")}</h3>
       <table className="tabla-simple ancha">
         <thead>
           <tr>
-            <th>Persona</th>
-            <th>Rol</th>
-            <th>Desde</th>
+            <th>{t("org.col.persona")}</th>
+            <th>{t("org.col.rol")}</th>
+            <th>{t("org.col.desde")}</th>
             <th />
           </tr>
         </thead>
@@ -137,19 +143,19 @@ function Miembros({ org, yo, onChange }: { org: Org; yo: string; onChange: () =>
               <td>
                 {m.name || m.email}
                 {m.name && <small className="muted"> · {m.email}</small>}
-                {m.user_id === yo && <small className="muted"> · tú</small>}
+                {m.user_id === yo && <small className="muted">{t("org.tu")}</small>}
               </td>
               <td>
                 {admin ? (
                   <select
                     className="field"
                     value={m.role}
-                    aria-label={`Rol de ${m.email}`}
+                    aria-label={t("org.rol_de", { email: m.email })}
                     onChange={async (e) => {
                       if (
                         await intentar(
                           () => setMemberRole(org.id, m.user_id, e.target.value as Rol),
-                          `${m.email} ahora es ${e.target.value}.`,
+                          t("org.ahora_es", { email: m.email, rol: rolDe(e.target.value as Rol) }),
                         )
                       )
                         onChange();
@@ -157,12 +163,12 @@ function Miembros({ org, yo, onChange }: { org: Org; yo: string; onChange: () =>
                   >
                     {ROLES.map((r) => (
                       <option key={r} value={r}>
-                        {r}
+                        {rolDe(r)}
                       </option>
                     ))}
                   </select>
                 ) : (
-                  m.role
+                  rolDe(m.role)
                 )}
               </td>
               <td className="num">{timestamp(m.since)}</td>
@@ -172,15 +178,18 @@ function Miembros({ org, yo, onChange }: { org: Org; yo: string; onChange: () =>
                     type="button"
                     className="btn small"
                     onClick={async () => {
-                      const texto = m.user_id === yo ? "¿Salir de la organización?" : `¿Quitar a ${m.email}?`;
+                      const texto =
+                        m.user_id === yo
+                          ? t("org.salir_confirm")
+                          : t("org.quitar_confirm", { email: m.email });
                       if (!window.confirm(texto)) return;
-                      if (await intentar(() => removeMember(org.id, m.user_id), "Hecho.")) {
+                      if (await intentar(() => removeMember(org.id, m.user_id), t("org.hecho"))) {
                         if (m.user_id === yo) window.location.href = "/";
                         else onChange();
                       }
                     }}
                   >
-                    {m.user_id === yo ? "Salir" : "Quitar"}
+                    {m.user_id === yo ? t("org.salir") : t("comun.quitar")}
                   </button>
                 )}
               </td>
@@ -189,9 +198,7 @@ function Miembros({ org, yo, onChange }: { org: Org; yo: string; onChange: () =>
         </tbody>
       </table>
       <p className="disclaimer">
-        Lector: ve. Miembro: además anota ejecuciones, marca problemas y gestiona prompts y
-        conjuntos. Admin: además miembros, claves, alertas, presupuesto y borrar. Quitar a
-        alguien cierra sus sesiones al momento.
+        {t("org.roles.nota")}
       </p>
       <Aviso {...msg} />
     </section>
@@ -208,24 +215,24 @@ function Invitaciones({ org, onChange }: { org: Org; onChange: () => void }) {
 
   return (
     <section className="sec">
-      <h3>Invitar</h3>
+      <h3>{t("org.invitar")}</h3>
       <div className="ab">
         <label className="grow">
-          <small>Email</small>
+          <small>{t("org.email")}</small>
           <input
             className="field"
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="persona@empresa.com"
+            placeholder={t("org.email_placeholder")}
           />
         </label>
         <label>
-          <small>Rol</small>
+          <small>{t("org.col.rol")}</small>
           <select className="field" value={rol} onChange={(e) => setRol(e.target.value as Rol)}>
-            <option value="lector">lector</option>
-            <option value="miembro">miembro</option>
-            <option value="admin">admin</option>
+            <option value="lector">{rolDe("lector")}</option>
+            <option value="miembro">{rolDe("miembro")}</option>
+            <option value="admin">{rolDe("admin")}</option>
           </select>
         </label>
         <button
@@ -241,15 +248,15 @@ function Invitaciones({ org, onChange }: { org: Org; onChange: () => void }) {
             }
           }}
         >
-          Invitar
+          {t("org.invitar")}
         </button>
       </div>
       {enlace && (
         <div className="una-vez">
           <p>
             {enlace.emailed
-              ? "Le hemos mandado el enlace por correo. También puedes copiarlo:"
-              : "Esta instalación no tiene correo configurado: mándale tú este enlace. Sólo se enseña ahora, y caduca en 7 días."}
+              ? t("org.enviado")
+              : t("org.sin_correo")}
           </p>
           <Copiable texto={enlace.link} />
         </div>
@@ -257,21 +264,21 @@ function Invitaciones({ org, onChange }: { org: Org; onChange: () => void }) {
       {(org.invitations?.length ?? 0) > 0 && (
         <>
           <p className="muted" style={{ marginTop: 16 }}>
-            Pendientes
+            {t("org.pendientes")}
           </p>
           <ul className="lista-simple">
             {org.invitations!.map((i) => (
               <li key={i.email}>
-                {i.email} · {i.role} · caduca el {timestamp(i.expires_at)}{" "}
+                {i.email} · {rolDe(i.role)} · {t("org.caduca", { fecha: timestamp(i.expires_at) })}{" "}
                 <button
                   type="button"
                   className="btn small"
                   onClick={async () => {
-                    if (await intentar(() => cancelInvite(org.id, i.email), "Invitación anulada."))
+                    if (await intentar(() => cancelInvite(org.id, i.email), t("org.anulada")))
                       onChange();
                   }}
                 >
-                  Anular
+                  {t("org.anular")}
                 </button>
               </li>
             ))}
@@ -283,19 +290,21 @@ function Invitaciones({ org, onChange }: { org: Org; onChange: () => void }) {
   );
 }
 
-const ACCIONES: Record<string, string> = {
-  configurar_instalacion: "configuró la instalación",
-  login: "entró",
-  login_fallido: "intento de entrada fallido",
-  invitar: "invitó a",
-  anular_invitacion: "anuló la invitación de",
-  aceptar_invitacion: "aceptó la invitación como",
-  cambiar_rol: "cambió el rol de",
-  quitar_miembro: "quitó a",
-  crear_clave: "creó una clave para",
-  revocar_clave: "revocó la clave",
-  borrar_proyecto: "borró el proyecto",
-};
+const ACCIONES = {
+  configurar_instalacion: "org.acc.configurar_instalacion",
+  login: "org.acc.login",
+  login_fallido: "org.acc.login_fallido",
+  invitar: "org.acc.invitar",
+  anular_invitacion: "org.acc.anular_invitacion",
+  aceptar_invitacion: "org.acc.aceptar_invitacion",
+  cambiar_rol: "org.acc.cambiar_rol",
+  quitar_miembro: "org.acc.quitar_miembro",
+  crear_clave: "org.acc.crear_clave",
+  revocar_clave: "org.acc.revocar_clave",
+  borrar_proyecto: "org.acc.borrar_proyecto",
+} as const;
+const accion = (clave: string) =>
+  clave in ACCIONES ? t(ACCIONES[clave as keyof typeof ACCIONES]) : clave;
 
 function Auditoria({ org }: { org: Org }) {
   const [eventos, setEventos] = useState<AuditEvent[] | null>(null);
@@ -308,11 +317,11 @@ function Auditoria({ org }: { org: Org }) {
   return (
     <section className="sec">
       <details>
-        <summary className="sec-summary">Registro de actividad</summary>
+        <summary className="sec-summary">{t("org.registro")}</summary>
         {eventos === null ? (
-          <p className="muted">Cargando…</p>
+          <p className="muted">{t("org.cargando")}</p>
         ) : eventos.length === 0 ? (
-          <p className="muted">Nada todavía.</p>
+          <p className="muted">{t("org.nada")}</p>
         ) : (
           <table className="tabla-simple ancha">
             <tbody>
@@ -320,7 +329,7 @@ function Auditoria({ org }: { org: Org }) {
                 <tr key={`${e.at}-${i}`}>
                   <td className="num">{timestamp(e.at)}</td>
                   <td>
-                    {e.email || "alguien"} {ACCIONES[e.action] ?? e.action}{" "}
+                    {e.email || t("org.alguien")} {accion(e.action)}{" "}
                     <span className="muted">{e.target}</span>
                   </td>
                   <td className="num muted">{e.ip}</td>
@@ -343,14 +352,14 @@ function TuCuenta({ me }: { me: Me }) {
 
   return (
     <section className="sec">
-      <h3>Tu cuenta</h3>
+      <h3>{t("org.tu_cuenta")}</h3>
       <p className="lead">
         {me.user?.email}
-        {me.user?.is_admin && " · administras esta instalación"}
+        {me.user?.is_admin && t("org.admin_instalacion")}
       </p>
       <div className="ab">
         <label>
-          <small>Contraseña actual</small>
+          <small>{t("org.pass_actual")}</small>
           <input
             className="field"
             type="password"
@@ -360,7 +369,7 @@ function TuCuenta({ me }: { me: Me }) {
           />
         </label>
         <label>
-          <small>Nueva (10 caracteres o más)</small>
+          <small>{t("org.pass_nueva")}</small>
           <input
             className="field"
             type="password"
@@ -377,7 +386,7 @@ function TuCuenta({ me }: { me: Me }) {
             if (
               await intentar(
                 () => changePassword(actual, nueva),
-                "Contraseña cambiada. Las demás sesiones se han cerrado.",
+                t("org.pass_cambiada"),
               )
             ) {
               setActual("");
@@ -385,7 +394,7 @@ function TuCuenta({ me }: { me: Me }) {
             }
           }}
         >
-          Cambiar contraseña
+          {t("org.pass_cambiar")}
         </button>
       </div>
       <div className="actions" style={{ paddingTop: 10 }}>
@@ -396,7 +405,7 @@ function TuCuenta({ me }: { me: Me }) {
             if (await intentar(() => logoutAll(), "")) window.location.href = "/entrar";
           }}
         >
-          Cerrar sesión en todos los dispositivos
+          {t("org.cerrar_todo")}
         </button>
       </div>
       <Aviso {...msg} />

@@ -1,8 +1,24 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { Fragment, createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { ETIQUETAS, IDIOMAS, NOMBRES, detectar, fijarIdioma, recordar, type Idioma } from "./idioma";
 import { t, type Clave } from "./textos";
+
+/** La sección de la URL y la clave de su título. */
+const TITULOS: Record<string, Clave> = {
+  ajustes: "titulo.ajustes",
+  configurar: "titulo.configurar",
+  entrar: "titulo.entrar",
+  evaluaciones: "titulo.evaluaciones",
+  invitacion: "titulo.invitacion",
+  organizacion: "titulo.organizacion",
+  panel: "titulo.panel",
+  problema: "titulo.problema",
+  prompts: "titulo.prompts",
+  traza: "titulo.traza",
+  trazas: "titulo.trazas",
+};
 
 const Contexto = createContext<{ idioma: Idioma; cambiar: (idioma: Idioma) => void }>({
   idioma: "es",
@@ -28,6 +44,14 @@ export function ProveedorIdioma({ children }: { children: ReactNode }) {
     setIdioma(elegido);
   }, []);
 
+  // El título de la pestaña, en el idioma de la pantalla. Lo pinta React (un `<title>`
+  // que sube al `<head>`) y no los metadatos de Next, que salen fijos en el HTML
+  // estático y además se vuelven a aplicar después de montar. Los títulos concretos
+  // —un problema, una traza— los pone `useTitulo` cuando llegan los datos.
+  const ruta = usePathname();
+  const seccion = TITULOS[(ruta ?? "/").split("/")[1] ?? ""];
+  const titulo = seccion ? `${t(seccion)} · Laplace` : "Laplace";
+
   const cambiar = (nuevo: Idioma) => {
     recordar(nuevo);
     fijarIdioma(nuevo);
@@ -37,6 +61,7 @@ export function ProveedorIdioma({ children }: { children: ReactNode }) {
 
   return (
     <Contexto.Provider value={{ idioma, cambiar }}>
+      <title>{titulo}</title>
       <Fragment key={idioma}>{children}</Fragment>
     </Contexto.Provider>
   );

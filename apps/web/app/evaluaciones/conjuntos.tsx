@@ -6,6 +6,9 @@ import { createDataset, deleteDataset } from "@/lib/api";
 import { usePermisos } from "@/lib/permisos";
 import { money, number, timestamp } from "@/lib/format";
 import type { Dataset, Rate, RunSummary } from "@/lib/types";
+import { tr } from "@/lib/i18n";
+import { porcentaje } from "@/lib/format";
+import { t } from "@/lib/textos";
 
 export function Conjuntos({
   project,
@@ -37,7 +40,7 @@ export function Conjuntos({
       setNombre("");
       onChange();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "no se ha podido crear");
+      setError(e instanceof Error ? e.message : t("seg.error.crear"));
     } finally {
       setCreando(false);
     }
@@ -47,16 +50,14 @@ export function Conjuntos({
   return (
     <section className="sec">
       <fieldset className="sin-marco" disabled={!escribir}>
-      <h2>Conjuntos de casos</h2>
+      <h2>{t("ev.conj.titulo")}</h2>
       <p className="lead">
-        Colecciones de ejecuciones <strong>reales</strong> de tu agente. No hay casos
-        inventados aquí: cada uno sale de una traza que ocurrió, y se puede abrir para ver
-        de dónde salió.
+        {tr("ev.conj.lead", { reales: <strong>{t("ev.conj.reales")}</strong> })}
       </p>
 
       <div className="ab">
         <label className="grow">
-          <small>Nombre</small>
+          <small>{t("ev.conj.nombre")}</small>
           <input
             className="field"
             value={nombre}
@@ -65,7 +66,7 @@ export function Conjuntos({
           />
         </label>
         <label>
-          <small>Cuántas trazas</small>
+          <small>{t("ev.conj.cuantas")}</small>
           <input
             className="field"
             type="number"
@@ -77,28 +78,28 @@ export function Conjuntos({
           />
         </label>
         <button type="button" className="btn" onClick={crear} disabled={creando || !nombre.trim()}>
-          {creando ? "Creando…" : "Crear desde las más recientes"}
+          {creando ? t("conj.creando") : t("ev.conj.crear")}
         </button>
       </div>
       <p className="disclaimer">
-        ¿Quieres otro filtro? Fíltralo en{" "}
-        <Link href={`/trazas${query}`}>el explorador</Link> y pulsa «Guardar estas trazas
-        como conjunto de casos»: el conjunto guarda el filtro con el que se formó, para
-        que después se pueda discutir de dónde salió.
+        {tr("ev.conj.otro_filtro", {
+          explorador: <Link href={`/trazas${query}`}>{t("ev.explorador")}</Link>,
+          guardar: t("conj.guardar"),
+        })}
       </p>
       {error && <p className="verr">{error}</p>}
 
       {datasets.length === 0 ? (
-        <p className="disclaimer">Todavía no hay ninguno.</p>
+        <p className="disclaimer">{t("ev.conj.ninguno")}</p>
       ) : (
         <div className="tbl-scroll">
           <table className="tbl">
             <thead>
               <tr>
-                <th>Conjunto</th>
-                <th className="r">Casos</th>
-                <th className="pro">Filtro de origen</th>
-                <th className="r hide-sm">Creado</th>
+                <th>{t("ev.conj.col.conjunto")}</th>
+                <th className="r">{t("ev.conj.col.casos")}</th>
+                <th className="pro">{t("ev.conj.col.filtro")}</th>
+                <th className="r hide-sm">{t("ev.conj.col.creado")}</th>
                 <th />
               </tr>
             </thead>
@@ -112,7 +113,7 @@ export function Conjuntos({
                   <td className="r">{number(d.item_count)}</td>
                   <td className="pro" style={{ fontFamily: "var(--mono)", fontSize: 12 }}>
                     {Object.entries(d.source_filter).length === 0
-                      ? "sin filtro (las más recientes)"
+                      ? t("ev.conj.sin_filtro")
                       : Object.entries(d.source_filter)
                           .map(([k, v]) => `${k}=${v}`)
                           .join(" · ")}
@@ -127,7 +128,7 @@ export function Conjuntos({
                         onChange();
                       }}
                     >
-                      Borrar
+                      {t("ev.borrar")}
                     </button>
                   </td>
                 </tr>
@@ -157,23 +158,20 @@ export function Tiradas({
   if (runs.length === 0) return null;
   return (
     <section className="sec">
-      <h2>Tiradas</h2>
-      <p className="lead">
-        Cada una es una pasada de un conjunto por una versión de tu agente. Las lanza el
-        SDK en tu proceso; aquí sólo llega el parte y las trazas.
-      </p>
+      <h2>{t("ev.tiradas")}</h2>
+      <p className="lead">{t("ev.tiradas.lead")}</p>
       <div className="tbl-scroll">
         <table className="tbl">
           <thead>
             <tr>
-              <th>Versión</th>
-              <th>Conjunto</th>
-              <th className="r">Casos</th>
-              <th className="r">Personas</th>
-              <th className="r">Juez</th>
-              <th className="r">Coste</th>
-              <th className="r pro">Juzgar costó</th>
-              <th className="r hide-sm">Cuándo</th>
+              <th>{t("ev.col.version")}</th>
+              <th>{t("ev.col.conjunto")}</th>
+              <th className="r">{t("ev.col.casos")}</th>
+              <th className="r">{t("ev.col.personas")}</th>
+              <th className="r">{t("ev.col.juez")}</th>
+              <th className="r">{t("ev.col.coste")}</th>
+              <th className="r pro">{t("ev.col.juzgar")}</th>
+              <th className="r hide-sm">{t("ev.col.cuando")}</th>
             </tr>
           </thead>
           <tbody>
@@ -207,11 +205,11 @@ export function Tiradas({
         </table>
       </div>
       <p className="disclaimer">
-        ¿Sin tiradas de una versión nueva? Lánzala con{" "}
-        <code>laplace.run_dataset(&quot;…&quot;, mi_agente, variant=&quot;…&quot;)</code> apuntando
-        a este mismo Laplace. Las trazas que genere se ven en{" "}
-        <Link href={`/trazas${query}`}>el explorador</Link> como cualquier otra, y el
-        proyecto es «{project}».
+        {tr("ev.sin_tiradas", {
+          codigo: <code>laplace.run_dataset(&quot;…&quot;, mi_agente, variant=&quot;…&quot;)</code>,
+          explorador: <Link href={`/trazas${query}`}>{t("ev.explorador")}</Link>,
+          proyecto: project,
+        })}
       </p>
     </section>
   );
@@ -227,8 +225,8 @@ export function Celda({ rate }: { rate?: Rate }) {
       </span>
     );
   return (
-    <span title={`entre ${(rate.low! * 100).toFixed(0)} % y ${(rate.high! * 100).toFixed(0)} %`}>
-      {(rate.value * 100).toFixed(0)} %
+    <span title={t("ev.entre", { bajo: porcentaje(rate.low!), alto: porcentaje(rate.high!) })}>
+      {porcentaje(rate.value)}
     </span>
   );
 }

@@ -4,13 +4,21 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { Cargando } from "@/components/states";
 import { type Rol, acceptInvitation, getInvitation } from "@/lib/api";
+import { tr } from "@/lib/i18n";
+import { t } from "@/lib/textos";
 
-const QUE_PUEDE: Record<Rol, string> = {
-  lector: "ver los datos de sus proyectos",
-  miembro: "ver, anotar ejecuciones, marcar problemas y gestionar prompts",
-  admin: "todo lo anterior, más miembros, claves, alertas y presupuesto",
-  propietario: "todo, incluido hacer y deshacer propietarios",
-};
+const QUE_PUEDE = {
+  lector: "inv.puede.lector",
+  miembro: "inv.puede.miembro",
+  admin: "inv.puede.admin",
+  propietario: "inv.puede.propietario",
+} as const;
+const NOMBRE_ROL = {
+  lector: "rol.lector",
+  miembro: "rol.miembro",
+  admin: "rol.admin",
+  propietario: "rol.propietario",
+} as const;
 
 /**
  * Aceptar una invitación (D-127). Si ese email ya tiene cuenta, pide su contraseña y
@@ -28,7 +36,7 @@ function Contenido() {
   useEffect(() => {
     getInvitation(token)
       .then(setInfo)
-      .catch((e) => setFallo(e instanceof Error ? e.message : "esa invitación no vale"));
+      .catch((e) => setFallo(e instanceof Error ? e.message : t("inv.no_vale")));
   }, [token]);
 
   async function aceptar(e: React.FormEvent) {
@@ -39,7 +47,7 @@ function Contenido() {
       await acceptInvitation(token, nombre, contrasena);
       window.location.href = "/";
     } catch (err) {
-      setError(err instanceof Error ? err.message : "no se ha podido aceptar");
+      setError(err instanceof Error ? err.message : t("inv.error"));
       setEnviando(false);
     }
   }
@@ -48,11 +56,8 @@ function Contenido() {
     return (
       <main className="auth">
         <div className="auth-card">
-          <h1>Esta invitación no vale</h1>
-          <p className="muted">
-            {fallo}. Las invitaciones caducan a los siete días y sólo sirven una vez: pide
-            otra a quien te invitó.
-          </p>
+          <h1>{t("inv.no_vale.titulo")}</h1>
+          <p className="muted">{t("inv.no_vale.texto", { motivo: fallo })}</p>
         </div>
       </main>
     );
@@ -62,17 +67,20 @@ function Contenido() {
   return (
     <main className="auth">
       <form className="auth-card" onSubmit={aceptar}>
-        <h1>Únete a «{info.org_name}»</h1>
+        <h1>{t("inv.unete", { org: info.org_name })}</h1>
         <p className="muted">
-          Como <strong>{info.role}</strong>: podrás {QUE_PUEDE[info.role]}.
+          {tr("inv.como", {
+            rol: <strong>{t(NOMBRE_ROL[info.role as Rol])}</strong>,
+            puede: t(QUE_PUEDE[info.role as Rol]),
+          })}
         </p>
         <label>
-          <small>Email</small>
+          <small>{t("org.email")}</small>
           <input className="field" value={info.email} disabled />
         </label>
         {!info.has_account && (
           <label>
-            <small>Tu nombre</small>
+            <small>{t("conf.nombre")}</small>
             <input
               className="field"
               value={nombre}
@@ -84,8 +92,8 @@ function Contenido() {
         <label>
           <small>
             {info.has_account
-              ? "Ya tienes cuenta con este email: tu contraseña"
-              : "Elige una contraseña (10 caracteres o más)"}
+              ? t("inv.con_cuenta")
+              : t("inv.elige")}
           </small>
           <input
             className="field"
@@ -100,7 +108,7 @@ function Contenido() {
         </label>
         {error && <p className="verr">{error}</p>}
         <button type="submit" className="btn primary" disabled={enviando}>
-          {enviando ? "Uniéndote…" : "Aceptar la invitación"}
+          {enviando ? t("inv.uniendote") : t("inv.aceptar")}
         </button>
       </form>
     </main>

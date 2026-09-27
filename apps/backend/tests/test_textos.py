@@ -66,7 +66,8 @@ def test_las_reglas_de_plural_son_las_de_intl():
     web = ejecutar(
         f"""
 const res = {{}};
-for (const [l, e] of Object.entries({{es: "es-ES", en: "en-US", pt: "pt-BR", fr: "fr-FR", zh: "zh-CN"}})) {{
+const etiquetas = {{es: "es-ES", en: "en-US", pt: "pt-BR", fr: "fr-FR", zh: "zh-CN"}};
+for (const [l, e] of Object.entries(etiquetas)) {{
   const r = new Intl.PluralRules(e);
   res[l] = {numeros}.map((n) => {{ const f = r.select(n); return f === "one" ? "one" : "other"; }});
 }}

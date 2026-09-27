@@ -2,6 +2,7 @@ import { duration, money, tokens } from "@/lib/format";
 import { barGeometry, flatten, timeWindow } from "@/lib/tree";
 import type { Trace } from "@/lib/types";
 import { KindDot } from "./pieces";
+import { t } from "@/lib/textos";
 
 /**
  * El árbol de una traza, sin interacción, para incrustarlo en la ficha de un problema.
@@ -47,7 +48,7 @@ export function StaticTree({ trace, highlight }: { trace: Trace; highlight?: str
                 )}
               </span>
               {node.repeat_count > 1 && (
-                <span className="badge" title="Misma llamada, misma entrada">
+                <span className="badge" title={t("arbol.misma_entrada")}>
                   ×{node.repeat_count}
                 </span>
               )}

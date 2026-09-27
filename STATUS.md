@@ -164,8 +164,9 @@ Lo que sostiene esas casillas, en concreto:
 El orden y el detalle están en [`docs/HOJA_DE_RUTA.md`](docs/HOJA_DE_RUTA.md), que es
 el documento que se mantiene al día. En corto: las fases 3 y 4 están cerradas (la
 escala medida con 10 millones de spans al día, la búsqueda en el contenido y la latencia
-en el Panel); queda el paquete fino de TypeScript, que espera el nombre en npm, y
-después internacionalización y margen por cliente. El diagnóstico automático con modelo
+en el Panel); la interfaz y el motor hablan cinco idiomas (Fase 5, D-147 y D-148);
+queda el resto de la Fase 5 —menos texto, gráficos, maquetación—, el paquete fino de
+TypeScript, que espera el nombre en npm, y el margen por cliente. El diagnóstico automático con modelo
 sigue con su hueco reservado en el contrato, el esquema y la API.
 
 ## Con un framework de verdad: LangGraph, y un agente en Node
