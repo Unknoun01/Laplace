@@ -27,6 +27,7 @@ from typing import Any
 from . import cifras
 from .insights import Finding, FixCheck, detect
 from .storage.base import Window
+from .textos import t, tn
 
 logger = logging.getLogger("laplace.seguimiento")
 
@@ -76,8 +77,10 @@ def _escribir(valor: float, unidad: str) -> str:
     if unidad == "usd":
         return cifras.dinero(valor)
     if unidad == "tokens":
-        return f"{cifras.miles(valor)} tokens"
-    return f"{cifras.decimal(valor / 1000, 2)} s" if valor >= 1000 else f"{valor:.0f} ms"
+        return t("unidad.tokens", n=cifras.miles(valor))
+    if valor >= 1000:
+        return f"{cifras.decimal(valor / 1000, 2)} s"
+    return f"{cifras.miles(valor)} ms"
 
 
 def _parse(valor: Any) -> datetime:
@@ -126,11 +129,11 @@ def comprobar(
 
     if n_despues < MIN_EJECUCIONES:
         check.verdict = "pendiente"
-        check.headline = (
-            f"Todavía no se puede comprobar: desde que lo marcaste han llegado "
-            f"{cifras.miles(n_despues)} "
-            f"{'ejecución' if n_despues == 1 else 'ejecuciones'} y hacen falta al menos "
-            f"{MIN_EJECUCIONES}."
+        check.headline = tn(
+            "seguimiento.pendiente",
+            n_despues,
+            n=cifras.miles(n_despues),
+            minimo=MIN_EJECUCIONES,
         )
         return check
 
@@ -139,13 +142,9 @@ def comprobar(
         # Sin antes no hay ahorro que calcular: sólo se puede decir si sigue saliendo.
         check.verdict = "arreglado" if not por_despues else "sigue"
         check.headline = (
-            f"No hay ejecuciones de antes de marcarlo con las que comparar. Después, en "
-            f"{cifras.miles(n_despues)} ejecuciones, "
-            + (
-                "no ha vuelto a aparecer."
-                if not por_despues
-                else f"va a {ahora_txt} por ejecución."
-            )
+            t("seguimiento.sin_antes.no_aparece", n=cifras.miles(n_despues))
+            if not por_despues
+            else t("seguimiento.sin_antes.sigue", n=cifras.miles(n_despues), ahora=ahora_txt)
         )
         return check
 
@@ -153,25 +152,22 @@ def comprobar(
     if not por_despues:
         check.verdict = "arreglado"
         check.saved = por_antes * n_despues
-        suelo = "al menos " if check.cost_is_floor else ""
-        check.headline = (
-            f"En las {cifras.miles(n_despues)} ejecuciones desde que lo marcaste no ha vuelto "
-            f"a aparecer. Antes se iban {antes_txt} por ejecución: a ese ritmo, llevas "
-            f"{suelo}{_escribir(check.saved, unidad)} sin gastar."
+        ahorrado = _escribir(check.saved, unidad)
+        if check.cost_is_floor:
+            ahorrado = t("seguimiento.al_menos", x=ahorrado)
+        check.headline = t(
+            "seguimiento.arreglado",
+            n=cifras.miles(n_despues),
+            antes=antes_txt,
+            ahorrado=ahorrado,
         )
     elif por_despues <= por_antes * MEJORA:
         check.verdict = "mejor"
         check.saved = (por_antes - por_despues) * n_despues
-        check.headline = (
-            f"Ha bajado de {antes_txt} a {ahora_txt} por ejecución, pero sigue apareciendo. "
-            f"Algo del arreglo funciona; no todo."
-        )
+        check.headline = t("seguimiento.mejor", antes=antes_txt, ahora=ahora_txt)
     else:
         check.verdict = "sigue"
-        check.headline = (
-            f"Sigue apareciendo igual: {antes_txt} por ejecución antes de marcarlo y "
-            f"{ahora_txt} después. Por eso vuelve a la lista."
-        )
+        check.headline = t("seguimiento.sigue", antes=antes_txt, ahora=ahora_txt)
     return check
 
 

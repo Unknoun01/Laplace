@@ -119,7 +119,7 @@ def test_con_casos_suficientes_la_linea_junta_coste_y_acierto():
     )
     assert "v8" in metrica.headline
     assert "0,004 US$" in metrica.headline
-    assert "94 %" in metrica.headline
+    assert "94 %" in metrica.headline
 
 
 def test_una_version_sin_trafico_vale_none_y_no_cero():

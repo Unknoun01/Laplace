@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from . import cifras
 from .insights import MIN_DAYS_FOR_PROJECTION, observed_days
 from .storage.base import Window
+from .textos import t
 
 CLAVE = "budget"
 #: Porcentajes del presupuesto que avisan, una vez cada uno por mes.
@@ -91,36 +92,42 @@ def calcular(
         cost_is_floor=resumen.unknown_cost_spans > 0,
         unknown_cost_spans=resumen.unknown_cost_spans,
     )
-    suelo = "al menos " if b.cost_is_floor else ""
-    lleva = f"Este mes llevas {suelo}{cifras.dinero(gastado)}"
+    lleva = t(
+        "presupuesto.lleva_suelo" if b.cost_is_floor else "presupuesto.lleva",
+        coste=cifras.dinero(gastado),
+    )
     if monthly_usd is None:
-        b.headline = f"{lleva}. No hay presupuesto puesto."
+        b.headline = t("presupuesto.sin_tope", lleva=lleva)
         return b
 
     b.ratio = gastado / monthly_usd
-    tope = cifras.dinero(monthly_usd)
-    pct = cifras.porcentaje(b.ratio)
+    valores = {
+        "lleva": lleva,
+        "tope": cifras.dinero(monthly_usd),
+        "pct": cifras.porcentaje(b.ratio),
+    }
     if b.ratio >= 1:
         b.status = "pasado"
-        b.headline = f"{lleva}: has pasado el presupuesto de {tope} ({pct})."
+        b.headline = t("presupuesto.pasado", **valores)
     elif proyectado is not None and proyectado > monthly_usd:
         b.status = "va-a-pasarse"
-        b.headline = (
-            f"{lleva} de {tope} ({pct}). A este ritmo cerrarás el mes en "
-            f"{cifras.dinero(proyectado)}: te pasarás."
+        b.headline = t(
+            "presupuesto.va_a_pasarse", **valores, proyectado=cifras.dinero(proyectado)
         )
     elif b.ratio >= AVISOS[0] / 100:
         b.status = "cerca"
-        b.headline = f"{lleva} de {tope} ({pct}). Estás cerca del tope."
+        b.headline = t("presupuesto.cerca", **valores)
     else:
         b.status = "bien"
         cierre = (
-            f" A este ritmo cerrarás el mes en {cifras.dinero(proyectado)}."
+            t("presupuesto.cierre.proyectado", proyectado=cifras.dinero(proyectado))
             if proyectado is not None
-            else f" Todavía no proyectamos el mes: hace falta al menos "
-            f"{cifras.decimal(MIN_DAYS_FOR_PROJECTION)} día de datos."
+            else t(
+                "presupuesto.cierre.sin_proyeccion",
+                dias=cifras.decimal(MIN_DAYS_FOR_PROJECTION),
+            )
         )
-        b.headline = f"{lleva} de {tope} ({pct}).{cierre}"
+        b.headline = t("presupuesto.bien", **valores, cierre=cierre)
     return b
 
 

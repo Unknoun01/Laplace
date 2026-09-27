@@ -256,3 +256,25 @@ def test_el_renovador_recalcula_en_el_idioma_en_que_se_pidio(cliente, monkeypatc
     api.CACHE_DIAGNOSTICO._envejecer(50)
     assert asyncio.run(cache_diagnostico.una_vuelta(api.CACHE_DIAGNOSTICO, 60)) == 1
     assert vistos == ["zh"]
+
+
+def test_los_avisos_salen_en_el_idioma_de_quien_los_configura(cliente, monkeypatch):
+    """Se mandan desde un proceso de fondo, sin petición de la que sacar el idioma: se
+    guarda el de quien configuró las alertas (D-148)."""
+    from laplace_backend import main
+
+    r = cliente.put(
+        "/api/alert-settings",
+        json={"project_id": "p", "generic_webhook_url": "https://127.0.0.1:9/avisos"},
+        headers={"Accept-Language": "fr-FR"},
+    )
+    assert r.status_code == 200, r.text
+    runner = main.app.state.alerts
+    assert runner.config_for("p").language == "fr"
+
+    enviados: list[str] = []
+    monkeypatch.setattr(runner, "_enviar", lambda ajustes, texto: enviados.append(texto) or True)
+    # Fuera de la petición, sin idioma en el contexto: el aviso sale en francés igual.
+    assert idioma.actual() == "es"
+    assert runner.send_test("p") is True
+    assert "message de test" in enviados[0]

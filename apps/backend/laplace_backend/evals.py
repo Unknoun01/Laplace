@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field
 
 from . import cifras
 from .storage.base import TraceCost
+from .textos import t, tn
 
 logger = logging.getLogger("laplace.evals")
 
@@ -200,16 +201,11 @@ def rate_for(source: AnnotationSource, passed: int, failed: int, unjudged: int) 
     )
     if judged == 0:
         rate.unavailable = (
-            "ningún caso tiene veredicto de esta fuente todavía"
-            if unjudged
-            else "esta tirada no tiene casos"
+            t("evals.tasa.sin_veredicto") if unjudged else t("evals.tasa.sin_casos")
         )
         return rate
     if judged < MIN_CASES_FOR_RATE:
-        rate.unavailable = (
-            f"sólo {judged} {'caso' if judged == 1 else 'casos'} con veredicto; hacen "
-            f"falta {MIN_CASES_FOR_RATE} para que un porcentaje signifique algo"
-        )
+        rate.unavailable = tn("evals.tasa.pocos", judged, minimo=MIN_CASES_FOR_RATE)
         return rate
     rate.value = passed / judged
     rate.low, rate.high = wilson(passed, judged)
@@ -271,7 +267,7 @@ def prompt_labels(
         for nombre, version in prompts.get(item.trace_id, [])
     }
     return sorted(
-        f"{nombre} v{version}" if version else f"{nombre} (reserva)"
+        f"{nombre} v{version}" if version else t("evals.reserva", nombre=nombre)
         for nombre, version in vistas
     )
 
@@ -322,7 +318,7 @@ def side_for(
 
 
 def _pct(x: float) -> str:
-    return f"{x * 100:.0f} %"
+    return cifras.porcentaje(x)
 
 
 def _money(x: float) -> str:
@@ -338,30 +334,41 @@ def compare_rates(source: AnnotationSource, a: Rate, b: Rate) -> SourceCompariso
     dentro del margen es exactamente cómo se despliega una regresión creyendo que es una
     mejora, y es la cuarta cara del mismo error que ya nos ha mordido tres veces.
     """
-    etiqueta = "las personas" if source == "human" else "el juez"
+    fuente = t("evals.fuente.personas" if source == "human" else "evals.fuente.juez")
 
     if a.value is None or b.value is None:
         falta = a.unavailable or b.unavailable
         return SourceComparison(
             source=source,
             verdict="sin-base",
-            headline=f"Según {etiqueta}: todavía no se puede comparar.",
-            detail=(
-                f"{falta.capitalize()}. A tiene {a.passed} de {a.judged} y B, "
-                f"{b.passed} de {b.judged}. Son los números en bruto: no se convierten "
-                f"en porcentaje porque con tan pocos no querría decir nada."
+            headline=t("evals.cmp.sin_base.titulo", fuente=fuente),
+            detail=t(
+                "evals.cmp.sin_base.detalle",
+                falta=falta[:1].upper() + falta[1:],
+                a_ok=a.passed,
+                a_n=a.judged,
+                b_ok=b.passed,
+                b_n=b.judged,
             ),
             a=a,
             b=b,
         )
 
-    cifras = (
-        f"A acierta {_pct(a.value)} ({a.passed} de {a.judged}) y B, {_pct(b.value)} "
-        f"({b.passed} de {b.judged})."
+    cifras_txt = t(
+        "evals.cmp.cifras",
+        a_pct=_pct(a.value),
+        a_ok=a.passed,
+        a_n=a.judged,
+        b_pct=_pct(b.value),
+        b_ok=b.passed,
+        b_n=b.judged,
     )
-    margenes = (
-        f"Con estos casos, A está entre {_pct(a.low)} y {_pct(a.high)}, y B entre "
-        f"{_pct(b.low)} y {_pct(b.high)}."
+    margenes = t(
+        "evals.cmp.margenes",
+        a_bajo=_pct(a.low),
+        a_alto=_pct(a.high),
+        b_bajo=_pct(b.low),
+        b_alto=_pct(b.high),
     )
 
     # Solapan los intervalos: la diferencia cabe dentro del ruido de la muestra.
@@ -369,12 +376,8 @@ def compare_rates(source: AnnotationSource, a: Rate, b: Rate) -> SourceCompariso
         return SourceComparison(
             source=source,
             verdict="empate",
-            headline=f"Según {etiqueta}: no se distinguen con estos casos.",
-            detail=(
-                f"{cifras} {margenes} Los dos márgenes se solapan, así que esa "
-                f"diferencia cabe dentro del azar de la muestra. Para separarlas hacen "
-                f"falta más casos anotados, no otra lectura de éstos."
-            ),
+            headline=t("evals.cmp.empate.titulo", fuente=fuente),
+            detail=t("evals.cmp.empate.detalle", cifras=cifras_txt, margenes=margenes),
             a=a,
             b=b,
         )
@@ -383,12 +386,10 @@ def compare_rates(source: AnnotationSource, a: Rate, b: Rate) -> SourceCompariso
     return SourceComparison(
         source=source,
         verdict="mejor" if mejor else "peor",
-        headline=(
-            f"Según {etiqueta}: B acierta más que A."
-            if mejor
-            else f"Según {etiqueta}: B acierta menos que A."
+        headline=t(
+            "evals.cmp.mejor.titulo" if mejor else "evals.cmp.peor.titulo", fuente=fuente
         ),
-        detail=f"{cifras} {margenes} Los márgenes no se solapan.",
+        detail=t("evals.cmp.separados", cifras=cifras_txt, margenes=margenes),
         a=a,
         b=b,
     )
@@ -410,31 +411,35 @@ def _headline(
     coste_a = a.cost_per_case_usd or 0.0
     coste_b = b.cost_per_case_usd or 0.0
     cambio = ((coste_b - coste_a) / coste_a) if coste_a > 0 else None
-    suelo = "al menos " if (a.cost_is_floor or b.cost_is_floor) else ""
+    suelo = a.cost_is_floor or b.cost_is_floor
+
+    def importe(valor: float) -> str:
+        return t("evals.al_menos", x=_money(valor)) if suelo else _money(valor)
 
     if cambio is None:
-        frase_coste = f"B cuesta {suelo}{_money(coste_b)} por caso."
+        frase_coste = t("evals.coste.b_cuesta", coste=importe(coste_b))
     elif cambio < -MATERIAL_COST_CHANGE:
-        frase_coste = f"cuesta un {_pct(-cambio)} menos por caso"
+        frase_coste = t("evals.coste.menos", pct=_pct(-cambio))
     elif cambio > MATERIAL_COST_CHANGE:
-        frase_coste = f"cuesta un {_pct(cambio)} más por caso"
+        frase_coste = t("evals.coste.mas", pct=_pct(cambio))
     else:
-        frase_coste = "cuesta prácticamente lo mismo"
+        frase_coste = t("evals.coste.igual")
 
-    detalle_coste = (
-        f"A: {suelo}{_money(coste_a)} por caso ({_money(a.cost_usd)} en total). "
-        f"B: {suelo}{_money(coste_b)} por caso ({_money(b.cost_usd)} en total). "
-        f"El coste no lleva margen porque no es una muestra: es la factura de lo que se "
-        f"ejecutó, medida paso a paso."
+    detalle_coste = t(
+        "evals.detalle_coste",
+        a=importe(coste_a),
+        a_total=_money(a.cost_usd),
+        b=importe(coste_b),
+        b_total=_money(b.cost_usd),
     )
 
     con_base = [c for c in por_fuente if c.verdict != "sin-base"]
     if not con_base:
         return (
-            f"Todavía no se puede decir si B acierta igual, pero sí lo que cuesta: {frase_coste}."
+            t("evals.titular.sin_base.con_cambio", coste=frase_coste)
             if cambio is not None
-            else f"Todavía no se puede decir si B acierta igual. {frase_coste}",
-            f"Ninguna fuente de veredicto tiene casos suficientes. {detalle_coste}",
+            else t("evals.titular.sin_base", coste=frase_coste),
+            t("evals.detalle.sin_base", detalle=detalle_coste),
         )
 
     # Si alguna fuente dice que empeora, manda esa: es el lado por el que hay que
@@ -442,19 +447,19 @@ def _headline(
     peor = next((c for c in con_base if c.verdict == "peor"), None)
     if peor is not None:
         return (
-            f"B acierta menos que A, aunque {frase_coste}.",
+            t("evals.titular.peor", coste=frase_coste),
             f"{peor.detail} {detalle_coste}",
         )
 
     mejor = next((c for c in con_base if c.verdict == "mejor"), None)
     if mejor is not None:
-        return (f"B acierta más que A y {frase_coste}.", f"{mejor.detail} {detalle_coste}")
+        return (t("evals.titular.mejor", coste=frase_coste), f"{mejor.detail} {detalle_coste}")
 
     # Empate: ninguna fuente distingue las dos versiones, así que lo que decide es el
     # coste. Es el caso más común de una comparación honesta y el más accionable.
     empate = con_base[0]
     return (
-        f"B acierta igual —hasta donde se puede saber— y {frase_coste}.",
+        t("evals.titular.igual", coste=frase_coste),
         f"{empate.detail} {detalle_coste}",
     )
 

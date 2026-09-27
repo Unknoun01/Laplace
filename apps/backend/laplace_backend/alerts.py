@@ -40,10 +40,11 @@ from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import quote
 
-from . import cifras
+from . import cifras, idioma
 from .config import Settings
 from .insights import Finding, Overview, span_label, window_label
 from .storage.base import Window
+from .textos import t, tn
 
 logger = logging.getLogger("laplace.alerts")
 
@@ -83,6 +84,10 @@ class ProjectAlertConfig:
     #: JSON, y una dirección de correo. Slack sigue siendo `webhook_url`.
     generic_webhook_url: str = ""
     email_to: str = ""
+    #: En qué idioma se escriben los avisos: el de quien guardó los ajustes por última
+    #: vez (D-148). Se mandan desde un proceso de fondo, que no tiene petición de la que
+    #: sacarlo.
+    language: str = "es"
 
     @property
     def enabled(self) -> bool:
@@ -178,6 +183,7 @@ def _apply(base: ProjectAlertConfig, ajustes: dict[str, Any]) -> ProjectAlertCon
         ("quiet_hours", float),
         ("window_days", int),
         ("muted", bool),
+        ("language", str),
     ):
         if clave in ajustes:
             try:
@@ -520,13 +526,15 @@ def _amount_phrase(finding: Finding, ventana: str) -> str:
     fiable —modelo sin tarifa, o tarifa asumida— la cifra NO se afirma. Se anuncia con
     `≥`, que es lo único que sabemos con certeza: que se ha gastado al menos eso.
     """
-    suelo = "al menos " if finding.cost_is_floor else ""
-    frase = f"{suelo}{money(finding.window_waste_usd)} en {ventana}"
+    def importe(valor: float) -> str:
+        return t("alerta.al_menos", x=money(valor)) if finding.cost_is_floor else money(valor)
+
+    frase = t("alerta.importe", coste=importe(finding.window_waste_usd), ventana=ventana)
     if finding.monthly_saving_usd is not None:
-        frase += f" · {suelo}{money(finding.monthly_saving_usd)} al mes a ese ritmo"
+        frase += t("alerta.al_mes", coste=importe(finding.monthly_saving_usd))
     if finding.cost_unverified:
         # No es un suelo: una tarifa de LiteLLM puede pasarse igual que quedarse corta.
-        frase += " (tarifa sin verificar)"
+        frase += t("alerta.sin_verificar")
     return frase
 
 
@@ -543,10 +551,8 @@ def compose(
     """
     ventana = window_label(overview.observed_days)
     cuantos = len(decision.due)
-    sujeto = "1 problema supera" if cuantos == 1 else f"{cuantos} problemas superan"
-    cabecera = (
-        f"*Laplace · «{overview.project_id}»* — {sujeto} el umbral de "
-        f"{money(config.min_usd)}."
+    cabecera = tn(
+        "alerta.cabecera", cuantos, proyecto=overview.project_id, umbral=money(config.min_usd)
     )
 
     lineas = [cabecera, ""]
@@ -560,27 +566,22 @@ def compose(
 
     notas: list[str] = []
     if any(f.cost_is_floor for f in decision.due):
-        notas.append(
-            "Las cifras con «al menos» son un *suelo*: hay pasos cuyo modelo no está en "
-            "la tabla de precios o cuyo metro de facturación no hemos podido confirmar, "
-            "así que el coste real puede ser mayor, nunca menor."
-        )
+        notas.append(t("alerta.nota.suelo"))
     if not overview.projected:
         notas.append(
-            f"No se proyecta a mes: hay {span_label(overview.observed_days)} de datos y "
-            f"el mínimo para proyectar es {span_label(overview.min_days_for_projection)}. "
-            f"Lo que ves es dinero ya gastado."
+            t(
+                "alerta.nota.sin_proyeccion",
+                hay=span_label(overview.observed_days),
+                minimo=span_label(overview.min_days_for_projection),
+            )
         )
     if decision.silenced:
-        cuantos_mas = len(decision.silenced)
-        sigue = (
-            "Otro problema sigue abierto y no se repite"
-            if cuantos_mas == 1
-            else f"Otros {cuantos_mas} problemas siguen abiertos y no se repiten"
-        )
         notas.append(
-            f"{sigue} aquí: ya se avisó, y su periodo de calma "
-            f"({span_label(config.quiet_hours / 24)}) no ha terminado."
+            tn(
+                "alerta.nota.calma",
+                len(decision.silenced),
+                calma=span_label(config.quiet_hours / 24),
+            )
         )
 
     if notas:
@@ -963,10 +964,8 @@ class AlertRunner:
         ajustes = self.config_for(project_id)
         if not ajustes.enabled:
             return None
-        texto = (
-            f"*Laplace · «{project_id}»* — mensaje de prueba. Si lo lees, las alertas de "
-            "este proyecto llegan aquí."
-        )
+        with idioma.usar(ajustes.language):
+            texto = t("alerta.prueba", proyecto=project_id)
         return self._enviar(ajustes, texto)
 
     def _enviar(self, ajustes: ProjectAlertConfig, texto: str) -> bool:
@@ -1000,10 +999,18 @@ class AlertRunner:
         clave = f"budget:{b.month}:{pct}"
         if clave in self._state.read(project_id):
             return "", ""
-        return f"*Presupuesto* — {b.headline}", clave
+        return t("alerta.presupuesto", texto=b.headline), clave
 
     def evaluate(self, project_id: str, *, dry_run: bool = False) -> Decision:
-        """Un proyecto. `dry_run` calcula la decisión sin mandar ni recordar nada."""
+        """Un proyecto. `dry_run` calcula la decisión sin mandar ni recordar nada.
+
+        Todo en el idioma de los ajustes del proyecto: los títulos de los hallazgos y el
+        presupuesto se redactan dentro, y este proceso no viene de ninguna petición.
+        """
+        with idioma.usar(self.config_for(project_id).language):
+            return self._evaluate(project_id, dry_run=dry_run)
+
+    def _evaluate(self, project_id: str, *, dry_run: bool) -> Decision:
         from .insights import overview as build_overview
 
         ajustes = self.config_for(project_id)
@@ -1047,7 +1054,7 @@ class AlertRunner:
         }
         partes = []
         if decision.budget_notice:
-            partes.append(f"*Laplace · «{project_id}»* — {decision.budget_notice}")
+            partes.append(t("alerta.proyecto", proyecto=project_id, texto=decision.budget_notice))
         if decision.due:
             partes.append(compose(vista, decision, ajustes, urls))
         texto = "\n\n".join(partes)

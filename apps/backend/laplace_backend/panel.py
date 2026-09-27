@@ -32,6 +32,7 @@ from . import cifras
 from .dinero import motivo_sin_dinero
 from .insights import observed_days, span_label, window_label
 from .storage.base import Bucket, Latency, Window, WindowFacts
+from .textos import t, tn
 
 logger = logging.getLogger("laplace.panel")
 
@@ -298,7 +299,7 @@ def _per_execution_metrics(
     latencia: Latency | None = None,
     latencia_anterior: Latency | None = None,
 ) -> list[Metric]:
-    sin_datos = "no hay ejecuciones en este rango"
+    sin_datos = t("panel.sin_datos")
     prev = anterior or _Aggregate()
     lat = latencia or Latency()
     lat_b = latencia_anterior if anterior else None
@@ -318,31 +319,31 @@ def _per_execution_metrics(
         # Sin una sola tarifa conocida no hay cifra que dar: un 0 aquí se lee como
         # «no cuesta nada» y es la misma mentira que proyectar sobre una hora (D-107).
         _metric(
-            "Coste por ejecución",
+            t("panel.m.coste"),
             "money",
             None if sin_dinero else coste_a,
             None if sin_dinero else coste_b,
             unavailable=sin_dinero or sin_datos,
         ),
-        _metric("Tokens por ejecución", "tokens", tok_a, tok_b, unavailable=sin_datos),
-        _metric("Pasos por ejecución", "count", pasos_a, pasos_b, unavailable=sin_datos),
+        _metric(t("panel.m.tokens"), "tokens", tok_a, tok_b, unavailable=sin_datos),
+        _metric(t("panel.m.pasos"), "count", pasos_a, pasos_b, unavailable=sin_datos),
         # Mediana y p95, no media (D-145): tres ejecuciones colgadas entre cien llevan
         # la media a una cifra que no es la espera de nadie.
         _metric(
-            "Duración, mediana",
+            t("panel.m.p50"),
             "duration",
             lat.p50_ms,
             lat_b.p50_ms if lat_b else None,
             unavailable=sin_datos,
         ),
         _metric(
-            "Duración, p95",
+            t("panel.m.p95"),
             "duration",
             lat.p95_ms,
             lat_b.p95_ms if lat_b else None,
             unavailable=sin_datos,
         ),
-        _metric("Ejecuciones con error", "ratio", err_a, err_b, unavailable=sin_datos),
+        _metric(t("panel.m.errores"), "ratio", err_a, err_b, unavailable=sin_datos),
     ]
 
 
@@ -354,14 +355,24 @@ def _total_metrics(
     hay = anterior is not None
     return [
         _metric(
-            "Gasto total",
+            t("panel.m.gasto"),
             "money",
             None if sin_dinero else actual.cost_usd,
             (prev.cost_usd if hay else None) if not sin_dinero else None,
             unavailable=sin_dinero,
         ),
-        _metric("Ejecuciones", "count", float(actual.traces), float(prev.traces) if hay else None),
-        _metric("Tokens", "tokens", float(actual.tokens), float(prev.tokens) if hay else None),
+        _metric(
+            t("panel.m.ejecuciones"),
+            "count",
+            float(actual.traces),
+            float(prev.traces) if hay else None,
+        ),
+        _metric(
+            t("panel.m.tokens_total"),
+            "tokens",
+            float(actual.tokens),
+            float(prev.tokens) if hay else None,
+        ),
     ]
 
 
@@ -371,7 +382,7 @@ def _total_metrics(
 
 
 def _pct(ratio: float) -> str:
-    return f"{abs(ratio) * 100:.0f} %"
+    return cifras.porcentaje(abs(ratio))
 
 
 def read_out(
@@ -391,18 +402,11 @@ def read_out(
     degradación con nombre.
     """
     if anterior is None or anterior.traces == 0 or actual.traces == 0 or sin_comparacion:
-        motivo = sin_comparacion or (
-            "todavía no hay dos periodos con ejecuciones que contrastar"
-        )
+        motivo = sin_comparacion or t("panel.sin_base.motivo")
         return Reading(
             verdict="sin-base",
-            headline="Todavía no hay con qué comparar.",
-            detail=(
-                f"Para decir si algo ha cambiado hace falta un periodo anterior "
-                f"utilizable, y {motivo}. Llevas {ventana} de datos. Las cifras de abajo "
-                f"son lo observado, medido, sin comparación: no son cero, es que "
-                f"todavía no hay contra qué medirlas."
-            ),
+            headline=t("panel.sin_base.titulo"),
+            detail=t("panel.sin_base.detalle", motivo=motivo, ventana=ventana),
         )
 
     unitario = _change(actual.per_trace(actual.cost_usd), anterior.per_trace(anterior.cost_usd))
@@ -411,8 +415,8 @@ def read_out(
     if unitario is None or volumen is None or total is None:
         return Reading(
             verdict="sin-base",
-            headline="Todavía no hay con qué comparar.",
-            detail="El periodo anterior no tiene gasto con el que contrastar éste.",
+            headline=t("panel.sin_base.titulo"),
+            detail=t("panel.sin_gasto_anterior"),
         )
 
     sube_unitario = unitario > MATERIAL_CHANGE
@@ -420,76 +424,48 @@ def read_out(
     sube_volumen = volumen > MATERIAL_CHANGE
     baja_volumen = volumen < -MATERIAL_CHANGE
 
-    cifras = (
-        _clausula("El gasto", total, "sube", "baja", "se mantiene")
-        + ", "
-        + _clausula("las ejecuciones", volumen, "suben", "bajan", "se mantienen")
-        + " y "
-        + _clausula("el coste de cada una", unitario, "sube", "baja", "se mantiene")
-        + "."
+    frase = t(
+        "panel.cifras",
+        gasto=_clausula("gasto", total),
+        ejecuciones=_clausula("ejecuciones", volumen),
+        unitario=_clausula("unitario", unitario),
     )
+    cifras_txt = frase[:1].upper() + frase[1:]
 
     if sube_unitario and sube_volumen:
+        caso, verdict = "mixto", "mixto"
+    elif sube_unitario:
+        caso, verdict = "revisar", "revisar"
+    elif sube_volumen and not baja_unitario:
+        caso, verdict = "normal", "normal"
+    elif baja_unitario:
+        caso, verdict = "mejora", "mejora"
+    elif baja_volumen:
+        caso, verdict = "menos", "estable"
+    else:
         return Reading(
-            verdict="mixto",
-            headline="Suben las dos cosas: hay más ejecuciones y además cada una cuesta más.",
-            detail=(
-                f"{cifras} La parte del volumen es trabajo real; la del coste por "
-                f"ejecución no, y es la que hay que mirar."
-            ),
-        )
-    if sube_unitario:
-        return Reading(
-            verdict="revisar",
-            headline="Subida sin más ejecuciones: revisar.",
-            detail=(
-                f"{cifras} El mismo trabajo está costando más que antes, así que esto no "
-                f"lo explica la demanda. Mira los picos de abajo y la lista de problemas."
-            ),
-        )
-    if sube_volumen and not baja_unitario:
-        return Reading(
-            verdict="normal",
-            headline="Subida acompañada de más ejecuciones: normal.",
-            detail=(
-                f"{cifras} Cada ejecución cuesta prácticamente lo mismo: el gasto sube "
-                f"porque tu agente está trabajando más, no peor."
-            ),
-        )
-    if baja_unitario:
-        return Reading(
-            verdict="mejora",
-            headline="Cada ejecución cuesta menos que antes.",
-            detail=f"{cifras} Es la dirección buena: el trabajo se está abaratando.",
-        )
-    if baja_volumen:
-        return Reading(
-            verdict="estable",
-            headline="Menos ejecuciones, y cada una cuesta lo mismo.",
-            detail=(
-                f"{cifras} La bajada del gasto es menos trabajo, no una mejora: si el "
-                f"tráfico vuelve, el gasto vuelve."
-            ),
+            verdict="estable", headline=t("panel.estable.titulo"), detail=cifras_txt
         )
     return Reading(
-        verdict="estable",
-        headline="Estable: el coste por ejecución no se mueve.",
-        detail=cifras,
+        verdict=verdict,
+        headline=t(f"panel.{caso}.titulo"),
+        detail=t(f"panel.{caso}.detalle", cifras=cifras_txt),
     )
 
 
-def _clausula(sujeto: str, ratio: float, sube: str, baja: str, quieto: str) -> str:
+def _clausula(sujeto: str, ratio: float) -> str:
     """«el gasto sube un 40 %» / «las ejecuciones se mantienen».
 
-    Cada sujeto trae sus tres formas verbales porque «las ejecuciones sube un 40 %» es
-    justo el tipo de frase que hace dudar de todo lo demás que dice la pantalla. Y por
-    debajo del umbral no se dice el porcentaje: un 3 % no «sube», está quieto.
+    Cláusula entera por idioma, sujeto y dirección: «las ejecuciones sube un 40 %» es
+    justo el tipo de frase que hace dudar de todo lo demás que dice la pantalla, y cada
+    idioma concuerda a su manera. Por debajo del umbral no se dice el porcentaje: un 3 %
+    no «sube», está quieto.
     """
     if ratio > MATERIAL_CHANGE:
-        return f"{sujeto} {sube} un {_pct(ratio)}"
+        return t(f"panel.c.{sujeto}.sube", pct=_pct(ratio))
     if ratio < -MATERIAL_CHANGE:
-        return f"{sujeto} {baja} un {_pct(ratio)}"
-    return f"{sujeto} {quieto}"
+        return t(f"panel.c.{sujeto}.baja", pct=_pct(ratio))
+    return t(f"panel.c.{sujeto}.igual")
 
 
 # ---------------------------------------------------------------------------------
@@ -510,8 +486,8 @@ def _share(parte: float) -> str:
     aritméticamente cierto.
     """
     if parte >= 0.95:
-        return "prácticamente todo el sobrecoste"
-    return f"el {parte * 100:.0f} % del sobrecoste"
+        return t("panel.parte.todo")
+    return t("panel.parte.pct", pct=cifras.porcentaje(parte))
 
 
 def _median(valores: list[float]) -> float:
@@ -533,15 +509,13 @@ def find_spikes(buckets: list[Bucket]) -> tuple[list[int], float, str]:
         return (
             [],
             0.0,
-            f"Hacen falta al menos {MIN_BUCKETS_FOR_SPIKES} tramos con ejecuciones para "
-            f"tener una línea base con la que comparar, y de momento hay "
-            f"{len(con_datos)}. Sin línea base, cualquier tramo parece un pico.",
+            t("panel.picos.pocos", minimo=MIN_BUCKETS_FOR_SPIKES, hay=len(con_datos)),
         )
 
     unitarios = [b.cost_usd / b.traces for b in con_datos]
     base = _median(unitarios)
     if base <= 0:
-        return [], 0.0, "El coste habitual por ejecución es cero, así que no hay pico posible."
+        return [], 0.0, t("panel.picos.cero")
 
     picos = [
         i
@@ -585,14 +559,8 @@ def attribute(
             causas.append(
                 SpikeCause(
                     kind="version_prompt",
-                    text=(
-                        f"Las trazas de este tramo corrieron con el texto de reserva de "
-                        f"«{nombre}», no con la versión de producción."
-                    ),
-                    evidence=(
-                        "Significa que el SDK no pudo pedirle el prompt a Laplace y usó "
-                        "el del código. No figura en ninguna traza anterior de la ventana."
-                    ),
+                    text=t("panel.causa.reserva", nombre=nombre),
+                    evidence=t("panel.causa.reserva.evidencia"),
                     link={"prompt": nombre},
                 )
             )
@@ -600,14 +568,8 @@ def attribute(
         causas.append(
             SpikeCause(
                 kind="version_prompt",
-                text=(
-                    f"Las trazas de este tramo usan una versión de «{nombre}» que no "
-                    f"estaba antes: la v{version}."
-                ),
-                evidence=(
-                    "No figura en ninguna traza anterior de esta ventana. Lo dicen las "
-                    "propias trazas, no la hora de un despliegue."
-                ),
+                text=t("panel.causa.version", nombre=nombre, version=version),
+                evidence=t("panel.causa.version.evidencia"),
                 link={"prompt": nombre, "version": version},
             )
         )
@@ -616,16 +578,16 @@ def attribute(
         causas.append(
             SpikeCause(
                 kind="modelo_nuevo",
-                text=f"Aparece un modelo que no se había visto antes: {modelo}.",
-                evidence="No figura en ninguna traza anterior de esta ventana.",
+                text=t("panel.causa.modelo", modelo=modelo),
+                evidence=t("panel.causa.nuevo_antes"),
             )
         )
     for herramienta in sorted(dentro.tools - antes.tools):
         causas.append(
             SpikeCause(
                 kind="herramienta_nueva",
-                text=f"Aparece una herramienta nueva: «{herramienta}».",
-                evidence="No figura en ninguna traza anterior de esta ventana.",
+                text=t("panel.causa.herramienta", herramienta=herramienta),
+                evidence=t("panel.causa.nuevo_antes"),
             )
         )
 
@@ -654,35 +616,29 @@ def attribute(
             causas.append(
                 SpikeCause(
                     kind="paso_nuevo" if nuevo else "paso_disparado",
-                    text=(
-                        f"Un paso nuevo, «{etiqueta}», se lleva {_share(parte)}."
-                        if nuevo
-                        else f"El paso «{etiqueta}» se lleva {_share(parte)}: cuesta más "
-                        f"por ejecución que en el resto del rango."
+                    text=t(
+                        "panel.causa.paso_nuevo" if nuevo else "panel.causa.paso_disparado",
+                        paso=etiqueta,
+                        parte=_share(parte),
                     ),
-                    evidence=f"{cifras.dinero(de_mas)} por encima de lo que costaba antes.",
+                    evidence=t("panel.causa.paso.evidencia", coste=cifras.dinero(de_mas)),
                 )
             )
 
     if volumen_ratio is not None and volumen_ratio > 1 + MATERIAL_CHANGE and not causas:
         # Sólo si no hay nada mejor: más ejecuciones explica el gasto del tramo, pero
         # el pico se mide por ejecución, así que casi nunca es la respuesta.
-        de_mas = (volumen_ratio - 1) * 100
         causas.append(
             SpikeCause(
                 kind="volumen",
-                text=f"Hubo un {de_mas:.0f} % más de ejecuciones que de costumbre.",
-                evidence="El resto del sobrecoste no se explica con nada nuevo en las trazas.",
+                text=t("panel.causa.volumen", pct=cifras.porcentaje(volumen_ratio - 1)),
+                evidence=t("panel.causa.volumen.evidencia"),
             )
         )
 
     if causas:
         return causas, ""
-    return [], (
-        "No identificamos la causa. En este tramo no aparece ningún modelo, ninguna "
-        "herramienta ni ninguna versión de prompt que no estuviera antes, y ningún paso "
-        "concentra el sobrecoste. Las trazas del tramo están un clic más abajo."
-    )
+    return [], t("panel.causa.ninguna")
 
 
 # ---------------------------------------------------------------------------------
@@ -700,20 +656,14 @@ def comparable(buckets: list[Bucket]) -> str:
     """
     trazas = sum(b.traces for b in buckets)
     if trazas == 0:
-        return "el periodo anterior no tiene ninguna ejecución"
+        return t("panel.anterior.vacio")
     if trazas < MIN_TRACES_FOR_COMPARISON:
-        return (
-            f"el periodo anterior sólo tiene {trazas} "
-            f"{'ejecución' if trazas == 1 else 'ejecuciones'}, muy pocas para comparar"
-        )
+        return tn("panel.anterior.pocas", trazas)
 
     con_datos = [i for i, b in enumerate(buckets) if b.traces > 0]
     cobertura = (con_datos[-1] - con_datos[0] + 1) / len(buckets) if buckets else 0.0
     if cobertura < MIN_PREVIOUS_COVERAGE:
-        return (
-            "el periodo anterior está casi vacío: tu agente todavía no enviaba trazas "
-            "durante la mayor parte de él, así que compararse con él no dice nada"
-        )
+        return t("panel.anterior.casi_vacio")
     return ""
 
 
@@ -763,8 +713,7 @@ def _spike(
 
     if antes.traces == 0:
         causas, sin_atribuir = [], (
-            "No identificamos la causa: es el primer tramo con datos del rango, así que "
-            "no hay nada anterior con lo que compararlo."
+            t("panel.causa.primer_tramo")
         )
     else:
         tramos_previos = [b for b in buckets[:indice] if b.traces > 0]

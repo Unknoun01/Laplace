@@ -29,7 +29,9 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from . import cifras
 from .storage.base import CoverageFacts
+from .textos import t, tn
 
 logger = logging.getLogger("laplace.coverage")
 
@@ -106,10 +108,7 @@ def _signal(
 ) -> Signal:
     señal = Signal(key=key, label=label, counted=counted, total=total)
     if total < MIN_CALLS_FOR_COVERAGE:
-        señal.unavailable = (
-            f"con {total} {'llamada' if total == 1 else 'llamadas'} a modelos, un "
-            f"porcentaje no diría nada; hacen falta {MIN_CALLS_FOR_COVERAGE}"
-        )
+        señal.unavailable = tn("cobertura.pocas", total, minimo=MIN_CALLS_FOR_COVERAGE)
         return señal
     señal.value = counted / total
     señal.level = _level(señal.value)
@@ -119,15 +118,15 @@ def _signal(
 
 
 def _pct(value: float) -> str:
-    return f"{value * 100:.0f} %"
+    return cifras.porcentaje(value)
 
 
 def _de_cada_diez(value: float) -> str:
     """«Seis de cada diez» se entiende sin traducir; «el 61 %» hay que traducirlo."""
     faltan = round((1 - value) * 10)
     if faltan <= 1:
-        return "alguna llamada suelta"
-    return f"{faltan} de cada diez llamadas"
+        return t("cobertura.alguna_suelta")
+    return t("cobertura.de_cada_diez", n=faltan)
 
 
 def build(facts: CoverageFacts, *, has_managed_prompts: bool = False) -> Coverage:
@@ -135,87 +134,32 @@ def build(facts: CoverageFacts, *, has_managed_prompts: bool = False) -> Coverag
     total = facts.llm_calls
     cobertura = Coverage(llm_calls=total, split_steps=list(facts.split_steps))
 
-    cobertura.signals.append(
-        _signal(
-            "pasos",
-            "Pasos que se distinguen entre sí",
-            facts.identified_steps,
-            total,
-            consequence=(
-                "Las llamadas que no se distinguen caen todas en el mismo montón, así "
-                "que las reglas no pueden comparar un paso con otro y se callan. Un "
-                "«no hay nada que arreglar» con esta señal baja significa «no lo "
-                "sabemos», no «está bien»."
-            ),
-            fix=(
-                "Decora las funciones de tu agente con @laplace.observe(type=\"agent\") "
-                "o envuélvelas en laplace.span(...): con eso Laplace sabe desde dónde se "
-                "llama al modelo. Si tienes los payloads desactivados "
-                "(capture_content=False), tampoco puede usar las instrucciones."
-            ),
+    for clave, contado in (
+        ("pasos", facts.identified_steps),
+        ("tarifa", facts.priced),
+        ("tokens", facts.measured_tokens),
+    ):
+        cobertura.signals.append(
+            _signal(
+                clave,
+                t(f"cobertura.{clave}.label"),
+                contado,
+                total,
+                consequence=t(f"cobertura.{clave}.consecuencia"),
+                fix=t(f"cobertura.{clave}.arreglo"),
+            )
         )
-    )
-    cobertura.signals.append(
-        _signal(
-            "tarifa",
-            "Llamadas con tarifa conocida",
-            facts.priced,
-            total,
-            consequence=(
-                "Lo que no tiene tarifa no cuesta cero: cuesta «no lo sabemos». Mientras "
-                "esta señal no esté al 100 %, el gasto de abajo es un suelo y el ahorro "
-                "también."
-            ),
-            fix=(
-                "Si es un modelo de un proveedor, escribe su tarifa en un JSON tuyo "
-                "—{\"models\": {\"nombre-del-modelo\": {\"input\": 1.0, \"output\": 4.0}}}, "
-                "en dólares por millón de tokens, de su página oficial— y arranca Laplace "
-                "con LAPLACE_PRICES_EXTRA apuntando a ese fichero. "
-                "Si corre en tu máquina —Ollama, LM Studio—, no hay tarifa que añadir: no "
-                "te cobra nadie. Entonces esta señal se queda a cero a propósito, el dinero "
-                "no se puede calcular y las reglas te hablan de tokens y de tiempo, que sí "
-                "están medidos."
-            ),
-        )
-    )
-    cobertura.signals.append(
-        _signal(
-            "tokens",
-            "Llamadas con tokens del proveedor",
-            facts.measured_tokens,
-            total,
-            consequence=(
-                "Los tokens que contamos nosotros son una aproximación, y el coste que "
-                "sale de ellos también. No es lo mismo una cifra que viene de la factura "
-                "que una que sale de dividir caracteres entre cuatro. Ojo: una llamada que "
-                "falló tampoco trae tokens, y también baja esta señal: ahí no hay nada que "
-                "estimar, es que no hubo respuesta."
-            ),
-            fix=(
-                "Mira primero si son llamadas con error —una caída del proveedor las "
-                "cuenta todas aquí—. Si no lo son, en streaming pide el recuento: en "
-                "OpenAI, stream_options={\"include_usage\": True}."
-            ),
-        )
-    )
 
     # La versión de prompt es la única de las cuatro que puede estar a cero sin que nada
     # esté mal: significa «no gestionas prompts aquí», que es una decisión legítima. Se
     # enseña igual —es información— pero no cuenta para el veredicto ni pinta de rojo.
     prompts = _signal(
         "prompts",
-        "Llamadas con versión de prompt",
+        t("cobertura.prompts.label"),
         facts.with_prompt_version,
         total,
-        consequence=(
-            "Sin versión en la traza no se puede decir qué versión de un prompt costó "
-            "qué ni cuál acertaba más: la pestaña de Prompts se queda con lo que puede "
-            "inferir de las instrucciones."
-        ),
-        fix=(
-            "Saca el prompt a Laplace y pídelo con laplace.get_prompt(\"nombre\"). Es "
-            "opcional: el resto del producto funciona igual sin esto."
-        ),
+        consequence=t("cobertura.prompts.consecuencia"),
+        fix=t("cobertura.prompts.arreglo"),
     )
     # No depende de que el contador esté a cero, sino de si el proyecto gestiona
     # prompts. Un proyecto que borró su prompt conserva trazas que lo mencionan, y
@@ -269,68 +213,43 @@ def _reading(cobertura: Coverage) -> tuple[str, str]:
     if cobertura.level == "sin-base":
         motivo = next(
             (s.unavailable for s in cobertura.signals if s.unavailable),
-            "todavía no hay llamadas a modelos que mirar",
+            t("cobertura.sin_llamadas"),
         )
         return (
-            "Todavía no podemos decir cuánto de tu agente entendemos.",
-            f"{motivo.capitalize()}. En cuanto haya tráfico, aquí aparecerá qué parte de "
-            f"tus llamadas podemos analizar y qué parte se nos escapa.",
+            t("cobertura.sin_base.titulo"),
+            t("cobertura.sin_base.detalle", motivo=motivo[:1].upper() + motivo[1:]),
         )
 
     malas = [s for s in cobertura.signals if s.level in ("malo", "flojo")]
+    nombres = ", ".join(t("comillas", x=p) for p in cobertura.split_steps[:3])
 
     # El paso partido va primero aunque los cuatro porcentajes estén altos: es el caso
     # en el que el producto se calla pareciendo sano, y no hay ningún otro sitio donde
     # se cuente.
     if cobertura.split_steps and not malas:
-        nombres = ", ".join(f"«{p}»" for p in cobertura.split_steps[:3])
-        cuantos = len(cobertura.split_steps)
         return (
-            (
-                f"Hay {cuantos} paso cuyas instrucciones cambian en casi cada ejecución: "
-                f"{nombres}."
-                if cuantos == 1
-                else f"Hay {cuantos} pasos cuyas instrucciones cambian en casi cada "
-                f"ejecución: {nombres}."
-            )
-            + " Sobre ellos no podemos decirte nada.",
-            "Cuando el prompt de un paso lleva datos variables dentro —una fecha, un "
-            "nombre, el contexto del usuario—, cada llamada parece un paso distinto y las "
-            "reglas no tienen dos llamadas que comparar: se callan. No es que ese paso "
-            "esté bien, es que no lo hemos mirado. Saca esos datos a variables "
-            "(con laplace.get_prompt y {{variables}}, o metiéndolos en el mensaje del "
-            "usuario en vez de en el de sistema) y volverá a contar como un paso solo.",
+            tn("cobertura.partidos.titulo", len(cobertura.split_steps), nombres=nombres),
+            t("cobertura.partidos.detalle"),
         )
 
     if not malas:
         pasos = next(s for s in cobertura.signals if s.key == "pasos")
         return (
-            f"Entendemos el {_pct(pasos.value or 0)} de las llamadas de tu agente.",
-            "Las cifras de abajo se calculan sobre eso. Cuando no podemos analizar una "
-            "llamada —porque no distinguimos su paso, porque su modelo no está en la "
-            "tabla de precios o porque sus tokens son una estimación— lo decimos aquí y "
-            "no lo escondemos en el total.",
+            t("cobertura.bien.titulo", parte=_pct(pasos.value or 0)),
+            t("cobertura.bien.detalle"),
         )
 
     peor = malas[0]
-    aviso = (
-        f"{_de_cada_diez(peor.value or 0).capitalize()} de tu agente se nos escapan."
-        if peor.key == "pasos"
+    if peor.key == "pasos":
+        de_cada = _de_cada_diez(peor.value or 0)
+        aviso = t("cobertura.aviso.pasos", parte=de_cada[:1].upper() + de_cada[1:])
+    else:
         # El texto de la señal ya empieza por «Llamadas…», así que anteponer «de tus
         # llamadas» lo duplicaba: «de tus llamadas llamadas con tarifa conocida».
-        else f"Sólo el {_pct(peor.value or 0)} de tus {peor.label.lower()}."
-    )
-    partidos = ""
-    if cobertura.split_steps:
-        nombres = ", ".join(f"«{p}»" for p in cobertura.split_steps[:3])
-        partidos = (
-            f" Pasa sobre todo en {nombres}: sus instrucciones cambian en casi cada "
-            f"ejecución, lo que casi siempre significa que llevan datos variables dentro "
-            f"—una fecha, un nombre— y eso parte un paso en muchos. Sácalos a variables y "
-            f"volverán a contar como uno."
-        )
+        aviso = t("cobertura.aviso.otra", parte=_pct(peor.value or 0), senal=peor.label.lower())
+    partidos = t("cobertura.partidos.cola", nombres=nombres) if cobertura.split_steps else ""
     return (
-        f"{aviso} Léelo antes que las cifras de abajo." if cobertura.prominent else aviso,
+        t("cobertura.leelo_antes", aviso=aviso) if cobertura.prominent else aviso,
         # El «qué hacer» ya sale debajo, en la señal que va mal: repetirlo aquí era
         # leer el mismo párrafo dos veces seguidas.
         f"{peor.consequence}{partidos}",
