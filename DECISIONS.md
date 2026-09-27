@@ -2749,8 +2749,9 @@ y prompt desplegado), igual que las frases del motor.
 Sin idioma pedido la API sigue contestando en español, como un script sin cabeceras
 esperaba (D-147).
 
-### D-150 — Los pendientes de la auditoría del rediseño: A1, A2 y B1
-Tres hallazgos de `docs/auditoria-rediseno.md` que seguían abiertos.
+### D-150 — Los pendientes de la auditoría del rediseño (A1, A2, B1) y la maquetación
+Tres hallazgos de `docs/auditoria-rediseno.md` que seguían abiertos, y el ancho de
+pantalla que la hoja de ruta apuntaba para la Fase 5.
 
 * **A1 · Un rango vacío no es un proyecto vacío.** Con trazas de hace tres días y el
   rango en un día, el Diagnóstico y el Panel decían «Esperando la primera ejecución», que
@@ -2762,3 +2763,26 @@ Tres hallazgos de `docs/auditoria-rediseno.md` que seguían abiertos.
   llevar. Las instrucciones de instalar quedan sólo para el proyecto al que nunca ha
   llegado nada, con un texto que ya no habla de rangos. Pruebas de pantallas con una traza
   de hace tres días (el botón lleva a `days=7` y enseña los datos) y otra de hace noventa.
+* **A2 · El coste de cada traza, visible en el móvil.** La pregunta va en una línea
+  con puntos suspensivos, y en una celda de tabla eso fija el ancho mínimo de la
+  columna: a 375 px la tabla medía 479 y el coste, por el que se ordena la lista,
+  quedaba fuera. La columna de la traza lleva `width: 100%; max-width: 0` en estrecho y
+  es ella la que recorta.
+* **B1 · Las pestañas, enteras a cualquier ancho.** Hasta 1100 px la cabecera pasa a dos
+  filas (el contexto arriba, las pestañas debajo a lo ancho): a 1024 «Ajustes» quedaba
+  bajo el difuminado. En móvil las seis van en una rejilla de tres por dos en vez de una
+  barra desplazable que escondía «Prompts» y «Ajustes» y que nadie desplaza porque no
+  parece desplazable. El difuminado ya no es fijo: `TopBar` mide hacia qué lado quedan
+  pestañas escondidas (`data-desborda`) y difumina sólo ese borde.
+* **A 1440 px ya no sobra un tercio.** La carcasa pasa de 1440 a 1280 y se centra, así
+  que cabecera y contenido comparten bordes. El Diagnóstico llena ese ancho (antes se
+  quedaba en 1180, pegado a la izquierda). A partir de 1200 px el Panel pone los picos
+  al lado de las métricas y «quién gasta» debajo a todo el ancho, y la ficha de un
+  problema pone lo que se hace con él (probar antes, marcarlo, ver las trazas) en una
+  columna fija junto a lo que se lee, con los párrafos a 75 caracteres. Ajustes,
+  Evaluaciones y Prompts, que son formularios y listas, se quedan en la medida cómoda
+  de 960.
+* **Pruebas de pantallas** para las tres: el coste dentro de su marco a 375 px; las seis
+  pestañas enteras a 375, 1024 y 1440 en español y en francés; y a 1440 el contenido
+  llega hasta donde llega la cabecera. Con la interfaz anterior fallan siete de nueve
+  (las dos que pasan son la navegación a 1440, que ya estaba bien).

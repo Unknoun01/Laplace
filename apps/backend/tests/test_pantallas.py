@@ -336,3 +336,73 @@ def test_una_traza_mas_vieja_que_cualquier_rango_no_ofrece_boton(servidor, naveg
         assert errores == [], errores
     finally:
         pagina.close()
+
+
+def test_en_movil_el_coste_de_cada_traza_se_ve_sin_desplazar(servidor, navegador):
+    """A2 de la auditoría: a 375 px la tabla de trazas medía 479 y del coste —la columna
+    por la que se ordena— sólo asomaba el símbolo. Ahora cabe en su marco."""
+    pagina, errores = _abrir(navegador, servidor + "/trazas/?project=demo&days=7", "movil")
+    try:
+        pagina.locator("td.money").first.wait_for(timeout=15_000)
+        medidas = pagina.evaluate(
+            """() => {
+                const marco = document.querySelector('.tbl-scroll');
+                const coste = document.querySelector('td.money').getBoundingClientRect();
+                return {tabla: marco.scrollWidth, marco: marco.clientWidth,
+                        derecha: coste.right, borde: marco.getBoundingClientRect().right};
+            }"""
+        )
+        assert medidas["tabla"] <= medidas["marco"] + 1, medidas
+        assert medidas["derecha"] <= medidas["borde"], medidas
+        assert errores == [], errores
+    finally:
+        pagina.close()
+
+
+@pytest.mark.parametrize(("ancho", "alto"), [(375, 812), (1024, 768), (1440, 900)])
+@pytest.mark.parametrize("lengua", ["es-ES", "fr-FR"])
+def test_las_seis_pestanas_se_ven_enteras(servidor, navegador, ancho, alto, lengua):
+    """B1 y la navegación en móvil: a 1024 px «Ajustes» quedaba bajo el difuminado, y a
+    375 «Prompts» y «Ajustes» detrás del borde de una barra desplazable. Cada pestaña
+    tiene que caber entera dentro de la barra, sin desplazarla."""
+    pagina = navegador.new_page(viewport={"width": ancho, "height": alto}, locale=lengua)
+    try:
+        pagina.goto(servidor + "/?project=demo&days=7", wait_until="networkidle")
+        pagina.locator("nav.nav a").first.wait_for(timeout=15_000)
+        fuera = pagina.evaluate(
+            """() => {
+                const nav = document.querySelector('nav.nav');
+                const caja = nav.getBoundingClientRect();
+                return [...nav.querySelectorAll('a')]
+                    .filter(a => {
+                        const r = a.getBoundingClientRect();
+                        return r.left < caja.left - 1 || r.right > caja.right + 1
+                            || a.scrollWidth > a.clientWidth + 1;
+                    })
+                    .map(a => a.innerText);
+            }"""
+        )
+        assert fuera == [], f"pestañas que no se ven enteras a {ancho} px: {fuera}"
+        assert pagina.locator("nav.nav").get_attribute("data-desborda") in ("", None)
+    finally:
+        pagina.close()
+
+
+@pytest.mark.parametrize("ruta", ["/?project=demo&days=7", "/panel/?project=demo&days=7"])
+def test_a_1440_el_contenido_no_deja_un_tercio_vacio(servidor, navegador, ruta):
+    """A 1440 px el contenido acababa en 980 (Panel) o 1200 (Diagnóstico) con la
+    cabecera hasta 1420: un tercio de pantalla vacío a la derecha. Ahora el contenido
+    llega hasta donde llega la cabecera."""
+    pagina, errores = _abrir(navegador, servidor + ruta, "escritorio")
+    try:
+        pagina.locator("main").wait_for(timeout=15_000)
+        pagina.wait_for_timeout(500)
+        medidas = pagina.evaluate(
+            """() => ({main: document.querySelector('main').getBoundingClientRect().toJSON(),
+                      barra: document.querySelector('.topbar').getBoundingClientRect().toJSON()})"""
+        )
+        assert abs(medidas["main"]["left"] - medidas["barra"]["left"]) <= 1, medidas
+        assert medidas["barra"]["right"] - medidas["main"]["right"] <= 2, medidas
+        assert errores == [], errores
+    finally:
+        pagina.close()

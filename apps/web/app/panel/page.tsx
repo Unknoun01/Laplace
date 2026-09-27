@@ -49,7 +49,7 @@ function Contenido() {
     return <NoTracesYet project={project} lastSeen={lastSeen} days={days} />;
 
   return (
-    <main className="reading">
+    <main className="reading panel">
       <section className="hero">
         <h1>{t("panel.titulo", { proyecto: project })}</h1>
 
@@ -110,7 +110,7 @@ function QuienGasta({ project, days, currency }: { project: string; days: number
 
   const context = `project=${encodeURIComponent(project)}&days=${days}`;
   return (
-    <section className="sec">
+    <section className="sec quien">
       <div className="sec-head">
         <h2>{t("panel.quien")}</h2>
         <div className="seg" role="group" aria-label={t("panel.agrupar")}>
@@ -330,7 +330,7 @@ function Chart({ panel }: { panel: Panel }) {
 function Spikes({ panel }: { panel: Panel }) {
   if (panel.spikes.length === 0) {
     return (
-      <section className="sec">
+      <section className="sec picos">
         <h2>{t("panel.picos")}</h2>
         <p className="lead">{panel.spikes_unavailable || t("panel.picos.ninguno")}</p>
       </section>
@@ -338,7 +338,7 @@ function Spikes({ panel }: { panel: Panel }) {
   }
 
   return (
-    <section className="sec">
+    <section className="sec picos">
       <h2>
         {tn("panel.picos.n", panel.spikes.length)}
       </h2>

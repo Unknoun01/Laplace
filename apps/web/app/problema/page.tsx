@@ -60,7 +60,7 @@ function Contenido() {
   const flaggedHash = finding.tech.find((t) => t.label === "laplace.dedup_hash")?.value;
 
   return (
-    <main className="reading">
+    <main className="reading problema">
       <Link href={`/${query}`} className="back">
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
           <path
@@ -76,6 +76,8 @@ function Contenido() {
 
       <Head finding={finding} />
 
+      <div className="prob-cols">
+      <div className="prob-cuerpo">
       <section className="block">
         <h2>{t("prob.que_pasa")}</h2>
         <p>{finding.what_happens}</p>
@@ -197,6 +199,11 @@ function Contenido() {
         )}
         <p className="disclaimer">{finding.savings_note}</p>
       </section>
+      </div>
+
+      {/* Lo que se hace con el problema, al lado de lo que se lee (D-150). En estrecho
+          cae debajo, donde estaba. */}
+      <aside className="prob-rail">
 
       {/* Marcar, ignorar y crear conjuntos es escribir: un lector no lo ve ofrecido
           (D-127). El backend lo rechazaría igual. */}
@@ -219,6 +226,8 @@ function Contenido() {
         <Link href={`/trazas${query}&${pasoParams(finding)}&sort=recent`} className="btn">
           {t("prob.ver_ultimas")}
         </Link>
+      </div>
+      </aside>
       </div>
     </main>
   );
