@@ -257,3 +257,82 @@ def test_en_ingles_no_queda_interfaz_en_espanol(servidor, navegador, pantalla):
         assert restos == [], (pantalla, restos)
     finally:
         contexto.close()
+
+
+def _traza_de_hace(servidor: str, proyecto: str, dias: float) -> None:
+    """Una traza de `proyecto` fechada hace `dias`, por OTLP/JSON como la mandaría Node."""
+    import json
+
+    fin = time.time_ns() - int(dias * 86_400 * 1e9)
+    span = {
+        "traceId": os.urandom(16).hex(),
+        "spanId": os.urandom(8).hex(),
+        "name": "atender",
+        "kind": 1,
+        "startTimeUnixNano": str(fin - 2_000_000_000),
+        "endTimeUnixNano": str(fin),
+        "status": {"code": 1},
+    }
+    cuerpo = {
+        "resourceSpans": [
+            {
+                "resource": {
+                    "attributes": [{"key": "service.name", "value": {"stringValue": proyecto}}]
+                },
+                "scopeSpans": [{"scope": {"name": "prueba"}, "spans": [span]}],
+            }
+        ]
+    }
+    peticion = urllib.request.Request(
+        servidor + "/v1/traces",
+        data=json.dumps(cuerpo).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(peticion, timeout=10):
+        pass
+
+
+@pytest.mark.parametrize("pantalla", ["/", "/panel/"])
+def test_un_rango_vacio_no_dice_que_no_ha_llegado_nada(servidor, navegador, pantalla):
+    """A1 de la auditoría del rediseño: con trazas de hace tres días y el rango en un
+    día, la pantalla decía «Esperando la primera ejecución» y hacía pensar que la
+    instalación no funcionaba. Ahora dice cuándo llegó la última y ofrece el rango que
+    la incluye, que al pulsarlo la enseña."""
+    _traza_de_hace(servidor, "antiguo", 3)
+    url = f"{servidor}{pantalla}?project=antiguo&days=1"
+    pagina, errores = _abrir(navegador, url, "escritorio")
+    try:
+        pagina.wait_for_function(
+            "() => document.body.innerText.includes('No hay ejecuciones')",
+            timeout=15_000,
+        )
+        texto = pagina.locator("body").inner_text()
+        assert "Esperando la primera ejecución" not in texto
+        assert "La última llegó el" in texto
+        pagina.locator("a", has_text="Ver los últimos 7 días").click()
+        pagina.wait_for_function(
+            "() => !document.body.innerText.includes('No hay ejecuciones')",
+            timeout=15_000,
+        )
+        assert "days=7" in pagina.url and "project=antiguo" in pagina.url
+        assert errores == [], errores
+    finally:
+        pagina.close()
+
+
+def test_una_traza_mas_vieja_que_cualquier_rango_no_ofrece_boton(servidor, navegador):
+    """Si la última es de antes del rango más largo, no hay rango que ofrecer: se dice
+    la fecha y que hace falta tráfico nuevo, sin un botón que no llevaría a nada."""
+    _traza_de_hace(servidor, "vetusto", 90)
+    pagina, errores = _abrir(navegador, servidor + "/?project=vetusto&days=30", "escritorio")
+    try:
+        pagina.wait_for_function(
+            "() => document.body.innerText.includes('No hay ejecuciones')",
+            timeout=15_000,
+        )
+        texto = pagina.locator("body").inner_text()
+        assert "antes de los 30 días" in texto, texto
+        assert pagina.locator("a", has_text="Ver los últimos").count() == 0
+        assert errores == [], errores
+    finally:
+        pagina.close()

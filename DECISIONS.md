@@ -2748,3 +2748,17 @@ y prompt desplegado), igual que las frases del motor.
 
 Sin idioma pedido la API sigue contestando en español, como un script sin cabeceras
 esperaba (D-147).
+
+### D-150 — Los pendientes de la auditoría del rediseño: A1, A2 y B1
+Tres hallazgos de `docs/auditoria-rediseno.md` que seguían abiertos.
+
+* **A1 · Un rango vacío no es un proyecto vacío.** Con trazas de hace tres días y el
+  rango en un día, el Diagnóstico y el Panel decían «Esperando la primera ejecución», que
+  es lo primero que se ve al entrar y hace pensar que la instalación no funciona.
+  `NoTracesYet` recibe ahora `last_seen` (ya venía en `/api/projects`) y el rango: si
+  alguna vez llegó algo, el título es «No hay ejecuciones en el último día», dice cuándo
+  llegó la última y ofrece **el rango más corto que la incluye** con un botón. Si es más
+  vieja que el rango más largo (30 días), lo dice sin botón, porque no hay rango al que
+  llevar. Las instrucciones de instalar quedan sólo para el proyecto al que nunca ha
+  llegado nada, con un texto que ya no habla de rangos. Pruebas de pantallas con una traza
+  de hace tres días (el botón lleva a `days=7` y enseña los datos) y otra de hace noventa.

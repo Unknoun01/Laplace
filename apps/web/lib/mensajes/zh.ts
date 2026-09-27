@@ -56,7 +56,7 @@ export const zh: Mensajes = {
   "estado.demo.error": "无法加载",
   "estado.sin_trazas.titulo": "正在等待“{proyecto}”的第一次运行",
   "estado.sin_trazas.texto":
-    "项目已存在，但在当前时间范围内没有收到任何追踪。可以在上方栏中扩大时间范围，或在启用 Laplace 的情况下运行你的智能体。",
+    "该项目尚未收到任何追踪。只要在启用 Laplace 的情况下运行你的智能体，它就会出现在这里：",
   "estado.nada.titulo_con_aviso": "没有发现需要修复的问题，但我们没能检查全部内容",
   "estado.nada.titulo": "你现在没有在浪费钱",
   "estado.nada.texto":
@@ -795,4 +795,9 @@ export const zh: Mensajes = {
   // Errores de la API que no traen una frase propia.
   "api.fallo": "{ruta} 返回错误 {estado}",
   "api.no_valida": "请求无效：{campos}",
+  // A1: un rango vacío no es un proyecto vacío.
+  "estado.rango_vacio.titulo": "{ventana}没有运行",
+  "estado.rango_vacio.ultima": "最近一次运行在 {fecha} 到达。",
+  "estado.rango_vacio.fuera": "最近一次运行在 {fecha} 到达，早于此处可查看的 {rango}。请在启用 Laplace 的情况下运行你的智能体以查看新数据。",
+  "estado.rango_vacio.boton": "查看{ventana}",
 };

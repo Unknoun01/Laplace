@@ -31,9 +31,10 @@ function Contenido() {
 
   const estado = useApi(async (senal) => {
     const projects = await listProjects(senal);
-    if (projects.length === 0) return { project: "", panel: null };
-    const project = projects.find((p) => p.id === pedido)?.id ?? projects[0].id;
-    return { project, panel: await getPanel(project, days, senal) };
+    if (projects.length === 0) return { project: "", panel: null, lastSeen: null };
+    const elegido = projects.find((p) => p.id === pedido) ?? projects[0];
+    const panel = await getPanel(elegido.id, days, senal);
+    return { project: elegido.id, panel, lastSeen: elegido.last_seen };
   }, [pedido, days]);
 
   if (estado.fase === "cargando") return <Cargando />;
@@ -42,10 +43,10 @@ function Contenido() {
   if (estado.fase === "sin-permiso") return <NotYours mensaje={estado.error.message} />;
   if (estado.fase === "error") return <BackendDown mensaje={estado.error.message} />;
 
-  const { project, panel } = estado.datos;
+  const { project, panel, lastSeen } = estado.datos;
   if (!panel) return <NoProject />;
   if (panel.observed_days === 0 && panel.totals[1]?.value === 0)
-    return <NoTracesYet project={project} />;
+    return <NoTracesYet project={project} lastSeen={lastSeen} days={days} />;
 
   return (
     <main className="reading">

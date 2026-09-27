@@ -57,7 +57,7 @@ export const en: Mensajes = {
   "estado.demo.error": "couldn't load them",
   "estado.sin_trazas.titulo": "Waiting for the first run of “{proyecto}”",
   "estado.sin_trazas.texto":
-    "The project exists but no traces have arrived in the range you're looking at. Try widening the range in the bar above, or run your agent with Laplace enabled.",
+    "No traces from this project have arrived yet. As soon as you run your agent with Laplace enabled, it will show up here:",
   "estado.nada.titulo_con_aviso": "We found nothing to fix, but we couldn't look at everything",
   "estado.nada.titulo": "You're not wasting money right now",
   "estado.nada.texto":
@@ -797,4 +797,9 @@ export const en: Mensajes = {
   // Errores de la API que no traen una frase propia.
   "api.fallo": "Error {estado} on {ruta}",
   "api.no_valida": "The request isn't valid: {campos}",
+  // A1: un rango vacío no es un proyecto vacío.
+  "estado.rango_vacio.titulo": "No runs in {ventana}",
+  "estado.rango_vacio.ultima": "The last one arrived on {fecha}.",
+  "estado.rango_vacio.fuera": "The last one arrived on {fecha}, before the {rango} you can look at here. Run your agent with Laplace enabled to see new data.",
+  "estado.rango_vacio.boton": "Show {ventana}",
 };

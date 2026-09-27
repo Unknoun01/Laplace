@@ -63,7 +63,7 @@ export const es = {
   "estado.demo.error": "no se han podido cargar",
   "estado.sin_trazas.titulo": "Esperando la primera ejecución de «{proyecto}»",
   "estado.sin_trazas.texto":
-    "El proyecto existe pero no ha llegado ninguna traza en el rango que estás mirando. Prueba a ampliar el rango en la barra de arriba, o lanza tu agente con Laplace activado.",
+    "Todavía no ha llegado ninguna traza de este proyecto. En cuanto lances tu agente con Laplace activado, aparecerá aquí:",
   "estado.nada.titulo_con_aviso":
     "No hemos encontrado nada que arreglar, pero no hemos podido mirarlo todo",
   "estado.nada.titulo": "No estás tirando dinero ahora mismo",
@@ -804,6 +804,11 @@ export const es = {
   // Errores de la API que no traen una frase propia.
   "api.fallo": "Error {estado} en {ruta}",
   "api.no_valida": "La petición no es válida: {campos}",
+  // A1: un rango vacío no es un proyecto vacío.
+  "estado.rango_vacio.titulo": "No hay ejecuciones en {ventana}",
+  "estado.rango_vacio.ultima": "La última llegó el {fecha}.",
+  "estado.rango_vacio.fuera": "La última llegó el {fecha}, antes de los {rango} que se pueden mirar aquí. Lanza tu agente con Laplace activado para ver datos nuevos.",
+  "estado.rango_vacio.boton": "Ver {ventana}",
 } as const;
 
 export type Clave = keyof typeof es;

@@ -28,14 +28,16 @@ function Contenido() {
 
   const estado = useApi(async (senal) => {
     const projects = await listProjects(senal);
-    if (projects.length === 0) return { project: "", overview: null, budget: null };
-    const project = projects.find((p) => p.id === pedido)?.id ?? projects[0].id;
+    if (projects.length === 0)
+      return { project: "", overview: null, budget: null, lastSeen: null };
+    const elegido = projects.find((p) => p.id === pedido) ?? projects[0];
+    const project = elegido.id;
     const [overview, budget] = await Promise.all([
       getOverview(project, days, senal),
       // El presupuesto es un añadido: si falla, el inicio sigue en pie sin él.
       getBudget(project, senal).catch(() => null),
     ]);
-    return { project, overview, budget };
+    return { project, overview, budget, lastSeen: elegido.last_seen };
   }, [pedido, days]);
 
   if (estado.fase === "cargando") return <CargandoDiagnostico />;
@@ -44,9 +46,10 @@ function Contenido() {
   if (estado.fase === "sin-permiso") return <NotYours mensaje={estado.error.message} />;
   if (estado.fase === "error") return <BackendDown mensaje={estado.error.message} />;
 
-  const { project, overview, budget } = estado.datos;
+  const { project, overview, budget, lastSeen } = estado.datos;
   if (!overview) return <NoProject />;
-  if (overview.spans === 0) return <NoTracesYet project={project} />;
+  if (overview.spans === 0)
+    return <NoTracesYet project={project} lastSeen={lastSeen} days={days} />;
 
   const query = `?project=${encodeURIComponent(project)}&days=${days}`;
   const ventana = windowLabel(overview.observed_days);

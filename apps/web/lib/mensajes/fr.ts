@@ -58,7 +58,7 @@ export const fr: Mensajes = {
   "estado.demo.error": "impossible de les charger",
   "estado.sin_trazas.titulo": "En attente de la première exécution de « {proyecto} »",
   "estado.sin_trazas.texto":
-    "Le projet existe mais aucune trace n’est arrivée sur la période affichée. Élargissez la période dans la barre du haut, ou lancez votre agent avec Laplace activé.",
+    "Aucune trace de ce projet n’est encore arrivée. Dès que vous lancerez votre agent avec Laplace activé, elle apparaîtra ici :",
   "estado.nada.titulo_con_aviso":
     "Nous n’avons rien trouvé à corriger, mais nous n’avons pas pu tout examiner",
   "estado.nada.titulo": "Vous ne gaspillez pas d’argent en ce moment",
@@ -799,4 +799,9 @@ export const fr: Mensajes = {
   // Errores de la API que no traen una frase propia.
   "api.fallo": "Erreur {estado} sur {ruta}",
   "api.no_valida": "La requête n’est pas valide : {campos}",
+  // A1: un rango vacío no es un proyecto vacío.
+  "estado.rango_vacio.titulo": "Aucune exécution sur {ventana}",
+  "estado.rango_vacio.ultima": "La dernière est arrivée le {fecha}.",
+  "estado.rango_vacio.fuera": "La dernière est arrivée le {fecha}, avant les {rango} consultables ici. Lancez votre agent avec Laplace activé pour voir des données récentes.",
+  "estado.rango_vacio.boton": "Voir {ventana}",
 };
