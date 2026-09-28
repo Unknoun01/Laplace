@@ -31,24 +31,25 @@ function Contenido() {
 
   const estado = useApi(async (senal) => {
     const projects = await listProjects(senal);
-    if (projects.length === 0) return { project: "", panel: null };
-    const project = projects.find((p) => p.id === pedido)?.id ?? projects[0].id;
-    return { project, panel: await getPanel(project, days, senal) };
+    if (projects.length === 0) return { project: "", panel: null, lastSeen: null };
+    const elegido = projects.find((p) => p.id === pedido) ?? projects[0];
+    const panel = await getPanel(elegido.id, days, senal);
+    return { project: elegido.id, panel, lastSeen: elegido.last_seen };
   }, [pedido, days]);
 
   if (estado.fase === "cargando") return <Cargando />;
   if (estado.fase === "sin-backend") return <BackendDown />;
-  if (estado.fase === "sin-clave") return <NeedsKey mensaje={estado.error.message} />;
+  if (estado.fase === "sin-clave") return <NeedsKey mensaje={estado.error.message} codigo={estado.error.code} />;
   if (estado.fase === "sin-permiso") return <NotYours mensaje={estado.error.message} />;
   if (estado.fase === "error") return <BackendDown mensaje={estado.error.message} />;
 
-  const { project, panel } = estado.datos;
+  const { project, panel, lastSeen } = estado.datos;
   if (!panel) return <NoProject />;
   if (panel.observed_days === 0 && panel.totals[1]?.value === 0)
-    return <NoTracesYet project={project} />;
+    return <NoTracesYet project={project} lastSeen={lastSeen} days={days} />;
 
   return (
-    <main className="reading">
+    <main className="reading panel">
       <section className="hero">
         <h1>{t("panel.titulo", { proyecto: project })}</h1>
 
@@ -109,7 +110,7 @@ function QuienGasta({ project, days, currency }: { project: string; days: number
 
   const context = `project=${encodeURIComponent(project)}&days=${days}`;
   return (
-    <section className="sec">
+    <section className="sec quien">
       <div className="sec-head">
         <h2>{t("panel.quien")}</h2>
         <div className="seg" role="group" aria-label={t("panel.agrupar")}>
@@ -329,7 +330,7 @@ function Chart({ panel }: { panel: Panel }) {
 function Spikes({ panel }: { panel: Panel }) {
   if (panel.spikes.length === 0) {
     return (
-      <section className="sec">
+      <section className="sec picos">
         <h2>{t("panel.picos")}</h2>
         <p className="lead">{panel.spikes_unavailable || t("panel.picos.ninguno")}</p>
       </section>
@@ -337,7 +338,7 @@ function Spikes({ panel }: { panel: Panel }) {
   }
 
   return (
-    <section className="sec">
+    <section className="sec picos">
       <h2>
         {tn("panel.picos.n", panel.spikes.length)}
       </h2>

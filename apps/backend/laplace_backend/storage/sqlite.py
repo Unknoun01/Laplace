@@ -53,6 +53,7 @@ from .base import (
     ProjectStats,
     PromptUsage,
     RepeatedGroup,
+    StepCostSeries,
     StepFacts,
     TraceCost,
     TraceFilter,
@@ -61,6 +62,7 @@ from .base import (
     WindowFacts,
     WindowSummary,
     densify,
+    densify_steps,
     disambiguate,
     encode_cursor,
     nearest_rank,
@@ -1034,6 +1036,39 @@ class SQLiteStore:
                     ),
                 )
                 for r in filas
+            ],
+            window,
+            bucket_minutes,
+        )
+
+    def step_cost_series(
+        self, project_id: str, window: Window, bucket_minutes: int
+    ) -> StepCostSeries:
+        params = self._window_params(project_id, window)
+        params["origen"] = _iso(window.since)
+        params["ancho"] = bucket_minutes
+        tramo = "CAST((julianday(start_time) - julianday(:origen)) * 1440 / :ancho AS INTEGER)"
+        total = self._query(
+            f"""SELECT {tramo} AS tramo, SUM(cost_total_usd) AS coste
+                FROM spans WHERE {WINDOW_WHERE} GROUP BY tramo""",
+            params,
+        )
+        pasos = self._query(
+            f"""SELECT CASE WHEN step_key != '' THEN step_key ELSE name END AS paso,
+                       MAX(CASE WHEN step_label != '' THEN step_label ELSE name END)
+                                                                        AS etiqueta,
+                       MAX(step_site) AS sitio, MAX(step_hint) AS pista,
+                       {tramo} AS tramo, SUM(cost_total_usd) AS coste
+                FROM spans WHERE {RULES_WHERE} AND cost_total_usd > 0
+                GROUP BY paso, tramo""",
+            params,
+        )
+        return densify_steps(
+            [(int(r["tramo"]), float(r["coste"] or 0.0)) for r in total],
+            [
+                (r["paso"], r["etiqueta"] or "", r["sitio"] or "", r["pista"] or "",
+                 int(r["tramo"]), float(r["coste"] or 0.0))
+                for r in pasos
             ],
             window,
             bucket_minutes,

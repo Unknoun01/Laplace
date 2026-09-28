@@ -42,6 +42,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from .textos import t
+
 logger = logging.getLogger("laplace.cuentas")
 
 #: De menos a más. Cada rol puede todo lo de los anteriores.
@@ -108,9 +110,9 @@ def validar_contrasena(contrasena: str) -> str:
     """Un motivo si no vale, cadena vacía si vale. Longitud, y nada de reglas de
     símbolos: obligan a contraseñas peores, no mejores."""
     if len(contrasena) < MIN_CONTRASENA:
-        return f"la contraseña tiene que tener al menos {MIN_CONTRASENA} caracteres"
+        return t("error.contrasena_corta", n=MIN_CONTRASENA)
     if len(contrasena) > 256:
-        return "la contraseña es demasiado larga"
+        return t("error.contrasena_larga")
     return ""
 
 

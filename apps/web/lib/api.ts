@@ -1,4 +1,5 @@
 import { idiomaActual } from "./idioma";
+import { t } from "./textos";
 import type {
   Annotation,
   AnnotationVerdict,
@@ -103,12 +104,39 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    /** El caso, cuando el backend lo dice: el mensaje viene traducido (D-149). */
+    readonly code: string = "",
   ) {
     super(message);
   }
 }
 
 type Params = Record<string, string | number | undefined>;
+
+/**
+ * El error del backend con la frase que lo explica, ya en el idioma de la pantalla: el backend
+ * la redacta en el de `Accept-Language` (D-149). Es la que hay que leer para arreglarlo
+ * —«esta clave no tiene acceso a ese proyecto», «ese filtro no selecciona ninguna
+ * traza»—, y tragarla dejaría un «500» pelado. La validación de FastAPI (422) no trae
+ * frase sino una lista de campos, y `String()` de eso era «[object Object]».
+ */
+async function errorDe(response: Response, path: string): Promise<ApiError> {
+  const error = (mensaje: string, codigo = "") => new ApiError(mensaje, response.status, codigo);
+  try {
+    const cuerpo = await response.json();
+    const detalle = cuerpo?.detail;
+    if (typeof detalle === "string" && detalle) return error(detalle, String(cuerpo?.code ?? ""));
+    if (Array.isArray(detalle) && detalle.length) {
+      const campos = detalle
+        .map((e: { loc?: unknown[] }) => (e?.loc ?? []).filter((x) => x !== "body").join("."))
+        .filter(Boolean);
+      return error(t("api.no_valida", { campos: [...new Set(campos)].join(", ") || "?" }));
+    }
+  } catch {
+    /* la respuesta no era JSON: se queda el mensaje genérico */
+  }
+  return error(t("api.fallo", { estado: response.status, ruta: path }));
+}
 
 /**
  * `senal` cancela la petición (D-131). Las lecturas con las que las pantallas se cargan
@@ -126,16 +154,7 @@ async function get<T>(path: string, params?: Params, senal?: AbortSignal): Promi
 
   const response = await fetch(url, { cache: "no-store", headers: cabeceras(), signal: senal });
   if (!response.ok) {
-    // El detalle del backend explica el 401 y el 403 («esta clave no tiene acceso a ese
-    // proyecto»), que es justo lo que hay que leer para arreglarlo.
-    let detail = `${response.status} en ${path}`;
-    try {
-      const cuerpo = await response.json();
-      if (cuerpo?.detail) detail = String(cuerpo.detail);
-    } catch {
-      /* la respuesta no era JSON */
-    }
-    throw new ApiError(detail, response.status);
+    throw await errorDe(response, path);
   }
   return (await response.json()) as T;
 }
@@ -261,16 +280,7 @@ async function send<T>(path: string, method: string, body?: unknown): Promise<T>
     cache: "no-store",
   });
   if (!response.ok) {
-    // El detalle del backend es el que explica el problema («no hay base de metadatos»,
-    // «ese filtro no selecciona ninguna traza»). Tragarlo dejaría un «500» pelado.
-    let detail = `${response.status} en ${path}`;
-    try {
-      const cuerpo = await response.json();
-      if (cuerpo?.detail) detail = String(cuerpo.detail);
-    } catch {
-      /* la respuesta no era JSON: se queda el mensaje genérico */
-    }
-    throw new ApiError(detail, response.status);
+    throw await errorDe(response, path);
   }
   return (await response.json()) as T;
 }

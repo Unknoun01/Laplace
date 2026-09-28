@@ -34,6 +34,7 @@ from .prompts import (
 )
 from .storage.base import Window
 from .storage.metadata import MetadataUnavailable, new_id
+from .textos import t
 
 logger = logging.getLogger("laplace.api.prompts")
 
@@ -53,7 +54,9 @@ def _guard(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
     except MetadataUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        # Lo que dice («postgres no responde: …») es para quien opera: al log.
+        logger.warning("sin base de metadatos: %s", exc)
+        raise HTTPException(status_code=503, detail=t("error.metadatos")) from exc
 
 
 def _alcance(request: Request) -> str | None:
@@ -99,25 +102,21 @@ async def resolve_prompt(
     if prompt is None:
         raise HTTPException(
             status_code=404,
-            detail=(
-                f"no hay ningún prompt llamado «{name}» en el proyecto «{project_id}». "
-                f"Créalo en la pestaña Prompts o pasa fallback= con el texto del código."
-            ),
+            detail=t("error.prompt_no_hay", nombre=name, proyecto=project_id),
         )
 
     numero = version or prompt.production_version
     if not numero:
         raise HTTPException(
             status_code=409,
-            detail=(
-                f"el prompt «{name}» no tiene ninguna versión en producción. Pon una "
-                f"desde la pestaña Prompts: guardar una versión no la despliega."
-            ),
+            detail=t("error.prompt_sin_produccion", nombre=name),
         )
 
     guardada = await run_in_threadpool(meta.get_prompt_version, prompt.id, numero)
     if guardada is None:
-        raise HTTPException(status_code=404, detail=f"«{name}» no tiene versión {numero}")
+        raise HTTPException(
+            status_code=404, detail=t("error.prompt_sin_version", nombre=name, version=numero)
+        )
     return {
         "prompt_id": prompt.id,
         "name": prompt.name,
@@ -202,7 +201,7 @@ async def get_prompt(
     meta = _meta(request)
     prompt = await run_in_threadpool(meta.get_prompt, prompt_id, _alcance(request))
     if prompt is None:
-        raise HTTPException(status_code=404, detail="ese prompt no existe")
+        raise HTTPException(status_code=404, detail=t("error.prompt_no_existe"))
 
     ventana = _window(days)
     uso, veredictos = await _context(request, project_id, ventana)
@@ -220,7 +219,7 @@ async def prompt_diff(
     vieja = await run_in_threadpool(meta.get_prompt_version, prompt_id, a)
     nueva = await run_in_threadpool(meta.get_prompt_version, prompt_id, b)
     if vieja is None or nueva is None:
-        raise HTTPException(status_code=404, detail="alguna de las dos versiones no existe")
+        raise HTTPException(status_code=404, detail=t("error.versiones_no_existen"))
     return diff_versions(vieja.text, nueva.text)
 
 
@@ -257,10 +256,7 @@ async def create_prompt(request: Request, body: PromptIn) -> PromptCard:
     if any(p.name == body.name for p in existentes):
         raise HTTPException(
             status_code=409,
-            detail=(
-                f"ya hay un prompt llamado «{body.name}» en este proyecto. Añádele una "
-                f"versión en vez de crear otro: el histórico es lo que da las métricas."
-            ),
+            detail=t("error.prompt_ya_existe", nombre=body.name),
         )
 
     prompt = Prompt(
@@ -304,7 +300,7 @@ class VersionIn(BaseModel):
 async def add_version(request: Request, prompt_id: str, body: VersionIn) -> PromptVersion:
     meta = _meta(request)
     if await run_in_threadpool(meta.get_prompt, prompt_id, _alcance(request)) is None:
-        raise HTTPException(status_code=404, detail="ese prompt no existe")
+        raise HTTPException(status_code=404, detail=t("error.prompt_no_existe"))
     version = await run_in_threadpool(
         _guard,
         meta.add_prompt_version,
@@ -343,10 +339,11 @@ async def set_production(request: Request, prompt_id: str, body: DeployIn) -> di
     meta = _meta(request)
     prompt = await run_in_threadpool(meta.get_prompt, prompt_id, _alcance(request))
     if prompt is None:
-        raise HTTPException(status_code=404, detail="ese prompt no existe")
+        raise HTTPException(status_code=404, detail=t("error.prompt_no_existe"))
     if await run_in_threadpool(meta.get_prompt_version, prompt_id, body.version) is None:
         raise HTTPException(
-            status_code=404, detail=f"«{prompt.name}» no tiene versión {body.version}"
+            status_code=404,
+            detail=t("error.prompt_sin_version", nombre=prompt.name, version=body.version),
         )
 
     despliegue = await run_in_threadpool(
@@ -359,11 +356,7 @@ async def set_production(request: Request, prompt_id: str, body: DeployIn) -> di
     )
     return {
         "deploy": despliegue.model_dump(mode="json"),
-        "detail": (
-            f"v{body.version} es la que sirve Laplace a partir de ahora. Los procesos ya "
-            f"arrancados la cogen en cuanto caduque su copia guardada, como mucho un "
-            f"minuto después."
-        ),
+        "detail": t("estado.prompt_desplegado", version=body.version),
     }
 
 
@@ -378,5 +371,5 @@ async def delete_prompt(request: Request, prompt_id: str) -> dict[str, bool]:
         _guard, _meta(request).delete_prompt, prompt_id, _alcance(request)
     )
     if not borrado:
-        raise HTTPException(status_code=404, detail="ese prompt no existe")
+        raise HTTPException(status_code=404, detail=t("error.prompt_no_existe"))
     return {"deleted": True}

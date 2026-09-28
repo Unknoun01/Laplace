@@ -92,7 +92,7 @@ export function Listado({
       </div>
 
       <div className="tbl-scroll">
-        <table className="tbl">
+        <table className="tbl trazas">
           <thead>
             <tr>
               <th>{t("lista.col.traza")}</th>

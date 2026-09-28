@@ -257,3 +257,243 @@ def test_en_ingles_no_queda_interfaz_en_espanol(servidor, navegador, pantalla):
         assert restos == [], (pantalla, restos)
     finally:
         contexto.close()
+
+
+def _traza_de_hace(servidor: str, proyecto: str, dias: float) -> None:
+    """Una traza de `proyecto` fechada hace `dias`, por OTLP/JSON como la mandaría Node."""
+    import json
+
+    fin = time.time_ns() - int(dias * 86_400 * 1e9)
+    span = {
+        "traceId": os.urandom(16).hex(),
+        "spanId": os.urandom(8).hex(),
+        "name": "atender",
+        "kind": 1,
+        "startTimeUnixNano": str(fin - 2_000_000_000),
+        "endTimeUnixNano": str(fin),
+        "status": {"code": 1},
+    }
+    cuerpo = {
+        "resourceSpans": [
+            {
+                "resource": {
+                    "attributes": [{"key": "service.name", "value": {"stringValue": proyecto}}]
+                },
+                "scopeSpans": [{"scope": {"name": "prueba"}, "spans": [span]}],
+            }
+        ]
+    }
+    peticion = urllib.request.Request(
+        servidor + "/v1/traces",
+        data=json.dumps(cuerpo).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(peticion, timeout=10):
+        pass
+
+
+@pytest.mark.parametrize("pantalla", ["/", "/panel/"])
+def test_un_rango_vacio_no_dice_que_no_ha_llegado_nada(servidor, navegador, pantalla):
+    """A1 de la auditoría del rediseño: con trazas de hace tres días y el rango en un
+    día, la pantalla decía «Esperando la primera ejecución» y hacía pensar que la
+    instalación no funcionaba. Ahora dice cuándo llegó la última y ofrece el rango que
+    la incluye, que al pulsarlo la enseña."""
+    _traza_de_hace(servidor, "antiguo", 3)
+    url = f"{servidor}{pantalla}?project=antiguo&days=1"
+    pagina, errores = _abrir(navegador, url, "escritorio")
+    try:
+        pagina.wait_for_function(
+            "() => document.body.innerText.includes('No hay ejecuciones')",
+            timeout=15_000,
+        )
+        texto = pagina.locator("body").inner_text()
+        assert "Esperando la primera ejecución" not in texto
+        assert "La última llegó el" in texto
+        pagina.locator("a", has_text="Ver los últimos 7 días").click()
+        pagina.wait_for_function(
+            "() => !document.body.innerText.includes('No hay ejecuciones')",
+            timeout=15_000,
+        )
+        assert "days=7" in pagina.url and "project=antiguo" in pagina.url
+        assert errores == [], errores
+    finally:
+        pagina.close()
+
+
+def test_una_traza_mas_vieja_que_cualquier_rango_no_ofrece_boton(servidor, navegador):
+    """Si la última es de antes del rango más largo, no hay rango que ofrecer: se dice
+    la fecha y que hace falta tráfico nuevo, sin un botón que no llevaría a nada."""
+    _traza_de_hace(servidor, "vetusto", 90)
+    pagina, errores = _abrir(navegador, servidor + "/?project=vetusto&days=30", "escritorio")
+    try:
+        pagina.wait_for_function(
+            "() => document.body.innerText.includes('No hay ejecuciones')",
+            timeout=15_000,
+        )
+        texto = pagina.locator("body").inner_text()
+        assert "antes de los 30 días" in texto, texto
+        assert pagina.locator("a", has_text="Ver los últimos").count() == 0
+        assert errores == [], errores
+    finally:
+        pagina.close()
+
+
+def test_en_movil_el_coste_de_cada_traza_se_ve_sin_desplazar(servidor, navegador):
+    """A2 de la auditoría: a 375 px la tabla de trazas medía 479 y del coste —la columna
+    por la que se ordena— sólo asomaba el símbolo. Ahora cabe en su marco."""
+    pagina, errores = _abrir(navegador, servidor + "/trazas/?project=demo&days=7", "movil")
+    try:
+        pagina.locator("td.money").first.wait_for(timeout=15_000)
+        medidas = pagina.evaluate(
+            """() => {
+                const marco = document.querySelector('.tbl-scroll');
+                const coste = document.querySelector('td.money').getBoundingClientRect();
+                return {tabla: marco.scrollWidth, marco: marco.clientWidth,
+                        derecha: coste.right, borde: marco.getBoundingClientRect().right};
+            }"""
+        )
+        assert medidas["tabla"] <= medidas["marco"] + 1, medidas
+        assert medidas["derecha"] <= medidas["borde"], medidas
+        assert errores == [], errores
+    finally:
+        pagina.close()
+
+
+@pytest.mark.parametrize(("ancho", "alto"), [(375, 812), (1024, 768), (1440, 900)])
+@pytest.mark.parametrize("lengua", ["es-ES", "fr-FR"])
+def test_las_seis_pestanas_se_ven_enteras(servidor, navegador, ancho, alto, lengua):
+    """B1 y la navegación en móvil: a 1024 px «Ajustes» quedaba bajo el difuminado, y a
+    375 «Prompts» y «Ajustes» detrás del borde de una barra desplazable. Cada pestaña
+    tiene que caber entera dentro de la barra, sin desplazarla."""
+    pagina = navegador.new_page(viewport={"width": ancho, "height": alto}, locale=lengua)
+    try:
+        pagina.goto(servidor + "/?project=demo&days=7", wait_until="networkidle")
+        pagina.locator("nav.nav a").first.wait_for(timeout=15_000)
+        fuera = pagina.evaluate(
+            """() => {
+                const nav = document.querySelector('nav.nav');
+                const caja = nav.getBoundingClientRect();
+                return [...nav.querySelectorAll('a')]
+                    .filter(a => {
+                        const r = a.getBoundingClientRect();
+                        return r.left < caja.left - 1 || r.right > caja.right + 1
+                            || a.scrollWidth > a.clientWidth + 1;
+                    })
+                    .map(a => a.innerText);
+            }"""
+        )
+        assert fuera == [], f"pestañas que no se ven enteras a {ancho} px: {fuera}"
+        assert pagina.locator("nav.nav").get_attribute("data-desborda") in ("", None)
+    finally:
+        pagina.close()
+
+
+@pytest.mark.parametrize("ruta", ["/?project=demo&days=7", "/panel/?project=demo&days=7"])
+def test_a_1440_el_contenido_no_deja_un_tercio_vacio(servidor, navegador, ruta):
+    """A 1440 px el contenido acababa en 980 (Panel) o 1200 (Diagnóstico) con la
+    cabecera hasta 1420: un tercio de pantalla vacío a la derecha. Ahora el contenido
+    llega hasta donde llega la cabecera."""
+    pagina, errores = _abrir(navegador, servidor + ruta, "escritorio")
+    try:
+        pagina.locator("main").wait_for(timeout=15_000)
+        pagina.wait_for_timeout(500)
+        medidas = pagina.evaluate(
+            """() => ({main: document.querySelector('main').getBoundingClientRect().toJSON(),
+                      barra: document.querySelector('.topbar').getBoundingClientRect().toJSON()})"""
+        )
+        assert abs(medidas["main"]["left"] - medidas["barra"]["left"]) <= 1, medidas
+        assert medidas["barra"]["right"] - medidas["main"]["right"] <= 2, medidas
+        assert errores == [], errores
+    finally:
+        pagina.close()
+
+
+def test_el_heroe_dice_lo_que_puedes_dejar_de_pagar(servidor, navegador):
+    """Menos texto (D-151): la cifra grande es lo que se puede dejar de pagar, y las
+    salvedades van plegadas en un distintivo de confianza que se abre con un clic."""
+    pagina, errores = _abrir(navegador, servidor + "/?project=demo&days=7", "escritorio")
+    try:
+        pagina.locator(".big.save").wait_for(timeout=15_000)
+        heroe = pagina.locator("section.hero")
+        assert "Puedes dejar de pagar hasta" in heroe.inner_text()
+        # Plegado: la línea de la proyección no se ve hasta abrir el distintivo.
+        distintivo = pagina.locator("details.confianza")
+        assert "Confianza" in distintivo.locator(":scope > summary").inner_text()
+        assert not pagina.get_by_text("Proyección desde").first.is_visible()
+        distintivo.locator(":scope > summary").click()
+        assert pagina.get_by_text("Proyección desde").first.is_visible()
+        assert errores == [], errores
+    finally:
+        pagina.close()
+
+
+def test_la_ficha_pliega_el_porque(servidor, navegador):
+    """Una frase arriba y el «¿Por qué pasa?» plegado: se lee qué pasa y cómo arreglarlo
+    sin tres párrafos en medio."""
+    pagina, errores = _abrir(navegador, servidor + "/?project=demo&days=7", "escritorio")
+    try:
+        enlace = pagina.locator("a[href*='/problema']").first
+        enlace.wait_for(timeout=15_000)
+        enlace.click()
+        porque = pagina.locator("details.porque-bloque")
+        porque.wait_for(timeout=15_000)
+        assert porque.get_attribute("open") is None
+        assert "¿Por qué pasa?" in porque.locator("summary").inner_text()
+        assert errores == [], errores
+    finally:
+        pagina.close()
+
+
+def test_el_diagnostico_ensena_donde_se_va_el_dinero(servidor, navegador):
+    """D-152: gasto por día con la franja evitable, y coste por paso sin dos filas con
+    el mismo nombre (en la demo salían tres «responder»)."""
+    pagina, errores = _abrir(navegador, servidor + "/?project=demo&days=7", "escritorio")
+    try:
+        graficos = pagina.locator("section.graficos")
+        graficos.wait_for(timeout=15_000)
+        assert graficos.locator("rect.evitable").count() > 0
+        nombres = graficos.locator(".pasos-coste .nombre").all_inner_texts()
+        assert nombres and len(nombres) == len(set(nombres)), nombres
+        assert errores == [], errores
+    finally:
+        pagina.close()
+
+
+def test_el_css_tambien_habla_el_idioma_elegido(servidor, navegador):
+    """El «¿por qué?» de un aviso plegado lo pinta el CSS; en inglés dice «why?»."""
+    pagina = navegador.new_page(viewport={"width": 1440, "height": 900}, locale="en-US")
+    try:
+        pagina.goto(servidor + "/?project=demo&days=7", wait_until="networkidle")
+        pagina.locator("details.confianza").wait_for(timeout=15_000)
+        sufijo = pagina.evaluate(
+            """() => getComputedStyle(
+                document.querySelector('details.porque:not(.pregunta) > summary'), '::after'
+            ).content"""
+        )
+        assert "why" in sufijo and "qué" not in sufijo, sufijo
+    finally:
+        pagina.close()
+
+
+def test_la_traza_ensena_el_grafo_del_agente(servidor, navegador):
+    """D-153: una caja por paso y una flecha por llamada, con cuántas veces. En la demo
+    las trazas con bucle llaman a «consultar_manual» varias veces desde el mismo paso."""
+    base = servidor + "/trazas/?project=demo&days=30&sort=cost"
+    pagina, errores = _abrir(navegador, base, "escritorio")
+    try:
+        fila = pagina.locator("a[href*='/traza?'], a[href*='/traza/?']").first
+        fila.wait_for(timeout=15_000)
+        fila.click()
+        grafo = pagina.locator("section.grafo-agente")
+        grafo.wait_for(timeout=15_000)
+        assert grafo.locator("g.nodo").count() >= 2
+        assert grafo.locator("g.arista").count() >= 1
+        # Una traza de la demo con bucle: «×n» en alguna flecha.
+        pagina.goto(servidor + "/trazas/?project=demo&days=30&sort=cost&q=consultar_manual",
+                    wait_until="networkidle")
+        pagina.locator("a[href*='/traza?'], a[href*='/traza/?']").first.click()
+        pagina.locator("section.grafo-agente").wait_for(timeout=15_000)
+        assert pagina.locator("section.grafo-agente g.arista.varias").count() >= 1
+        assert errores == [], errores
+    finally:
+        pagina.close()

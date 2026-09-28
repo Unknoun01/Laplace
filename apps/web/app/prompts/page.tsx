@@ -44,6 +44,7 @@ function Contenido() {
     "cargando" | "listo" | "sin-proyecto" | "caido" | "sin-clave" | "sin-permiso"
   >("cargando");
   const [error, setError] = useState("");
+  const [codigo, setCodigo] = useState("");
   const [vista, setVista] = useState<PromptsView | null>(null);
 
   const recargar = useCallback(
@@ -65,6 +66,7 @@ function Contenido() {
       } catch (e) {
         if (!vigente) return;
         setError(e instanceof Error ? e.message : "");
+        setCodigo(e instanceof ApiError ? e.code : "");
         // Igual que en el resto de pantallas: «te falta la clave» y «esa clave no es de
         // este proyecto» no son fallos del backend y tienen salida propia.
         const estado = e instanceof ApiError ? e.status : 0;
@@ -78,7 +80,7 @@ function Contenido() {
 
   if (fase === "cargando") return <Cargando />;
   if (fase === "caido") return <BackendDown mensaje={error} />;
-  if (fase === "sin-clave") return <NeedsKey mensaje={error} />;
+  if (fase === "sin-clave") return <NeedsKey mensaje={error} codigo={codigo} />;
   if (fase === "sin-permiso") return <NotYours mensaje={error} />;
   if (fase === "sin-proyecto") return <NoProject />;
   if (!vista) return <Cargando />;

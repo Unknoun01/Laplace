@@ -130,19 +130,19 @@ export function Señales({ cobertura }: { cobertura: Coverage }) {
  * el gasto, o cuando la proyección sale de unas horas de datos, se dice aquí mismo en
  * lugar de presentarlo como una promesa.
  */
-export function Caveats({
-  overview,
-  ventana,
-  casiTodo,
-}: {
-  overview: Overview;
-  ventana: string;
-  casiTodo: boolean;
-}) {
+type Aviso = { linea: React.ReactNode; porque: React.ReactNode; peso: "baja" | "media" | "nota" };
+
+/**
+ * Las salvedades de la cifra del héroe, como datos. Cada una tiene una línea, su
+ * porqué y cuánto pesa en la confianza: «baja» si falta dinero por contar, «media» si
+ * lo contado puede quedarse corto o es desproporcionado, «nota» si sólo explica de
+ * dónde sale (una proyección no es una duda: es cómo se calcula).
+ */
+function avisosDe(overview: Overview, ventana: string, casiTodo: boolean): Aviso[] {
   // Cada aviso es una línea que se lee siempre y un porqué que se despliega. Antes
   // eran párrafos enteros, y en un móvil la primera pantalla no enseñaba ni un solo
   // problema: el rigor tapaba lo que el rigor protege (D-124).
-  const avisos: { linea: React.ReactNode; porque: React.ReactNode }[] = [];
+  const avisos: Aviso[] = [];
 
   if (overview.unknown_cost_spans > 0) {
     avisos.push({
@@ -158,6 +158,7 @@ export function Caveats({
       porque: (
 <>{t("avisos.incompleto.porque")}</>
       ),
+      peso: "baja",
     });
   }
   if (overview.assumed_rate_spans > 0) {
@@ -173,6 +174,7 @@ export function Caveats({
       porque: (
 <>{t("avisos.suelo.porque")}</>
       ),
+      peso: "media",
     });
   }
   if (overview.projected) {
@@ -183,6 +185,7 @@ export function Caveats({
       porque: (
 <>{t("avisos.proyeccion.porque")}</>
       ),
+      peso: "nota",
     });
   } else {
     avisos.push({
@@ -197,6 +200,7 @@ export function Caveats({
       porque: (
 <>{t("avisos.sin_proyectar.porque", { ventana })}</>
       ),
+      peso: "nota",
     });
   }
   // Cuando el evitable es casi todo, esto ya lo dice el bloque de arriba. Decirlo dos
@@ -213,19 +217,57 @@ export function Caveats({
       porque: (
 <>{t("avisos.mucho.porque")}</>
       ),
+      peso: "media",
     });
   }
+  return avisos;
+}
 
-  if (avisos.length === 0) return null;
+/**
+ * Las salvedades como un distintivo de confianza y no como un párrafo (D-151).
+ *
+ * Una línea por salvedad debajo de la cifra seguían siendo tres o cuatro líneas entre
+ * el dinero y la lista de problemas. El distintivo dice de un vistazo cuánto fiarse
+ * —alta, media, baja— y se despliega para dar las salvedades enteras, cada una con su
+ * porqué: nada se esconde, sólo se pliega. El nivel lo pone la peor salvedad, y la
+ * cobertura mala (que ya va en su bloque, arriba) también lo baja.
+ */
+export function Confianza({
+  overview,
+  ventana,
+  casiTodo,
+  coberturaMala,
+}: {
+  overview: Overview;
+  ventana: string;
+  casiTodo: boolean;
+  coberturaMala: boolean;
+}) {
+  const avisos = avisosDe(overview, ventana, casiTodo);
+  const nivel =
+    coberturaMala || avisos.some((a) => a.peso === "baja")
+      ? "baja"
+      : avisos.some((a) => a.peso === "media")
+        ? "media"
+        : "alta";
   return (
-    <div className="caveats compactos">
-      {avisos.map((aviso, index) => (
-        <details key={index} className="porque">
-          <summary>{aviso.linea}</summary>
-          <p>{aviso.porque}</p>
-        </details>
-      ))}
-    </div>
+    <details className={`confianza ${nivel}`}>
+      <summary>
+        <i className="punto" aria-hidden /> {t(`conf.${nivel}`)}
+        {avisos.length > 0 && (
+          <span className="cuantas"> · {tn("conf.notas", avisos.length, { n: avisos.length })}</span>
+        )}
+      </summary>
+      <div className="confianza-cuerpo">
+        <p className="confianza-nivel">{t(`conf.${nivel}.texto`)}</p>
+        {avisos.map((aviso, index) => (
+          <details key={index} className="porque">
+            <summary>{aviso.linea}</summary>
+            <p>{aviso.porque}</p>
+          </details>
+        ))}
+      </div>
+    </details>
   );
 }
 

@@ -42,6 +42,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from .textos import t
+
 logger = logging.getLogger("laplace.auth")
 
 #: Prefijo visible de las claves. Sirve para reconocerlas en un log o en un `.env` y
@@ -85,10 +87,12 @@ ALL_PROJECTS = "*"
 class AuthError(Exception):
     """Credencial ausente, inválida o insuficiente."""
 
-    def __init__(self, status: int, detail: str) -> None:
+    def __init__(self, status: int, detail: str, code: str = "") -> None:
         super().__init__(detail)
         self.status = status
         self.detail = detail
+        # El `detail` se traduce (D-149); quien necesite distinguir un caso lee `code`.
+        self.code = code
 
 
 @dataclass
@@ -133,7 +137,7 @@ class Identity:
         proyectos de los demás.
         """
         if not self.allows(project_id):
-            raise AuthError(403, "esta clave no tiene acceso a ese proyecto")
+            raise AuthError(403, t("error.clave_sin_acceso"))
 
     def scope(self, project_id: str | None) -> str | None:
         """El proyecto que hay que consultar de verdad.
@@ -151,9 +155,7 @@ class Identity:
             # Una persona de una organización con varios proyectos (D-127). Antes se
             # escogía el primero por orden alfabético, en silencio: la misma petición
             # contestaba con datos de un proyecto u otro según cómo se llamaran (D-131).
-            raise AuthError(
-                400, "tienes acceso a varios proyectos: di cuál con ?project_id="
-            )
+            raise AuthError(400, t("error.varios_proyectos"))
         return next(iter(self.projects), None)
 
     def visible(self, project_ids: list[str]) -> list[str]:
@@ -212,15 +214,15 @@ def resolve(metadata: Any, key: str) -> Identity:
         fila = metadata.api_key_by_hash(hash_key(key))
     except Exception as exc:  # noqa: BLE001
         logger.exception("no se pudo verificar la clave")
-        raise AuthError(503, "no se puede verificar la credencial ahora mismo") from exc
+        raise AuthError(503, t("error.credencial_no_verificable")) from exc
 
     if fila is None:
-        raise AuthError(401, "credencial inválida")
+        raise AuthError(401, t("error.credencial_invalida"), code="credencial_invalida")
     if fila.get("revoked_at"):
-        raise AuthError(401, "esa clave está revocada")
+        raise AuthError(401, t("error.clave_revocada"))
     caduca = fila.get("expires_at")
     if caduca and str(caduca) <= datetime.now(timezone.utc).isoformat():
-        raise AuthError(401, "esa clave ha caducado: crea otra en la pantalla de la organización")
+        raise AuthError(401, t("error.clave_caducada"))
     return Identity(
         key_id=fila["id"],
         name=fila.get("name") or fila["id"],
@@ -302,9 +304,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
             # 401 lleva `WWW-Authenticate` porque es lo que dice el estándar y lo que
             # hace que un cliente sepa que le falta credencial y no que se ha roto algo.
             cabeceras = {"WWW-Authenticate": "Bearer"} if exc.status == 401 else {}
-            return JSONResponse(
-                status_code=exc.status, content={"detail": exc.detail}, headers=cabeceras
-            )
+            contenido = {"detail": exc.detail, **({"code": exc.code} if exc.code else {})}
+            return JSONResponse(status_code=exc.status, content=contenido, headers=cabeceras)
 
         request.state.identity = identidad
         return await call_next(request)
@@ -331,11 +332,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             identidad.by_cookie = True
             await self._apuntar_uso(identidad.key_id)
             return identidad
-        raise AuthError(
-            401,
-            "inicia sesión, o manda una clave de API en la cabecera "
-            "«Authorization: Bearer lp_…»",
-        )
+        raise AuthError(401, t("error.sin_credencial"))
 
     async def _apuntar_uso(self, key_id: str) -> None:
         import time
@@ -379,7 +376,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if not (identidad.by_cookie or siempre):
             return
         if not request.headers.get("x-laplace"):
-            raise AuthError(403, "falta la cabecera X-Laplace en una escritura con sesión")
+            raise AuthError(403, t("error.falta_x_laplace"))
 
     async def _check_role(self, request: Request, identidad: Identity) -> None:
         """Lo que puede escribir una persona depende de su rol en ese proyecto.
@@ -408,11 +405,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             # persona con ese rol o la clave de instalación (y el modo local, que es
             # abierto a propósito, la tiene).
             if es_de_admin and not identidad.sees_everything:
-                raise AuthError(
-                    403,
-                    "esto lo hace una persona con rol de admin desde la interfaz, no una "
-                    "clave de API de proyecto",
-                )
+                raise AuthError(403, t("error.solo_admin_persona"))
             return
         from .cuentas import rol_suficiente
 
@@ -427,14 +420,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if identidad.sees_everything:
             return
         if not proyecto:
-            raise AuthError(400, "esta escritura tiene que decir sobre qué proyecto es")
+            raise AuthError(400, t("error.escritura_sin_proyecto"))
         rol = identidad.roles.get(proyecto)
         necesita = "admin" if es_de_admin else "miembro"
         if not rol_suficiente(rol, necesita):
-            raise AuthError(
-                403,
-                f"tu rol en este proyecto no permite esto: hace falta ser {necesita}",
-            )
+            raise AuthError(403, t(f"error.rol_proyecto.{necesita}"))
 
     async def _check_scope(self, request: Request, identidad: Identity) -> None:
         if identidad.sees_everything:
@@ -474,7 +464,7 @@ def identity_from_session(cuentas: Any, request: Request) -> Identity | None:
         roles = {} if usuario.is_admin else cuentas.roles_por_proyecto(usuario.id)
     except Exception as exc:  # noqa: BLE001
         logger.exception("no se pudo verificar la sesión")
-        raise AuthError(503, "no se puede verificar la sesión ahora mismo") from exc
+        raise AuthError(503, t("error.sesion_no_verificable")) from exc
     return Identity(
         name=usuario.email,
         user_id=usuario.id,

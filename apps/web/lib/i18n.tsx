@@ -34,6 +34,17 @@ const Contexto = createContext<{ idioma: Idioma; cambiar: (idioma: Idioma) => vo
  * volver a montar es la forma de que ninguna pantalla se quede con cifras o frases del
  * idioma anterior.
  */
+/**
+ * Los textos que pinta el CSS con `content:` —el «¿por qué?» de un aviso plegado, la
+ * marca «avanzado»— no pasan por React, y estaban escritos en español en la hoja de
+ * estilos: salían en español en los cinco idiomas. Van como variables en `<html>`.
+ */
+function textosDelCss(): void {
+  const raiz = document.documentElement.style;
+  raiz.setProperty("--txt-porque", JSON.stringify(` ${t("css.porque")}`));
+  raiz.setProperty("--txt-avanzado", JSON.stringify(t("css.avanzado")));
+}
+
 export function ProveedorIdioma({ children }: { children: ReactNode }) {
   const [idioma, setIdioma] = useState<Idioma>("es");
 
@@ -41,6 +52,7 @@ export function ProveedorIdioma({ children }: { children: ReactNode }) {
     const elegido = detectar();
     fijarIdioma(elegido);
     document.documentElement.lang = ETIQUETAS[elegido];
+    textosDelCss();
     setIdioma(elegido);
   }, []);
 
@@ -56,6 +68,7 @@ export function ProveedorIdioma({ children }: { children: ReactNode }) {
     recordar(nuevo);
     fijarIdioma(nuevo);
     document.documentElement.lang = ETIQUETAS[nuevo];
+    textosDelCss();
     setIdioma(nuevo);
   };
 

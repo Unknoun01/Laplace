@@ -24,6 +24,7 @@ from .config import Settings, get_settings
 from .idioma import MiddlewareIdioma
 from .limites import CabecerasSeguridad, LimiteCuerpo
 from .storage.base import SpanStore
+from .textos import t
 
 logger = logging.getLogger("laplace")
 
@@ -490,11 +491,7 @@ def interfaz(ruta: str) -> Response:
         return JSONResponse(
             status_code=501,
             content={
-                "detail": (
-                    "La API está en pie pero no encuentro la interfaz. Constrúyela con "
-                    "`LAPLACE_EXPORT=1 npm run build` en apps/web, o instala una versión "
-                    "publicada de laplace-trace[ui]."
-                )
+                "detail": t("error.sin_interfaz")
             },
         )
 

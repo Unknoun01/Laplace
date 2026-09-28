@@ -213,9 +213,11 @@ body {
   margin: 0 auto;
   padding: 0 20px 80px;
 }
-/* El explorador y el árbol necesitan más ancho que el texto. */
+/* El explorador y el árbol necesitan más ancho que el texto. Con 1280 y centrada, la
+   cabecera y el contenido comparten bordes: a 1440 px el margen es igual a los dos
+   lados en vez de un tercio de pantalla vacío a la derecha (D-150). */
 .shell.wide {
-  max-width: 1440px;
+  max-width: 1280px;
 }
 /* Las pantallas de lectura vuelven a la medida cómoda del mock. */
 .reading {
@@ -286,10 +288,26 @@ body[data-mode="pro"] .simple-only {
 }
 /* Si no caben, se nota: el borde derecho se difumina en vez de cortar una pestaña
    por la mitad sin avisar. Con sitio de sobra, el difuminado cae en hueco vacío. */
-.nav {
+/* Sólo hacia el lado por el que queda algo: `TopBar` mide y pone `data-desborda`. Antes
+   el difuminado era fijo y, al llegar al final del desplazamiento, la última pestaña
+   seguía difuminada (B1). */
+.nav[data-desborda="derecha"] {
   -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
   mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
-  padding-right: 24px;
+}
+.nav[data-desborda="izquierda"] {
+  -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
+}
+.nav[data-desborda="ambos"] {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 28px,
+    #000 calc(100% - 28px),
+    transparent
+  );
+  mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
 }
 .nav::-webkit-scrollbar {
   display: none;
@@ -602,6 +620,24 @@ body[data-mode="pro"] .simple-only {
   font-weight: 500;
 }
 
+/* Hasta 1100 px las pestañas no caben en la misma fila que el contexto (a 1024 px
+   «Ajustes» quedaba bajo el difuminado, B1): la barra pasa a dos filas, arriba el
+   contexto —logo, proyecto, rango, idioma, interruptor— y debajo las pestañas a lo
+   ancho. */
+@media (max-width: 1100px) {
+  .topbar {
+    height: auto;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 0;
+  }
+  .nav {
+    order: 3;
+    width: 100%;
+    flex-basis: 100%;
+  }
+}
+
 /* ---------- secciones y tarjetas ---------- */
 .sec {
   padding: 32px 0 0;
@@ -827,7 +863,7 @@ body[data-mode="pro"] .simple-only {
   font-weight: 500;
 }
 .block.pro h2::after {
-  content: "avanzado";
+  content: var(--txt-avanzado, "avanzado");
   margin-left: 9px;
   font-family: var(--mono);
   font-size: var(--fs-2xs);
@@ -1571,20 +1607,6 @@ code {
   .kv dt {
     flex: 0 0 120px;
   }
-  /* La barra pasa a dos filas en vez de desbordarse en horizontal. */
-  .topbar {
-    height: auto;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 8px 0;
-  }
-  /* Arriba el contexto —logo, proyecto, rango, interruptor—; debajo, las pestañas
-     a lo ancho, desplazables. */
-  .nav {
-    order: 3;
-    width: 100%;
-    flex-basis: 100%;
-  }
   .mark {
     font-size: 0;
     gap: 0;
@@ -1608,9 +1630,21 @@ code {
   .switch {
     padding: 5px 8px;
   }
+  /* Las seis pestañas a la vista, en dos filas de tres: desplazables escondían
+     «Prompts» y «Ajustes» detrás del borde, y nadie desplaza una barra que no parece
+     desplazable. */
+  .nav {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 2px;
+    overflow: visible;
+  }
   .nav a,
   .nav span {
-    padding: 5px 7px;
+    padding: 6px 4px;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   /* Los destinos de fases futuras no compiten por sitio en una pantalla pequeña. */
   .nav span.soon {
@@ -1619,6 +1653,14 @@ code {
   /* En móvil manda el dinero, el estado y el nombre. */
   .tbl .hide-sm {
     display: none;
+  }
+  /* La pregunta va en una línea con puntos suspensivos, y en una celda de tabla eso
+     fija el ancho mínimo de la columna: la tabla medía 479 px en 375 y el coste, que es
+     por lo que se ordena, quedaba fuera (A2). Con ancho máximo cero la columna de la
+     traza se queda con lo que sobre y es ella la que recorta. */
+  .tbl.trazas td:first-child {
+    width: 100%;
+    max-width: 0;
   }
 }
 
@@ -2640,14 +2682,15 @@ details.porque > summary::-webkit-details-marker {
   display: none;
 }
 details.porque > summary::after {
-  content: " ¿por qué?";
+  content: var(--txt-porque, " ¿por qué?");
   color: var(--ink-3);
   font-size: var(--fs-sm);
 }
 details.porque[open] > summary::after {
   content: "";
 }
-.casitodo details.porque > summary::after {
+.casitodo details.porque > summary::after,
+details.porque.pregunta > summary::after {
   content: "";
 }
 .casitodo details.porque > summary {
@@ -2981,7 +3024,6 @@ fieldset.sin-marco:disabled {
    En estrecho el carril cae entre el héroe y la lista, que es donde estaba.
    --------------------------------------------------------------------------- */
 .diag {
-  max-width: 1180px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 300px;
   grid-template-areas:
@@ -3296,4 +3338,294 @@ body {
   width: min(300px, 40%);
   height: 260px;
   background: color-mix(in srgb, var(--glow-color), var(--accent-3) 12%);
+}
+
+/* ---------------------------------------------------------------------------
+   Pantallas anchas (D-150). A 1440 px las pantallas de lectura dejaban un tercio vacío
+   a la derecha. Las que tienen algo que poner al lado lo ponen: el Panel, los picos
+   junto a las métricas; la ficha de un problema, lo que se hace con él junto a lo que
+   se lee. Las de formularios (Ajustes, Evaluaciones) se quedan en la medida cómoda.
+   --------------------------------------------------------------------------- */
+@media (min-width: 1200px) {
+  main.panel {
+    max-width: none;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 380px;
+    grid-template-areas:
+      "hero  picos"
+      "quien quien";
+    column-gap: var(--sp-10);
+    align-items: start;
+  }
+  main.panel > .hero {
+    grid-area: hero;
+  }
+  main.panel > .picos {
+    grid-area: picos;
+    position: sticky;
+    top: 70px;
+  }
+  main.panel > .quien {
+    grid-area: quien;
+  }
+
+  main.problema {
+    max-width: none;
+  }
+  main.problema .d-head h1 {
+    max-width: 40ch;
+  }
+  .prob-cols {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 360px;
+    column-gap: var(--sp-10);
+    align-items: start;
+  }
+  .prob-cuerpo p,
+  .prob-cuerpo ol {
+    max-width: 75ch;
+  }
+  .prob-rail {
+    position: sticky;
+    top: 70px;
+    padding-top: var(--sp-6);
+  }
+  .prob-rail .actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Menos texto (D-151): el héroe dice lo que se puede dejar de pagar, y las salvedades
+   van en un distintivo de confianza que se despliega.
+   --------------------------------------------------------------------------- */
+.big.save {
+  color: var(--amber);
+}
+.hero-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+}
+.puedes-lead {
+  margin: var(--sp-5) 0 var(--sp-3);
+  color: var(--ink-2);
+  font-size: var(--fs-lg);
+  font-weight: 500;
+}
+.puedes .hero-sub {
+  margin: var(--sp-3) 0 0;
+}
+details.confianza {
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+  max-width: 100%;
+}
+details.confianza > summary {
+  cursor: pointer;
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 11px;
+  border: 1px solid var(--hair);
+  border-radius: var(--r-pill);
+  white-space: nowrap;
+}
+details.confianza > summary::-webkit-details-marker {
+  display: none;
+}
+details.confianza > summary:hover {
+  border-color: var(--hair-strong);
+  color: var(--ink);
+}
+details.confianza .punto {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--teal);
+}
+details.confianza.media .punto {
+  background: var(--amber);
+}
+details.confianza.baja .punto {
+  background: var(--rose);
+}
+details.confianza .cuantas {
+  color: var(--ink-3);
+}
+.confianza-cuerpo {
+  margin-top: var(--sp-3);
+  padding-left: 14px;
+  border-left: 2px solid var(--hair);
+  display: grid;
+  gap: 4px;
+  max-width: 60ch;
+}
+.confianza-cuerpo .confianza-nivel {
+  margin: 0 0 4px;
+  color: var(--ink-2);
+}
+details.porque-bloque > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* ---------------------------------------------------------------------------
+   Dónde se va el dinero (D-152). Los mismos dos colores que la barra del héroe: gris
+   el trabajo real, ámbar lo evitable.
+   --------------------------------------------------------------------------- */
+.chart .legend i.real,
+.pasos-coste i.real {
+  background: var(--hair-strong);
+}
+.chart .legend i.evitable,
+.pasos-coste i.evitable {
+  background: var(--amber);
+}
+.graficos .chart rect.real {
+  fill: var(--hair-strong);
+}
+.graficos .chart rect.evitable {
+  fill: var(--amber);
+}
+.graficos .chart details.porque {
+  margin-top: var(--sp-2);
+  font-size: var(--fs-sm);
+}
+.pasos-coste h3 {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  margin: var(--sp-6) 0 var(--sp-3);
+}
+.pasos-coste ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.pasos-coste li {
+  display: grid;
+  grid-template-columns: minmax(0, 14rem) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: var(--fs-sm);
+}
+.pasos-coste li.otros .nombre {
+  color: var(--ink-3);
+}
+.pasos-coste .nombre {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pasos-coste .barra {
+  height: 10px;
+}
+.pasos-coste .barra i {
+  display: block;
+  height: 100%;
+  border-radius: var(--r-pill);
+  overflow: hidden;
+}
+.pasos-coste .barra i.real {
+  display: flex;
+  justify-content: flex-end;
+}
+.pasos-coste .cifra {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+.pasos-coste .cifra small {
+  display: block;
+  color: var(--amber);
+  font-family: var(--sans);
+  font-size: var(--fs-xs);
+}
+@media (max-width: 700px) {
+  .pasos-coste li {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .pasos-coste .barra {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   El grafo del agente (D-153). Cajas del cristal de siempre; el color sólo dice algo:
+   ámbar, un paso con un problema del Diagnóstico; rosa, un paso que falló.
+   --------------------------------------------------------------------------- */
+.grafo-agente {
+  margin: var(--sp-8) 0 var(--sp-6);
+}
+.grafo-agente h2 {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+.grafo-agente .lead {
+  margin: 0 0 var(--sp-4);
+  color: var(--ink-3);
+  font-size: var(--fs-md);
+}
+.grafo-marco {
+  overflow-x: auto;
+  border: 1px solid var(--hair-soft);
+  border-radius: var(--r);
+  background: var(--panel);
+  padding: 4px;
+}
+.grafo-marco svg {
+  display: block;
+}
+.grafo-agente .nodo rect {
+  fill: var(--glass);
+  stroke: var(--hair-strong);
+  stroke-width: 1;
+}
+.grafo-agente .nodo.llm rect {
+  stroke: var(--iris);
+}
+.grafo-agente .nodo.problema rect {
+  stroke: var(--amber);
+  stroke-width: 2;
+}
+.grafo-agente .nodo.error rect {
+  stroke: var(--rose);
+  stroke-width: 2;
+}
+.grafo-agente .nodo text.nombre {
+  fill: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+}
+.grafo-agente .nodo text.meta {
+  fill: var(--ink-3);
+  font-size: 11px;
+  font-family: var(--mono);
+}
+.grafo-agente .arista path {
+  fill: none;
+  stroke: var(--ink-4);
+  stroke-width: 1.3;
+}
+.grafo-agente .arista.varias path {
+  stroke: var(--amber);
+  stroke-width: 1.8;
+}
+.grafo-agente .arista text {
+  fill: var(--amber);
+  font-size: 11px;
+  font-family: var(--mono);
+}
+.grafo-agente .punta {
+  fill: var(--ink-4);
 }

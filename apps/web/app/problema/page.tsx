@@ -40,7 +40,7 @@ function Contenido() {
 
   if (estado.fase === "cargando") return <TableSkeleton />;
   if (estado.fase === "sin-backend") return <BackendDown />;
-  if (estado.fase === "sin-clave") return <NeedsKey mensaje={estado.error.message} />;
+  if (estado.fase === "sin-clave") return <NeedsKey mensaje={estado.error.message} codigo={estado.error.code} />;
   if (estado.fase === "sin-permiso") return <NotYours mensaje={estado.error.message} />;
   if (estado.fase === "error") return <BackendDown mensaje={estado.error.message} />;
 
@@ -60,7 +60,7 @@ function Contenido() {
   const flaggedHash = finding.tech.find((t) => t.label === "laplace.dedup_hash")?.value;
 
   return (
-    <main className="reading">
+    <main className="reading problema">
       <Link href={`/${query}`} className="back">
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden>
           <path
@@ -76,18 +76,22 @@ function Contenido() {
 
       <Head finding={finding} />
 
+      <div className="prob-cols">
+      <div className="prob-cuerpo">
       <section className="block">
         <h2>{t("prob.que_pasa")}</h2>
         <p>{finding.what_happens}</p>
         {finding.evidence.length > 0 && <Repetitions spans={finding.evidence} bucle={finding.kind === "bucle"} />}
       </section>
 
-      <section className="block">
-        <h2>{t("prob.por_que")}</h2>
+      {/* Una frase arriba (qué pasa) y el porqué plegado (D-151): son tres párrafos
+          entre lo que pasa y cómo arreglarlo, y quien quiere arreglarlo ya lo sabe. */}
+      <details className="block porque-bloque">
+        <summary>{t("prob.por_que.plegado")}</summary>
         {finding.why.split("\n\n").map((paragraph, index) => (
           <p key={index}>{paragraph}</p>
         ))}
-      </section>
+      </details>
 
       <section className="block pro">
         <h2>{t("prob.deteccion")}</h2>
@@ -189,14 +193,22 @@ function Contenido() {
             )}
           </p>
         )}
-        {finding.savings_calculation && (
-          <p className="pro">
-            <span style={{ color: "var(--ink-3)" }}>{t("prob.calculo")} </span>
-            {finding.savings_calculation}
-          </p>
-        )}
-        <p className="disclaimer">{finding.savings_note}</p>
+        <details className="porque pregunta">
+          <summary>{t("prob.ahorro.como")}</summary>
+          {finding.savings_calculation && (
+            <p className="pro">
+              <span style={{ color: "var(--ink-3)" }}>{t("prob.calculo")} </span>
+              {finding.savings_calculation}
+            </p>
+          )}
+          <p className="disclaimer">{finding.savings_note}</p>
+        </details>
       </section>
+      </div>
+
+      {/* Lo que se hace con el problema, al lado de lo que se lee (D-150). En estrecho
+          cae debajo, donde estaba. */}
+      <aside className="prob-rail">
 
       {/* Marcar, ignorar y crear conjuntos es escribir: un lector no lo ve ofrecido
           (D-127). El backend lo rechazaría igual. */}
@@ -219,6 +231,8 @@ function Contenido() {
         <Link href={`/trazas${query}&${pasoParams(finding)}&sort=recent`} className="btn">
           {t("prob.ver_ultimas")}
         </Link>
+      </div>
+      </aside>
       </div>
     </main>
   );

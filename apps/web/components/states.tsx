@@ -1,15 +1,18 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   type Me,
+  RANGES,
   entrarConClave,
   getInstance,
   getMe,
   loadDemo,
   olvidarClave,
 } from "@/lib/api";
+import { dayHour, windowLabel } from "@/lib/format";
 import { tr } from "@/lib/i18n";
 import { t } from "@/lib/textos";
 
@@ -165,7 +168,49 @@ function CargarDemo() {
   );
 }
 
-export function NoTracesYet({ project }: { project: string }) {
+/**
+ * Sin ejecuciones que enseñar. Son dos situaciones que antes se decían igual (A1 de la
+ * auditoría del rediseño): un proyecto al que **nunca** ha llegado nada, que necesita
+ * instrucciones, y uno con trazas **fuera del rango** que se mira, que necesita otro
+ * rango. Decir «esperando la primera ejecución» en el segundo caso hace pensar que la
+ * instalación no funciona. `lastSeen` sale de `/api/projects`.
+ */
+export function NoTracesYet({
+  project,
+  lastSeen,
+  days,
+}: {
+  project: string;
+  lastSeen?: string | null;
+  days?: number;
+}) {
+  const ruta = usePathname();
+  const params = useSearchParams();
+  if (lastSeen && days) {
+    const haceDias = (Date.now() - Date.parse(lastSeen)) / 86_400_000;
+    // El rango más corto de los que hay que ya la incluye.
+    const rango = RANGES.find((r) => r.days > days && r.days >= haceDias);
+    const mayor = RANGES[RANGES.length - 1];
+    const otros = new URLSearchParams(params.toString());
+    if (rango) otros.set("days", String(rango.days));
+    return (
+      <div className="state">
+        <h2>{t("estado.rango_vacio.titulo", { ventana: windowLabel(days) })}</h2>
+        <p>
+          {rango || haceDias <= days
+            ? t("estado.rango_vacio.ultima", { fecha: dayHour(lastSeen) })
+            : t("estado.rango_vacio.fuera", { fecha: dayHour(lastSeen), rango: t(mayor.label) })}
+        </p>
+        {rango && (
+          <div className="actions">
+            <Link className="btn primary" href={`${ruta}?${otros.toString()}`}>
+              {t("estado.rango_vacio.boton", { ventana: windowLabel(rango.days) })}
+            </Link>
+          </div>
+        )}
+      </div>
+    );
+  }
   return (
     <div className="state">
       <h2>{t("estado.sin_trazas.titulo", { proyecto: project })}</h2>
@@ -211,7 +256,7 @@ export function NothingToFix({
  * sale, porque un formulario que pide un secreto sin explicar cuál es lo que hace que
  * la gente pegue el primero que encuentra.
  */
-export function NeedsKey({ mensaje }: { mensaje?: string }) {
+export function NeedsKey({ mensaje, codigo }: { mensaje?: string; codigo?: string }) {
   const [valor, setValor] = useState("");
   const [fallo, setFallo] = useState("");
   const [me, setMe] = useState<Me | null>(null);
@@ -236,7 +281,8 @@ export function NeedsKey({ mensaje }: { mensaje?: string }) {
     <div className="state">
       <h2>{t("estado.clave.titulo")}</h2>
       <p>
-        {mensaje && mensaje !== "credencial inválida"
+        {/* «Credencial inválida» no ayuda a nadie a conseguir una: se explica de dónde sale. */}
+        {mensaje && codigo !== "credencial_invalida"
           ? mensaje
           : t("estado.clave.sin_clave")}
       </p>

@@ -2712,3 +2712,147 @@ evaluaciones, los avisos y todas las pantallas de la web.
 (`HTTPException.detail`, que la web enseña tal cual en algunos formularios); el prompt del
 juez, que es para un modelo y no para una pantalla; los datos de la demo, que son el
 agente de un cliente hispanohablante; la línea de órdenes y los logs.
+
+### D-149 — Los errores de la API, en el idioma de la petición
+D-148 dejó en español los `HTTPException.detail`, y la web los enseña tal cual en sus
+formularios: una contraseña corta, una invitación caducada o un prompt repetido salían en
+español en mitad de una pantalla en chino. Ahora cada error sale del catálogo
+(`error.*`, y `estado.*` para los tres `detail` de estado: juez apagado, alertas apagadas
+y prompt desplegado), igual que las frases del motor.
+
+* **Todos los caminos, también los que no pasan por una ruta.** El 401 del middleware de
+  autenticación, el 413 del tope de tamaño (`limites.py`) y el del cuerpo OTLP
+  descomprimido contestan sin llegar a la ruta; funcionan porque `MiddlewareIdioma` es el
+  más externo. Una prueba lo comprueba con peticiones de verdad, y moverlo por dentro
+  del de autenticación la hace fallar (comprobado).
+* **Los validadores** (`validar_contrasena`, `motivo_correo_invalido`) devuelven el
+  motivo ya traducido, porque la ruta lo pasa tal cual a `detail`.
+* **Frases enteras, no trozos.** `_solo_instalacion("cambiar una tarifa")` pegaba la
+  acción delante de «afecta a todos los proyectos…»; ahora es una clave por acción. Lo
+  mismo con el rol que falta («hace falta ser admin»): una clave por rol.
+* **`MetadataUnavailable` se queda en el log.** Lo que dice («postgres no responde: …»)
+  es para quien opera la instalación; a la pantalla le llega «la base de metadatos no
+  está disponible ahora mismo; si era un cambio, no se ha guardado», traducido.
+* **Guardia** (`test_errores_api.py`): lee con `ast` las rutas, `auth`, `cuentas`,
+  `limites`, `main` y la ingesta, y falla con cualquier literal con aspecto de frase
+  dentro de un `HTTPException`, un `AuthError`, un `CuerpoDemasiadoGrande`, un cuerpo con
+  `"detail"` o lo que devuelven los validadores. Encontró uno que se me había pasado
+  (««x» no es una dirección de correo válida»).
+* **Web:** el mensaje de respaldo («500 en /api/…») pasa por el catálogo, y un 422 de
+  FastAPI, que trae una lista de campos en vez de una frase, ya no se enseña como
+  «[object Object]» sino como «La petición no es válida: name, project_id».
+* **Un código donde hacía falta distinguir un caso.** `NeedsKey` escondía el mensaje
+  «credencial inválida» comparando el texto, que en inglés ya no casaba. `AuthError`
+  lleva ahora un `code` opcional que sale en la respuesta (`"credencial_invalida"`), y
+  la web lo lee en `ApiError.code`. El resto de errores no lo necesitan todavía.
+
+Sin idioma pedido la API sigue contestando en español, como un script sin cabeceras
+esperaba (D-147).
+
+### D-150 — Los pendientes de la auditoría del rediseño (A1, A2, B1) y la maquetación
+Tres hallazgos de `docs/auditoria-rediseno.md` que seguían abiertos, y el ancho de
+pantalla que la hoja de ruta apuntaba para la Fase 5.
+
+* **A1 · Un rango vacío no es un proyecto vacío.** Con trazas de hace tres días y el
+  rango en un día, el Diagnóstico y el Panel decían «Esperando la primera ejecución», que
+  es lo primero que se ve al entrar y hace pensar que la instalación no funciona.
+  `NoTracesYet` recibe ahora `last_seen` (ya venía en `/api/projects`) y el rango: si
+  alguna vez llegó algo, el título es «No hay ejecuciones en el último día», dice cuándo
+  llegó la última y ofrece **el rango más corto que la incluye** con un botón. Si es más
+  vieja que el rango más largo (30 días), lo dice sin botón, porque no hay rango al que
+  llevar. Las instrucciones de instalar quedan sólo para el proyecto al que nunca ha
+  llegado nada, con un texto que ya no habla de rangos. Pruebas de pantallas con una traza
+  de hace tres días (el botón lleva a `days=7` y enseña los datos) y otra de hace noventa.
+* **A2 · El coste de cada traza, visible en el móvil.** La pregunta va en una línea
+  con puntos suspensivos, y en una celda de tabla eso fija el ancho mínimo de la
+  columna: a 375 px la tabla medía 479 y el coste, por el que se ordena la lista,
+  quedaba fuera. La columna de la traza lleva `width: 100%; max-width: 0` en estrecho y
+  es ella la que recorta.
+* **B1 · Las pestañas, enteras a cualquier ancho.** Hasta 1100 px la cabecera pasa a dos
+  filas (el contexto arriba, las pestañas debajo a lo ancho): a 1024 «Ajustes» quedaba
+  bajo el difuminado. En móvil las seis van en una rejilla de tres por dos en vez de una
+  barra desplazable que escondía «Prompts» y «Ajustes» y que nadie desplaza porque no
+  parece desplazable. El difuminado ya no es fijo: `TopBar` mide hacia qué lado quedan
+  pestañas escondidas (`data-desborda`) y difumina sólo ese borde.
+* **A 1440 px ya no sobra un tercio.** La carcasa pasa de 1440 a 1280 y se centra, así
+  que cabecera y contenido comparten bordes. El Diagnóstico llena ese ancho (antes se
+  quedaba en 1180, pegado a la izquierda). A partir de 1200 px el Panel pone los picos
+  al lado de las métricas y «quién gasta» debajo a todo el ancho, y la ficha de un
+  problema pone lo que se hace con él (probar antes, marcarlo, ver las trazas) en una
+  columna fija junto a lo que se lee, con los párrafos a 75 caracteres. Ajustes,
+  Evaluaciones y Prompts, que son formularios y listas, se quedan en la medida cómoda
+  de 960.
+* **Pruebas de pantallas** para las tres: el coste dentro de su marco a 375 px; las seis
+  pestañas enteras a 375, 1024 y 1440 en español y en francés; y a 1440 el contenido
+  llega hasta donde llega la cabecera. Con la interfaz anterior fallan siete de nueve
+  (las dos que pasan son la navegación a 1440, que ya estaba bien).
+
+### D-151 — Menos texto: lo que puedes dejar de pagar, un distintivo de confianza y el porqué plegado
+La hoja de ruta pedía «una frase y un ¿por qué? plegable», las guardas como distintivo y
+no como párrafo, y un héroe que diga «Puedes dejar de pagar hasta X».
+
+* **El héroe.** La cifra grande es ahora lo evitable, en el mismo ámbar que su tramo de
+  la barra: «Puedes dejar de pagar hasta 131 US$ al mes», y debajo, en una frase, «de
+  los 216 US$ que te costará este mes, al ritmo de los últimos 6,8 días». Antes eran dos
+  cifras grandes con una flecha —total → lo que quedaría—, y lo que el producto vende
+  (el ahorro) había que restarlo. Sin proyección no se promete futuro: «Te habrías
+  ahorrado hasta X en 6 horas», sobre lo ya gastado. Cuando no hay nada evitable, no hay
+  tarifas o el evitable pasa del 90 % (D-073, D-107, `CASI_TODO_EVITABLE`), el héroe
+  sigue como estaba: esos casos tienen su propia forma de decirse.
+* **Las salvedades, en un distintivo** («Confianza media · 2 notas») que se despliega
+  con las mismas líneas y porqués de D-124: nada se quita, sólo se pliega. El nivel lo
+  pone la peor salvedad: **baja** si falta gasto por contar (pasos sin tarifa) o la
+  cobertura es mala; **media** si la cifra es un suelo (tarifa asumida) o el evitable
+  pasa del umbral de cautela; **alta** en otro caso. Una proyección no baja el nivel: no
+  es una duda, es cómo se calcula, y va como nota. Cada nivel dice en una frase qué
+  significa, y esa frase tiene que ser verdad en todos los casos que lo producen.
+* **La ficha de un problema**: «Qué está pasando» sigue a la vista; «¿Por qué pasa?» y
+  el cálculo del ahorro («¿Cómo se calcula?») van plegados. Lo que se hace con el
+  problema ya estaba al lado (D-150).
+* Pruebas de pantallas: el héroe dice lo que puedes dejar de pagar, la línea de la
+  proyección no se ve hasta abrir el distintivo, y la ficha llega con el porqué cerrado.
+  Las claves que se quedaron sin uso (`diag.si_arreglas`, `prob.por_que`) se borran.
+
+### D-152 — Dónde se va el dinero: gasto por día con la franja evitable y coste por paso
+El Diagnóstico decía cuánto se puede dejar de pagar pero no cuándo ni en qué. Debajo de
+la lista de problemas (lo primero sigue siendo qué arreglar) hay ahora dos gráficos: el
+gasto por día —por hora si la ventana es de menos de tres días— con la parte evitable
+encima, y el coste de los pasos que más gastan con su parte evitable.
+
+* **La franja evitable es un reparto, y se dice.** Las reglas miden lo evitable de cada
+  hallazgo sobre la ventana entera, no día a día. Se reparte por tramos **en proporción
+  a lo que gastó en cada tramo el paso del hallazgo** (`insights/grafico.py`). Así los
+  tramos suman exactamente lo evitable del héroe —nada se cuenta dos veces ni se
+  inventa— y un día en que ese paso no trabajó no recibe nada. Lo descartado: pasar las
+  reglas día a día (los umbrales cambian con el tamaño de la ventana y la suma no
+  daría la cifra de arriba) y repartir a partes iguales (pintaría derroche en días sin
+  actividad; la prueba lo comprueba mutando a eso). Debajo del gráfico, plegado, «¿Cómo
+  se reparte lo evitable por días?». Si algún hallazgo no tiene gasto de su paso en la
+  serie, su importe no se coloca en ningún día y se dice cuánto es. Y ningún tramo
+  enseña más evitable que gasto.
+* **Una lectura más**, `step_cost_series`, en los dos almacenes: el gasto total por tramo
+  (por el instante de cada span, no de la ejecución como el Panel: aquí la pregunta es
+  cuándo se gastó) y el de cada paso con el filtro de las reglas, sin tiradas de
+  evaluación, que es de donde sale lo evitable. Se pide una vez por Diagnóstico.
+* **Los pasos se nombran como en el resto del producto** (`disambiguate`, D-106): en la
+  demo salían tres filas «responder» con tres cifras distintas.
+* **Dos textos que el CSS pintaba en español en los cinco idiomas**, encontrados por el
+  camino: el «¿por qué?» de los avisos plegados y la marca «avanzado». Los pasa ahora el
+  proveedor de idioma como variables (`--txt-porque`, `--txt-avanzado`), y una guardia
+  en `test_textos_web.py` falla con cualquier `content:` con texto fuera de `var()`.
+  Los plegados que ya son una pregunta («¿Cómo se calcula?») no llevan el sufijo.
+
+Pruebas en `test_grafico_diagnostico.py` (los dos almacenes): los tramos suman el gasto
+y lo evitable del héroe, lo evitable cae donde gastó su paso, orden y resto de pasos,
+tramos por hora en ventanas cortas, el tope por tramo y los homónimos; y dos de
+pantallas.
+
+### D-153 — El grafo del agente en la vista de traza
+Encima del árbol, «Cómo está hecho el agente»: una caja por paso (identidad `step_key`, o
+tipo y nombre si no la hay) con sus llamadas y su coste, y una flecha por cada paso que
+llama a otro con cuántas veces (en ámbar si son varias: un bucle pasa de treinta filas a
+una flecha «×6»). Capas por la menor profundidad a la que aparece cada paso; una llamada
+hacia atrás va curvada por debajo. Ámbar el paso con un problema del Diagnóstico en esta
+traza, rosa el que falló. Sin tarifa no cuesta cero: el nodo dice «sin tarifa» o «≥ X».
+Sale del árbol que ya llega a la web, sin backend nuevo. Prueba de pantallas: nodos y
+aristas en una traza de la demo, y «×n» en una con bucle.

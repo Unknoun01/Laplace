@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { DEFAULT_DAYS, type Me, RANGES, getMe, listProjects, logout } from "@/lib/api";
 import { SelectorIdioma } from "@/lib/i18n";
 import { t } from "@/lib/textos";
@@ -49,6 +49,27 @@ export function TopBar() {
     },
     [params, pathname, router],
   );
+
+  // Hacia qué lado quedan pestañas escondidas, para difuminar sólo ese borde (B1).
+  const nav = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const barra = nav.current;
+    if (!barra) return;
+    const medir = () => {
+      const sobra = barra.scrollWidth - barra.clientWidth;
+      const x = barra.scrollLeft;
+      barra.dataset.desborda =
+        sobra <= 1 ? "" : x <= 1 ? "derecha" : x >= sobra - 1 ? "izquierda" : "ambos";
+    };
+    medir();
+    barra.addEventListener("scroll", medir, { passive: true });
+    const observador = new ResizeObserver(medir);
+    observador.observe(barra);
+    return () => {
+      barra.removeEventListener("scroll", medir);
+      observador.disconnect();
+    };
+  }, [acceso]);
 
   const keep = new URLSearchParams();
   if (project) keep.set("project", project);
@@ -104,7 +125,7 @@ export function TopBar() {
         </select>
       </div>
 
-      <nav className="nav">
+      <nav className="nav" ref={nav}>
         <Link href={`/${query}`} aria-current={
             pathname === "/" || pathname.startsWith("/problema") ? "page" : undefined
           }>

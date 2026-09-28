@@ -38,6 +38,7 @@ from .cuentas import (
     rol_suficiente,
     validar_contrasena,
 )
+from .textos import t
 
 logger = logging.getLogger("laplace.api.cuentas")
 
@@ -47,7 +48,7 @@ router = APIRouter(prefix="/api")
 def _cuentas(request: Request) -> Any:
     cuentas = getattr(request.app.state, "cuentas", None)
     if cuentas is None:
-        raise HTTPException(status_code=503, detail="no hay base de cuentas en esta instalación")
+        raise HTTPException(status_code=503, detail=t("error.sin_cuentas"))
     return cuentas
 
 
@@ -131,10 +132,10 @@ def _usuario(request: Request) -> Any:
     """La persona con sesión, o 401. Una clave de API no es una persona."""
     identidad = identity_of(request)
     if not identidad.user_id:
-        raise HTTPException(status_code=401, detail="esto es para personas con sesión")
+        raise HTTPException(status_code=401, detail=t("error.solo_personas"))
     usuario = _cuentas(request).usuario(identidad.user_id)
     if usuario is None:
-        raise HTTPException(status_code=401, detail="la sesión ya no vale")
+        raise HTTPException(status_code=401, detail=t("error.sesion_caducada"))
     return usuario
 
 
@@ -150,9 +151,9 @@ def _exigir_org(request: Request, org_id: str, necesita: str) -> Any:
     rol = next((o["role"] for o in orgs if o["id"] == org_id), None)
     if rol is None:
         # Igual que con los proyectos: no se dice si la organización existe.
-        raise HTTPException(status_code=404, detail="no encontramos esa organización")
+        raise HTTPException(status_code=404, detail=t("error.org_no_encontrada"))
     if not rol_suficiente(rol, necesita):
-        raise HTTPException(status_code=403, detail=f"hace falta ser {necesita} de la organización")
+        raise HTTPException(status_code=403, detail=t(f"error.rol_org.{necesita}"))
     return usuario
 
 
@@ -214,17 +215,17 @@ async def setup(request: Request, response: Response, body: SetupIn) -> dict[str
     dejarlos sin dueño los haría invisibles para todo el mundo salvo por clave.
     """
     if _local(request):
-        raise HTTPException(status_code=404, detail="el modo local no tiene cuentas")
+        raise HTTPException(status_code=404, detail=t("error.local_sin_cuentas"))
     cuentas = _cuentas(request)
     if await run_in_threadpool(cuentas.hay_usuarios):
-        raise HTTPException(status_code=409, detail="esta instalación ya está configurada")
+        raise HTTPException(status_code=409, detail=t("error.ya_configurada"))
     # El código se gasta aquí, antes de crear nada, y bajo cerrojo: dos peticiones a la
     # vez con el código bueno ya no crean dos administradores (D-131). Si algo falla más
     # abajo se devuelve, para no dejar la instalación sin forma de configurarse.
     with _CERROJO_SETUP:
         esperado = getattr(request.app.state, "setup_token", "") or ""
         if not esperado or not hmac.compare_digest(body.token.strip(), esperado):
-            raise HTTPException(status_code=403, detail="ese código de configuración no vale")
+            raise HTTPException(status_code=403, detail=t("error.codigo_configuracion"))
         request.app.state.setup_token = ""
     try:
         return await _configurar_instalacion(request, response, body, cuentas)
@@ -240,7 +241,7 @@ async def _configurar_instalacion(
     if motivo:
         raise HTTPException(status_code=400, detail=motivo)
     if "@" not in body.email:
-        raise HTTPException(status_code=400, detail="ese email no es válido")
+        raise HTTPException(status_code=400, detail=t("error.email_invalido"))
 
     def crear() -> tuple[Any, str]:
         usuario = cuentas.crear_usuario(body.email, body.name, body.password, is_admin=True)
@@ -270,7 +271,7 @@ class LoginIn(BaseModel):
 @router.post("/auth/login")
 async def login(request: Request, response: Response, body: LoginIn) -> dict[str, Any]:
     if _local(request):
-        raise HTTPException(status_code=404, detail="el modo local no tiene cuentas")
+        raise HTTPException(status_code=404, detail=t("error.local_sin_cuentas"))
     cuentas = _cuentas(request)
     frenos = request.app.state.frenos
     email = normalizar_email(body.email)
@@ -279,7 +280,7 @@ async def login(request: Request, response: Response, body: LoginIn) -> dict[str
     if await run_in_threadpool(frenos.bloqueado, *claves):
         raise HTTPException(
             status_code=429,
-            detail="demasiados intentos fallidos. Espera un cuarto de hora y vuelve a probar",
+            detail=t("error.demasiados_intentos"),
         )
 
     def comprobar() -> Any:
@@ -294,7 +295,7 @@ async def login(request: Request, response: Response, body: LoginIn) -> dict[str
     if usuario is None:
         await run_in_threadpool(frenos.fallo, *claves)
         await run_in_threadpool(cuentas.anotar, "", "", "login_fallido", email, ip)
-        raise HTTPException(status_code=401, detail="email o contraseña incorrectos")
+        raise HTTPException(status_code=401, detail=t("error.credenciales"))
 
     await run_in_threadpool(frenos.limpiar, f"email:{email}")
     token = await run_in_threadpool(
@@ -376,7 +377,7 @@ async def change_password(request: Request, body: PasswordIn) -> dict[str, Any]:
     guardado = await run_in_threadpool(cuentas.hash_de, usuario.id)
     # scrypt tarda décimas de segundo a propósito: fuera del bucle de eventos.
     if not await run_in_threadpool(comprobar_contrasena, body.current, guardado):
-        raise HTTPException(status_code=403, detail="la contraseña actual no es ésa")
+        raise HTTPException(status_code=403, detail=t("error.contrasena_actual"))
     motivo = validar_contrasena(body.new)
     if motivo:
         raise HTTPException(status_code=400, detail=motivo)
@@ -405,7 +406,7 @@ async def invitation(request: Request, token: str) -> dict[str, Any]:
     """Lo que la pantalla de aceptar enseña: a qué organización y con qué rol."""
     info = await run_in_threadpool(_cuentas(request).invitacion, token)
     if info is None:
-        raise HTTPException(status_code=404, detail="esa invitación no existe o ha caducado")
+        raise HTTPException(status_code=404, detail=t("error.invitacion"))
     existe = await run_in_threadpool(_cuentas(request).usuario_por_email, info["email"])
     return {**info, "has_account": existe is not None}
 
@@ -422,7 +423,7 @@ async def accept(request: Request, response: Response, body: AcceptIn) -> dict[s
     cuentas = _cuentas(request)
     info = await run_in_threadpool(cuentas.invitacion, body.token)
     if info is None:
-        raise HTTPException(status_code=404, detail="esa invitación no existe o ha caducado")
+        raise HTTPException(status_code=404, detail=t("error.invitacion"))
 
     existente = await run_in_threadpool(cuentas.usuario_por_email, info["email"])
     if existente is not None:
@@ -433,12 +434,12 @@ async def accept(request: Request, response: Response, body: AcceptIn) -> dict[s
         if await run_in_threadpool(frenos.bloqueado, *claves):
             raise HTTPException(
                 status_code=429,
-                detail="demasiados intentos fallidos. Espera un cuarto de hora y vuelve a probar",
+                detail=t("error.demasiados_intentos"),
             )
         usuario, guardado = existente
         if not await run_in_threadpool(comprobar_contrasena, body.password, guardado):
             await run_in_threadpool(frenos.fallo, *claves)
-            raise HTTPException(status_code=403, detail="la contraseña de tu cuenta no es ésa")
+            raise HTTPException(status_code=403, detail=t("error.contrasena_cuenta"))
     else:
         motivo = validar_contrasena(body.password)
         if motivo:
@@ -461,7 +462,7 @@ async def accept(request: Request, response: Response, body: AcceptIn) -> dict[s
 
     token = await run_in_threadpool(unir)
     if token is None:
-        raise HTTPException(status_code=404, detail="esa invitación no existe o ha caducado")
+        raise HTTPException(status_code=404, detail=t("error.invitacion"))
     _poner_cookie(request, response, token)
     return {"ok": True, "org_name": info["org_name"]}
 
@@ -507,7 +508,7 @@ class InviteIn(BaseModel):
 async def invite(request: Request, body: InviteIn) -> dict[str, Any]:
     usuario = await run_in_threadpool(_exigir_org, request, body.org_id, "admin")
     if "@" not in body.email:
-        raise HTTPException(status_code=400, detail="ese email no es válido")
+        raise HTTPException(status_code=400, detail=t("error.email_invalido"))
     cuentas = _cuentas(request)
     token = await run_in_threadpool(cuentas.invitar, body.org_id, body.email, body.role, usuario.id)
     base = (
@@ -568,14 +569,14 @@ async def set_role(request: Request, body: MemberIn) -> dict[str, Any]:
     cuentas = _cuentas(request)
     miembros = {m["user_id"]: m for m in await run_in_threadpool(cuentas.miembros, body.org_id)}
     if body.user_id not in miembros:
-        raise HTTPException(status_code=404, detail="esa persona no está en la organización")
+        raise HTTPException(status_code=404, detail=t("error.persona_no_en_org"))
     actual = miembros[body.user_id]["role"]
     toca_propietario = "propietario" in (actual, body.role)
     if toca_propietario:
         await run_in_threadpool(_exigir_org, request, body.org_id, "propietario")
     propietarios = await run_in_threadpool(_propietarios, cuentas, body.org_id)
     if actual == "propietario" and body.role != "propietario" and len(propietarios) == 1:
-        raise HTTPException(status_code=409, detail="la organización se quedaría sin propietario")
+        raise HTTPException(status_code=409, detail=t("error.sin_propietario"))
     await run_in_threadpool(cuentas.poner_miembro, body.org_id, body.user_id, body.role)
     await run_in_threadpool(
         cuentas.anotar,
@@ -598,13 +599,13 @@ async def remove_member(request: Request, org_id: str, user_id: str) -> dict[str
     cuentas = _cuentas(request)
     miembros = {m["user_id"]: m for m in await run_in_threadpool(cuentas.miembros, org_id)}
     if user_id not in miembros:
-        raise HTTPException(status_code=404, detail="esa persona no está en la organización")
+        raise HTTPException(status_code=404, detail=t("error.persona_no_en_org"))
     if miembros[user_id]["role"] == "propietario":
         if user_id != yo.id:
             await run_in_threadpool(_exigir_org, request, org_id, "propietario")
         if len(await run_in_threadpool(_propietarios, cuentas, org_id)) == 1:
             raise HTTPException(
-                status_code=409, detail="la organización se quedaría sin propietario"
+                status_code=409, detail=t("error.sin_propietario")
             )
     await run_in_threadpool(cuentas.quitar_miembro, org_id, user_id)
     await run_in_threadpool(cuentas.cerrar_todas, user_id)
@@ -634,9 +635,9 @@ async def create_key(request: Request, body: KeyIn) -> dict[str, Any]:
     usuario = await run_in_threadpool(_exigir_org, request, body.org_id, "admin")
     cuentas = _cuentas(request)
     if body.project_id == "*":
-        raise HTTPException(status_code=400, detail="«*» no es un proyecto")
+        raise HTTPException(status_code=400, detail=t("error.asterisco"))
     if not await run_in_threadpool(cuentas.asignar_proyecto, body.project_id, body.org_id):
-        raise HTTPException(status_code=409, detail="ese nombre de proyecto ya está en uso")
+        raise HTTPException(status_code=409, detail=t("error.proyecto_en_uso"))
     caduca = (
         datetime.now(timezone.utc) + timedelta(days=body.expires_days)
         if body.expires_days
@@ -659,7 +660,7 @@ async def revoke_key(request: Request, org_id: str, key_id: str) -> dict[str, An
     cuentas = _cuentas(request)
     proyectos = await run_in_threadpool(cuentas.proyectos_de_org, org_id)
     if not await run_in_threadpool(cuentas.revocar_clave, key_id, proyectos):
-        raise HTTPException(status_code=404, detail="no hay ninguna clave activa con ese id")
+        raise HTTPException(status_code=404, detail=t("error.clave_no_activa"))
     await run_in_threadpool(
         cuentas.anotar, org_id, usuario.id, "revocar_clave", key_id, _ip(request)
     )
