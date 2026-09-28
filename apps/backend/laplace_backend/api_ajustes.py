@@ -20,7 +20,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from . import idioma, presupuesto
+from . import idioma, margen, presupuesto
 from .alerts import CLAVE_AJUSTES, webhook_valido
 from .auth import identity_of
 from .ingest.otlp import recalcular_coste
@@ -143,6 +143,50 @@ async def put_budget(request: Request, body: BudgetIn) -> presupuesto.Budget:
         await run_in_threadpool(_guard, meta.delete_setting, body.project_id, presupuesto.CLAVE)
     tope = body.monthly_limit or None
     return await run_in_threadpool(presupuesto.calcular, _store(request), body.project_id, tope)
+
+
+# ---------------------------------------------------------------------------------
+# Margen por cliente (Fase 6, D-161)
+# ---------------------------------------------------------------------------------
+
+
+@router.get("/customers", response_model=margen.MarginView)
+async def get_customers(
+    request: Request, project_id: str, days: int = Query(30, ge=1, le=90)
+) -> margen.MarginView:
+    """Coste, ingresos y margen de cada cliente, con el aviso de quién hace perder dinero."""
+    ingresos = await run_in_threadpool(margen.leer_ingresos, _meta(request), project_id)
+    return await run_in_threadpool(
+        margen.calcular, _store(request), project_id, _ventana(days), ingresos
+    )
+
+
+class RevenueIn(BaseModel):
+    """Lo que paga un cliente al mes. Sin `_usd`, como el presupuesto: es un dato del
+    usuario, no una cifra que el producto afirme."""
+
+    project_id: str
+    customer_id: str = Field(min_length=1, max_length=200)
+    #: Al mes. `None` o 0 lo quita.
+    monthly: float | None = Field(default=None, ge=0, le=1e9)
+
+
+@router.put("/customers/revenue")
+async def put_customer_revenue(request: Request, body: RevenueIn) -> dict[str, Any]:
+    meta = _meta(request)
+    cliente = body.customer_id.strip()
+    if not cliente:
+        raise HTTPException(status_code=422, detail=t("error.cliente_vacio"))
+    if body.monthly:
+        await run_in_threadpool(
+            _guard, meta.set_setting, body.project_id, margen.clave(cliente),
+            {"monthly": body.monthly},
+        )
+    else:
+        await run_in_threadpool(
+            _guard, meta.delete_setting, body.project_id, margen.clave(cliente)
+        )
+    return {"customer_id": cliente, "monthly": body.monthly or None}
 
 
 # ---------------------------------------------------------------------------------

@@ -153,6 +153,12 @@ export function TopBar() {
           {t("nav.panel")}
         </Link>
         <Link
+          href={`/clientes${query}`}
+          aria-current={pathname.startsWith("/clientes") ? "page" : undefined}
+        >
+          {t("nav.clientes")}
+        </Link>
+        <Link
           href={`/prompts${query}`}
           aria-current={pathname.startsWith("/prompts") ? "page" : undefined}
         >

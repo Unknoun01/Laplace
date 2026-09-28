@@ -201,6 +201,8 @@ class Span(_Model):
 
     session_id: str | None = None
     user_id: str | None = None
+    #: El cliente que paga por este trabajo, para el margen por cliente (D-161).
+    customer_id: str | None = None
     tags: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 

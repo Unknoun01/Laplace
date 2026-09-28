@@ -49,6 +49,7 @@ en el estándar vive bajo el prefijo `laplace.*`, nunca inventando nombres dentr
 | `laplace.span.type`  | string | Uno de los cinco tipos de §1.                     |
 | `laplace.session.id` | string | Agrupa varias trazas de una misma conversación.   |
 | `laplace.user.id`    | string | Usuario final del agente (no el cliente Laplace). |
+| `laplace.customer.id` | string | Cliente que paga por este trabajo: la clave del margen por cliente (D-161). Basta en un span de la traza, normalmente la raíz. |
 | `laplace.tags`       | string | JSON array de strings.                            |
 | `laplace.metadata`   | string | JSON object libre.                                |
 | `laplace.prompt.name`    | string | Prompt gestionado que produjo la llamada (§9).  |

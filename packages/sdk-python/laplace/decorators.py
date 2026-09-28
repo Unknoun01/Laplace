@@ -28,20 +28,30 @@ _session_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 _user_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "laplace_user_id", default=None
 )
+_customer_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "laplace_customer_id", default=None
+)
 
 
 def set_context(
-    *, session_id: str | None = None, user_id: str | None = None
+    *,
+    session_id: str | None = None,
+    user_id: str | None = None,
+    customer_id: str | None = None,
 ) -> None:
-    """Fija sesión y usuario final para todos los spans que se abran a partir de aquí.
+    """Fija sesión, usuario final y cliente para todos los spans que se abran a partir
+    de aquí.
 
-    Se propaga por `contextvars`, así que funciona igual en async y en hilos creados
-    después de la llamada.
+    `customer_id` es quien paga por el trabajo del agente: con él, Laplace calcula el
+    margen de cada cliente (D-161). Se propaga por `contextvars`, así que funciona igual
+    en async y en hilos creados después de la llamada.
     """
     if session_id is not None:
         _session_id.set(session_id)
     if user_id is not None:
         _user_id.set(user_id)
+    if customer_id is not None:
+        _customer_id.set(customer_id)
 
 
 def get_current_trace_id() -> str | None:
@@ -85,6 +95,7 @@ def _apply_common(
     _set(span, semconv.LAPLACE_SPAN_TYPE, span_type)
     _set(span, semconv.LAPLACE_SESSION_ID, session_id or _session_id.get())
     _set(span, semconv.LAPLACE_USER_ID, user_id or _user_id.get())
+    _set(span, semconv.LAPLACE_CUSTOMER_ID, _customer_id.get())
     if tags:
         _set(span, semconv.LAPLACE_TAGS, dumps(list(tags)))
     if metadata:

@@ -3985,3 +3985,89 @@ details.porque-bloque > summary {
   color: var(--ink-4);
   text-align: right;
 }
+
+/* ---------------------------------------------------------------------------
+   Margen por cliente (D-161). El aviso va primero y en rosa, que es el color de lo que
+   falla: un cliente que hace perder dinero es un fallo del negocio, no del agente.
+   --------------------------------------------------------------------------- */
+.cl-titular {
+  margin: var(--sp-3) 0 0;
+  font-size: var(--fs-lg);
+  color: var(--ink);
+}
+.cl-aviso {
+  margin: var(--sp-6) 0;
+  padding: var(--sp-4) var(--sp-5);
+  border: 1px solid var(--rose-line);
+  background: var(--rose-bg);
+  border-radius: var(--r-lg);
+}
+.cl-aviso h2 {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-xl);
+  color: var(--rose-ink);
+}
+.cl-aviso ul {
+  margin: 0 0 var(--sp-2);
+  padding-left: var(--sp-5);
+}
+.cl-aviso p {
+  margin: 0;
+  color: var(--ink-2);
+}
+.cl-tabla td,
+.cl-tabla th {
+  vertical-align: middle;
+}
+.cl-tabla .cl-fila td {
+  border-bottom: 0;
+  padding-bottom: 2px;
+}
+.cl-tabla .cl-frase td {
+  padding-top: 0;
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+}
+.cl-tabla .margen.pierde {
+  color: var(--rose-ink);
+  font-weight: 600;
+}
+.cl-tabla .margen.gana {
+  color: var(--teal);
+}
+.cl-tabla .margen.ajustado {
+  color: var(--amber);
+}
+.cl-tabla .margen small {
+  display: block;
+  color: var(--ink-3);
+}
+.cl-ingreso {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  justify-content: flex-end;
+}
+.cl-ingreso .field {
+  width: 96px;
+  text-align: right;
+}
+.cl-anadir summary {
+  cursor: pointer;
+  color: var(--iris);
+}
+.cl-anadir .ab {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp-3);
+  margin-top: var(--sp-3);
+}
+.rail-block.clientes-aviso {
+  border-color: var(--rose-line);
+}
+.rail-block.clientes-aviso p {
+  margin: var(--sp-1) 0 var(--sp-2);
+  color: var(--rose-ink);
+  font-weight: 600;
+}

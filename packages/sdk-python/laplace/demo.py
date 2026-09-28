@@ -343,6 +343,24 @@ def _escenario(momento: datetime, ahora: datetime, rng: random.Random) -> Escena
     )
 
 
+#: A qué empresa cliente pertenece cada usuario de la demo (D-161). La primera
+#: concentra el uso —sus usuarios son los que más escriben—, que es el caso que el margen
+#: por cliente tiene que enseñar: el cliente que más trabajo da no siempre es el que más
+#: deja.
+CLIENTES_DEMO = ("iberviajes", "hoteles-mar", "agencia-sol", "particulares")
+
+
+def cliente_de(usuario: str) -> str:
+    n = int(usuario.rsplit("-", 1)[-1])
+    if n <= 3:
+        return CLIENTES_DEMO[0]
+    if n <= 10:
+        return CLIENTES_DEMO[1]
+    if n <= 20:
+        return CLIENTES_DEMO[2]
+    return CLIENTES_DEMO[3]
+
+
 def generar_mes(
     endpoint: str,
     project: str = "demo",
@@ -378,7 +396,9 @@ def generar_mes(
                 esc = _escenario(momento, fin, rng)
                 usuario = rng.choices(usuarios, weights=pesos)[0]
                 set_context(
-                    session_id=f"{usuario}-{momento:%m%d}", user_id=usuario
+                    session_id=f"{usuario}-{momento:%m%d}",
+                    user_id=usuario,
+                    customer_id=cliente_de(usuario),
                 )
                 pregunta = rng.choice(PREGUNTAS)
                 trace_id = _una_ejecucion(pregunta, esc)

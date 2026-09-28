@@ -43,6 +43,7 @@ PANTALLAS = {
     "diagnostico": ("/?project=demo&days=7", "cosas que arreglar"),
     "trazas": ("/trazas/?project=demo&days=7", "Cada fila es una ejecución"),
     "panel": ("/panel/?project=demo&days=7", "por unidad de trabajo"),
+    "clientes": ("/clientes/?project=demo&days=30", "iberviajes"),
     "evaluaciones": ("/evaluaciones/?project=demo&days=30", "regresiones-atencion"),
     "prompts": ("/prompts/?project=demo&days=30", "atencion"),
     "ajustes": ("/ajustes/?project=demo", "Presupuesto"),
@@ -617,6 +618,7 @@ def test_probar_empieza_por_los_arreglos_del_diagnostico(servidor, navegador):
         ("/evaluaciones/?project=demo", "Probar"),
         ("/trazas/?project=demo", "Trazas"),
         ("/panel/?project=demo", "Panel"),
+        ("/clientes/?project=demo", "Clientes"),
         ("/prompts/?project=demo", "Prompts"),
         ("/ajustes/?project=demo", "Ajustes"),
     ],
@@ -665,3 +667,31 @@ def test_el_alto_contraste_quita_el_cristal(servidor, navegador, tema, fondo):
         assert pagina.evaluate("document.documentElement.dataset.contrast") is None
     finally:
         contexto.close()
+
+
+def test_el_aviso_de_quien_hace_perder_dinero(servidor, navegador):
+    """D-161: la demo tiene un cliente que cuesta más de lo que paga. La pestaña de
+    Clientes lo dice lo primero, y el Diagnóstico lo avisa en su carril."""
+    pagina, errores = _abrir(navegador, servidor + "/clientes/?project=demo&days=30",
+                             "escritorio")
+    try:
+        pagina.wait_for_function("() => document.querySelector('.cl-aviso')", timeout=15_000)
+        aviso = pagina.locator(".cl-aviso").inner_text()
+        assert "Este cliente te hace perder dinero" in aviso and "iberviajes" in aviso, aviso
+        texto = _texto_de(pagina)
+        assert texto.index("te hace perder dinero") < texto.index("hoteles-mar")
+        estados = pagina.locator(".cl-fila .chip").all_inner_texts()
+        assert estados[0] == "pierde dinero" and "sin ingresos" in estados, estados
+        assert errores == [], errores
+    finally:
+        pagina.close()
+
+    pagina, errores = _abrir(navegador, servidor + "/?project=demo&days=30", "escritorio")
+    try:
+        pagina.wait_for_function(
+            "() => document.querySelector('.clientes-aviso')", timeout=15_000
+        )
+        assert "1 cliente te hace perder dinero" in pagina.locator(".clientes-aviso").inner_text()
+        assert errores == [], errores
+    finally:
+        pagina.close()

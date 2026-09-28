@@ -51,6 +51,9 @@ contraste en cualquiera de ellos.
   menos.
 - **Panel** (`/panel`) — si el gasto sube porque hay más trabajo o porque el trabajo se
   ha encarecido, dicho con palabras, y los tramos que se salen de lo normal con su causa.
+- **Clientes** (`/clientes`) — lo que te paga cada cliente frente a lo que te cuesta su
+  trabajo al mes, y el aviso de qué clientes te hacen perder dinero. El coste sale de
+  `laplace.set_context(customer_id=…)`; lo que paga cada uno lo pones tú.
 - **Prompts** (`/prompts`) — qué versión está en producción, qué cambió entre una y otra,
   y qué costó y qué acertó cada una sobre el tráfico que la usó. Una versión que encarece
   el agente sale además en el Diagnóstico.

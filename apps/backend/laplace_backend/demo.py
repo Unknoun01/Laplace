@@ -11,6 +11,8 @@ escribe lo que no son trazas y hace falta para que cada pantalla enseñe algo:
   `gpt-5.6-luna`, hecha ayer;
 * la repetición marcada como arreglada el día en que se arregló, para que el
   seguimiento enseñe el dinero que ya no se gasta.
+* lo que paga cada empresa cliente, para que el margen por cliente enseñe uno que hace
+  perder dinero, uno ajustado, uno que deja margen y uno sin ingresos puestos (D-161).
 
 Sólo existe en local (`POST /api/demo`): en una instalación compartida, meter datos
 inventados es lo último que alguien espera de un botón.
@@ -58,6 +60,7 @@ def cargar_demo(origen: str, store: Any, metadata: Any) -> dict[str, Any]:
     _anotaciones(metadata, resultado, rng)
     _comparacion(origen, metadata, resultado, rng)
     arreglado = _arreglo_marcado(store, metadata, resultado)
+    _ingresos(store, metadata)
 
     return {
         "project_id": PROYECTO,
@@ -210,3 +213,29 @@ def _arreglo_marcado(
         },
     )
     return hallazgo.id
+
+
+#: Lo que paga cada cliente de la demo, como múltiplo de lo que cuesta al mes. Se
+#: calcula sobre el tráfico generado para que las cuatro historias salgan siempre,
+#: cambien los precios o no: el que más trabajo da no llega a cubrir su coste.
+MULTIPLO_INGRESOS = {"iberviajes": 0.7, "hoteles-mar": 1.12, "agencia-sol": 4.0}
+
+
+def _ingresos(store: Any, metadata: Any) -> None:
+    from . import margen
+
+    ventana = Window(
+        since=datetime.now().astimezone() - timedelta(days=trafico.DIAS),
+        until=datetime.now().astimezone(),
+        days=trafico.DIAS,
+    )
+    vista = margen.calcular(store, PROYECTO, ventana, {})
+    for cliente in vista.customers:
+        multiplo = MULTIPLO_INGRESOS.get(cliente.customer_id)
+        if multiplo is None or not cliente.monthly_cost_usd:
+            continue
+        # A céntimos: redondear a unidades convertía al ajustado en uno que pierde
+        # cuando su coste al mes es de pocos dólares.
+        mensual = round(cliente.monthly_cost_usd * multiplo, 2)
+        metadata.set_setting(PROYECTO, margen.clave(cliente.customer_id), {"monthly": mensual})
+

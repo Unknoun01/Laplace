@@ -5,10 +5,10 @@ import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { BigMoney, FindingCard, GapBar, Readout } from "@/components/pieces";
 import { BackendDown, CargandoDiagnostico, NeedsKey, NoProject, NoTracesYet, NotYours, NothingToFix } from "@/components/states";
-import { getBudget, getOverview, listProjects, parseDays } from "@/lib/api";
+import { getBudget, getCustomers, getOverview, listProjects, parseDays } from "@/lib/api";
 import { descargarCsv } from "@/lib/csv";
 import { dayHour, duration, money, number, percent, spanLabel, tokens, windowLabel } from "@/lib/format";
-import type { Budget, Finding, Overview } from "@/lib/types";
+import type { Budget, Finding, MarginView, Overview } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
 import { CasiTodoEvitable, CASI_TODO_EVITABLE, CoberturaBloque, CoberturaLinea, Confianza, SinDinero } from "./avisos";
 import { tr, trn } from "@/lib/i18n";
@@ -30,15 +30,17 @@ function Contenido() {
   const estado = useApi(async (senal) => {
     const projects = await listProjects(senal);
     if (projects.length === 0)
-      return { project: "", overview: null, budget: null, lastSeen: null };
+      return { project: "", overview: null, budget: null, clientes: null, lastSeen: null };
     const elegido = projects.find((p) => p.id === pedido) ?? projects[0];
     const project = elegido.id;
-    const [overview, budget] = await Promise.all([
+    const [overview, budget, clientes] = await Promise.all([
       getOverview(project, days, senal),
-      // El presupuesto es un añadido: si falla, el inicio sigue en pie sin él.
+      // El presupuesto y el margen por cliente son añadidos: si fallan, el inicio sigue
+      // en pie sin ellos.
       getBudget(project, senal).catch(() => null),
+      getCustomers(project, days, senal).catch(() => null),
     ]);
-    return { project, overview, budget, lastSeen: elegido.last_seen };
+    return { project, overview, budget, clientes, lastSeen: elegido.last_seen };
   }, [pedido, days]);
 
   if (estado.fase === "cargando") return <CargandoDiagnostico />;
@@ -47,7 +49,7 @@ function Contenido() {
   if (estado.fase === "sin-permiso") return <NotYours mensaje={estado.error.message} />;
   if (estado.fase === "error") return <BackendDown mensaje={estado.error.message} />;
 
-  const { project, overview, budget, lastSeen } = estado.datos;
+  const { project, overview, budget, clientes, lastSeen } = estado.datos;
   if (!overview) return <NoProject />;
   if (overview.spans === 0)
     return <NoTracesYet project={project} lastSeen={lastSeen} days={days} />;
@@ -176,6 +178,8 @@ function Contenido() {
       {/* El contexto que matiza la cifra, en su carril (D-132). En estrecho va debajo de
           la lista: lo primero, después de la cifra, es qué arreglar. */}
       <aside className="diag-rail" aria-label={t("diag.contexto")}>
+        <ClientesQuePierden clientes={clientes} query={query} />
+
         <LineaPresupuesto budget={budget} query={query} />
 
         {/* Cuando la cobertura es buena no desaparece: se queda en una línea. Que el
@@ -324,6 +328,22 @@ function ListaProblemas({ findings, query }: { findings: Finding[]; query: strin
         </details>
       )}
     </>
+  );
+}
+
+/**
+ * El aviso del margen por cliente (D-161), en el carril y sólo cuando hay algo que
+ * avisar: un cliente que te hace perder dinero va por encima del presupuesto, porque es
+ * dinero que se pierde, no que se gasta.
+ */
+function ClientesQuePierden({ clientes, query }: { clientes: MarginView | null; query: string }) {
+  if (!clientes || clientes.losing === 0) return null;
+  return (
+    <div className="rail-block clientes-aviso">
+      <h2>{t("diag.clientes")}</h2>
+      <p>{tn("diag.clientes.pierden", clientes.losing)}</p>
+      <Link href={`/clientes${query}`}>{t("diag.clientes.ver")}</Link>
+    </div>
   );
 }
 

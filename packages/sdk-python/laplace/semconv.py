@@ -72,6 +72,9 @@ GEN_AI_AGENT_ID = "gen_ai.agent.id"
 LAPLACE_SPAN_TYPE = "laplace.span.type"
 LAPLACE_SESSION_ID = "laplace.session.id"
 LAPLACE_USER_ID = "laplace.user.id"
+#: El cliente final que paga por el trabajo del agente (Fase 6, D-161). No es el usuario:
+#: una empresa cliente tiene muchos usuarios, y el margen es por quien factura.
+LAPLACE_CUSTOMER_ID = "laplace.customer.id"
 LAPLACE_TAGS = "laplace.tags"
 LAPLACE_METADATA = "laplace.metadata"
 

@@ -166,7 +166,8 @@ el documento que se mantiene al día. En corto: las fases 3, 4 y 5 están cerrad
 Fase 5 dejó el producto en cinco idiomas (D-147 a D-149), con menos texto, gráficos y
 grafo del agente (D-150 a D-153), el oscuro como tema por defecto (D-155) y la interfaz
 alrededor del ciclo detectar → probar → arreglar → verificar, con Prompts como fuente de
-hallazgos (D-156, D-157). Lo siguiente es el margen por cliente (Fase 6). El paquete fino
+hallazgos (D-156, D-157). La Fase 6, margen por cliente, está hecha en lo esencial (D-161): falta traer los
+ingresos desde Stripe. El paquete fino
 de TypeScript espera el nombre en npm, y el diagnóstico automático con modelo sigue con
 su hueco reservado en el contrato, el esquema y la API.
 
