@@ -3148,3 +3148,52 @@ día de datos no se compara; sin tarifa el margen es un techo; un cliente sin tr
 desaparece; sin clientes se dice; una tirada que fija cliente no se le cobra; y la API
 pone y quita ingresos. Rompiendo la proyección o el suelo, fallan. En pantalla, el aviso
 en Clientes y en el carril del Diagnóstico, y la séptima pestaña cabe en móvil.
+
+### D-162 — Lo que quedaba del margen por cliente: sus ejecuciones, sus problemas, la alerta y Stripe
+* **De un cliente a sus ejecuciones.** El explorador filtra por `customer_id` (en los dos
+  almacenes, por trazas como el usuario y la sesión: el cliente lo lleva la raíz), y cada
+  cliente de la pestaña lleva su «Ver sus ejecuciones».
+* **Qué problemas del Diagnóstico pasan en sus ejecuciones.** El aviso decía «mira qué
+  problemas pasan en sus ejecuciones» y había que buscarlos a mano. Ahora cada cliente
+  lleva los tres que más devuelven, cruzados por el paso igual que la vista de traza
+  (`customer_steps`: por cliente, los pasos que recorren sus ejecuciones y cuántas veces
+  como mucho en una; una repetición o un bucle sólo cuentan si el paso sale más de una
+  vez). Salen del mismo Diagnóstico del inicio, con su caché y sus estados: lo arreglado
+  o ignorado no se le atribuye a nadie. En la demo todos los clientes comparten los
+  mismos problemas, porque es el mismo agente para todos; con agentes que hacen cosas
+  distintas por cliente, la lista cambia.
+* **La alerta**, por los canales de siempre y en el mismo mensaje: «N clientes han
+  pasado a hacerte perder dinero», **una vez por cliente** cuando pasa a perder. Mientras
+  sigue perdiendo no vuelve a sonar —se le toca `seen_at` en cada vuelta para que la
+  limpieza de `decide()` no lo olvide y suene cada periodo de calma—; cuando se recupera
+  se olvida, y si recae vuelve a sonar. Se silencia como una regla más
+  (`cliente_pierde`) y sin ingresos puestos no dice nada.
+* **Ingresos desde Stripe** (`stripe_ingresos.py`). Una clave secreta o restringida por
+  proyecto, guardada con los ajustes y devuelta sólo como sus cuatro últimos caracteres.
+  «Traer de Stripe» lee las facturas pagadas de los últimos 30 días, con el cliente
+  expandido y paginando entero. Tres decisiones:
+  * **A qué cliente de las trazas va cada factura:** `metadata.laplace_customer_id` del
+    cliente de Stripe, o su id (`cus_…`). No por correo ni por nombre.
+  * **Al mes de verdad:** cada línea se lleva a un mes por el periodo que cubre (un plan
+    anual de 1.200 $ son 100 al mes); un cargo sin periodo cuenta entero.
+  * **Sin convertir monedas:** lo que no está en dólares no se suma con un tipo
+    inventado; se cuenta aparte y se dice al traerlo.
+
+  Lo puesto a mano para un cliente que Stripe no conoce se queda; lo que Stripe conoce
+  lo pisa la factura; lo que venía de Stripe y ya no sale se quita. Cada ingreso dice de
+  dónde sale («Stripe» en la tabla). La traída es a mano, con un botón: sin salida a
+  internet la instalación sigue funcionando con ingresos escritos. **No se ha probado
+  contra la API real** —aquí no hay salida a `api.stripe.com` ni clave—: las pruebas van
+  contra una Stripe falsa con la forma documentada de las facturas.
+
+Pruebas: `test_margen.py` (pasos por cliente en los dos almacenes, problemas por cliente,
+la alerta una vez, silenciada y sin ingresos; quitando el toque de `seen_at`, falla),
+`test_stripe.py` (cliente y mes de cada factura, otra moneda, paginación, lo manual que se
+queda, la clave que no se devuelve y la que Stripe rechaza; sin llevar al mes, falla) y
+`test_pantallas.py` (del aviso a las ejecuciones del cliente).
+
+De paso: la prueba de pantalla de D-157 buscaba el problema del prompt entre las tres
+tarjetas visibles del Diagnóstico, y su puesto depende de la hora a la que se carga la
+demo (según la hora sale un 53 % o un 70 % más caro, tercero o cuarto). Ahora despliega
+la lista entera antes de buscarlo: era la prueba la que dependía del reloj, no el
+producto.

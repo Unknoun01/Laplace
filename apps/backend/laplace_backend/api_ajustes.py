@@ -20,7 +20,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from . import idioma, margen, presupuesto
+from . import idioma, margen, presupuesto, stripe_ingresos
 from .alerts import CLAVE_AJUSTES, webhook_valido
 from .auth import identity_of
 from .ingest.otlp import recalcular_coste
@@ -154,11 +154,26 @@ async def put_budget(request: Request, body: BudgetIn) -> presupuesto.Budget:
 async def get_customers(
     request: Request, project_id: str, days: int = Query(30, ge=1, le=90)
 ) -> margen.MarginView:
-    """Coste, ingresos y margen de cada cliente, con el aviso de quién hace perder dinero."""
+    """Coste, ingresos y margen de cada cliente, con el aviso de quién hace perder dinero
+    y los problemas del Diagnóstico que pasan en sus ejecuciones."""
+    from .api import get_overview
+
     ingresos = await run_in_threadpool(margen.leer_ingresos, _meta(request), project_id)
-    return await run_in_threadpool(
-        margen.calcular, _store(request), project_id, _ventana(days), ingresos
+    ventana = _ventana(days)
+    vista = await run_in_threadpool(
+        margen.calcular, _store(request), project_id, ventana, ingresos
     )
+    if vista.customers:
+        # El mismo Diagnóstico que el inicio, con su caché y los estados de cada problema:
+        # lo arreglado o ignorado no se le atribuye a nadie.
+        diagnostico = await get_overview(request, project_id, days)
+        pasos = await run_in_threadpool(_store(request).customer_steps, project_id, ventana)
+        margen.con_problemas(vista, diagnostico.findings, pasos)
+    fuentes = await run_in_threadpool(margen.leer_fuentes, _meta(request), project_id)
+    for cliente in vista.customers:
+        if cliente.monthly_revenue is not None:
+            cliente.revenue_source = fuentes.get(cliente.customer_id, "manual")
+    return vista
 
 
 class RevenueIn(BaseModel):
@@ -187,6 +202,74 @@ async def put_customer_revenue(request: Request, body: RevenueIn) -> dict[str, A
             _guard, meta.delete_setting, body.project_id, margen.clave(cliente)
         )
     return {"customer_id": cliente, "monthly": body.monthly or None}
+
+
+# Ingresos desde Stripe (D-162). La clave es un secreto: se guarda y no se devuelve.
+
+
+@router.get("/stripe", response_model=stripe_ingresos.StripeStatus)
+async def get_stripe(request: Request, project_id: str) -> stripe_ingresos.StripeStatus:
+    return await run_in_threadpool(stripe_ingresos.estado, _meta(request), project_id)
+
+
+class StripeIn(BaseModel):
+    project_id: str
+    #: Una clave secreta o restringida de Stripe. `None` o vacía la quita.
+    api_key: str | None = Field(default=None, max_length=300)
+
+
+@router.put("/stripe", response_model=stripe_ingresos.StripeStatus)
+async def put_stripe(request: Request, body: StripeIn) -> stripe_ingresos.StripeStatus:
+    meta = _meta(request)
+    clave_stripe = (body.api_key or "").strip()
+    if clave_stripe and not stripe_ingresos.clave_valida(clave_stripe):
+        raise HTTPException(status_code=422, detail=t("stripe.clave_invalida"))
+    if clave_stripe:
+        ajustes = await run_in_threadpool(stripe_ingresos.leer, meta, body.project_id)
+        ajustes["api_key"] = clave_stripe
+        await run_in_threadpool(
+            _guard, meta.set_setting, body.project_id, stripe_ingresos.CLAVE, ajustes
+        )
+    else:
+        await run_in_threadpool(
+            _guard, meta.delete_setting, body.project_id, stripe_ingresos.CLAVE
+        )
+    return await run_in_threadpool(stripe_ingresos.estado, meta, body.project_id)
+
+
+class StripeSyncIn(BaseModel):
+    project_id: str
+
+
+@router.post("/stripe/sync")
+async def sync_stripe(request: Request, body: StripeSyncIn) -> dict[str, Any]:
+    """Trae lo que paga cada cliente de las facturas pagadas del último mes."""
+    meta = _meta(request)
+    ajustes = await run_in_threadpool(stripe_ingresos.leer, meta, body.project_id)
+    clave_stripe = ajustes.get("api_key")
+    if not clave_stripe:
+        raise HTTPException(status_code=409, detail=t("stripe.sin_clave"))
+    try:
+        resultado = await run_in_threadpool(stripe_ingresos.sincronizar, clave_stripe)
+    except stripe_ingresos.StripeError as exc:
+        raise HTTPException(status_code=502, detail=t(str(exc))) from exc
+    await run_in_threadpool(_guard, stripe_ingresos.aplicar, meta, body.project_id, resultado)
+    return {
+        "customers": len(resultado.revenue),
+        "invoices": resultado.invoices,
+        "other_currency": resultado.other_currency,
+        "synced_at": resultado.synced_at.isoformat(),
+        "detail": t(
+            "stripe.sincronizado",
+            clientes=len(resultado.revenue),
+            facturas=resultado.invoices,
+        )
+        + (
+            " " + t("stripe.otra_moneda", n=resultado.other_currency)
+            if resultado.other_currency
+            else ""
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------------

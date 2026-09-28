@@ -129,6 +129,8 @@ async def list_traces(
     status: str | None = Query(None, pattern="^(ok|error)$"),
     session_id: str | None = None,
     user_id: str | None = None,
+    #: El cliente que paga (D-161): de la pestaña de Clientes a sus ejecuciones.
+    customer_id: str | None = None,
     search: str | None = None,
     #: Texto a buscar dentro de prompts, respuestas y herramientas. Con menos de tres
     #: caracteres casa casi todo y ningún índice ayuda (D-144).
@@ -157,6 +159,7 @@ async def list_traces(
         status=status,
         session_id=session_id,
         user_id=user_id,
+        customer_id=customer_id,
         search=search,
         content=content,
         step_key=step_key,

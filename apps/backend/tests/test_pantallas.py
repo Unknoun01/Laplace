@@ -562,6 +562,10 @@ def test_prompts_es_una_fuente_de_hallazgos(servidor, navegador):
     Prompts y enseña el ciclo, y la ficha de Prompts avisa del problema abierto."""
     pagina, errores = _abrir(navegador, servidor + "/?project=demo&days=30", "escritorio")
     try:
+        # El puesto de este problema depende de la hora a la que se cargó la demo: a
+        # veces es el cuarto y va plegado en «ver más». Se despliega la lista entera.
+        pagina.locator(".card").first.wait_for(timeout=15_000)
+        pagina.evaluate("document.querySelectorAll('details.mas').forEach(d => d.open = true)")
         pagina.wait_for_function(
             "() => document.querySelector('main')?.innerText.includes('La v2 de «atencion»')",
             timeout=15_000,
@@ -692,6 +696,28 @@ def test_el_aviso_de_quien_hace_perder_dinero(servidor, navegador):
             "() => document.querySelector('.clientes-aviso')", timeout=15_000
         )
         assert "1 cliente te hace perder dinero" in pagina.locator(".clientes-aviso").inner_text()
+        assert errores == [], errores
+    finally:
+        pagina.close()
+
+
+def test_del_cliente_a_sus_ejecuciones(servidor, navegador):
+    """D-162: desde el aviso, «Ver sus ejecuciones» abre el explorador filtrado por ese
+    cliente, y todas las filas son suyas (la sesión de la demo lleva el usuario, que es
+    de iberviajes: u-01 a u-03)."""
+    pagina, errores = _abrir(navegador, servidor + "/clientes/?project=demo&days=30",
+                             "escritorio")
+    try:
+        pagina.wait_for_function("() => document.querySelector('.cl-aviso')", timeout=15_000)
+        pagina.locator(".cl-aviso").get_by_role("link", name="Ver sus ejecuciones →").click()
+        pagina.wait_for_function(
+            "() => document.querySelector('main')?.innerText.includes('del cliente iberviajes')",
+            timeout=15_000,
+        )
+        sesiones = pagina.locator("td").filter(has_text="sesión").all_inner_texts()
+        assert sesiones and all(
+            any(f"u-0{n}-" in s for n in (1, 2, 3)) for s in sesiones
+        ), sesiones[:5]
         assert errores == [], errores
     finally:
         pagina.close()

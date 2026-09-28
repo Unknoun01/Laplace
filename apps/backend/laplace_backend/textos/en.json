@@ -449,5 +449,14 @@
   "margen.titular.sin_ingresos": "Enter what each customer pays you to see their margin.",
   "margen.titular.sin_clientes": "Your runs don't say which customer they belong to yet.",
   "margen.titular.sin_proyeccion": "With {hay} of data we don't compare with what they pay per month yet: it takes {minimo}.",
-  "error.cliente_vacio": "The customer is missing."
+  "error.cliente_vacio": "The customer is missing.",
+  "alerta.clientes_one": "{n} customer has started losing you money:",
+  "alerta.clientes_other": "{n} customers have started losing you money:",
+  "stripe.clave_rechazada": "Stripe doesn't accept that key. Check that it's for this environment and can read invoices and customers.",
+  "stripe.error": "Stripe returned an error; try again in a while.",
+  "stripe.sin_respuesta": "Stripe doesn't respond from this server. If the installation can't reach the internet, enter revenue by hand.",
+  "stripe.clave_invalida": "That doesn't look like a Stripe key: it starts with sk_ or rk_ (live or test).",
+  "stripe.sin_clave": "Enter a Stripe key first.",
+  "stripe.sincronizado": "Revenue for {clientes} customers brought from Stripe, from {facturas} invoices paid in the last month.",
+  "stripe.otra_moneda": "{n} invoices in another currency weren't counted: they aren't converted with a made-up exchange rate."
 }

@@ -653,6 +653,12 @@ class SQLiteStore:
                 f"WHERE user_id = :user_id{acotar})"
             )
             params["user_id"] = filters.user_id
+        if filters.customer_id:
+            clauses.append(
+                "trace_id IN (SELECT DISTINCT trace_id FROM spans "
+                f"WHERE customer_id = :customer_id{acotar})"
+            )
+            params["customer_id"] = filters.customer_id
         if filters.model:
             # El modelo es de un span, no de la traza: se filtra por trazas que lo usan.
             clauses.append(
@@ -1439,6 +1445,27 @@ class SQLiteStore:
             )
             for r in self._query(sql, params)
         ]
+
+    def customer_steps(self, project_id: str, window: Window) -> dict[str, dict[str, int]]:
+        sql = f"""
+            WITH cliente AS (
+                SELECT trace_id, MAX(customer_id) AS c FROM spans
+                WHERE {RULES_WHERE} GROUP BY trace_id
+            ),
+            por_traza AS (
+                SELECT cliente.c AS cliente,
+                       CASE WHEN step_key != '' THEN step_key ELSE name END AS paso,
+                       COUNT(*) AS n
+                FROM spans JOIN cliente USING (trace_id)
+                WHERE {WINDOW_WHERE} AND cliente.c != ''
+                GROUP BY spans.trace_id, cliente.c, paso
+            )
+            SELECT cliente, paso, MAX(n) AS veces FROM por_traza GROUP BY cliente, paso
+        """
+        salida: dict[str, dict[str, int]] = {}
+        for r in self._query(sql, self._window_params(project_id, window)):
+            salida.setdefault(r["cliente"], {})[r["paso"]] = int(r["veces"])
+        return salida
 
     def delete_before(self, cutoff: datetime) -> int:
         """Borra los spans que empezaron antes de `cutoff`. Es la retención."""

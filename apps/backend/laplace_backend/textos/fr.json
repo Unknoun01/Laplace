@@ -449,5 +449,14 @@
   "margen.titular.sin_ingresos": "Indiquez ce que vous paie chaque client pour voir sa marge.",
   "margen.titular.sin_clientes": "Vos exécutions ne disent pas encore de quel client elles sont.",
   "margen.titular.sin_proyeccion": "Avec {hay} de données, on ne compare pas encore avec ce qu’ils paient par mois : il faut {minimo}.",
-  "error.cliente_vacio": "Le client manque."
+  "error.cliente_vacio": "Le client manque.",
+  "alerta.clientes_one": "{n} client s’est mis à vous faire perdre de l’argent :",
+  "alerta.clientes_other": "{n} clients se sont mis à vous faire perdre de l’argent :",
+  "stripe.clave_rechazada": "Stripe n’accepte pas cette clé. Vérifiez qu’elle est de cet environnement et qu’elle peut lire factures et clients.",
+  "stripe.error": "Stripe a renvoyé une erreur ; réessayez dans un moment.",
+  "stripe.sin_respuesta": "Stripe ne répond pas depuis ce serveur. Si l’installation n’accède pas à internet, saisissez les revenus à la main.",
+  "stripe.clave_invalida": "Cela ne ressemble pas à une clé Stripe : elle commence par sk_ ou rk_ (live ou test).",
+  "stripe.sin_clave": "Indiquez d’abord une clé Stripe.",
+  "stripe.sincronizado": "Revenus de {clientes} clients récupérés depuis Stripe, sur {facturas} factures payées le mois dernier.",
+  "stripe.otra_moneda": "{n} factures dans une autre devise n’ont pas été comptées : on ne les convertit pas avec un taux inventé."
 }

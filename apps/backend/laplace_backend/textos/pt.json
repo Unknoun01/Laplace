@@ -449,5 +449,14 @@
   "margen.titular.sin_ingresos": "Informe quanto cada cliente paga para ver a margem.",
   "margen.titular.sin_clientes": "Suas execuções ainda não dizem de qual cliente são.",
   "margen.titular.sin_proyeccion": "Com {hay} de dados ainda não comparamos com o que pagam por mês: é preciso {minimo}.",
-  "error.cliente_vacio": "Falta o cliente."
+  "error.cliente_vacio": "Falta o cliente.",
+  "alerta.clientes_one": "{n} cliente passou a fazer você perder dinheiro:",
+  "alerta.clientes_other": "{n} clientes passaram a fazer você perder dinheiro:",
+  "stripe.clave_rechazada": "O Stripe não aceita essa chave. Verifique se é deste ambiente e se pode ler faturas e clientes.",
+  "stripe.error": "O Stripe devolveu um erro; tente de novo daqui a pouco.",
+  "stripe.sin_respuesta": "O Stripe não responde a partir deste servidor. Se a instalação não acessa a internet, informe a receita à mão.",
+  "stripe.clave_invalida": "Isso não parece uma chave do Stripe: começa com sk_ ou rk_ (live ou test).",
+  "stripe.sin_clave": "Informe antes uma chave do Stripe.",
+  "stripe.sincronizado": "Receita de {clientes} clientes trazida do Stripe, de {facturas} faturas pagas no último mês.",
+  "stripe.otra_moneda": "{n} faturas em outra moeda não foram contadas: não são convertidas com um câmbio inventado."
 }
