@@ -2812,3 +2812,47 @@ no como párrafo, y un héroe que diga «Puedes dejar de pagar hasta X».
 * Pruebas de pantallas: el héroe dice lo que puedes dejar de pagar, la línea de la
   proyección no se ve hasta abrir el distintivo, y la ficha llega con el porqué cerrado.
   Las claves que se quedaron sin uso (`diag.si_arreglas`, `prob.por_que`) se borran.
+
+### D-152 — Dónde se va el dinero: gasto por día con la franja evitable y coste por paso
+El Diagnóstico decía cuánto se puede dejar de pagar pero no cuándo ni en qué. Debajo de
+la lista de problemas (lo primero sigue siendo qué arreglar) hay ahora dos gráficos: el
+gasto por día —por hora si la ventana es de menos de tres días— con la parte evitable
+encima, y el coste de los pasos que más gastan con su parte evitable.
+
+* **La franja evitable es un reparto, y se dice.** Las reglas miden lo evitable de cada
+  hallazgo sobre la ventana entera, no día a día. Se reparte por tramos **en proporción
+  a lo que gastó en cada tramo el paso del hallazgo** (`insights/grafico.py`). Así los
+  tramos suman exactamente lo evitable del héroe —nada se cuenta dos veces ni se
+  inventa— y un día en que ese paso no trabajó no recibe nada. Lo descartado: pasar las
+  reglas día a día (los umbrales cambian con el tamaño de la ventana y la suma no
+  daría la cifra de arriba) y repartir a partes iguales (pintaría derroche en días sin
+  actividad; la prueba lo comprueba mutando a eso). Debajo del gráfico, plegado, «¿Cómo
+  se reparte lo evitable por días?». Si algún hallazgo no tiene gasto de su paso en la
+  serie, su importe no se coloca en ningún día y se dice cuánto es. Y ningún tramo
+  enseña más evitable que gasto.
+* **Una lectura más**, `step_cost_series`, en los dos almacenes: el gasto total por tramo
+  (por el instante de cada span, no de la ejecución como el Panel: aquí la pregunta es
+  cuándo se gastó) y el de cada paso con el filtro de las reglas, sin tiradas de
+  evaluación, que es de donde sale lo evitable. Se pide una vez por Diagnóstico.
+* **Los pasos se nombran como en el resto del producto** (`disambiguate`, D-106): en la
+  demo salían tres filas «responder» con tres cifras distintas.
+* **Dos textos que el CSS pintaba en español en los cinco idiomas**, encontrados por el
+  camino: el «¿por qué?» de los avisos plegados y la marca «avanzado». Los pasa ahora el
+  proveedor de idioma como variables (`--txt-porque`, `--txt-avanzado`), y una guardia
+  en `test_textos_web.py` falla con cualquier `content:` con texto fuera de `var()`.
+  Los plegados que ya son una pregunta («¿Cómo se calcula?») no llevan el sufijo.
+
+Pruebas en `test_grafico_diagnostico.py` (los dos almacenes): los tramos suman el gasto
+y lo evitable del héroe, lo evitable cae donde gastó su paso, orden y resto de pasos,
+tramos por hora en ventanas cortas, el tope por tramo y los homónimos; y dos de
+pantallas.
+
+### D-153 — El grafo del agente en la vista de traza
+Encima del árbol, «Cómo está hecho el agente»: una caja por paso (identidad `step_key`, o
+tipo y nombre si no la hay) con sus llamadas y su coste, y una flecha por cada paso que
+llama a otro con cuántas veces (en ámbar si son varias: un bucle pasa de treinta filas a
+una flecha «×6»). Capas por la menor profundidad a la que aparece cada paso; una llamada
+hacia atrás va curvada por debajo. Ámbar el paso con un problema del Diagnóstico en esta
+traza, rosa el que falló. Sin tarifa no cuesta cero: el nodo dice «sin tarifa» o «≥ X».
+Sale del árbol que ya llega a la web, sin backend nuevo. Prueba de pantallas: nodos y
+aristas en una traza de la demo, y «×n» en una con bucle.

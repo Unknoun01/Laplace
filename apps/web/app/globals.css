@@ -863,7 +863,7 @@ body[data-mode="pro"] .simple-only {
   font-weight: 500;
 }
 .block.pro h2::after {
-  content: "avanzado";
+  content: var(--txt-avanzado, "avanzado");
   margin-left: 9px;
   font-family: var(--mono);
   font-size: var(--fs-2xs);
@@ -2682,14 +2682,15 @@ details.porque > summary::-webkit-details-marker {
   display: none;
 }
 details.porque > summary::after {
-  content: " ¿por qué?";
+  content: var(--txt-porque, " ¿por qué?");
   color: var(--ink-3);
   font-size: var(--fs-sm);
 }
 details.porque[open] > summary::after {
   content: "";
 }
-.casitodo details.porque > summary::after {
+.casitodo details.porque > summary::after,
+details.porque.pregunta > summary::after {
   content: "";
 }
 .casitodo details.porque > summary {
@@ -3472,4 +3473,159 @@ details.porque-bloque > summary {
   cursor: pointer;
   font-weight: 600;
   color: var(--ink);
+}
+
+/* ---------------------------------------------------------------------------
+   Dónde se va el dinero (D-152). Los mismos dos colores que la barra del héroe: gris
+   el trabajo real, ámbar lo evitable.
+   --------------------------------------------------------------------------- */
+.chart .legend i.real,
+.pasos-coste i.real {
+  background: var(--hair-strong);
+}
+.chart .legend i.evitable,
+.pasos-coste i.evitable {
+  background: var(--amber);
+}
+.graficos .chart rect.real {
+  fill: var(--hair-strong);
+}
+.graficos .chart rect.evitable {
+  fill: var(--amber);
+}
+.graficos .chart details.porque {
+  margin-top: var(--sp-2);
+  font-size: var(--fs-sm);
+}
+.pasos-coste h3 {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  margin: var(--sp-6) 0 var(--sp-3);
+}
+.pasos-coste ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.pasos-coste li {
+  display: grid;
+  grid-template-columns: minmax(0, 14rem) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: var(--fs-sm);
+}
+.pasos-coste li.otros .nombre {
+  color: var(--ink-3);
+}
+.pasos-coste .nombre {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pasos-coste .barra {
+  height: 10px;
+}
+.pasos-coste .barra i {
+  display: block;
+  height: 100%;
+  border-radius: var(--r-pill);
+  overflow: hidden;
+}
+.pasos-coste .barra i.real {
+  display: flex;
+  justify-content: flex-end;
+}
+.pasos-coste .cifra {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+.pasos-coste .cifra small {
+  display: block;
+  color: var(--amber);
+  font-family: var(--sans);
+  font-size: var(--fs-xs);
+}
+@media (max-width: 700px) {
+  .pasos-coste li {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .pasos-coste .barra {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   El grafo del agente (D-153). Cajas del cristal de siempre; el color sólo dice algo:
+   ámbar, un paso con un problema del Diagnóstico; rosa, un paso que falló.
+   --------------------------------------------------------------------------- */
+.grafo-agente {
+  margin: var(--sp-8) 0 var(--sp-6);
+}
+.grafo-agente h2 {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+.grafo-agente .lead {
+  margin: 0 0 var(--sp-4);
+  color: var(--ink-3);
+  font-size: var(--fs-md);
+}
+.grafo-marco {
+  overflow-x: auto;
+  border: 1px solid var(--hair-soft);
+  border-radius: var(--r);
+  background: var(--panel);
+  padding: 4px;
+}
+.grafo-marco svg {
+  display: block;
+}
+.grafo-agente .nodo rect {
+  fill: var(--glass);
+  stroke: var(--hair-strong);
+  stroke-width: 1;
+}
+.grafo-agente .nodo.llm rect {
+  stroke: var(--iris);
+}
+.grafo-agente .nodo.problema rect {
+  stroke: var(--amber);
+  stroke-width: 2;
+}
+.grafo-agente .nodo.error rect {
+  stroke: var(--rose);
+  stroke-width: 2;
+}
+.grafo-agente .nodo text.nombre {
+  fill: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+}
+.grafo-agente .nodo text.meta {
+  fill: var(--ink-3);
+  font-size: 11px;
+  font-family: var(--mono);
+}
+.grafo-agente .arista path {
+  fill: none;
+  stroke: var(--ink-4);
+  stroke-width: 1.3;
+}
+.grafo-agente .arista.varias path {
+  stroke: var(--amber);
+  stroke-width: 1.8;
+}
+.grafo-agente .arista text {
+  fill: var(--amber);
+  font-size: 11px;
+  font-family: var(--mono);
+}
+.grafo-agente .punta {
+  fill: var(--ink-4);
 }

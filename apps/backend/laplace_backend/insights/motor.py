@@ -16,6 +16,7 @@ from ..pasos import con_pista
 from ..storage.base import LoopGroup, ModelUsage, RepeatedGroup, Window, WindowSummary
 from .bucle import _loop_detail, _loop_finding
 from .contexto_fijo import _fixed_context_detail, _fixed_context_finding
+from .grafico import construir as construir_grafico
 from .modelo_caro import _expensive_model_detail, _expensive_model_finding
 from .modelos import (
     CAUTION_SAVINGS_RATIO,
@@ -375,6 +376,7 @@ def overview(
         findings=findings,
         set_aside=apartados,
         coverage=cobertura,
+        chart=construir_grafico(store, project_id, window, findings),
     )
 
 

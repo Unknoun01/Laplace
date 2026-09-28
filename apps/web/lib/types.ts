@@ -347,6 +347,29 @@ export interface Coverage {
   split_steps: string[];
 }
 
+/** Un tramo del gráfico del Diagnóstico. `avoidable_usd` es un reparto, no una medida. */
+export interface TramoGasto {
+  start: string;
+  cost_usd: number;
+  avoidable_usd: number;
+}
+
+export interface GastoPaso {
+  key: string;
+  name: string;
+  cost_usd: number;
+  avoidable_usd: number;
+}
+
+/** Espejo de `insights.modelos.Grafico` (D-152). */
+export interface Grafico {
+  bucket_minutes: number;
+  buckets: TramoGasto[];
+  steps: GastoPaso[];
+  other_steps_usd: number;
+  unattributed_usd: number;
+}
+
 export interface Overview {
   project_id: string;
   days: number;
@@ -394,6 +417,8 @@ export interface Overview {
   findings: Finding[];
   /** Cuánto de este proyecto entendemos. Va delante del dinero si es baja. */
   coverage: Coverage | null;
+  /** Dónde se va el dinero (D-152). `null` sin gasto que dibujar. */
+  chart: Grafico | null;
   /** Arreglados o ignorados: no suman al evitable (D-123). */
   set_aside: Finding[];
 }

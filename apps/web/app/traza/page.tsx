@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { GrafoAgente } from "@/components/GrafoAgente";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { TraceTree } from "@/components/TraceTree";
@@ -100,6 +101,8 @@ function Contenido() {
           </ul>
         </div>
       )}
+
+      <GrafoAgente trace={trace} resaltados={new Set(aqui.map((f) => f.step_key))} />
 
       <TraceTree trace={trace} />
 

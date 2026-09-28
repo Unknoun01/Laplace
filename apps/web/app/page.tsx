@@ -12,6 +12,7 @@ import type { Budget, Finding, Overview } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
 import { CasiTodoEvitable, CASI_TODO_EVITABLE, CoberturaBloque, CoberturaLinea, Confianza, SinDinero } from "./avisos";
 import { tr } from "@/lib/i18n";
+import { Graficos } from "./graficos";
 import { t, tn } from "@/lib/textos";
 
 /**
@@ -241,6 +242,12 @@ function Contenido() {
             {t("diag.nota.moneda", { moneda: overview.currency })}
           </p>
         </section>
+      )}
+
+      {/* Después de qué arreglar, que es lo que se ha venido a ver: el gráfico explica
+          de dónde sale la cifra, no la sustituye (D-152). */}
+      {overview.chart && !overview.cost_unavailable && (
+        <Graficos grafico={overview.chart} currency={overview.currency} />
       )}
 
       <Apartados findings={overview.set_aside} query={query} currency={overview.currency} />

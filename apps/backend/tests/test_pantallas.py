@@ -442,3 +442,58 @@ def test_la_ficha_pliega_el_porque(servidor, navegador):
         assert errores == [], errores
     finally:
         pagina.close()
+
+
+def test_el_diagnostico_ensena_donde_se_va_el_dinero(servidor, navegador):
+    """D-152: gasto por día con la franja evitable, y coste por paso sin dos filas con
+    el mismo nombre (en la demo salían tres «responder»)."""
+    pagina, errores = _abrir(navegador, servidor + "/?project=demo&days=7", "escritorio")
+    try:
+        graficos = pagina.locator("section.graficos")
+        graficos.wait_for(timeout=15_000)
+        assert graficos.locator("rect.evitable").count() > 0
+        nombres = graficos.locator(".pasos-coste .nombre").all_inner_texts()
+        assert nombres and len(nombres) == len(set(nombres)), nombres
+        assert errores == [], errores
+    finally:
+        pagina.close()
+
+
+def test_el_css_tambien_habla_el_idioma_elegido(servidor, navegador):
+    """El «¿por qué?» de un aviso plegado lo pinta el CSS; en inglés dice «why?»."""
+    pagina = navegador.new_page(viewport={"width": 1440, "height": 900}, locale="en-US")
+    try:
+        pagina.goto(servidor + "/?project=demo&days=7", wait_until="networkidle")
+        pagina.locator("details.confianza").wait_for(timeout=15_000)
+        sufijo = pagina.evaluate(
+            """() => getComputedStyle(
+                document.querySelector('details.porque:not(.pregunta) > summary'), '::after'
+            ).content"""
+        )
+        assert "why" in sufijo and "qué" not in sufijo, sufijo
+    finally:
+        pagina.close()
+
+
+def test_la_traza_ensena_el_grafo_del_agente(servidor, navegador):
+    """D-153: una caja por paso y una flecha por llamada, con cuántas veces. En la demo
+    las trazas con bucle llaman a «consultar_manual» varias veces desde el mismo paso."""
+    base = servidor + "/trazas/?project=demo&days=30&sort=cost"
+    pagina, errores = _abrir(navegador, base, "escritorio")
+    try:
+        fila = pagina.locator("a[href*='/traza?'], a[href*='/traza/?']").first
+        fila.wait_for(timeout=15_000)
+        fila.click()
+        grafo = pagina.locator("section.grafo-agente")
+        grafo.wait_for(timeout=15_000)
+        assert grafo.locator("g.nodo").count() >= 2
+        assert grafo.locator("g.arista").count() >= 1
+        # Una traza de la demo con bucle: «×n» en alguna flecha.
+        pagina.goto(servidor + "/trazas/?project=demo&days=30&sort=cost&q=consultar_manual",
+                    wait_until="networkidle")
+        pagina.locator("a[href*='/traza?'], a[href*='/traza/?']").first.click()
+        pagina.locator("section.grafo-agente").wait_for(timeout=15_000)
+        assert pagina.locator("section.grafo-agente g.arista.varias").count() >= 1
+        assert errores == [], errores
+    finally:
+        pagina.close()

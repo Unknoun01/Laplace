@@ -35,6 +35,7 @@ from .base import (
     ProjectStats,
     PromptUsage,
     RepeatedGroup,
+    StepCostSeries,
     StepFacts,
     TraceCost,
     TraceFilter,
@@ -43,6 +44,7 @@ from .base import (
     WindowFacts,
     WindowSummary,
     densify,
+    densify_steps,
     disambiguate,
     encode_cursor,
 )
@@ -923,6 +925,42 @@ class ClickHouseStore:
                     ),
                 )
                 for r in filas
+            ],
+            window,
+            bucket_minutes,
+        )
+
+    def step_cost_series(
+        self, project_id: str, window: Window, bucket_minutes: int
+    ) -> StepCostSeries:
+        params = self._window_params(project_id, window)
+        params["origen"] = _utc(window.since)
+        params["ancho_s"] = bucket_minutes * 60
+        tramo = "intDiv(dateDiff('second', toDateTime64(%(origen)s, 3), start_time), %(ancho_s)s)"
+        total = _named(
+            self._client.query(
+                f"""SELECT {tramo} AS tramo, sum(cost_total_usd) AS coste
+                    FROM spans FINAL WHERE {WINDOW_WHERE} GROUP BY tramo""",
+                parameters=params,
+            )
+        )
+        pasos = _named(
+            self._client.query(
+                f"""SELECT if(step_key != '', step_key, name) AS paso,
+                           max(if(step_label != '', step_label, name)) AS etiqueta,
+                           max(step_site) AS sitio, max(step_hint) AS pista,
+                           {tramo} AS tramo, sum(cost_total_usd) AS coste
+                    FROM spans FINAL WHERE {RULES_WHERE} AND cost_total_usd > 0
+                    GROUP BY paso, tramo""",
+                parameters=params,
+            )
+        )
+        return densify_steps(
+            [(int(r["tramo"]), float(r["coste"] or 0.0)) for r in total],
+            [
+                (r["paso"], r["etiqueta"] or "", r["sitio"] or "", r["pista"] or "",
+                 int(r["tramo"]), float(r["coste"] or 0.0))
+                for r in pasos
             ],
             window,
             bucket_minutes,

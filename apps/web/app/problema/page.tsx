@@ -193,7 +193,7 @@ function Contenido() {
             )}
           </p>
         )}
-        <details className="porque">
+        <details className="porque pregunta">
           <summary>{t("prob.ahorro.como")}</summary>
           {finding.savings_calculation && (
             <p className="pro">

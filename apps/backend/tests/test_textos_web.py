@@ -66,3 +66,19 @@ def test_los_plurales_van_por_parejas():
         or (c.endswith("_other") and c[:-6] + "_one" not in claves)
     ]
     assert sueltas == []
+
+
+def test_la_hoja_de_estilos_no_escribe_texto():
+    """El CSS pintaba «¿por qué?» y «avanzado» con `content:` en español, en los cinco
+    idiomas (D-152). Un texto así va en una variable que rellena el proveedor de idioma;
+    en el CSS sólo puede quedar como valor de reserva dentro de `var()`."""
+    from pathlib import Path
+
+    hoja = (Path(__file__).resolve().parents[2] / "web" / "app" / "globals.css").read_text(
+        encoding="utf-8"
+    )
+    escritos = [
+        m.group(0)
+        for m in re.finditer(r"content:\s*\"[^\"]*[^\W\d_]{2,}[^\"]*\"", hoja)
+    ]
+    assert escritos == [], escritos

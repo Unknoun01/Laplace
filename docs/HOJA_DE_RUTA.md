@@ -34,7 +34,7 @@ probada: `laplace ui` (un proceso + SQLite) y Docker (ClickHouse + Postgres + Ne
 - **Por fases:** una rama por fase y un commit por bloque. Se enseña al usuario y se fusiona a `master` sólo cuando lo aprueba (`git merge --no-ff`).
 - **Nada entra sin su prueba.** Primero la prueba en rojo, después el arreglo.
 - **Hay que comprobar que la prueba muerde:** romper el código a propósito y verla fallar.
-- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-149**.
+- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-154**.
 - **Todo en español:** código, comentarios, commits y textos.
 - **Los commits terminan con** `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - **Reglas del producto que no se tocan:**
@@ -116,20 +116,21 @@ probada: `laplace ui` (un proceso + SQLite) y Docker (ClickHouse + Postgres + Ne
 3. **Hecho (D-145):** duración mediana y p95 y ejecuciones con error en el Panel, en lugar de la duración media.
 4. **Pendiente, sin máquina para ello:** medir con semanas de histórico (hace falta una máquina con más memoria) para decidir sobre acotar por tiempo las subconsultas de `_where` y sobre `FINAL` con partes sin fusionar. Descartado con números: la clave de ordenación nueva y la tabla `trace_id → proyecto` (abrir una traza ya tarda 0,03 s) y lanzar las lecturas en paralelo.
 
-### Fase 5: interfaz e internacionalización
-- **Hecho (D-147, D-148): cinco idiomas** (español, inglés, portugués de Brasil, francés y chino simplificado) en el motor y en todas las pantallas, con cifras por idioma y el espejo `cifras.py` ↔ `format.ts` comprobado valor a valor. Pendiente: los mensajes de error de la API (`HTTPException.detail`).
-- **Menos texto:**
-  - una frase y un «¿por qué?» plegable;
-  - las guardas se muestran como un distintivo de confianza, no como un párrafo;
-  - el héroe dice «Puedes dejar de pagar hasta X».
-- **Gráficos en el Diagnóstico:** gasto de 30 días con la franja evitable superpuesta y coste por paso.
-- **Grafo del agente** en la vista de traza.
-- **Maquetación:**
-  - a 1440 px sobra un tercio de la pantalla;
-  - en móvil la navegación esconde «Prompts» y «Ajustes».
-- **Identidad visual:** el tema oscuro como insignia y un tema claro neutro en lugar del rosa.
-- **Rediseño alrededor del ciclo:** Evaluaciones pasa a ser el paso «probar» y Prompts una fuente más de hallazgos.
-- **Pendientes de `docs/auditoria-rediseno.md`** que no se hayan cerrado: A1, A2 y B1.
+### Fase 5: interfaz e internacionalización (rama `fase5-interfaz`, SIN fusionar)
+- **Hecho y fusionado (D-147, D-148):** cinco idiomas en el motor y en todas las pantallas.
+- **Hecho en la rama, un commit por bloque (28 de septiembre):**
+  - D-149: errores de la API en cinco idiomas (`error.*`), `AuthError.code`, guardia `test_errores_api.py`.
+  - D-150: A1 (rango vacío ≠ proyecto vacío), A2 (coste visible en móvil), B1 (pestañas enteras a 1024 y en móvil), carcasa de 1280 centrada, Panel y ficha de problema a dos columnas desde 1200 px.
+  - D-151: menos texto: «Puedes dejar de pagar hasta X», distintivo de confianza plegable, «¿Por qué pasa?» plegado.
+  - D-152: gráficos del Diagnóstico (gasto por día con franja evitable repartida y coste por paso), `step_cost_series` en los dos almacenes; y los textos que el CSS pintaba en español.
+  - D-153: grafo del agente en la vista de traza.
+- **Pendiente antes de fusionar, por orden:**
+  1. Pasar la batería **entera** del backend (con `docker compose up -d clickhouse postgres`) y las de pantallas tras `scripts/build_ui.py`: el último commit (D-152 y D-153) sólo se probó con sus pruebas propias, `test_pantallas.py`, `test_textos_web.py`, `test_grafico_diagnostico.py` y `test_diagnostico_escala.py`; la pasada completa se cortó.
+  2. Medir el Diagnóstico con la prueba de carga: `step_cost_series` es una lectura más.
+  3. **Identidad visual:** el tema oscuro como insignia y un tema claro neutro en lugar del rosa. Sin empezar.
+  4. **Rediseño alrededor del ciclo:** Evaluaciones como paso «probar» y Prompts como fuente de hallazgos. Sin empezar.
+  5. Revisión por encima de la historia del proyecto (lo pidió el usuario) buscando pendientes sueltos, y después fusionar `fase5-interfaz` en `master` y hacer push.
+- **Detalles vistos por el camino:** la franja del gráfico por días usa `dayHour` en el pie (sale la hora aunque el tramo sea un día); el héroe con `casiTodo` o sin tarifas sigue con el diseño anterior a propósito.
 
 ### Fase 6: margen por cliente (primera función nueva elegida)
 - `customer_id` en `set_context` y en el contrato, con paridad en los dos almacenes.

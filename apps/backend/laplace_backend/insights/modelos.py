@@ -178,6 +178,38 @@ class FindingDetail(Finding):
     evidence: list[Span] = Field(default_factory=list)
 
 
+class TramoGasto(BaseModel):
+    """Un tramo del gráfico del Diagnóstico (D-152)."""
+
+    start: datetime
+    #: Gasto medido en el tramo, por el instante de cada span.
+    cost_usd: float = 0.0
+    #: Lo evitable **repartido** a este tramo: en proporción a lo que gastó aquí cada
+    #: paso con un hallazgo. No es una medida del tramo, y la pantalla lo dice.
+    avoidable_usd: float = 0.0
+
+
+class GastoPaso(BaseModel):
+    """Un paso del gráfico de coste por paso (D-152)."""
+
+    key: str
+    name: str
+    cost_usd: float = 0.0
+    avoidable_usd: float = 0.0
+
+
+class Grafico(BaseModel):
+    """El gasto de la ventana en el tiempo y por paso, con su parte evitable (D-152)."""
+
+    bucket_minutes: int
+    buckets: list[TramoGasto] = Field(default_factory=list)
+    steps: list[GastoPaso] = Field(default_factory=list)
+    #: Lo que gastaron los pasos que no caben en la lista.
+    other_steps_usd: float = 0.0
+    #: Evitable que no se ha podido repartir porque su paso no tiene gasto en la serie.
+    unattributed_usd: float = 0.0
+
+
 class Overview(BaseModel):
     """El héroe: cuánto cuesta y cuánto sobra."""
 
@@ -249,6 +281,10 @@ class Overview(BaseModel):
     #: aparte a propósito: si la cobertura es baja, hay que enterarse **antes** de leer
     #: la cifra de ahorro, no después de ir a buscarla (D-096).
     coverage: Coverage | None = None
+
+    #: El gasto en el tiempo y por paso, con lo evitable encima (D-152). `None` cuando
+    #: no hay gasto que dibujar.
+    chart: Grafico | None = None
 
 
 # ---------------------------------------------------------------------------------

@@ -308,6 +308,54 @@ class Bucket:
 
 
 @dataclass
+class StepCostSeries:
+    """El coste de la ventana troceado en tramos, en total y por paso (D-152).
+
+    Alimenta el gráfico del Diagnóstico. El total es todo el gasto, como el del héroe;
+    lo de cada paso sale de lo mismo que miran las reglas (sin las tiradas de
+    evaluación), porque sirve para repartir por días lo evitable de cada hallazgo, y lo
+    evitable sale de ahí. A diferencia del Panel, se trocea **por span** y no por
+    ejecución: aquí la pregunta es cuándo se gastó, no cuánto costó cada ejecución.
+    """
+
+    total: list[float] = field(default_factory=list)
+    #: `paso -> coste por tramo`, con la misma longitud que `total`.
+    pasos: dict[str, list[float]] = field(default_factory=dict)
+    #: `paso -> (etiqueta, sitio, pista)`, para nombrarlo como el resto de pantallas.
+    nombres: dict[str, tuple[str, str, str]] = field(default_factory=dict)
+
+
+def densify_steps(
+    total: list[tuple[int, float]],
+    pasos: list[tuple[str, str, str, str, int, float]],
+    window: Window,
+    bucket_minutes: int,
+) -> StepCostSeries:
+    """Densifica las filas de los dos almacenes en la misma forma.
+
+    Cada paso se nombra con la mayor etiqueta, sitio y pista de todas sus filas, que es
+    lo que haría un `MAX()` sobre la ventana entera: el nombre no puede depender de cómo
+    se trocee.
+    """
+    n = bucket_count(window, bucket_minutes)
+    serie = StepCostSeries(total=[0.0] * n)
+    for tramo, coste in total:
+        if 0 <= tramo < n:
+            serie.total[tramo] += coste
+    for paso, etiqueta, sitio, pista, tramo, coste in pasos:
+        if not 0 <= tramo < n:
+            continue
+        serie.pasos.setdefault(paso, [0.0] * n)[tramo] += coste
+        viejo = serie.nombres.get(paso, ("", "", ""))
+        serie.nombres[paso] = (
+            max(viejo[0], etiqueta),
+            max(viejo[1], sitio),
+            max(viejo[2], pista),
+        )
+    return serie
+
+
+@dataclass
 class StepFacts:
     """Lo que un paso hizo y costó en un tramo.
 
@@ -653,6 +701,11 @@ class SpanStore(Protocol):
 
     def trace_latency(self, project_id: str, window: Window) -> Latency:
         """Mediana y p95 de la duración de las ejecuciones (panel, D-145)."""
+
+    def step_cost_series(
+        self, project_id: str, window: Window, bucket_minutes: int
+    ) -> StepCostSeries:
+        """El coste por tramo, en total y por paso: el gráfico del Diagnóstico (D-152)."""
 
     def window_facts(
         self, project_id: str, since: datetime, until: datetime
