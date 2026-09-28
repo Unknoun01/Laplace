@@ -1173,6 +1173,12 @@ class AlertRunner:
             return []
         salida = []
         for project_id in proyectos:
+            if self._metadata is not None:
+                # Los ingresos de Stripe, una vez al día y antes de evaluar: la alerta de
+                # clientes que pierden dinero tiene que mirar lo que pagan hoy (D-163).
+                from .stripe_ingresos import sincronizar_si_toca
+
+                sincronizar_si_toca(self._metadata, project_id)
             try:
                 salida.append(self.evaluate(project_id))
             except Exception:  # noqa: BLE001

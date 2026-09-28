@@ -159,3 +159,59 @@ def test_si_stripe_rechaza_la_clave_se_dice(cliente, monkeypatch):
     respuesta = cliente.post("/api/stripe/sync", json={"project_id": "p"})
     assert respuesta.status_code == 502
     assert "no acepta esa clave" in respuesta.json()["detail"]
+
+
+def test_se_traen_solos_una_vez_al_dia(tmp_path, monkeypatch):
+    """D-163: con la clave puesta, el bucle de fondo trae los ingresos si la última vez
+    fue hace más de un día, y no los vuelve a pedir antes."""
+    meta = SQLiteMetadataStore(tmp_path / "m.db")
+    meta.migrate()
+    falsa = _stripe()
+    monkeypatch.setattr(stripe_ingresos, "_pedir", falsa)
+    assert not stripe_ingresos.sincronizar_si_toca(meta, "p", AHORA), "sin clave, nada"
+
+    meta.set_setting("p", stripe_ingresos.CLAVE, {"api_key": CLAVE})
+    assert stripe_ingresos.sincronizar_si_toca(meta, "p", AHORA)
+    assert margen.leer_ingresos(meta, "p")["acme"] == 100.0
+    assert len(falsa.pedidas) == 2
+
+    from datetime import timedelta
+
+    assert not stripe_ingresos.sincronizar_si_toca(meta, "p", AHORA + timedelta(hours=23))
+    assert len(falsa.pedidas) == 2, "antes de un día no se vuelve a pedir"
+
+
+def test_si_stripe_falla_de_fondo_no_se_cae_nada(tmp_path, monkeypatch):
+    meta = SQLiteMetadataStore(tmp_path / "m.db")
+    meta.migrate()
+    meta.set_setting("p", stripe_ingresos.CLAVE, {"api_key": CLAVE})
+    meta.set_setting("p", margen.clave("acme"), {"monthly": 42.0, "source": "stripe"})
+
+    def caida(url, clave):
+        raise stripe_ingresos.StripeError("stripe.sin_respuesta")
+
+    monkeypatch.setattr(stripe_ingresos, "_pedir", caida)
+    assert not stripe_ingresos.sincronizar_si_toca(meta, "p", AHORA)
+    # Lo último traído sigue valiendo.
+    assert margen.leer_ingresos(meta, "p")["acme"] == 42.0
+
+
+def test_el_bucle_de_fondo_trae_los_ingresos(tmp_path, monkeypatch):
+    from laplace_backend.alerts import AlertConfig, AlertRunner, MemoryAlertState
+    from laplace_backend.config import Settings
+    from laplace_backend.storage.sqlite import SQLiteStore
+
+    db = tmp_path / "laplace.db"
+    store = SQLiteStore(db)
+    store.migrate()
+    meta = SQLiteMetadataStore(db)
+    meta.migrate()
+    meta.set_setting("p", stripe_ingresos.CLAVE, {"api_key": CLAVE})
+    monkeypatch.setattr(stripe_ingresos, "_pedir", _stripe())
+    monkeypatch.setattr(store, "list_projects", lambda: [type("P", (), {"project_id": "p"})])
+    runner = AlertRunner(
+        store, AlertConfig(Settings(store="sqlite", sqlite_path=str(db))), MemoryAlertState(),
+        metadata=meta,
+    )
+    runner.evaluate_all()
+    assert margen.leer_ingresos(meta, "p")["acme"] == 100.0

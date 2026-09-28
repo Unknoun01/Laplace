@@ -163,6 +163,37 @@ def estado(metadata: Any, project_id: str) -> StripeStatus:
     )
 
 
+#: Cada cuánto se traen solos los ingresos de un proyecto con clave puesta.
+CADA = timedelta(hours=24)
+
+
+def sincronizar_si_toca(metadata: Any, project_id: str, ahora: datetime | None = None) -> bool:
+    """La traída diaria (D-163): si hay clave y la última fue hace más de un día, trae.
+
+    La llama el bucle de fondo, que ya tiene turno entre procesos. Un fallo de Stripe no
+    se propaga: se apunta en el log y se reintenta en la siguiente vuelta, porque lo
+    último traído sigue valiendo mientras tanto. Devuelve si ha traído.
+    """
+    ahora = ahora or datetime.now(timezone.utc)
+    ajustes = leer(metadata, project_id)
+    clave = ajustes.get("api_key")
+    if not clave:
+        return False
+    ultima = ajustes.get("last_sync")
+    if ultima and ahora - datetime.fromisoformat(ultima) < CADA:
+        return False
+    try:
+        aplicar(metadata, project_id, sincronizar(clave, ahora))
+    except StripeError as exc:
+        logger.warning("stripe: no se han traído los ingresos de %s (%s)", project_id, exc)
+        return False
+    except Exception:  # noqa: BLE001 - el bucle de fondo no puede caerse por esto
+        logger.exception("stripe: fallo al traer los ingresos de %s", project_id)
+        return False
+    logger.info("stripe: ingresos de %s traídos", project_id)
+    return True
+
+
 def aplicar(metadata: Any, project_id: str, resultado: SyncResult) -> None:
     """Guarda lo que paga cada cliente, marcado como de Stripe.
 

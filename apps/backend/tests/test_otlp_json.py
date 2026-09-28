@@ -113,3 +113,38 @@ def test_los_enlaces_tambien_llevan_ids_hexadecimales():
     cuerpo = _cuerpo(links=[{"traceId": TRAZA, "spanId": RAIZ}])
     hijo = next(s for s in _spans(cuerpo) if s.type == "llm")
     assert hijo.trace_id == TRAZA
+
+
+def test_un_agente_en_node_dice_de_que_cliente_es_con_un_atributo():
+    """D-163: sin SDK de Laplace para Node, el cliente viaja como el atributo
+    `laplace.customer.id` en la raíz, puesto con `span.setAttribute`. Llega a la traza
+    y cuenta en el margen como el de Python."""
+    import json as _json
+    from datetime import datetime, timedelta, timezone
+
+    from laplace_backend import margen
+    from laplace_backend.storage.base import Window
+    from laplace_backend.storage.sqlite import SQLiteStore
+
+    cuerpo = _json.loads(_cuerpo())
+    raiz = cuerpo["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
+    raiz["attributes"] = [{"key": "laplace.customer.id", "value": {"stringValue": "acme"}}]
+    spans = _spans(_json.dumps(cuerpo).encode())
+    assert {s.span_id: s.customer_id for s in spans}[RAIZ] == "acme"
+
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as tmp:
+        store = SQLiteStore(Path(tmp) / "l.db")
+        store.migrate()
+        store.insert_spans(spans)
+        inicio = min(s.start_time for s in spans)
+        ventana = Window(since=inicio - timedelta(days=1), until=inicio + timedelta(days=1),
+                         days=2)
+        assert datetime.now(timezone.utc) > inicio
+        grupos = {g.key: g.traces for g in store.cost_by(spans[0].project_id, ventana,
+                                                         "customer")}
+        assert grupos == {"acme": 1}
+        vista = margen.calcular(store, spans[0].project_id, ventana, {"acme": 10.0})
+        assert [c.customer_id for c in vista.customers] == ["acme"]
