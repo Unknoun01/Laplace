@@ -59,6 +59,35 @@ leían mal.
 **lecturas de caché**, coste, los mensajes enteros y el árbol de la traza. Las reglas de
 derroche funcionan igual que con el SDK de Python.
 
+## El cliente de cada ejecución (margen por cliente)
+
+Para el margen por cliente (la pestaña de Clientes), cada ejecución tiene que decir para
+qué cliente es. Sin SDK de Laplace para Node no hay `setContext`, pero no hace falta: es
+el atributo `laplace.customer.id` en el span que envuelve la ejecución. Basta en uno —la
+raíz— y vale con cualquiera de las dos instrumentaciones de esta guía o sin ninguna.
+
+```js
+const { trace } = require("@opentelemetry/api");
+const tracer = trace.getTracer("mi-agente");
+
+async function atender(cliente, pregunta) {
+  return tracer.startActiveSpan("atender", async (span) => {
+    span.setAttribute("laplace.span.type", "agent");
+    span.setAttribute("laplace.customer.id", cliente); // quien paga por este trabajo
+    try {
+      return await miAgente(pregunta); // las llamadas al modelo cuelgan de aquí
+    } finally {
+      span.end();
+    }
+  });
+}
+```
+
+Probado el 28 de septiembre de 2026 con Node 22, `@opentelemetry/api` 1.9.1,
+`@opentelemetry/sdk-trace-node` 2.11.0 y `@opentelemetry/exporter-trace-otlp-http` 0.222.0
+contra `laplace ui`: cada ejecución llega con su cliente y cuenta en su margen (D-163).
+Lo mismo vale para `laplace.user.id` y `laplace.session.id`.
+
 ## Con OpenLLMetry (Traceloop)
 
 ```bash

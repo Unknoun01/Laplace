@@ -3197,3 +3197,26 @@ tarjetas visibles del Diagnóstico, y su puesto depende de la hora a la que se c
 demo (según la hora sale un 53 % o un 70 % más caro, tercero o cuarto). Ahora despliega
 la lista entera antes de buscarlo: era la prueba la que dependía del reloj, no el
 producto.
+
+### D-163 — Stripe se trae solo cada día, y el cliente desde Node sin SDK
+Lo que quedaba de la Fase 6 sin necesitar una clave.
+
+* **La traída diaria.** Con la clave puesta, el bucle de fondo —el de las alertas, que ya
+  tiene turno entre procesos— trae los ingresos de un proyecto si la última traída fue
+  hace más de un día, y lo hace **antes** de evaluar sus alertas, para que la de
+  clientes que pierden dinero mire lo que pagan hoy. Corre aunque el proyecto no tenga
+  canal de alertas. Si Stripe falla, se apunta en el log y se reintenta en la siguiente
+  vuelta: lo último traído sigue valiendo. El botón de la pestaña sigue ahí para traerlo
+  en el momento.
+* **El cliente desde un agente en Node.** No hace falta el SDK de TypeScript: es el
+  atributo `laplace.customer.id` en el span que envuelve la ejecución, que la ingesta ya
+  leía (D-161). La guía de TypeScript lo explica y está **probado con un agente en Node de
+  verdad** (OpenTelemetry 2.11 y el exportador JSON 0.222 contra `laplace ui`): tres
+  ejecuciones de dos clientes llegan con su cliente y su coste. Además, una prueba de
+  OTLP/JSON en la suite lleva ese atributo hasta el margen.
+* **Lo que sigue esperando:** probar la traída contra la API real de Stripe (hace falta
+  una clave de pruebas) y el paquete fino `@laplace/sdk` con su `setContext({
+  customerId })`, que espera el nombre del scope en npm.
+
+Pruebas: `test_stripe.py` (se trae una vez al día y no antes; si Stripe falla, lo último
+sigue valiendo; el bucle de fondo lo trae) y `test_otlp_json.py`.

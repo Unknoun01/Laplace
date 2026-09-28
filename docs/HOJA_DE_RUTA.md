@@ -37,7 +37,7 @@ probada: `laplace ui` (un proceso + SQLite) y Docker (ClickHouse + Postgres + Ne
 - **Por fases:** una rama por fase y un commit por bloque. Se enseña al usuario y se fusiona a `master` sólo cuando lo aprueba (`git merge --no-ff`).
 - **Nada entra sin su prueba.** Primero la prueba en rojo, después el arreglo.
 - **Hay que comprobar que la prueba muerde:** romper el código a propósito y verla fallar.
-- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-163**.
+- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-164**.
 - **Todo en español:** código, comentarios, commits y textos.
 - **Los commits terminan con** `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - **Reglas del producto que no se tocan:**
@@ -82,8 +82,9 @@ aviso de quién hace perder dinero (en la pestaña, en el Diagnóstico y como al
 cada cliente a sus ejecuciones y a los problemas que pasan en ellas. Queda:
 - **Probar Stripe contra la API real** con una clave de pruebas (`rk_test_…`): está hecho
   contra una Stripe falsa con la forma documentada.
-- **Traer de Stripe solo**, cada día, en el mismo bucle que las alertas; hoy es un botón.
-- El paquete de TypeScript tendrá que llevar `customerId` en su `setContext`.
+- El paquete fino de TypeScript (`@laplace/sdk`) tendrá que llevar `customerId` en su
+  `setContext`. Hasta entonces, un agente en Node pone el atributo `laplace.customer.id`
+  (probado, D-163; está en `docs/typescript.md`).
 
 ### Después: funciones diferenciales (confirmar el orden con el usuario)
 - **Replay contrafactual:** reenviar, con tope de gasto y permiso, las llamadas reales de un paso al modelo barato y compararlas con el juez. Sólo llamadas hoja sin herramientas con efectos. Es la prueba del paso 2 del ciclo.
