@@ -2856,3 +2856,37 @@ hacia atrás va curvada por debajo. Ámbar el paso con un problema del Diagnóst
 traza, rosa el que falló. Sin tarifa no cuesta cero: el nodo dice «sin tarifa» o «≥ X».
 Sale del árbol que ya llega a la web, sin backend nuevo. Prueba de pantallas: nodos y
 aristas en una traza de la demo, y «×n» en una con bucle.
+
+## 2026-09-28 — Fase 5: el cierre
+
+### D-154 — El Diagnóstico medido otra vez, con el gráfico dentro
+`step_cost_series` (D-152) es una lectura más en cada Diagnóstico y no se había medido
+con volumen. `scripts/carga.py` enseñaba sólo las cuatro lecturas más pesadas, así que
+una lectura nueva podía pesar sin verse; ahora da el desglose entero, con la media de
+cada lectura y su parte de la suma.
+
+**Dónde:** 10 millones de spans en un día (proyecto grande, 5 millones), en un
+contenedor Linux con 4 núcleos y 16 GB, **unas tres veces más lento que el portátil de
+D-142**: genera 40.000 spans/s frente a 120.000. Las cifras absolutas no se comparan con
+las de D-142; el reparto sí.
+
+* **Con las partes recién escritas** (medida justo después de generar), el Diagnóstico
+  tardó 10,5–11,4 s. **Con las partes ya fusionadas** (la misma tabla minutos después),
+  5,8–6,7 s con un día de rango y 5,3–5,6 con siete. La primera cifra es la del peor
+  momento de un servidor que ingiere sin parar; la segunda, la de uno tranquilo.
+* **`step_cost_series`: 0,75–0,80 s, un 13–14 % de la suma de lecturas**, en el mismo
+  orden que las otras cinco (bucles 21 %, repeticiones 20 %, uso por paso 16 %, resumen
+  14–16 %, cobertura 14–15 %). No es la que manda, pero es una sexta consulta que recorre
+  la ventana entera.
+* **Probado y no hecho: juntar sus dos pasadas en una.** Hoy hace una para el gasto total
+  por tramo y otra, con el filtro de las reglas, para el de cada paso. En una sola
+  (agrupando por paso y tramo, con `sumIf` para lo que no es tirada de evaluación) baja
+  de 0,73 a 0,57 s: **0,2 s de 6, un 3 %**, a cambio de reescribir la consulta en los dos
+  almacenes con su paridad. No acerca el objetivo de 1,5 s, que sigue pidiendo lo mismo
+  que en D-142: preagregados por hora para uso por paso, resumen, cobertura y ahora
+  también la serie del gráfico, que es exactamente la forma de un preagregado por hora.
+* **El Panel** tarda 1,6–1,8 s aquí (1,2–1,4 en el portátil) y la lista de trazas
+  1,0–1,1: el mismo orden que en D-142 con el factor de la máquina.
+
+Queda en la hoja de ruta: la serie del gráfico entra en la lista de lecturas que
+cubrirían los preagregados, y sigue faltando medir con semanas de histórico.
