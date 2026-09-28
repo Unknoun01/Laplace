@@ -3014,3 +3014,48 @@ del coste; la ficha dice lo mismo que la tarjeta; volver atrás se verifica; las
 lecturas dan lo mismo en los dos almacenes. `test_catalogo_hallazgos.py` siembra también
 un prompt encarecido y exige que tenga ficha y trazas. Rompiendo a propósito el
 escalado, el filtro de evaluaciones o la guarda de tarifa, fallan.
+
+## 2026-09-28 — El tema claro y el alto contraste
+
+### D-158 — El claro vuelve a ser Rose Gold, con cristal líquido
+Revierte la mitad de D-155 que cambió el claro por un gris neutro: el usuario lo vio y
+el claro había perdido el cristal. Un cristal translúcido sólo se nota si detrás hay
+color, y sobre un gris uniforme cada tarjeta parecía una caja blanca. El oscuro no cambia
+y sigue siendo el tema por defecto.
+
+* **Fondo de rubor y champán** con tres manchas de luz (`--bg-layers`: coral arriba a la
+  derecha, oro a la izquierda y rosa abajo) sobre el degradado de siempre. El cristal es
+  muy transparente (40 % de blanco) y lleva un filo de luz arriba y abajo y una sombra
+  cálida (`--glass-sheen`). El desenfoque satura lo que tiene detrás
+  (`blur(18px) saturate(170%)`), que es lo que hace que el color atraviese el cristal.
+* **Acentos rose gold, coral y oro**, oscurecidos como letra hasta pasar AA. El ahorro
+  no puede ser del mismo cobre que el derroche: en el claro es jade (`--teal` fijo),
+  el complementario del rose gold, que se distingue del ámbar a simple vista.
+* **El oscuro no se toca:** sus tokens nuevos no hacen nada (`--glass-sheen: 0 0 #0000`,
+  una capa transparente) y el desenfoque es el de antes. La prueba lo exige.
+* `test_tema.py` cambia la prueba de «el claro no es rosa» por la contraria: fondo de
+  rubor, acento rose gold, cristal con transparencia y filo de luz, y manchas detrás.
+  El contraste de toda la letra sigue medido en cada pasada.
+
+### D-159 — Alto contraste, para el claro y para el oscuro
+Un botón en Ajustes, debajo del tema, que se combina con cualquiera de los tres
+(oscuro, claro o del sistema). Se guarda en el navegador (`laplace.contrast`) y lo
+aplica el script del layout antes del primer pintado, como el tema (`data-contrast`).
+
+* **Otro modo, no el mismo tema con más tinta.** Sin transparencias, sin desenfoque, sin
+  resplandores ni tintes de fondo en etiquetas y círculos: negro puro o blanco puro,
+  grises neutros, y sólo los tres colores que significan algo (ámbar lo que se tira,
+  verde lo ahorrado, rosa lo que falla). En la primera versión del claro quedaban restos
+  del rose gold —la barra de cada tarjeta empezaba en rosa, los círculos de la posición
+  tenían fondo beige y los grises eran tostados— y el usuario lo vio como una
+  inconsistencia; ahora la prueba exige que los tintes sean transparentes y que el acento
+  principal del claro sea casi negro.
+* **Letra a 7:1 como mínimo (AAA)** y la tinta decorativa a 4,5, medidas igual que en los
+  temas normales. El botón principal va en negro con letra blanca en el claro, y al
+  revés en el oscuro.
+* **Los enlaces de texto se subrayan** (no las tarjetas ni los botones, que ya tienen su
+  borde) y el contorno del foco pasa a 3 px.
+* El claro de alto contraste también está escrito dos veces (elegido y del sistema), y
+  la prueba exige que las copias sean iguales. En pantalla, `test_pantallas.py` lo
+  enciende desde el botón en los dos temas, mide que el fondo sea negro o blanco puro y
+  que la barra no desenfoque, recarga, y lo apaga.

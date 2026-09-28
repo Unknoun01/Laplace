@@ -892,4 +892,6 @@ export const pt: Mensajes = {
   "ev.por_probar.guardado_como": "Salvo como “{nombre}”. Rode-o com a correção aplicada:",
   "ev.por_probar.ver": "Ver o problema",
   "ev.por_probar.error": "não foi possível salvar",
+  "aj.contraste.alto": "Alto contraste",
+  "aj.contraste.texto": "Fundos opacos, sem transparências nem desfoque, e texto com o máximo de contraste. Vale para o tema claro e para o escuro.",
 };

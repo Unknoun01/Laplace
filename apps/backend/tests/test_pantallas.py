@@ -635,3 +635,33 @@ def test_la_pestana_de_cada_pantalla_sale_marcada(servidor, navegador, ruta, pes
         assert orden[:2] == ["Diagnóstico", "Probar"], orden
     finally:
         pagina.close()
+
+
+@pytest.mark.parametrize(("tema", "fondo"), [(None, (0, 0, 0)), ("light", (255, 255, 255))])
+def test_el_alto_contraste_quita_el_cristal(servidor, navegador, tema, fondo):
+    """D-159: con alto contraste, el fondo es negro o blanco puro y el cristal no
+    desenfoca; el botón de Ajustes lo enciende y lo apaga sin recargar."""
+    contexto = navegador.new_context(locale="es-ES", viewport={"width": 1440, "height": 900})
+    try:
+        if tema:
+            contexto.add_init_script(f"localStorage.setItem('laplace.theme', '{tema}')")
+        pagina = contexto.new_page()
+        pagina.goto(servidor + "/ajustes/?project=demo", wait_until="networkidle")
+        boton = pagina.get_by_role("button", name="Alto contraste")
+        boton.wait_for(timeout=15_000)
+        assert boton.get_attribute("aria-pressed") == "false"
+        boton.click()
+        assert pagina.evaluate("document.documentElement.dataset.contrast") == "high"
+        pintado = pagina.evaluate(
+            """() => [getComputedStyle(document.body).backgroundColor,
+                      getComputedStyle(document.querySelector('.topbar')).backdropFilter]"""
+        )
+        assert pintado[0] == "rgb({}, {}, {})".format(*fondo), pintado
+        assert pintado[1] in ("none", ""), pintado
+        # Se recuerda al recargar, antes del primer pintado.
+        pagina.reload(wait_until="networkidle")
+        assert pagina.evaluate("document.documentElement.dataset.contrast") == "high"
+        pagina.get_by_role("button", name="Alto contraste").click()
+        assert pagina.evaluate("document.documentElement.dataset.contrast") is None
+    finally:
+        contexto.close()
