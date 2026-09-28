@@ -735,7 +735,7 @@ class SpanStore(Protocol):
         como el resto de reglas, y con los `step_keys` de cada versión."""
 
     def prompt_versions_by_trace(
-        self, project_id: str, trace_ids: list[str]
+        self, project_id: str, trace_ids: list[str], *, sin_evaluaciones: bool = False
     ) -> dict[str, list[tuple[str, int]]]:
         """Qué versiones de prompt usó cada una de esas trazas.
 
@@ -744,7 +744,9 @@ class SpanStore(Protocol):
         pueden ser millones. El acierto de una versión sale de ahí.
         """
 
-    def observed_prompts(self, project_id: str, window: Window) -> list[ObservedPrompt]:
+    def observed_prompts(
+        self, project_id: str, window: Window, *, rules: bool = False
+    ) -> list[ObservedPrompt]:
         """Juegos de instrucciones vistos en las trazas, sin gestión de prompts."""
 
     def co_occurring_step_keys(self, project_id: str, window: Window) -> set[str]:

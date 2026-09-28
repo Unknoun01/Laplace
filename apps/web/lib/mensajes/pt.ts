@@ -894,4 +894,5 @@ export const pt: Mensajes = {
   "ev.por_probar.error": "não foi possível salvar",
   "aj.contraste.alto": "Alto contraste",
   "aj.contraste.texto": "Fundos opacos, sem transparências nem desfoque, e texto com o máximo de contraste. Vale para o tema claro e para o escuro.",
+  "arbol.envoltorio": "O mesmo que “{hijo}”, que está dentro: esta etapa só o envolve.",
 };

@@ -243,15 +243,9 @@ apareció que había **seis** rutas por id opaco sin acotar, y que con la clave 
 proyecto se podían borrar y leer los prompts de otro (D-121). El punto ciego que D-097
 dejó anotado existía, y era más grande que la nota.
 
-**Lo que queda sin tocar, con su motivo:**
-
-1. **El árbol de traza pinta un envoltorio de un solo hijo** con los mismos tokens y el
-   mismo coste que su padre. Quitarlo o plegarlo por defecto es rediseñar la vista
-   principal de depuración, y ese nivel extra es el span `@observe` del usuario: a quien
-   está depurando le puede interesar verlo. No es un defecto con una respuesta obvia.
-2. **`_modelo_mas_rapido()` promedia medianas sin ponderar por llamadas.** Es una media
-   dentro de un camino de decisión, y cambiarla cambia qué modelo se recomienda, que es
-   una decisión de producto y no una corrección.
+Los dos que quedaban sin tocar a propósito —el envoltorio de un solo hijo en el árbol y
+la media sin ponderar de `_modelo_mas_rapido()`— se decidieron en D-160: el envoltorio se
+queda con «=» en sus cifras, y la media pondera por llamadas.
 
 ### Lo que sigue sin detectarse, y por qué
 

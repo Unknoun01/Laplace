@@ -3978,3 +3978,10 @@ details.porque-bloque > summary {
   margin: var(--sp-2) 0 0;
   font-size: var(--fs-sm);
 }
+
+/* Un envoltorio en el árbol (D-160): «=» en lugar de repetir las cifras de su hijo. */
+.node-cost.igual,
+.node-tok.igual {
+  color: var(--ink-4);
+  text-align: right;
+}

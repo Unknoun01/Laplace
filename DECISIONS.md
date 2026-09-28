@@ -3066,3 +3066,35 @@ aplica el script del layout antes del primer pintado, como el tema (`data-contra
   la prueba exige que las copias sean iguales. En pantalla, `test_pantallas.py` lo
   enciende desde el botón en los dos temas, mide que el fondo sea negro cálido o blanco y
   que la barra no desenfoque, recarga, y lo apaga.
+
+## 2026-09-28 — Tres decisiones que estaban abiertas
+
+### D-160 — Prompts sin tiradas de evaluación, envoltorios con «=» y el modelo rápido ponderado
+Tres cosas que `STATUS.md` y el repaso de D-157 dejaron para decidir con el usuario. Se
+decidieron a favor de la recomendación de cada una.
+
+* **La pestaña de Prompts ya no cuenta las tiradas de evaluación.** El coste, las
+  ejecuciones y el acierto de cada versión son los de su tráfico real, como en las
+  reglas. En la demo, la comparación A/B de ayer corre con la v2 y el modelo barato:
+  abarataba la v2 en Prompts (un 60 % más cara que la v1) y no en el Diagnóstico (un
+  70 %). Ahora las dos dicen lo mismo. Se excluyen el coste (`prompt_usage(rules=True)`),
+  los veredictos de las trazas de una tirada (`prompt_versions_by_trace(...,
+  sin_evaluaciones=True)`, porque una anotación del juez sobre una tirada no es del
+  tráfico) y los prompts observados sin gestión (`observed_prompts(rules=True)`). La
+  comparación de tiradas en Probar sigue leyéndolas, que es de lo que habla.
+* **Un envoltorio del árbol enseña «=» en vez de repetir las cifras de su hijo.** Un
+  paso con un solo hijo, sin llamada al modelo propia y con el mismo coste y los mismos
+  tokens —el span de un `@observe` alrededor de una llamada— sigue en el árbol, porque es
+  el paso del usuario y a quien depura le interesa verlo, pero sus columnas dicen «=»,
+  con el motivo al pasar el ratón y para lectores de pantalla. Antes el dinero se leía
+  dos veces. `esEnvoltorio()` en `lib/tree.ts`, probada con Node.
+* **El modelo rápido que se propone se elige ponderando por llamadas.** Un modelo corre
+  en varios pasos, cada uno con su mediana, y se juntaban con la media simple: un paso de
+  cinco llamadas lentas pesaba lo mismo que otro de cinco mil rápidas, y la
+  recomendación podía salir de una muestra suelta. Ahora es la media de las medianas
+  ponderada por llamadas, y a igualdad decide el nombre, no el orden de las filas.
+
+Pruebas: `test_prompts.py` (una tirada barata y anotada como fallo no mueve ni el coste
+ni el acierto de la v8; rompiendo cualquiera de las dos exclusiones, falla),
+`test_regla_prompt_caro.py` (las dos lecturas nuevas, iguales en SQLite y ClickHouse),
+`test_arbol_envoltorio.py` y `test_modelo_rapido.py`.

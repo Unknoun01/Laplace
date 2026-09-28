@@ -70,18 +70,28 @@ def _modelo_mas_rapido(usos: list[ModelUsage], excepto: str) -> tuple[str, float
     Se mira **dentro del propio tráfico del usuario**: proponer un modelo que no ha
     probado sería una recomendación inventada, y recomendar por tamaño de nombre es
     adivinar. Si sólo usa un modelo, no hay nada que proponer y la regla se calla.
+
+    Un modelo aparece en varios pasos, cada uno con su mediana. Se juntan **ponderando
+    por llamadas** (D-160): antes era la media simple de las medianas, y un paso con
+    cinco llamadas pesaba lo mismo que uno con cinco mil, así que la recomendación
+    podía salir de una muestra suelta y lenta.
     """
-    por_modelo: dict[str, list[float]] = {}
+    por_modelo: dict[str, list[tuple[float, int]]] = {}
     for uso in usos:
         # La mediana por llamada, no la media: ver `ModelUsage.p50_duration_ms`.
         if uso.model == excepto or uso.calls < MIN_CALLS_MODELO_RAPIDO or not uso.p50_duration_ms:
             continue
-        por_modelo.setdefault(uso.model, []).append(uso.p50_duration_ms)
+        por_modelo.setdefault(uso.model, []).append((uso.p50_duration_ms, uso.calls))
+
+    def ponderada(modelo: str) -> float:
+        pares = por_modelo[modelo]
+        return sum(ms * n for ms, n in pares) / sum(n for _, n in pares)
+
     if not por_modelo:
         return None
-    modelo = min(por_modelo, key=lambda m: sum(por_modelo[m]) / len(por_modelo[m]))
-    medias = por_modelo[modelo]
-    return modelo, sum(medias) / len(medias)
+    # A igualdad, el nombre: que la recomendación no dependa del orden de las filas.
+    modelo = min(por_modelo, key=lambda m: (ponderada(m), m))
+    return modelo, ponderada(modelo)
 
 
 #: Por qué esta regla no puede hablar de dinero. Son dos motivos **opuestos** y durante

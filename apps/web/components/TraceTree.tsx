@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { duration, exacto, money, number, pretty, tokens } from "@/lib/format";
-import { allNodes, barGeometry, flatten, timeWindow } from "@/lib/tree";
+import { allNodes, barGeometry, flatten, timeWindow, esEnvoltorio } from "@/lib/tree";
 import type { Span, Trace, TraceTreeNode } from "@/lib/types";
 import { t } from "@/lib/textos";
 
@@ -177,8 +177,26 @@ export function TraceTree({ trace }: { trace: Trace }) {
                 <span className="node-bar" title={duration(span.duration_ms)}>
                   <i style={{ left: `${offset}%`, width: `${width}%` }} />
                 </span>
-                <span className="node-tok">{tok > 0 ? tokens(tok) : ""}</span>
-                <span className="node-cost">{cost > 0 ? money(cost) : "—"}</span>
+                {esEnvoltorio(node) ? (
+                  // Sólo envuelve a su hijo: sus cifras son las de la fila de debajo, y
+                  // repetirlas se leía como el doble (D-160).
+                  <>
+                    <span className="node-tok igual" aria-hidden>
+                      =
+                    </span>
+                    <span
+                      className="node-cost igual"
+                      title={t("arbol.envoltorio", { hijo: node.children[0].span.name })}
+                    >
+                      =<span className="sr">{t("arbol.envoltorio", { hijo: node.children[0].span.name })}</span>
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="node-tok">{tok > 0 ? tokens(tok) : ""}</span>
+                    <span className="node-cost">{cost > 0 ? money(cost) : "—"}</span>
+                  </>
+                )}
               </div>
             );
           })}

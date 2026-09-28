@@ -282,3 +282,34 @@ def test_las_dos_lecturas_dan_lo_mismo_en_los_dos_almacenes(tmp_path):
 def test_el_minimo_es_el_de_la_pestana_de_prompts():
     """No se importa (el panel importa el motor): se exige que coincidan."""
     assert prompt_caro.MIN_TRACES == prompts.MIN_TRACES_FOR_COST
+
+
+def test_prompts_sin_tiradas_da_lo_mismo_en_los_dos_almacenes(tmp_path):
+    """D-160: la pestaña de Prompts lee sin tiradas de evaluación; las dos lecturas que
+    lo hacen (veredictos por traza y prompts observados) coinciden en los dos almacenes."""
+    from laplace_backend.storage.clickhouse import ClickHouseStore
+
+    nube = ClickHouseStore(Settings())
+    if not nube.health():
+        pytest.skip("no hay ClickHouse escuchando")
+    nube.migrate()
+    local = SQLiteStore(tmp_path / "laplace.db")
+    local.migrate()
+    proyecto = f"prompt-sin-eval-{uuid.uuid4().hex[:8]}"
+    reales = _ejecucion(proyecto, 8, 0.007, AHORA - timedelta(hours=2))
+    tirada = _ejecucion(proyecto, 8, 0.001, AHORA - timedelta(hours=1), evaluacion=True)
+    for almacen in (local, nube):
+        almacen.insert_spans(reales + tirada)
+    ids = [reales[0].trace_id, tirada[0].trace_id]
+    try:
+        for almacen in (local, nube):
+            con = almacen.prompt_versions_by_trace(proyecto, ids)
+            sin = almacen.prompt_versions_by_trace(proyecto, ids, sin_evaluaciones=True)
+            assert set(con) == set(ids)
+            assert set(sin) == {reales[0].trace_id}
+            todos = almacen.observed_prompts(proyecto, VENTANA)
+            reglas = almacen.observed_prompts(proyecto, VENTANA, rules=True)
+            assert sum(o.traces for o in todos) == 2
+            assert sum(o.traces for o in reglas) == 1
+    finally:
+        nube.delete_project(proyecto)

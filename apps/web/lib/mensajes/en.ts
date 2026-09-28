@@ -894,4 +894,5 @@ export const en: Mensajes = {
   "ev.por_probar.error": "couldn't save",
   "aj.contraste.alto": "High contrast",
   "aj.contraste.texto": "Opaque backgrounds, no transparency or blur, and text at maximum contrast. Works with both the light and the dark theme.",
+  "arbol.envoltorio": "Same as “{hijo}”, which is inside: this step only wraps it.",
 };
