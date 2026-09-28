@@ -1,83 +1,21 @@
 /* Sistema de diseño de Laplace.
  *
- * Glassmorphism con dos temas (D-133): claro «Rose Gold & Amanecer» por defecto y
- * oscuro «Tech Abisal». Las variables base de cada tema son las nueve de abajo y se
- * copian tal cual; todo lo demás —los tokens de siempre (`--ink`, `--panel`, `--amber`…)
- * y los tintes de estado— se deriva de ellas, así que las clases no cambian.
+ * Glassmorphism con dos temas (D-133, D-155). El oscuro, «Tech Abisal», es la insignia
+ * y va por defecto; el claro es neutro —grises fríos, los mismos acentos— y se elige en
+ * Ajustes, o se deja seguir al sistema. Las variables base de cada tema son las nueve
+ * de abajo; todo lo demás —los tokens de siempre (`--ink`, `--panel`, `--amber`…) y los
+ * tintes de estado— se deriva de ellas, así que las clases no cambian.
+ *
+ * El claro está escrito dos veces (elegido a mano, y «como el sistema» con el sistema en
+ * claro): CSS no deja nombrar un bloque de variables. `test_tema.py` exige que las dos
+ * copias sean idénticas y mide el contraste de cada tinta de texto en los dos temas.
  *
  * Siguen valiendo las escalas de D-132 (`--fs-*`, `--sp-*`, `--r-*`): lo nuevo se
  * escribe con ellas, sin píxeles sueltos.
  */
 
+/* MODO OSCURO: Tech Abisal. La insignia, y lo que ve quien no ha elegido nada. */
 :root {
-  /* MODO CLARO: Rose Gold & Amanecer (Por defecto) */
-  --bg-gradient-start: #fff0f0; /* Rosa amanecer suave */
-  --bg-gradient-mid: #ffe4e1;   /* Rose gold bruma */
-  --bg-gradient-end: #fdf5e6;   /* Destello cálido */
-  --text: #2d2424;              /* Gris cálido oscuro para legibilidad */
-  --muted: #7a6262;             /* Texto secundario cálido; #8b7373 quedaba en 3,96:1 */
-  --glass: rgba(255, 255, 255, 0.45); /* Cristal esmerilado blanco */
-  --line: rgba(255, 255, 255, 0.8);   /* Bordes definidos para contraste */
-  --accent-1: #c07c7c;          /* Rose Gold principal */
-  --accent-2: #ff9e7d;          /* Coral amanecer */
-  --accent-3: #d4af37;          /* Dorado suave */
-  --glow-color: rgba(255, 158, 125, 0.25); /* Resplandor coral */
-
-  /* Derivados del claro. Los acentos puros dan 2:1 sobre el cristal: sirven para
-     rellenos (barras, bordes, resplandores), no para letra. Como texto van oscurecidos
-     hacia `--text` hasta pasar AA, igual que `--muted` (D-132, D-133). */
-  --glass-strong: rgba(255, 250, 249, 0.88);
-  --line-soft: rgba(255, 255, 255, 0.55);
-  --line-strong: rgba(192, 124, 124, 0.35);
-  --ink-2: color-mix(in srgb, var(--text) 55%, var(--muted));
-  --ink-3: color-mix(in srgb, var(--muted) 78%, var(--text));
-  --ink-4: var(--muted);
-  --iris: color-mix(in srgb, var(--accent-1) 72%, var(--text));
-  --teal: color-mix(in srgb, var(--accent-2) 62%, #5a1a08);
-  /* Con 58 % el ámbar de los costes daba 3,4–3,95:1 sobre el cristal rosa. */
-  --amber: color-mix(in srgb, var(--accent-3) 42%, #3a2400);
-  --rose: #a52d3c;
-  --rose-ink: #9a2a37;
-  --on-iris: var(--text);
-  --shadow: 0 10px 30px rgba(192, 124, 124, 0.14);
-  --flash: rgba(255, 158, 125, 0.18);
-  color-scheme: light;
-}
-
-/* MODO OSCURO: Tech Glass original. Sigue al sistema salvo que se haya elegido un tema
-   en Ajustes, que se guarda en `data-theme` y manda en los dos sentidos (D-125). */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg-gradient-start: #182c55;
-    --bg-gradient-mid: #09111d;
-    --bg-gradient-end: #060a10;
-    --text: #eef4ff;
-    --muted: #91a1b5;
-    --glass: rgba(255, 255, 255, 0.04);
-    --line: rgba(255, 255, 255, 0.09);
-    --accent-1: #8b87ff;        /* Violeta */
-    --accent-2: #5de0cc;        /* Cian */
-    --accent-3: #f4bd61;        /* Ámbar */
-    --glow-color: rgba(118, 111, 255, 0.15); /* Resplandor violeta */
-
-    --glass-strong: rgba(12, 20, 34, 0.92);
-    --line-soft: rgba(255, 255, 255, 0.06);
-    --line-strong: rgba(255, 255, 255, 0.18);
-    --ink-2: color-mix(in srgb, var(--text) 60%, var(--muted));
-    --ink-3: var(--muted);
-    --ink-4: color-mix(in srgb, var(--muted) 60%, var(--bg-gradient-mid));
-    --iris: var(--accent-1);
-    --teal: var(--accent-2);
-    --amber: var(--accent-3);
-    --rose: #ee7d87;
-    --rose-ink: #f0b8bd;
-    --on-iris: #0b1020;
-    --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
-    --flash: rgba(93, 224, 204, 0.16);
-    color-scheme: dark;
-  }
-}
-:root[data-theme="dark"] {
   --bg-gradient-start: #182c55;
   --bg-gradient-mid: #09111d;
   --bg-gradient-end: #060a10;
@@ -85,18 +23,21 @@
   --muted: #91a1b5;
   --glass: rgba(255, 255, 255, 0.04);
   --line: rgba(255, 255, 255, 0.09);
-  --accent-1: #8b87ff;
-  --accent-2: #5de0cc;
-  --accent-3: #f4bd61;
-  --glow-color: rgba(118, 111, 255, 0.15);
+  --accent-1: #8b87ff;        /* Violeta */
+  --accent-2: #5de0cc;        /* Cian */
+  --accent-3: #f4bd61;        /* Ámbar */
+  --glow-color: rgba(118, 111, 255, 0.15); /* Resplandor violeta */
 
   --glass-strong: rgba(12, 20, 34, 0.92);
   --line-soft: rgba(255, 255, 255, 0.06);
   --line-strong: rgba(255, 255, 255, 0.18);
   --ink-2: color-mix(in srgb, var(--text) 60%, var(--muted));
   --ink-3: var(--muted);
-  --ink-4: color-mix(in srgb, var(--muted) 60%, var(--bg-gradient-mid));
-  --iris: var(--accent-1);
+  /* Medidos también sobre la esquina iluminada del degradado (`--bg-gradient-start`),
+     donde van el logo y el proyecto: con el violeta puro el enlace daba 4,1:1 y la
+     tinta decorativa 2,1 (D-155). */
+  --ink-4: color-mix(in srgb, var(--muted) 80%, var(--bg-gradient-mid));
+  --iris: color-mix(in srgb, var(--accent-1) 88%, #ffffff);
   --teal: var(--accent-2);
   --amber: var(--accent-3);
   --rose: #ee7d87;
@@ -105,6 +46,74 @@
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
   --flash: rgba(93, 224, 204, 0.16);
   color-scheme: dark;
+}
+
+/* MODO CLARO: neutro. Sustituye al «Rose Gold & Amanecer» de D-133: el rosa hacía de
+   Laplace otro producto en cuanto se cambiaba de tema. Aquí el fondo es gris frío, el
+   cristal casi blanco y los acentos son los del oscuro; como letra, esos acentos se
+   oscurecen hacia su propio tono hasta pasar AA (D-132), y como relleno —barras,
+   bordes, el botón principal— se usan tal cual. */
+:root[data-theme="light"] {
+  --bg-gradient-start: #f7f8fb;
+  --bg-gradient-mid: #eef1f5;
+  --bg-gradient-end: #e6e9ef;
+  --text: #141a24;
+  --muted: #5a6475;
+  --glass: rgba(255, 255, 255, 0.7);
+  --line: rgba(20, 26, 36, 0.1);
+  --accent-1: #7f7af8;
+  --accent-2: #3fcab5;
+  --accent-3: #e8a93c;
+  --glow-color: rgba(127, 122, 248, 0.12);
+
+  --glass-strong: rgba(255, 255, 255, 0.94);
+  --line-soft: rgba(20, 26, 36, 0.06);
+  --line-strong: rgba(20, 26, 36, 0.2);
+  --ink-2: color-mix(in srgb, var(--text) 55%, var(--muted));
+  --ink-3: var(--muted);
+  --ink-4: color-mix(in srgb, var(--muted) 70%, var(--bg-gradient-mid));
+  --iris: color-mix(in srgb, var(--accent-1) 62%, #10083a);
+  --teal: color-mix(in srgb, var(--accent-2) 42%, #03261f);
+  --amber: color-mix(in srgb, var(--accent-3) 44%, #3a2400);
+  --rose: #b3263a;
+  --rose-ink: #9a1f31;
+  --on-iris: #0b1020;
+  --shadow: 0 10px 30px rgba(20, 26, 36, 0.08);
+  --flash: rgba(127, 122, 248, 0.16);
+  color-scheme: light;
+}
+/* «Como el sistema» (D-125): el claro sólo si el sistema lo pide. Copia exacta del
+   bloque de arriba; la prueba falla si se separan. */
+@media (prefers-color-scheme: light) {
+  :root[data-theme="system"] {
+    --bg-gradient-start: #f7f8fb;
+    --bg-gradient-mid: #eef1f5;
+    --bg-gradient-end: #e6e9ef;
+    --text: #141a24;
+    --muted: #5a6475;
+    --glass: rgba(255, 255, 255, 0.7);
+    --line: rgba(20, 26, 36, 0.1);
+    --accent-1: #7f7af8;
+    --accent-2: #3fcab5;
+    --accent-3: #e8a93c;
+    --glow-color: rgba(127, 122, 248, 0.12);
+
+    --glass-strong: rgba(255, 255, 255, 0.94);
+    --line-soft: rgba(20, 26, 36, 0.06);
+    --line-strong: rgba(20, 26, 36, 0.2);
+    --ink-2: color-mix(in srgb, var(--text) 55%, var(--muted));
+    --ink-3: var(--muted);
+    --ink-4: color-mix(in srgb, var(--muted) 70%, var(--bg-gradient-mid));
+    --iris: color-mix(in srgb, var(--accent-1) 62%, #10083a);
+    --teal: color-mix(in srgb, var(--accent-2) 42%, #03261f);
+    --amber: color-mix(in srgb, var(--accent-3) 44%, #3a2400);
+    --rose: #b3263a;
+    --rose-ink: #9a1f31;
+    --on-iris: #0b1020;
+    --shadow: 0 10px 30px rgba(20, 26, 36, 0.08);
+    --flash: rgba(127, 122, 248, 0.16);
+    color-scheme: light;
+  }
 }
 
 /* Los tokens de siempre, ahora como alias de los de arriba: valen para los dos temas y

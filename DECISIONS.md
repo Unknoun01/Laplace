@@ -2890,3 +2890,37 @@ las de D-142; el reparto sí.
 
 Queda en la hoja de ruta: la serie del gráfico entra en la lista de lecturas que
 cubrirían los preagregados, y sigue faltando medir con semanas de histórico.
+
+### D-155 — El oscuro es la insignia; el claro, neutro
+Sustituye la parte de D-133 que ponía el claro «Rose Gold & Amanecer» por defecto.
+
+* **El oscuro por defecto.** Quien no ha elegido nada ve «Tech Abisal», tenga el sistema
+  como lo tenga: es la cara del producto en capturas, demos y la primera apertura de
+  `laplace ui`. Ajustes ofrece tres opciones, en este orden: Oscuro (sin nada guardado),
+  Claro y Como el sistema. Lo que ya estaba guardado sigue valiendo: `light` y `dark`
+  se leen igual; quien tenía «como el sistema» no tenía nada guardado y pasa al oscuro,
+  que es justo el cambio pedido.
+* **El claro, neutro.** El rosa hacía que el producto pareciera otro al cambiar de tema.
+  Ahora el fondo es gris frío (ningún canal se separa más de un 6 % de los otros), el
+  cristal casi blanco y los acentos son los del oscuro —violeta, cian, ámbar— con el
+  mismo tono; como letra se oscurecen hacia su propio color hasta pasar AA, y como
+  relleno (barras, el botón principal) se usan tal cual. El botón principal lleva letra
+  oscura sobre el degradado en los dos temas.
+* **El claro está escrito dos veces**, elegido a mano y «como el sistema» con el sistema
+  en claro: CSS no deja nombrar un bloque de variables. Antes pasaba lo mismo con el
+  oscuro, sin nada que vigilara que las dos copias no se separasen.
+* **El contraste, medido en cada pasada.** `test_tema.py` lee los tokens de
+  `globals.css`, resuelve `var()` y `color-mix()` como el navegador, compone el cristal
+  sobre los tres puntos del degradado y exige 4,5:1 a toda tinta de texto (`--ink`,
+  `--ink-2`, `--ink-3`, `--iris`, `--teal`, `--amber`, `--rose`, `--rose-ink`) y 3:1 a la
+  decorativa, en los dos temas. Lo primero que encontró fue del **oscuro**, no del claro:
+  la auditoría medía sobre el color del medio, y en la esquina iluminada del degradado,
+  donde van el logo y el proyecto, el violeta de los enlaces daba 4,1:1 y la tinta
+  decorativa 2,1. `--iris` en oscuro es ahora el violeta con un 12 % de blanco y
+  `--ink-4` sube del 60 al 80 % de `--muted`. La prueba exige también que las dos copias
+  del claro sean idénticas, que el fondo claro no tenga tinte, y comprueba que el claro
+  rosa con el ámbar de antes de la auditoría no pasaría.
+* **En pantalla**, `test_pantallas.py` abre Ajustes con cada combinación de lo guardado
+  y del sistema y mide la luminancia del fondo pintado, no una clase: sin nada y el
+  sistema en claro, oscuro; «como el sistema» con el sistema en claro, claro. Rompiendo
+  a propósito el script del layout (sin «system»), falla.

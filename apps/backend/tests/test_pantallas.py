@@ -497,3 +497,40 @@ def test_la_traza_ensena_el_grafo_del_agente(servidor, navegador):
         assert errores == [], errores
     finally:
         pagina.close()
+
+
+@pytest.mark.parametrize(
+    ("guardado", "sistema", "oscuro"),
+    [
+        (None, "light", True),
+        ("light", "dark", False),
+        ("dark", "light", True),
+        ("system", "light", False),
+        ("system", "dark", True),
+    ],
+)
+def test_el_tema_oscuro_es_el_de_partida(servidor, navegador, guardado, sistema, oscuro):
+    """D-155: sin nada elegido se ve el oscuro, aunque el sistema esté en claro; el claro
+    entra por elección o por «como el sistema». Se mide el fondo pintado, no la clase."""
+    contexto = navegador.new_context(color_scheme=sistema, locale="es-ES")
+    try:
+        if guardado:
+            contexto.add_init_script(f"localStorage.setItem('laplace.theme', '{guardado}')")
+        pagina = contexto.new_page()
+        pagina.goto(servidor + "/ajustes/?project=demo", wait_until="networkidle")
+        pagina.locator("main").wait_for(timeout=15_000)
+        luz = pagina.evaluate(
+            """() => {
+                const [r, g, b] = getComputedStyle(document.body).backgroundColor
+                    .match(/[\\d.]+/g).map(Number);
+                return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+            }"""
+        )
+        assert (luz < 0.2) is oscuro, (guardado, sistema, luz)
+        # El selector de Ajustes marca lo que se ve.
+        marcado = {None: "Oscuro", "dark": "Oscuro", "light": "Claro",
+                   "system": "Como el sistema"}[guardado]
+        boton = pagina.get_by_role("button", name=marcado, exact=True)
+        assert boton.get_attribute("aria-pressed") == "true"
+    finally:
+        contexto.close()

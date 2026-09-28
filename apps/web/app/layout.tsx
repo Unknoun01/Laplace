@@ -43,7 +43,8 @@ try {
   var m = localStorage.getItem("laplace.mode");
   document.body.dataset.mode = m === "pro" ? "pro" : "simple";
   var t = localStorage.getItem("laplace.theme");
-  if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+  // Sin nada guardado no se toca: el oscuro es el de partida (D-155).
+  if (t === "light" || t === "dark" || t === "system") document.documentElement.dataset.theme = t;
 } catch (e) {
   document.body.dataset.mode = "simple";
 }`;
