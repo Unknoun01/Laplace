@@ -18,6 +18,7 @@ from __future__ import annotations
 import importlib
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -714,6 +715,42 @@ def test_el_acierto_por_version_sale_de_las_anotaciones_de_esas_trazas(local):
     assert humana["value"] == pytest.approx(11 / 12)
     # Las ocho ejecuciones no anotadas no cuentan como fallo.
     assert humana["unjudged"] == 8
+
+
+def test_las_tiradas_de_evaluacion_no_cuentan_en_la_pestana(local):
+    """D-160: el coste y el acierto de una versión son los de su tráfico real. Una tirada
+    A/B con la v8 y otro modelo abarataba la v8 aquí y no en el Diagnóstico."""
+    import os
+
+    from laplace.semconv import EVAL_TAG
+
+    creado = local.post(
+        "/api/prompts", json={"project_id": "local", "name": "resumen", "text": "v1"}
+    ).json()
+    for _ in range(7):
+        local.post(
+            f"/api/prompts/{creado['id']}/versions",
+            json={"project_id": "local", "text": "más", "deploy": True},
+        )
+    # Diez ejecuciones de una tirada con la v8, mucho más baratas, anotadas como fallo.
+    tirada: list[Span] = []
+    for i in range(10):
+        spans = _traza("local", f"eval-{i:02d}", 0.0001, "resumen", 8)
+        spans[0].tags = [EVAL_TAG]
+        tirada += spans
+    SQLiteStore(Path(os.environ["LAPLACE_SQLITE_PATH"])).insert_spans(tirada)
+    for i in range(10):
+        local.post(
+            "/api/annotations",
+            json={"project_id": "local", "trace_id": f"eval-{i:02d}", "verdict": "fail"},
+        )
+
+    vista = local.get("/api/prompts", params={"project_id": "local", "days": 7}).json()
+    v8 = next(v for v in vista["prompts"][0]["versions"] if v["version"] == 8)
+    assert v8["traces"] == 20
+    assert v8["cost_per_execution_usd"] == pytest.approx(0.004)
+    humana = next(r for r in v8["rates"] if r["source"] == "human")
+    assert humana["judged"] == 0, "los veredictos de la tirada no son del tráfico real"
 
 
 def test_sin_prompts_gestionados_la_pestana_ensena_lo_de_las_trazas(local):

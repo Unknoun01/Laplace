@@ -1109,17 +1109,23 @@ class ClickHouseStore:
         return [row_to_prompt_usage(f) for f in filas]
 
     def prompt_versions_by_trace(
-        self, project_id: str, trace_ids: list[str]
+        self, project_id: str, trace_ids: list[str], *, sin_evaluaciones: bool = False
     ) -> dict[str, list[tuple[str, int]]]:
         if not trace_ids:
             return {}
+        fuera = (
+            "AND trace_id NOT IN (SELECT trace_id FROM spans WHERE project_id = "
+            f"%(project_id)s AND has(tags, '{EVAL_TAG}'))"
+            if sin_evaluaciones
+            else ""
+        )
         filas = _named(
             self._client.query(
-                """
+                f"""
                 SELECT DISTINCT trace_id, prompt_name AS nombre, prompt_version AS version
                 FROM spans FINAL
                 WHERE project_id = %(project_id)s AND trace_id IN %(ids)s
-                  AND prompt_name != ''
+                  AND prompt_name != '' {fuera}
                 """,
                 parameters={"project_id": project_id, "ids": list(trace_ids)},
             )
@@ -1129,12 +1135,15 @@ class ClickHouseStore:
             salida.setdefault(f["trace_id"], []).append((f["nombre"], int(f["version"])))
         return salida
 
-    def observed_prompts(self, project_id: str, window: Window) -> list[ObservedPrompt]:
+    def observed_prompts(
+        self, project_id: str, window: Window, *, rules: bool = False
+    ) -> list[ObservedPrompt]:
         """Juegos de instrucciones vistos en las trazas, para quien no gestiona prompts.
 
         El alias del `GROUP BY` no puede llamarse `step_key`: taparía la columna, que es
         el mismo tropiezo que ya documenta `MODEL_USAGE_SQL`.
         """
+        donde = RULES_WHERE if rules else WINDOW_WHERE
         filas = _named(
             self._client.query(
                 f"""
@@ -1155,7 +1164,7 @@ class ClickHouseStore:
                     min(start_time)        AS primero,
                     max(start_time)        AS ultimo
                 FROM spans FINAL
-                WHERE {WINDOW_WHERE} AND span_type = 'llm' AND step_key != ''
+                WHERE {donde} AND span_type = 'llm' AND step_key != ''
                 GROUP BY step_key
                 ORDER BY coste DESC, clave
                 """,

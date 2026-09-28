@@ -138,14 +138,20 @@ async def _context(request: Request, project_id: str, window: Window):
     trazas **anotadas** y no por todo el tráfico de cada versión: las anotadas son unas
     decenas y el tráfico puede ser el proyecto entero.
     """
-    uso = await run_in_threadpool(_store(request).prompt_usage, project_id, window)
+    # Sin las tiradas de evaluación, como las reglas (D-160): el coste y el acierto de
+    # una versión son los de su tráfico real. Una comparación A/B lanzada con la v2 y el
+    # modelo barato abarataba la v2 aquí y no en el Diagnóstico, y las dos pantallas
+    # decían cifras distintas del mismo cambio. Las tiradas tienen su pestaña.
+    uso = await run_in_threadpool(
+        lambda: _store(request).prompt_usage(project_id, window, rules=True)
+    )
     anotaciones = await run_in_threadpool(
         _meta(request).annotations_since, project_id, window.since
     )
     versiones = await run_in_threadpool(
-        _store(request).prompt_versions_by_trace,
-        project_id,
-        [a.trace_id for a in anotaciones],
+        lambda: _store(request).prompt_versions_by_trace(
+            project_id, [a.trace_id for a in anotaciones], sin_evaluaciones=True
+        )
     )
     return uso, verdicts_by_version(anotaciones, versiones)
 
@@ -176,7 +182,7 @@ async def list_prompts(
             )
 
     observados = await run_in_threadpool(
-        _store(request).observed_prompts, project_id, ventana
+        lambda: _store(request).observed_prompts(project_id, ventana, rules=True)
     )
     simultaneas = await run_in_threadpool(
         _store(request).co_occurring_step_keys, project_id, ventana

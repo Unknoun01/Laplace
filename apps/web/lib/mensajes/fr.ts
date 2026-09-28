@@ -896,4 +896,5 @@ export const fr: Mensajes = {
   "ev.por_probar.error": "impossible d’enregistrer",
   "aj.contraste.alto": "Contraste élevé",
   "aj.contraste.texto": "Fonds opaques, sans transparence ni flou, et texte au contraste maximal. Fonctionne avec le thème clair comme avec le sombre.",
+  "arbol.envoltorio": "Comme « {hijo} », qui est dedans : cette étape ne fait que l’envelopper.",
 };

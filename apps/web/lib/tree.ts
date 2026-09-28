@@ -45,3 +45,22 @@ export function barGeometry(
 export function allNodes(nodes: TraceTreeNode[]): TraceTreeNode[] {
   return nodes.flatMap((node) => [node, ...allNodes(node.children)]);
 }
+
+/**
+ * Un envoltorio: un paso con un solo hijo que no añade coste ni tokens propios, como el
+ * span de un `@observe` alrededor de una llamada al modelo (D-160). Su fila repetía las
+ * cifras de la de debajo y se leían dos veces. La fila se queda —es el paso del usuario,
+ * y a quien depura le interesa verlo—, pero sus cifras se dicen como «lo mismo que lo de
+ * dentro» en lugar de repetirse.
+ */
+export function esEnvoltorio(node: TraceTreeNode): boolean {
+  if (node.children.length !== 1 || node.span.llm) return false;
+  const hijo = node.children[0].subtree;
+  const propio = node.subtree;
+  return (
+    propio.cost_usd === hijo.cost_usd &&
+    propio.input_tokens === hijo.input_tokens &&
+    propio.output_tokens === hijo.output_tokens &&
+    (propio.cost_usd > 0 || propio.input_tokens + propio.output_tokens > 0)
+  );
+}

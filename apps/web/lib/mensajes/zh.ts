@@ -892,4 +892,5 @@ export const zh: Mensajes = {
   "ev.por_probar.error": "无法保存",
   "aj.contraste.alto": "高对比度",
   "aj.contraste.texto": "不透明背景，没有透明和模糊效果，文字达到最高对比度。浅色和深色主题都适用。",
+  "arbol.envoltorio": "与内部的“{hijo}”相同：这个步骤只是包裹它。",
 };

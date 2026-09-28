@@ -1221,18 +1221,27 @@ class SQLiteStore:
         return [row_to_prompt_usage(f) for f in filas]
 
     def prompt_versions_by_trace(
-        self, project_id: str, trace_ids: list[str]
+        self, project_id: str, trace_ids: list[str], *, sin_evaluaciones: bool = False
     ) -> dict[str, list[tuple[str, int]]]:
         if not trace_ids:
             return {}
         marcas = ", ".join(f":t{i}" for i in range(len(trace_ids)))
         params: dict[str, Any] = {f"t{i}": t for i, t in enumerate(trace_ids)}
         params["project_id"] = project_id
+        # Sin las tiradas de evaluación cuando lo pide la pestaña de Prompts (D-160); la
+        # comparación de tiradas sí las necesita, que es de lo que hablan.
+        fuera = (
+            f"AND trace_id NOT IN (SELECT trace_id FROM spans WHERE project_id = :project_id "
+            f"AND tags LIKE '%\"{EVAL_TAG}\"%')"
+            if sin_evaluaciones
+            else ""
+        )
         filas = self._query(
             f"""
             SELECT DISTINCT trace_id, prompt_name AS nombre, prompt_version AS version
             FROM spans
             WHERE project_id = :project_id AND trace_id IN ({marcas}) AND prompt_name != ''
+              {fuera}
             """,
             params,
         )
@@ -1241,7 +1250,9 @@ class SQLiteStore:
             salida.setdefault(f["trace_id"], []).append((f["nombre"], int(f["version"])))
         return salida
 
-    def observed_prompts(self, project_id: str, window: Window) -> list[ObservedPrompt]:
+    def observed_prompts(
+        self, project_id: str, window: Window, *, rules: bool = False
+    ) -> list[ObservedPrompt]:
         """Juegos de instrucciones vistos en las trazas, para quien no gestiona prompts.
 
         Se agrupa por `step_key`, que incluye el camino de llamada y la huella del
@@ -1249,6 +1260,7 @@ class SQLiteStore:
         deja separar «otro llamante» de «otro prompt» más arriba (D-115). Sólo spans de
         LLM: un `tool` no tiene instrucciones que versionar.
         """
+        donde = RULES_WHERE if rules else WINDOW_WHERE
         filas = self._query(
             f"""
             SELECT
@@ -1264,7 +1276,7 @@ class SQLiteStore:
                 MIN(start_time)           AS primero,
                 MAX(start_time)           AS ultimo
             FROM spans
-            WHERE {WINDOW_WHERE} AND span_type = 'llm' AND step_key != ''
+            WHERE {donde} AND span_type = 'llm' AND step_key != ''
             GROUP BY step_key
             ORDER BY coste DESC, clave
             """,

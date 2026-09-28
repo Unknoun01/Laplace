@@ -37,7 +37,7 @@ probada: `laplace ui` (un proceso + SQLite) y Docker (ClickHouse + Postgres + Ne
 - **Por fases:** una rama por fase y un commit por bloque. Se enseña al usuario y se fusiona a `master` sólo cuando lo aprueba (`git merge --no-ff`).
 - **Nada entra sin su prueba.** Primero la prueba en rojo, después el arreglo.
 - **Hay que comprobar que la prueba muerde:** romper el código a propósito y verla fallar.
-- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-160**.
+- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-161**.
 - **Todo en español:** código, comentarios, commits y textos.
 - **Los commits terminan con** `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - **Reglas del producto que no se tocan:**
@@ -66,10 +66,11 @@ probada: `laplace ui` (un proceso + SQLite) y Docker (ClickHouse + Postgres + Ne
 
 ## 3. Pendiente, por orden
 
-### Fase 5: cerrada (pendiente de enseñar y fusionar, rama `claude/nifty-cray-cr8ya8`)
-Hecho en esta tanda: la medida con la prueba de carga (D-154), el oscuro por defecto y el
-claro neutro (D-155), el rediseño alrededor del ciclo (D-156), Prompts como fuente de
-hallazgos (D-157) y el repaso de pendientes, que está en la sección 4.
+### Fase 5: cerrada y fusionada en `master`
+La medida con la prueba de carga (D-154), el oscuro por defecto (D-155), el rediseño
+alrededor del ciclo (D-156), Prompts como fuente de hallazgos (D-157), el claro Rose Gold
+con cristal líquido (D-158), el alto contraste en dark luxury y en claro (D-159) y las tres
+decisiones que estaban abiertas (D-160).
 
 ### Restos de fases cerradas
 - **Fase 3:** sin probar todavía Anthropic por OpenInference-js/OpenLLMetry-js, el AI SDK de Vercel, LangChain.js y `client.beta.*` en Python. Paquete fino `@laplace/sdk` (`init`, `observe`, `getPrompt`) cuando el usuario reserve el scope de npm.
@@ -105,15 +106,6 @@ Lo que `DECISIONS.md`, `STATUS.md`, `ANALISIS.md` y `docs/` dejaron dicho como p
 no estaba en esta hoja. Lo que se resolvió después (el streaming de D-016, la marca de
 tarifa sin verificar en lo agregado de D-141, el wheel con la interfaz dentro, el
 volumen medido) no está.
-- **Decidir contigo — Prompts cuenta las tiradas de evaluación y la regla no (D-157).** En
-  la demo, Prompts dice que la v2 cuesta un 60 % más y el Diagnóstico un 70 %, porque la
-  comparación A/B de ayer corre con la v2 y el modelo barato. Lo coherente con «tráfico
-  real» sería que Prompts tampoco las contara, pero es cambiar lo que esa pestaña ha
-  enseñado siempre.
-- **Decidir contigo — dos cosas que `STATUS.md` dejó abiertas a propósito:** el árbol de
-  traza pinta un envoltorio de un solo hijo con los mismos tokens y coste que su padre, y
-  `_modelo_mas_rapido()` promedia medianas sin ponderar por llamadas (cambiarlo cambia
-  qué modelo se recomienda).
 - **Guardia estructural para reglas nuevas.** `test_catalogo_hallazgos` exige ficha y
   trazas a cada tipo, pero nada exige que una regla nueva desambigüe su título (D-115) ni
   que entre en el descuento del doble conteo (D-117). La de Prompts (D-157) se hizo
@@ -147,6 +139,7 @@ volumen medido) no está.
 - Tras la caída de Docker del 26 de septiembre quedaron apartadas `%LOCALAPPDATA%\Docker\run.viejo-*` y `docker-secrets-engine.viejo-*` con sockets bloqueados; se pueden borrar tras reiniciar Windows.
 - Las tiradas de evaluación se registran con la fecha de ahora aunque sus trazas sean de ayer (en la demo).
 - El pie del gráfico de gasto por día (D-152) usa `dayHour` y enseña la hora aunque el tramo sea un día.
+- En el grafo del agente (D-153), un coste largo («0,003072 US$») se sale del borde de su caja.
 
 ## 5. Lo que sólo puede hacer el usuario
 - Reservar `laplace-trace` y `laplace-backend` en PyPI y registrar este repositorio como «trusted publisher» con el entorno `pypi`.
