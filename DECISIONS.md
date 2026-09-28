@@ -2786,3 +2786,29 @@ pantalla que la hoja de ruta apuntaba para la Fase 5.
   pestañas enteras a 375, 1024 y 1440 en español y en francés; y a 1440 el contenido
   llega hasta donde llega la cabecera. Con la interfaz anterior fallan siete de nueve
   (las dos que pasan son la navegación a 1440, que ya estaba bien).
+
+### D-151 — Menos texto: lo que puedes dejar de pagar, un distintivo de confianza y el porqué plegado
+La hoja de ruta pedía «una frase y un ¿por qué? plegable», las guardas como distintivo y
+no como párrafo, y un héroe que diga «Puedes dejar de pagar hasta X».
+
+* **El héroe.** La cifra grande es ahora lo evitable, en el mismo ámbar que su tramo de
+  la barra: «Puedes dejar de pagar hasta 131 US$ al mes», y debajo, en una frase, «de
+  los 216 US$ que te costará este mes, al ritmo de los últimos 6,8 días». Antes eran dos
+  cifras grandes con una flecha —total → lo que quedaría—, y lo que el producto vende
+  (el ahorro) había que restarlo. Sin proyección no se promete futuro: «Te habrías
+  ahorrado hasta X en 6 horas», sobre lo ya gastado. Cuando no hay nada evitable, no hay
+  tarifas o el evitable pasa del 90 % (D-073, D-107, `CASI_TODO_EVITABLE`), el héroe
+  sigue como estaba: esos casos tienen su propia forma de decirse.
+* **Las salvedades, en un distintivo** («Confianza media · 2 notas») que se despliega
+  con las mismas líneas y porqués de D-124: nada se quita, sólo se pliega. El nivel lo
+  pone la peor salvedad: **baja** si falta gasto por contar (pasos sin tarifa) o la
+  cobertura es mala; **media** si la cifra es un suelo (tarifa asumida) o el evitable
+  pasa del umbral de cautela; **alta** en otro caso. Una proyección no baja el nivel: no
+  es una duda, es cómo se calcula, y va como nota. Cada nivel dice en una frase qué
+  significa, y esa frase tiene que ser verdad en todos los casos que lo producen.
+* **La ficha de un problema**: «Qué está pasando» sigue a la vista; «¿Por qué pasa?» y
+  el cálculo del ahorro («¿Cómo se calcula?») van plegados. Lo que se hace con el
+  problema ya estaba al lado (D-150).
+* Pruebas de pantallas: el héroe dice lo que puedes dejar de pagar, la línea de la
+  proyección no se ve hasta abrir el distintivo, y la ficha llega con el porqué cerrado.
+  Las claves que se quedaron sin uso (`diag.si_arreglas`, `prob.por_que`) se borran.

@@ -10,7 +10,7 @@ import { descargarCsv } from "@/lib/csv";
 import { dayHour, duration, money, number, percent, spanLabel, tokens, windowLabel } from "@/lib/format";
 import type { Budget, Finding, Overview } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
-import { CasiTodoEvitable, CASI_TODO_EVITABLE, CoberturaBloque, CoberturaLinea, Caveats, SinDinero } from "./avisos";
+import { CasiTodoEvitable, CASI_TODO_EVITABLE, CoberturaBloque, CoberturaLinea, Confianza, SinDinero } from "./avisos";
 import { tr } from "@/lib/i18n";
 import { t, tn } from "@/lib/textos";
 
@@ -69,6 +69,7 @@ function Contenido() {
   // barra, y «puedes dejar de pagar tu agente entero» es la clase de cifra que hace
   // que alguien cierre la pestaña. Se enseña el gasto y se explica lo que pasa.
   const casiTodo = ahorra && total > 0 && evitable / total >= CASI_TODO_EVITABLE;
+  const destacaAhorro = ahorra && !casiTodo && !overview.cost_unavailable;
 
   const cobertura = overview.coverage;
 
@@ -80,12 +81,22 @@ function Contenido() {
       {cobertura?.prominent && <CoberturaBloque cobertura={cobertura} />}
 
       <section className="hero">
-        <h1>{t("diag.titulo", { proyecto: project })}</h1>
-        <p className="hero-sub">
-          {overview.projected
-            ? t("diag.al_ritmo", { ventana })
-            : t("diag.en_datos", { tiempo: spanLabel(overview.observed_days) })}
-        </p>
+        <div className="hero-top">
+          <h1>{t("diag.titulo", { proyecto: project })}</h1>
+          <Confianza
+            overview={overview}
+            ventana={ventana}
+            casiTodo={casiTodo}
+            coberturaMala={!!cobertura?.prominent}
+          />
+        </div>
+        {!destacaAhorro && (
+          <p className="hero-sub">
+            {overview.projected
+              ? t("diag.al_ritmo", { ventana })
+              : t("diag.en_datos", { tiempo: spanLabel(overview.observed_days) })}
+          </p>
+        )}
 
         {/* Sin una sola tarifa conocida no hay cifra que enseñar. Un «$0» grande con el
             aviso debajo se lee como «no cuesta nada», que es lo contrario de lo que
@@ -95,6 +106,32 @@ function Contenido() {
           <div className="pair">
             <SinDinero motivo={overview.cost_unavailable} />
           </div>
+        ) : destacaAhorro ? (
+          // Lo primero que se lee es lo que se puede dejar de pagar, no lo que se paga
+          // (D-151). El total va debajo, en una frase, y la barra los reparte.
+          <div className="puedes">
+            <p className="puedes-lead">
+              {overview.projected ? t("diag.puedes.proy") : t("diag.puedes.gastado")}
+            </p>
+            <BigMoney
+              amount={evitable}
+              currency={overview.currency}
+              label={
+                overview.projected
+                  ? t("diag.puedes.al_mes")
+                  : t("diag.puedes.en", { tiempo: spanLabel(overview.observed_days) })
+              }
+              save
+            />
+            <p className="hero-sub">
+              {overview.projected
+                ? t("diag.de_total.proy", { total: money(total, overview.currency), ventana })
+                : t("diag.de_total.gastado", {
+                    total: money(total, overview.currency),
+                    tiempo: spanLabel(overview.observed_days),
+                  })}
+            </p>
+          </div>
         ) : (
         <div className="pair">
           <BigMoney
@@ -102,19 +139,6 @@ function Contenido() {
             currency={overview.currency}
             label={overview.projected ? t("diag.costara") : t("diag.ha_costado")}
           />
-          {ahorra && !casiTodo && (
-            <>
-              <div className="arrow" aria-hidden>
-                →
-              </div>
-              <BigMoney
-                amount={necesario}
-                currency={overview.currency}
-                label={t("diag.si_arreglas")}
-                good
-              />
-            </>
-          )}
         </div>
         )}
 
@@ -129,8 +153,6 @@ function Contenido() {
         {casiTodo && !overview.cost_unavailable && (
           <CasiTodoEvitable overview={overview} total={total} evitable={evitable} />
         )}
-
-        <Caveats overview={overview} ventana={ventana} casiTodo={casiTodo} />
       </section>
 
       {/* El contexto que matiza la cifra, en su carril (D-132). En estrecho va debajo de

@@ -84,12 +84,14 @@ function Contenido() {
         {finding.evidence.length > 0 && <Repetitions spans={finding.evidence} bucle={finding.kind === "bucle"} />}
       </section>
 
-      <section className="block">
-        <h2>{t("prob.por_que")}</h2>
+      {/* Una frase arriba (qué pasa) y el porqué plegado (D-151): son tres párrafos
+          entre lo que pasa y cómo arreglarlo, y quien quiere arreglarlo ya lo sabe. */}
+      <details className="block porque-bloque">
+        <summary>{t("prob.por_que.plegado")}</summary>
         {finding.why.split("\n\n").map((paragraph, index) => (
           <p key={index}>{paragraph}</p>
         ))}
-      </section>
+      </details>
 
       <section className="block pro">
         <h2>{t("prob.deteccion")}</h2>
@@ -191,13 +193,16 @@ function Contenido() {
             )}
           </p>
         )}
-        {finding.savings_calculation && (
-          <p className="pro">
-            <span style={{ color: "var(--ink-3)" }}>{t("prob.calculo")} </span>
-            {finding.savings_calculation}
-          </p>
-        )}
-        <p className="disclaimer">{finding.savings_note}</p>
+        <details className="porque">
+          <summary>{t("prob.ahorro.como")}</summary>
+          {finding.savings_calculation && (
+            <p className="pro">
+              <span style={{ color: "var(--ink-3)" }}>{t("prob.calculo")} </span>
+              {finding.savings_calculation}
+            </p>
+          )}
+          <p className="disclaimer">{finding.savings_note}</p>
+        </details>
       </section>
       </div>
 

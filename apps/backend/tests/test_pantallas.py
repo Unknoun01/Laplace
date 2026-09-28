@@ -406,3 +406,39 @@ def test_a_1440_el_contenido_no_deja_un_tercio_vacio(servidor, navegador, ruta):
         assert errores == [], errores
     finally:
         pagina.close()
+
+
+def test_el_heroe_dice_lo_que_puedes_dejar_de_pagar(servidor, navegador):
+    """Menos texto (D-151): la cifra grande es lo que se puede dejar de pagar, y las
+    salvedades van plegadas en un distintivo de confianza que se abre con un clic."""
+    pagina, errores = _abrir(navegador, servidor + "/?project=demo&days=7", "escritorio")
+    try:
+        pagina.locator(".big.save").wait_for(timeout=15_000)
+        heroe = pagina.locator("section.hero")
+        assert "Puedes dejar de pagar hasta" in heroe.inner_text()
+        # Plegado: la línea de la proyección no se ve hasta abrir el distintivo.
+        distintivo = pagina.locator("details.confianza")
+        assert "Confianza" in distintivo.locator(":scope > summary").inner_text()
+        assert not pagina.get_by_text("Proyección desde").first.is_visible()
+        distintivo.locator(":scope > summary").click()
+        assert pagina.get_by_text("Proyección desde").first.is_visible()
+        assert errores == [], errores
+    finally:
+        pagina.close()
+
+
+def test_la_ficha_pliega_el_porque(servidor, navegador):
+    """Una frase arriba y el «¿Por qué pasa?» plegado: se lee qué pasa y cómo arreglarlo
+    sin tres párrafos en medio."""
+    pagina, errores = _abrir(navegador, servidor + "/?project=demo&days=7", "escritorio")
+    try:
+        enlace = pagina.locator("a[href*='/problema']").first
+        enlace.wait_for(timeout=15_000)
+        enlace.click()
+        porque = pagina.locator("details.porque-bloque")
+        porque.wait_for(timeout=15_000)
+        assert porque.get_attribute("open") is None
+        assert "¿Por qué pasa?" in porque.locator("summary").inner_text()
+        assert errores == [], errores
+    finally:
+        pagina.close()

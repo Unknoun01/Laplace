@@ -16,15 +16,20 @@ export function BigMoney({
   currency,
   label,
   good,
+  save,
 }: {
   amount: number;
   currency: string;
   label: string;
   good?: boolean;
+  /** Lo que se puede dejar de pagar: el mismo ámbar que su tramo de la barra. */
+  save?: boolean;
 }) {
   return (
     <div>
-      <div className={`big num${good ? " good" : ""}`}>{money(amount, currency)}</div>
+      <div className={`big num${good ? " good" : ""}${save ? " save" : ""}`}>
+        {money(amount, currency)}
+      </div>
       <div className="pair-lbl">
         {label} <Euros usd={amount} />
       </div>
