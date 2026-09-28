@@ -58,17 +58,17 @@ probada: `laplace ui` (un proceso + SQLite) y Docker (ClickHouse + Postgres + Ne
 - **Servidor local:** la configuración «local» de `.claude/launch.json` (puerto 8100). Tras tocar Python hay que reiniciarlo.
 - **Demo:** `.venv/Scripts/python.exe -m laplace.cli demo --endpoint http://127.0.0.1:8100` carga un mes de datos.
 - **Pantallas:** `test_pantallas.py` usa Playwright con Chromium, ya instalados en `.venv`.
-- **Estado:** la última pasada completa (antes de D-149) dio 767 pruebas bien, 0 fallos y 4 saltadas (las que necesitan clave de proveedor). Las del espejo con la web necesitan Node 22.6 o posterior.
+- **Estado:** la última pasada completa (D-153) dio 810 pruebas bien y 4 saltadas (las que necesitan clave de proveedor). Las del espejo con la web necesitan Node 22.6 o posterior.
 - **Prueba de carga:** `python scripts/carga.py --spans 10000000` genera un día de tráfico en ClickHouse y mide las pantallas; `--borrar` lo quita. Con 10 millones hacen falta unos 8 GB para Docker.
 
 ## 3. Pendiente, por orden
 
-### Fase 5: cerrarla (rama `fase5-interfaz`, subida a GitHub, SIN fusionar)
-1. Pasar la batería **entera** del backend (con `docker compose up -d clickhouse postgres`) y las de pantallas tras `scripts/build_ui.py`. El último commit (D-152 y D-153) sólo se probó con sus propias pruebas y con `test_pantallas.py`; la pasada completa se cortó.
-2. Medir el Diagnóstico con la prueba de carga: `step_cost_series` (D-152) es una lectura más.
-3. **Identidad visual:** el tema oscuro como insignia y un tema claro neutro en lugar del rosa.
-4. **Rediseño alrededor del ciclo:** Evaluaciones pasa a ser el paso «probar» y Prompts una fuente más de hallazgos.
-5. Repaso por encima de la historia del proyecto buscando pendientes sueltos (lo pidió el usuario); después, fusionar `fase5-interfaz` en `master` y hacer push.
+### Fase 5: lo que queda (lo demás, fusionado en `master` el 28 de septiembre, D-149 a D-153)
+La batería completa pasó: 810 bien y 4 saltadas; dos de ClickHouse fallaron con Docker muy lento (la pasada tardó 86 minutos) y pasan al repetirlas (`test_auditoria_p2.py`, `test_busqueda_contenido.py`).
+1. Medir el Diagnóstico con la prueba de carga: `step_cost_series` (D-152) es una lectura más.
+2. **Identidad visual:** el tema oscuro como insignia y un tema claro neutro en lugar del rosa.
+3. **Rediseño alrededor del ciclo:** Evaluaciones pasa a ser el paso «probar» y Prompts una fuente más de hallazgos.
+4. Repaso por encima de la historia del proyecto buscando pendientes sueltos (lo pidió el usuario).
 
 ### Restos de fases cerradas
 - **Fase 3:** sin probar todavía Anthropic por OpenInference-js/OpenLLMetry-js, el AI SDK de Vercel, LangChain.js y `client.beta.*` en Python. Paquete fino `@laplace/sdk` (`init`, `observe`, `getPrompt`) cuando el usuario reserve el scope de npm.
