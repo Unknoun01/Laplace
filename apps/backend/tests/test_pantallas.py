@@ -637,9 +637,9 @@ def test_la_pestana_de_cada_pantalla_sale_marcada(servidor, navegador, ruta, pes
         pagina.close()
 
 
-@pytest.mark.parametrize(("tema", "fondo"), [(None, (0, 0, 0)), ("light", (255, 255, 255))])
+@pytest.mark.parametrize(("tema", "fondo"), [(None, (10, 9, 8)), ("light", (255, 255, 255))])
 def test_el_alto_contraste_quita_el_cristal(servidor, navegador, tema, fondo):
-    """D-159: con alto contraste, el fondo es negro o blanco puro y el cristal no
+    """D-159: con alto contraste, el fondo es negro cálido o blanco puro y el cristal no
     desenfoca; el botón de Ajustes lo enciende y lo apaga sin recargar."""
     contexto = navegador.new_context(locale="es-ES", viewport={"width": 1440, "height": 900})
     try:

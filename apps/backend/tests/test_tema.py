@@ -255,6 +255,22 @@ def test_el_alto_contraste_no_tiene_transparencias():
     # en rosa claro y el botón principal era rosa con letra negra.
     claro = _tema("claro-ac")
     assert _luminancia(_color(claro["accent-1"], claro)) < 0.05
+    # Y el oscuro, con el mismo estilo que el claro y no con el neón del oscuro normal:
+    # acentos de poca saturación (marfil, champán) y fondo negro cálido, no azulado.
+    oscuro = _tema("oscuro-ac")
+    for acento in ("accent-1", "accent-2"):
+        assert _saturacion(_color(oscuro[acento], oscuro)) <= 0.6, acento
+    r, g, b, _ = _color(oscuro["bg-gradient-mid"], oscuro)
+    assert r >= g >= b, "negro cálido, no azulado"
+
+
+def _saturacion(c: Color) -> float:
+    r, g, b = (v / 255 for v in c[:3])
+    alto, bajo = max(r, g, b), min(r, g, b)
+    luz = (alto + bajo) / 2
+    if alto == bajo:
+        return 0.0
+    return (alto - bajo) / (1 - abs(2 * luz - 1))
 
 
 def _tono(c: Color) -> float:
