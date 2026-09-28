@@ -15,6 +15,7 @@ import type {
   Instance,
   JudgeStatus,
   MarginView,
+  StripeStatus,
   Overview,
   Panel,
   ProjectStats,
@@ -214,6 +215,8 @@ export interface TraceQuery {
   /** Identidad exacta de un paso, la que trae cada hallazgo en `step_key`. */
   step_key?: string;
   user_id?: string;
+  /** El cliente que paga (D-161). */
+  customer_id?: string;
   status?: string;
   session_id?: string;
   span_type?: string;
@@ -486,6 +489,19 @@ export function setCustomerRevenue(
     customer_id: customerId,
     monthly,
   });
+}
+
+export function getStripe(projectId: string): Promise<StripeStatus> {
+  return get<StripeStatus>("/api/stripe", { project_id: projectId });
+}
+
+/** Pone la clave de Stripe; `null` la quita. */
+export function setStripe(projectId: string, apiKey: string | null): Promise<StripeStatus> {
+  return send<StripeStatus>("/api/stripe", "PUT", { project_id: projectId, api_key: apiKey });
+}
+
+export function syncStripe(projectId: string): Promise<{ customers: number; detail: string }> {
+  return send("/api/stripe/sync", "POST", { project_id: projectId });
 }
 
 export function getBudget(projectId: string, senal?: AbortSignal): Promise<Budget> {

@@ -505,6 +505,12 @@ class ClickHouseStore:
                 f"trace_id IN (SELECT trace_id FROM spans WHERE user_id = %(user_id)s{acotar})"
             )
             params["user_id"] = filters.user_id
+        if filters.customer_id:
+            clauses.append(
+                "trace_id IN (SELECT trace_id FROM spans "
+                f"WHERE customer_id = %(customer_id)s{acotar})"
+            )
+            params["customer_id"] = filters.customer_id
 
         # El estado es una propiedad de la traza entera, no de un span: "ok" significa
         # que ninguno de sus spans falló, así que va por exclusión.
@@ -1282,6 +1288,29 @@ class ClickHouseStore:
             row_to_span(r)
             for r in _named(self._client.query(sql, parameters={"m": model}))
         ]
+
+    def customer_steps(self, project_id: str, window: Window) -> dict[str, dict[str, int]]:
+        sql = f"""
+            SELECT cliente, paso, max(n) AS veces FROM (
+                SELECT c.cliente AS cliente,
+                       if(s.step_key != '', s.step_key, s.name) AS paso,
+                       count() AS n
+                FROM (SELECT * FROM spans FINAL WHERE {WINDOW_WHERE}) AS s
+                INNER JOIN (
+                    SELECT trace_id, max(customer_id) AS cliente FROM spans FINAL
+                    WHERE {RULES_WHERE} GROUP BY trace_id
+                ) AS c ON s.trace_id = c.trace_id
+                WHERE c.cliente != ''
+                GROUP BY s.trace_id, cliente, paso
+            )
+            GROUP BY cliente, paso
+        """
+        salida: dict[str, dict[str, int]] = {}
+        for r in _named(
+            self._client.query(sql, parameters=self._window_params(project_id, window))
+        ):
+            salida.setdefault(r["cliente"], {})[r["paso"]] = int(r["veces"])
+        return salida
 
     def cost_by(
         self,

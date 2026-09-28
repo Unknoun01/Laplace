@@ -45,6 +45,13 @@ MAX_CLIENTES = 500
 Estado = Literal["pierde", "ajustado", "gana", "sin-ingresos", "sin-proyeccion", "sin-trafico"]
 
 
+class FindingRef(BaseModel):
+    """Un problema abierto del Diagnóstico que pasa en las ejecuciones de un cliente."""
+
+    id: str
+    title: str
+
+
 class CustomerMargin(BaseModel):
     """Un cliente: lo que cuesta, lo que paga y lo que queda."""
 
@@ -57,6 +64,8 @@ class CustomerMargin(BaseModel):
     #: Lo que paga al mes, puesto por el usuario. Sin `_usd`: es un dato suyo, no una
     #: cifra que el producto afirme (el guardia de D-107 va por esas).
     monthly_revenue: float | None = None
+    #: De dónde sale lo que paga: `manual` o `stripe` (D-162). Vacío sin ingresos.
+    revenue_source: str = ""
     #: Ingresos menos coste, al mes. `None` sin ingresos o sin proyección.
     margin_usd: float | None = None
     #: Margen entre ingresos. `None` cuando no hay margen.
@@ -66,6 +75,9 @@ class CustomerMargin(BaseModel):
     unknown_cost_spans: int = 0
     status: Estado = "sin-ingresos"
     headline: str = ""
+    #: Los problemas abiertos del Diagnóstico que pasan en sus ejecuciones, del que más
+    #: dinero devuelve al que menos. Es por donde empezar con un cliente que pierde.
+    findings: list[FindingRef] = Field(default_factory=list)
 
 
 class MarginView(BaseModel):
@@ -89,6 +101,18 @@ class MarginView(BaseModel):
 
 def clave(customer_id: str) -> str:
     return f"{PREFIJO}{customer_id}"
+
+
+def leer_fuentes(metadata: Any, project_id: str) -> dict[str, str]:
+    """De dónde sale lo que paga cada cliente: `stripe` o `manual`."""
+    try:
+        filas = metadata.list_settings(project_id, PREFIJO)
+    except Exception:  # noqa: BLE001
+        return {}
+    return {
+        k[len(PREFIJO) :]: ("stripe" if (v or {}).get("source") == "stripe" else "manual")
+        for k, v in filas.items()
+    }
 
 
 def leer_ingresos(metadata: Any, project_id: str) -> dict[str, float]:
@@ -171,6 +195,29 @@ def _fila(
         fila.status = "gana"
         fila.headline = t("margen.fila.gana_suelo" if suelo else "margen.fila.gana", **valores)
     return fila
+
+
+#: Problemas que se enseñan por cliente: los que más devuelven. El resto, en el Diagnóstico.
+MAX_PROBLEMAS = 3
+
+
+def con_problemas(vista: MarginView, findings: list[Any], pasos: dict[str, dict[str, int]]) -> None:
+    """Pone a cada cliente los problemas del Diagnóstico que pasan en sus ejecuciones.
+
+    Se cruza por el paso, igual que la vista de traza: el problema está en un paso por
+    el que pasan las ejecuciones del cliente. Una repetición o un bucle, además, sólo
+    cuentan si el paso sale más de una vez en alguna de sus ejecuciones: pasar por él una
+    vez no es repetirlo. `findings` llega ordenado por dinero, y ese orden se respeta.
+    """
+    for cliente in vista.customers:
+        suyos = pasos.get(cliente.customer_id, {})
+        for f in findings:
+            veces = suyos.get(f.step_key, 0)
+            minimo = 2 if f.kind in ("repeticion", "bucle") else 1
+            if f.step_key and veces >= minimo:
+                cliente.findings.append(FindingRef(id=f.id, title=f.title))
+            if len(cliente.findings) >= MAX_PROBLEMAS:
+                break
 
 
 _ORDEN = {"pierde": 0, "ajustado": 1, "gana": 2, "sin-ingresos": 3, "sin-proyeccion": 3,

@@ -33,6 +33,8 @@ class TraceFilter:
     status: str | None = None
     session_id: str | None = None
     user_id: str | None = None
+    #: El cliente que paga (D-161), para ir del margen por cliente a sus ejecuciones.
+    customer_id: str | None = None
     #: Busca en el nombre de los spans y en el id de la traza.
     search: str | None = None
     #: Busca en el contenido: prompts, respuestas, argumentos y salidas de herramientas,
@@ -790,6 +792,11 @@ class SpanStore(Protocol):
 
         Por ejecución: cada traza cuenta entera para la clave que lleve alguno de sus
         spans (normalmente la raíz), y las que no llevan ninguna van juntas bajo `""`."""
+
+    def customer_steps(self, project_id: str, window: Window) -> dict[str, dict[str, int]]:
+        """Por cliente, los pasos que recorren sus ejecuciones y cuántas veces como mucho
+        en una sola (D-161). Sin tiradas de evaluación. El paso es su identidad
+        (`step_key`, o el nombre si no la tiene), la misma que llevan los hallazgos."""
 
     def unpriced_models(self, project_ids: list[str] | None, window: Window) -> list[str]:
         """Modelos con llamadas sin tarifa en la ventana; `None` son todos los proyectos."""

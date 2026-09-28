@@ -933,6 +933,19 @@ export const es = {
   "diag.clientes.pierden_one": "{n} cliente te hace perder dinero.",
   "diag.clientes.pierden_other": "{n} clientes te hacen perder dinero.",
   "diag.clientes.ver": "Ver el margen por cliente",
+  "trazas.filtro.cliente": "Sólo las ejecuciones del cliente {cliente}",
+  "cl.problemas": "Pasa en sus ejecuciones:",
+  "cl.ver_ejecuciones": "Ver sus ejecuciones →",
+  "aj.regla.cliente_pierde": "Cliente que pierde dinero",
+  "cl.stripe.titulo": "Ingresos desde Stripe",
+  "cl.stripe.lead": "En lugar de escribirlos: lo que paga cada cliente sale de sus facturas pagadas del último mes, llevado a un mes (un plan anual cuenta su doceava parte). Cada cliente de Stripe se casa con el de tus trazas por metadata.laplace_customer_id, o por su id. Basta una clave restringida con lectura de facturas y clientes.",
+  "cl.stripe.clave": "Clave de Stripe",
+  "cl.stripe.puesta": "Clave puesta ({pista}).",
+  "cl.stripe.ultima": "Última vez: {fecha}, {n} clientes.",
+  "cl.stripe.nunca": "Todavía no se ha traído nada.",
+  "cl.stripe.traer": "Traer de Stripe",
+  "cl.stripe.quitar": "Quitar la clave",
+  "cl.stripe.fuente": "Stripe",
 } as const;
 
 export type Clave = keyof typeof es;

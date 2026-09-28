@@ -1,12 +1,21 @@
 "use client";
 
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { BackendDown, Cargando, NeedsKey, NoProject, NotYours } from "@/components/states";
-import { getCustomers, listProjects, parseDays, setCustomerRevenue } from "@/lib/api";
-import { money, number, porcentaje, windowLabel } from "@/lib/format";
+import {
+  getCustomers,
+  getStripe,
+  listProjects,
+  parseDays,
+  setCustomerRevenue,
+  setStripe,
+  syncStripe,
+} from "@/lib/api";
+import { money, number, porcentaje, timestamp, windowLabel } from "@/lib/format";
 import { usePermisos } from "@/lib/permisos";
-import type { CustomerMargin, MarginView } from "@/lib/types";
+import type { CustomerMargin, MarginView, StripeStatus } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
 import { t, tn } from "@/lib/textos";
 
@@ -42,6 +51,7 @@ function Contenido() {
   if (!vista) return <NoProject />;
 
   const recargar = () => setVersion((v) => v + 1);
+  const query = `?project=${encodeURIComponent(vista.project_id)}&days=${days}`;
   const pierden = vista.customers.filter((c) => c.status === "pierde");
 
   return (
@@ -59,6 +69,7 @@ function Contenido() {
             {pierden.map((c) => (
               <li key={c.customer_id}>
                 <strong>{c.customer_id}</strong> — {c.headline}
+                <Problemas cliente={c} query={query} />
               </li>
             ))}
           </ul>
@@ -86,6 +97,7 @@ function Contenido() {
                     cliente={c}
                     vista={vista}
                     escribir={permisos.escribir}
+                    query={query}
                     onChange={recargar}
                   />
                 ))}
@@ -108,6 +120,8 @@ function Contenido() {
           })}
         </p>
       )}
+
+      {permisos.escribir && <Stripe project={vista.project_id} onChange={recargar} />}
 
       {permisos.escribir && <Anadir project={vista.project_id} onChange={recargar} />}
 
@@ -134,11 +148,13 @@ function Fila({
   cliente,
   vista,
   escribir,
+  query,
   onChange,
 }: {
   cliente: CustomerMargin;
   vista: MarginView;
   escribir: boolean;
+  query: string;
   onChange: () => void;
 }) {
   const suelo = cliente.cost_is_floor ? "≥ " : "";
@@ -157,6 +173,9 @@ function Fila({
             : "—"}
         </td>
         <td className="num">
+          {cliente.revenue_source === "stripe" && (
+            <span className="chip where cl-fuente">{t("cl.stripe.fuente")}</span>
+          )}
           {escribir ? (
             <Ingreso cliente={cliente} project={vista.project_id} onChange={onChange} />
           ) : cliente.monthly_revenue !== null ? (
@@ -180,7 +199,10 @@ function Fila({
         </td>
       </tr>
       <tr className="cl-frase">
-        <td colSpan={5}>{cliente.headline}</td>
+        <td colSpan={5}>
+          {cliente.headline}
+          <Problemas cliente={cliente} query={query} />
+        </td>
       </tr>
     </>
   );
@@ -229,6 +251,118 @@ function Ingreso({
         </button>
       )}
       {error && <small className="verr">{error}</small>}
+    </span>
+  );
+}
+
+/**
+ * Lo que paga cada cliente, traído de las facturas pagadas de Stripe (D-162). La clave
+ * se escribe una vez y no vuelve: la API sólo devuelve sus cuatro últimos caracteres.
+ */
+function Stripe({ project, onChange }: { project: string; onChange: () => void }) {
+  const [estado, setEstado] = useState<StripeStatus | null>(null);
+  const [clave, setClave] = useState("");
+  const [mensaje, setMensaje] = useState({ ok: true, texto: "" });
+  const [trayendo, setTrayendo] = useState(false);
+
+  useEffect(() => {
+    getStripe(project)
+      .then(setEstado)
+      .catch(() => setEstado(null));
+  }, [project]);
+
+  async function guardar(valor: string | null) {
+    try {
+      setEstado(await setStripe(project, valor));
+      setClave("");
+      setMensaje({ ok: true, texto: "" });
+    } catch (e) {
+      setMensaje({ ok: false, texto: e instanceof Error ? e.message : t("cl.error.guardar") });
+    }
+  }
+
+  async function traer() {
+    setTrayendo(true);
+    try {
+      const r = await syncStripe(project);
+      setMensaje({ ok: true, texto: r.detail });
+      setEstado(await getStripe(project));
+      onChange();
+    } catch (e) {
+      setMensaje({ ok: false, texto: e instanceof Error ? e.message : t("cl.error.guardar") });
+    } finally {
+      setTrayendo(false);
+    }
+  }
+
+  if (!estado) return null;
+  return (
+    <section className="sec cl-stripe">
+      <h2>{t("cl.stripe.titulo")}</h2>
+      <p className="lead">{t("cl.stripe.lead")}</p>
+      {estado.configured ? (
+        <>
+          <p className="muted">
+            {t("cl.stripe.puesta", { pista: estado.key_hint })}{" "}
+            {estado.last_sync
+              ? t("cl.stripe.ultima", { fecha: timestamp(estado.last_sync), n: estado.customers })
+              : t("cl.stripe.nunca")}
+          </p>
+          <div className="actions" style={{ paddingTop: 0 }}>
+            <button type="button" className="btn primary" onClick={traer} disabled={trayendo}>
+              {t("cl.stripe.traer")}
+            </button>
+            <button type="button" className="btn" onClick={() => guardar(null)}>
+              {t("cl.stripe.quitar")}
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className="ab">
+          <label>
+            <small>{t("cl.stripe.clave")}</small>
+            <input
+              className="field"
+              type="password"
+              autoComplete="off"
+              placeholder="rk_live_…"
+              value={clave}
+              onChange={(e) => setClave(e.target.value)}
+            />
+          </label>
+          <button type="button" className="btn" onClick={() => guardar(clave.trim())}>
+            {t("cl.guardar")}
+          </button>
+        </div>
+      )}
+      {mensaje.texto && <p className={mensaje.ok ? "okline" : "verr"}>{mensaje.texto}</p>}
+    </section>
+  );
+}
+
+/**
+ * Por dónde empezar con un cliente: los problemas del Diagnóstico que pasan en sus
+ * ejecuciones (los que más devuelven) y sus ejecuciones en el explorador (D-161).
+ */
+function Problemas({ cliente, query }: { cliente: CustomerMargin; query: string }) {
+  if (cliente.traces === 0) return null;
+  return (
+    <span className="cl-problemas">
+      {cliente.findings.length > 0 && (
+        <>
+          {t("cl.problemas")}{" "}
+          {cliente.findings.map((f, i) => (
+            <span key={f.id}>
+              {i > 0 && " · "}
+              <Link href={`/problema${query}&id=${encodeURIComponent(f.id)}`}>{f.title}</Link>
+            </span>
+          ))}
+          {" · "}
+        </>
+      )}
+      <Link href={`/trazas${query}&customer=${encodeURIComponent(cliente.customer_id)}`}>
+        {t("cl.ver_ejecuciones")}
+      </Link>
     </span>
   );
 }

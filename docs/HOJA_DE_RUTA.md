@@ -22,7 +22,7 @@ probada: `laplace ui` (un proceso + SQLite) y Docker (ClickHouse + Postgres + Ne
   La cifra principal del producto es «ahorrado y recuperable».
 - La observabilidad completa se mantiene para el análisis en profundidad.
 - **Idiomas:** español, inglés, portugués de Brasil, francés y chino simplificado, con i18n real (hecho, D-147 y D-148).
-- **Primera función nueva, después de las fases técnicas:** margen por cliente final (hecha en lo esencial, D-161).
+- **Primera función nueva, después de las fases técnicas:** margen por cliente final (hecha, D-161 y D-162).
 - **En vez de un editor tipo n8n:** un **plano de control**.
   - Grafo del agente sacado de las trazas (ya existe por traza, D-153; falta el de todo el proyecto).
   - El ciclo ya tiene su sitio en la interfaz (D-156): Probar es el paso 2, la ficha dice
@@ -37,7 +37,7 @@ probada: `laplace ui` (un proceso + SQLite) y Docker (ClickHouse + Postgres + Ne
 - **Por fases:** una rama por fase y un commit por bloque. Se enseña al usuario y se fusiona a `master` sólo cuando lo aprueba (`git merge --no-ff`).
 - **Nada entra sin su prueba.** Primero la prueba en rojo, después el arreglo.
 - **Hay que comprobar que la prueba muerde:** romper el código a propósito y verla fallar.
-- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-162**.
+- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-163**.
 - **Todo en español:** código, comentarios, commits y textos.
 - **Los commits terminan con** `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - **Reglas del producto que no se tocan:**
@@ -76,17 +76,13 @@ decisiones que estaban abiertas (D-160).
 - **Fase 3:** sin probar todavía Anthropic por OpenInference-js/OpenLLMetry-js, el AI SDK de Vercel, LangChain.js y `client.beta.*` en Python. Paquete fino `@laplace/sdk` (`init`, `observe`, `getPrompt`) cuando el usuario reserve el scope de npm.
 - **Fase 4:** medir con semanas de histórico (hace falta una máquina con más memoria) para decidir sobre acotar por tiempo las subconsultas de `_where` y sobre `FINAL` con partes sin fusionar. El Diagnóstico tarda unos 4 s la primera vez con 10 millones de spans al día en el portátil (objetivo 1,5 s); los preagregados lo bajarían a unos 2,5 s y están aparcados hasta que esa primera carga importe. Si se hacen, la serie del gráfico (`step_cost_series`, un 13 % del Diagnóstico, D-154) entra en la lista: tiene exactamente la forma de un preagregado por hora.
 
-### Fase 6: margen por cliente (D-161; queda Stripe)
-Hecho: `customer_id` de punta a punta con paridad, ingresos a mano en la pestaña de
-Clientes, la pantalla con coste, ingresos y margen al mes, el aviso de «este cliente te
-hace perder dinero» (en la pestaña y en el carril del Diagnóstico) y la demo con las
-cuatro historias. Queda:
-- **Ingresos desde Stripe:** leer lo facturado a cada cliente (su `customer` de Stripe
-  enlazado con el `customer_id` de las trazas) en lugar de escribirlo a mano.
-- **Filtrar las trazas por cliente** en el explorador, para ir del aviso a sus ejecuciones.
-- **Qué problemas del Diagnóstico pasan en las ejecuciones de un cliente**: el aviso dice
-  que se miren, y hoy hay que buscarlos a mano.
-- **Alerta** cuando un cliente pasa a perder dinero, por los canales de siempre.
+### Fase 6: cerrada (D-161, D-162)
+`customer_id` de punta a punta, ingresos a mano o desde Stripe, margen al mes con el
+aviso de quién hace perder dinero (en la pestaña, en el Diagnóstico y como alerta), y de
+cada cliente a sus ejecuciones y a los problemas que pasan en ellas. Queda:
+- **Probar Stripe contra la API real** con una clave de pruebas (`rk_test_…`): está hecho
+  contra una Stripe falsa con la forma documentada.
+- **Traer de Stripe solo**, cada día, en el mismo bucle que las alertas; hoy es un botón.
 - El paquete de TypeScript tendrá que llevar `customerId` en su `setContext`.
 
 ### Después: funciones diferenciales (confirmar el orden con el usuario)
@@ -154,6 +150,7 @@ volumen medido) no está.
 - Reservar un scope en npm, por ejemplo `@laplace-ai`.
 - Decidir el dominio: `laplace.dev`, `laplace.ai` y `laplace.sh` están cogidos; `uselaplace.com` parecía libre, pero hay que confirmarlo.
 - Poner una clave de proveedor para las 4 pruebas vivas que validan las cifras contra la factura real (`LAPLACE_LIVE_TESTS=1`).
+- Una clave de pruebas de Stripe (`rk_test_…`) para probar la traída de ingresos contra la API real.
 
 ## 6. Negocio (del informe de auditoría)
 - **Mensaje:** «Laplace encuentra el dinero que tu agente tira, te dice cómo arreglarlo y demuestra cuánto has dejado de pagar». Complementario a Langfuse, no rival.

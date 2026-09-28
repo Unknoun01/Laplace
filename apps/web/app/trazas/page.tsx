@@ -57,6 +57,7 @@ function Contenido() {
   const session = params.get("session") ?? "";
   // Llega desde el reparto por usuario del Panel (D-123).
   const user = params.get("user") ?? "";
+  const customer = params.get("customer") ?? "";
   const cursor = params.get("cursor") ?? "";
 
   const estado = useApi(async (senal) => {
@@ -78,12 +79,13 @@ function Contenido() {
         min_cost_usd: Number.isFinite(minCost) && minCost > 0 ? minCost : undefined,
         session_id: session || undefined,
         user_id: user || undefined,
+        customer_id: customer || undefined,
       }, senal),
       // Sólo para poblar el desplegable de modelos del modo avanzado.
       getOverview(project, days, senal).catch(() => null),
     ]);
     return { project, page, overview };
-  }, [pedido, days, sort, q, enContenido, step, status, type, model, minCostRaw, session, user, cursor]);
+  }, [pedido, days, sort, q, enContenido, step, status, type, model, minCostRaw, session, user, customer, cursor]);
 
   if (estado.fase === "cargando") return <TableSkeleton />;
   if (estado.fase === "sin-backend") return <BackendDown />;
@@ -113,6 +115,7 @@ function Contenido() {
         {step && <input type="hidden" name="step" value={step} />}
         {step && <input type="hidden" name="step_label" value={stepLabel} />}
         {user && <input type="hidden" name="user" value={user} />}
+        {customer && <input type="hidden" name="customer" value={customer} />}
         <input
           type="search"
           name="q"
@@ -205,6 +208,15 @@ function Contenido() {
         </p>
       )}
 
+      {customer && (
+        <p className="filtro-paso">
+          <span>{tr("trazas.filtro.cliente", { cliente: <strong>{customer}</strong> })}</span>
+          <Link href={`/trazas?${sinParametro(params, "customer")}`} className="btn">
+            {t("trazas.quitar")}
+          </Link>
+        </p>
+      )}
+
       {page.traces.length > 0 && (
         <div className="explorer-tools">
           <button
@@ -221,6 +233,7 @@ function Contenido() {
                 model: model || undefined,
                 session_id: session || undefined,
                 user_id: user || undefined,
+                customer_id: customer || undefined,
               })
             }
           >
@@ -243,6 +256,7 @@ function Contenido() {
             min_cost_usd: minCostRaw || undefined,
             session_id: session || undefined,
             user_id: user || undefined,
+            customer_id: customer || undefined,
             sort,
           }}
         />

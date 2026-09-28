@@ -262,3 +262,125 @@ def test_una_tirada_de_evaluacion_no_se_cobra_a_ningun_cliente(almacen):
     acme = next(c for c in vista.customers if c.customer_id == "acme")
     assert acme.traces == 10 and acme.window_cost_usd == pytest.approx(10.0)
     assert vista.unassigned_cost_usd == pytest.approx(0.5)
+
+
+def _repetida(proyecto, cliente, cuando, veces=3) -> list[Span]:
+    """Una ejecución de `cliente` que llama tres veces al mismo paso con lo mismo."""
+    spans = _ejecucion(proyecto, cliente, 0.01, cuando)
+    llamada = spans[1]
+    llamada.step_key = "paso-buscar"
+    llamada.dedup_hash = f"rep-{llamada.trace_id}"
+    for i in range(1, veces):
+        copia = llamada.model_copy(deep=True)
+        copia.span_id = uuid.uuid4().hex[:16]
+        copia.start_time = cuando + timedelta(milliseconds=10 * i)
+        spans.append(copia)
+    return spans
+
+
+def test_los_pasos_de_cada_cliente_en_los_dos_almacenes(almacen):
+    store, proyecto = almacen
+    spans = []
+    for d in range(4):
+        spans += _repetida(proyecto, "acme", AHORA - timedelta(days=d, hours=1))
+        spans += _ejecucion(proyecto, "beta", 0.01, AHORA - timedelta(days=d, hours=2))
+    store.insert_spans(spans)
+    pasos = store.customer_steps(proyecto, VENTANA)
+    assert pasos["acme"]["paso-buscar"] == 3
+    assert pasos["acme"]["agente"] == 1
+    assert "paso-buscar" not in pasos["beta"]
+    assert "" not in pasos
+
+
+def test_cada_cliente_lleva_los_problemas_de_sus_ejecuciones(almacen):
+    from laplace_backend import insights
+
+    store, proyecto = almacen
+    spans = []
+    for d in range(4):
+        spans += _repetida(proyecto, "acme", AHORA - timedelta(days=d, hours=1))
+        # beta pasa por el mismo paso una sola vez: no lo repite.
+        una = _ejecucion(proyecto, "beta", 0.01, AHORA - timedelta(days=d, hours=2))
+        una[1].step_key = "paso-buscar"
+        spans += una
+    store.insert_spans(spans)
+    hallazgos = insights.detect(store, proyecto, VENTANA)
+    assert any(f.kind == "repeticion" for f in hallazgos)
+    vista = margen.calcular(store, proyecto, VENTANA, {})
+    margen.con_problemas(vista, hallazgos, store.customer_steps(proyecto, VENTANA))
+    por_cliente = {c.customer_id: [f.id for f in c.findings] for c in vista.customers}
+    assert "repeticion:paso-buscar" in por_cliente["acme"]
+    assert "repeticion:paso-buscar" not in por_cliente["beta"], "pasar una vez no es repetir"
+
+
+class _Notificador:
+    def __init__(self) -> None:
+        self.enviados: list[str] = []
+
+    def send(self, url: str, texto: str) -> bool:
+        self.enviados.append(texto)
+        return True
+
+
+def _alertas(tmp_path, ingresos: dict[str, float]):
+    from laplace_backend.alerts import AlertConfig, AlertRunner, MemoryAlertState
+    from laplace_backend.storage.metadata import SQLiteMetadataStore
+
+    db = tmp_path / "alertas.db"
+    store = SQLiteStore(db)
+    store.migrate()
+    spans = []
+    for d in range(5):
+        spans += _ejecucion("p", "acme", 1.0, AHORA - timedelta(days=d, hours=1))
+    store.insert_spans(spans)
+    meta = SQLiteMetadataStore(db)
+    meta.migrate()
+    meta.set_setting("p", "alerts", {"webhook_url": "https://hooks.slack.com/services/T/B/x"})
+    for cliente, importe in ingresos.items():
+        meta.set_setting("p", margen.clave(cliente), {"monthly": importe})
+    notificador = _Notificador()
+    estado = MemoryAlertState()
+    runner = AlertRunner(
+        store, AlertConfig(Settings(store="sqlite", sqlite_path=str(db))), estado, notificador,
+        metadata=meta,
+    )
+    return runner, notificador, meta, estado
+
+
+def test_la_alerta_avisa_una_vez_cuando_un_cliente_pasa_a_perder(tmp_path):
+    # acme cuesta unos 30 $ al mes y paga 5.
+    runner, notificador, meta, estado = _alertas(tmp_path, {"acme": 5.0})
+    primera = runner.evaluate("p")
+    assert "acme" in primera.customers_notice
+    assert any("ha pasado a hacerte perder dinero" in m for m in notificador.enviados)
+    enviados = len(notificador.enviados)
+
+    # Sigue perdiendo: no vuelve a sonar, ni siquiera pasado el periodo de calma.
+    registro = estado.read("p")["customer:acme"]
+    registro.seen_at -= timedelta(days=3)
+    registro.notified_at -= timedelta(days=3)
+    estado.save("p", registro)
+    assert runner.evaluate("p").customers_notice == ""
+    assert len(notificador.enviados) == enviados
+    assert "customer:acme" in estado.read("p")
+
+    # Se recupera (le sube el precio): se olvida. Si recae, vuelve a sonar.
+    meta.set_setting("p", margen.clave("acme"), {"monthly": 500.0})
+    runner.evaluate("p")
+    assert "customer:acme" not in estado.read("p")
+    meta.set_setting("p", margen.clave("acme"), {"monthly": 5.0})
+    assert "acme" in runner.evaluate("p").customers_notice
+
+
+def test_la_alerta_de_clientes_se_puede_silenciar_y_sin_ingresos_calla(tmp_path):
+    runner, notificador, meta, _ = _alertas(tmp_path, {})
+    assert runner.evaluate("p").customers_notice == ""
+    meta.set_setting("p", margen.clave("acme"), {"monthly": 5.0})
+    meta.set_setting(
+        "p", "alerts",
+        {
+            "webhook_url": "https://hooks.slack.com/services/T/B/x",
+            "muted_kinds": ["cliente_pierde"],
+        },
+    )
+    assert runner.evaluate("p").customers_notice == ""

@@ -33,7 +33,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from pathlib import Path
@@ -446,6 +446,15 @@ class Decision:
     #: Aviso de presupuesto que toca mandar (D-123), y su clave en el estado.
     budget_notice: str = ""
     budget_key: str = ""
+    #: Clientes que han pasado a hacer perder dinero (D-161): el aviso, las claves que
+    #: se recuerdan al mandarlo y las de los que ya no pierden, que se olvidan para que
+    #: vuelva a sonar si recaen.
+    customers_notice: str = ""
+    customer_keys: list[str] = field(default_factory=list)
+    customers_recovered: list[str] = field(default_factory=list)
+    #: Los que ya se avisaron y siguen perdiendo: se les toca `seen_at` para que la
+    #: limpieza de `decide()` no los olvide y vuelvan a sonar cada periodo de calma.
+    customers_still: list[str] = field(default_factory=list)
 
 
 def decide(
@@ -1001,6 +1010,42 @@ class AlertRunner:
             return "", ""
         return t("alerta.presupuesto", texto=b.headline), clave
 
+    def _clientes(
+        self, project_id: str, ajustes: ProjectAlertConfig
+    ) -> tuple[str, list[str], list[str], list[str]]:
+        """El aviso de los clientes que han pasado a hacer perder dinero (D-161).
+
+        Una vez por cliente, cuando pasa a perder: no cada vuelta mientras siga igual,
+        que es la forma de que se silencie el canal. Cuando deja de perder se olvida, y
+        si vuelve a perder, vuelve a sonar. Sin ingresos puestos no hay nada que decir.
+        """
+        if self._metadata is None or "cliente_pierde" in ajustes.muted_kinds:
+            return "", [], [], []
+        from . import margen
+
+        ingresos = margen.leer_ingresos(self._metadata, project_id)
+        if not ingresos:
+            return "", [], [], []
+        vista = margen.calcular(
+            self._store, project_id, _window(ajustes.window_days), ingresos
+        )
+        previos = self._state.read(project_id)
+        pierden = [c for c in vista.customers if c.status == "pierde"]
+        nuevos = [c for c in pierden if f"customer:{c.customer_id}" not in previos]
+        vivos = {f"customer:{c.customer_id}" for c in pierden}
+        recuperados = [k for k in previos if k.startswith("customer:") and k not in vivos]
+        siguen = [k for k in vivos if k in previos]
+        if not nuevos:
+            return "", [], recuperados, siguen
+        lineas = [tn("alerta.clientes", len(nuevos))]
+        lineas += [f"• *{c.customer_id}* — {c.headline}" for c in nuevos]
+        return (
+            "\n".join(lineas),
+            [f"customer:{c.customer_id}" for c in nuevos],
+            recuperados,
+            siguen,
+        )
+
     def evaluate(self, project_id: str, *, dry_run: bool = False) -> Decision:
         """Un proyecto. `dry_run` calcula la decisión sin mandar ni recordar nada.
 
@@ -1032,10 +1077,23 @@ class AlertRunner:
         previos = self._state.read(project_id)
         decision = decide(vista, ajustes, previos, ahora)
         decision.budget_notice, decision.budget_key = self._presupuesto(project_id, ahora)
+        (
+            decision.customers_notice,
+            decision.customer_keys,
+            decision.customers_recovered,
+            decision.customers_still,
+        ) = self._clientes(project_id, ajustes)
         if dry_run:
             return decision
 
-        self._state.forget(project_id, decision.forgotten)
+        # Un cliente que sigue perdiendo no está olvidado: sólo está avisado.
+        decision.forgotten = [k for k in decision.forgotten if k not in decision.customers_still]
+        self._state.forget(project_id, decision.forgotten + decision.customers_recovered)
+        for clave_cliente in decision.customers_still:
+            previo = previos.get(clave_cliente)
+            if previo is not None:
+                previo.seen_at = ahora
+                self._state.save(project_id, previo)
         # Los que están en calma se tocan igual: `seen_at` es lo que impide que un
         # problema que sigue vivo se olvide sólo por llevar rato sin poder avisar.
         for finding in decision.silenced:
@@ -1045,7 +1103,7 @@ class AlertRunner:
                 previo.amount_usd = finding.window_waste_usd
                 self._state.save(project_id, previo)
 
-        if not decision.due and not decision.budget_notice:
+        if not decision.due and not decision.budget_notice and not decision.customers_notice:
             return decision
 
         urls = {
@@ -1055,6 +1113,10 @@ class AlertRunner:
         partes = []
         if decision.budget_notice:
             partes.append(t("alerta.proyecto", proyecto=project_id, texto=decision.budget_notice))
+        if decision.customers_notice:
+            partes.append(
+                t("alerta.proyecto", proyecto=project_id, texto=decision.customers_notice)
+            )
         if decision.due:
             partes.append(compose(vista, decision, ajustes, urls))
         texto = "\n\n".join(partes)
@@ -1063,6 +1125,17 @@ class AlertRunner:
             # ciclo lo vuelve a intentar en lugar de tragarse el aviso para siempre.
             return replace(decision, due=[], reason="el envío ha fallado por todos los canales")
 
+        for clave_cliente in decision.customer_keys:
+            self._state.save(
+                project_id,
+                AlertRecord(
+                    finding_id=clave_cliente,
+                    notified_at=ahora,
+                    seen_at=ahora,
+                    amount_usd=0.0,
+                    times=1,
+                ),
+            )
         if decision.budget_key:
             self._state.save(
                 project_id,

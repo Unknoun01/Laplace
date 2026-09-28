@@ -449,5 +449,14 @@
   "margen.titular.sin_ingresos": "填写每个客户付给你的金额，即可看到利润。",
   "margen.titular.sin_clientes": "你的运行还没有标明属于哪个客户。",
   "margen.titular.sin_proyeccion": "只有 {hay} 的数据，还不能与每月付款比较：需要 {minimo}。",
-  "error.cliente_vacio": "缺少客户。"
+  "error.cliente_vacio": "缺少客户。",
+  "alerta.clientes_one": "{n} 个客户开始让你亏钱：",
+  "alerta.clientes_other": "{n} 个客户开始让你亏钱：",
+  "stripe.clave_rechazada": "Stripe 不接受这个密钥。请确认它属于当前环境，并能读取发票和客户。",
+  "stripe.error": "Stripe 返回了错误；请稍后再试。",
+  "stripe.sin_respuesta": "从这台服务器连不上 Stripe。如果安装无法访问互联网，请手动填写收入。",
+  "stripe.clave_invalida": "这不像 Stripe 密钥：应以 sk_ 或 rk_ 开头（live 或 test）。",
+  "stripe.sin_clave": "请先填写 Stripe 密钥。",
+  "stripe.sincronizado": "已从 Stripe 获取 {clientes} 个客户的收入，来自上个月已支付的 {facturas} 张发票。",
+  "stripe.otra_moneda": "{n} 张其他货币的发票未计入：不会用臆造的汇率换算。"
 }
