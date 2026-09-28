@@ -3254,3 +3254,48 @@ acumulado; la misma llamada queda con dos formas según cómo se haga.
 Pruebas: `test_proveedores_beta.py` (15, con los clientes reales y el transporte
 falso). Sin el arreglo fallan 10, y si la búsqueda del atributo se salta la clase del
 gestor fallan las de `stream()`, las beta y las normales.
+
+### D-165 — Las integraciones de TypeScript que faltaban, probadas: y lo que se perdía
+Anthropic por OpenInference-js y por OpenLLMetry-js, el AI SDK de Vercel y LangChain.js
+estaban en la guía como «deberían llegar, nadie lo ha comprobado». Se han probado con
+agentes de Node de verdad contra `laplace ui` y un proveedor falso con la forma
+documentada de cada API (sin clave ni gasto). Los tokens, la caché y el coste llegaban
+bien por las cuatro vías. Lo demás, no:
+
+* **El AI SDK de Vercel 7 no mandaba nada.** La versión 7 ya no lee
+  `experimental_telemetry`, que es lo que decía la guía: hace falta
+  `registerTelemetry(new OpenTelemetry())` de `@ai-sdk/otel` y `telemetry` en cada
+  llamada. La guía lo explica ahora.
+* **Las convenciones GenAI actuales se leían a medias.** Vercel 7 y OpenLLMetry-js
+  mandan los mensajes en `parts` (no en `content`) y el prompt de sistema **aparte**, en
+  `gen_ai.system_instructions`. Los mensajes se guardaban tal cual —la interfaz los
+  enseñaba vacíos y las reglas que miran el texto no tenían nada que mirar— y el prompt
+  de sistema se perdía, con él la mitad de la identidad del paso: dos pasos con la misma
+  pregunta caían en uno. La ingesta pasa ahora cada mensaje en `parts` a la forma del SDK
+  de Python (la de OpenAI): el texto a `content`, las llamadas a herramientas a
+  `tool_calls` y su respuesta a un mensaje `tool`; lo que no es texto ni herramienta
+  (una imagen) se queda en `parts` al lado. Las instrucciones aparte se unen como primer
+  mensaje de sistema si no hay ya uno. Nunca se pisa un mensaje que ya trae `content`, y
+  para saber si hay `parts` se busca la cadena antes de parsear nada: los spans de
+  nuestro SDK no pagan el cambio.
+* **OpenInference-js con Anthropic deja el `system` en `llm.invocation_parameters`**, no
+  entre los mensajes: se une igual (cadena o bloques de texto). Además se leen su
+  `llm.response.model_name` y su `llm.finish_reason`, en singular.
+* **La respuesta de LangChain.js con `ChatOpenAI` 1.6 llegaba sin texto.** Va por la
+  Responses API, su contenido es una lista y la instrumentación de OpenInference sólo
+  manda el rol. El texto está en `output.value`, en `generations[i][0].text`, y se saca
+  de ahí si los mensajes de salida no traen ninguno.
+* **Lo que no es nuestro y se deja dicho en la guía:** LangChain.js 1.5, en streaming con
+  Anthropic, cuenta un token de salida de más (suma el de `message_start` al total), y
+  OpenLLMetry no manda el motivo de parada en streaming.
+
+El banco queda en `scripts/integraciones_js`, con las versiones fijadas y un
+`verificar.py` que exige a cada llamada modelo, tokens con la caché dentro, coste
+medido, el prompt de sistema y la respuesta en texto. Contra la ingesta de antes da 21
+fallos, y contra la de ahora, ninguno. Sigue sin probarse contra las API reales, y
+LangGraph.js, el Agents SDK de TypeScript y Mastra no se han probado.
+
+Pruebas: 10 nuevas en `test_convenciones.py`, con los atributos copiados de las trazas
+de verdad. Entre ellas, una con un span que sólo trae `parts` y nada más que lo delate
+(como la instrumentación oficial de OpenTelemetry para OpenAI), porque sin ella nada
+fallaba al romper la detección.

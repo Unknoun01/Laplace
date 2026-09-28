@@ -12,6 +12,9 @@ modelo, sin tokens y sin coste: cobertura cero, y el producto callado (D-136).
 * **OpenLLMetry** (Traceloop): `traceloop.span.kind`, `traceloop.entity.input/output`,
   `gen_ai.prompt.{i}.*`, `gen_ai.completion.{i}.*`, `gen_ai.usage.prompt_tokens` y
   `gen_ai.usage.completion_tokens` (los nombres anteriores de GenAI).
+* **Las convenciones GenAI actuales** de OpenTelemetry, que ya emiten el AI SDK de Vercel
+  y OpenLLMetry-js: los mensajes en `parts` en lugar de `content`, y las instrucciones
+  aparte, en `gen_ai.system_instructions` (D-165).
 
 La regla es una sola: **se rellena lo que falta, nunca se pisa lo que ya viene**. Si un
 span trae a la vez nuestros atributos y los de otra familia, mandan los nuestros. Y lo
@@ -68,6 +71,7 @@ TRADUCIDOS = (
     "output.value",
     "traceloop.entity.input",
     "traceloop.entity.output",
+    "gen_ai.system_instructions",
 )
 
 
@@ -75,13 +79,14 @@ def normalizar(attrs: dict[str, Any]) -> dict[str, Any]:
     """Los atributos del span con los nuestros rellenos desde la familia que traiga."""
     if not any(k.startswith(("openinference.", "llm.", "traceloop.", "gen_ai.prompt.",
                              "gen_ai.completion.", "gen_ai.usage.prompt_tokens",
-                             "gen_ai.usage.cache_",
+                             "gen_ai.usage.cache_", "gen_ai.system_instructions",
                              "input.value", "tool.name", "session.id"))
-               for k in attrs):
+               for k in attrs) and not _en_parts(attrs):
         return attrs
     salida = dict(attrs)
     _openinference(attrs, salida)
     _openllmetry(attrs, salida)
+    _genai_actual(salida)
     _tokens_de_cache_coherentes(salida)
     return salida
 
@@ -108,6 +113,9 @@ def _openinference(attrs: dict[str, Any], salida: dict[str, Any]) -> None:
 
     modelo = attrs.get("llm.model_name") or attrs.get("embedding.model_name")
     _poner(salida, semconv.GEN_AI_REQUEST_MODEL, modelo)
+    _poner(salida, semconv.GEN_AI_RESPONSE_MODEL, attrs.get("llm.response.model_name"))
+    if attrs.get("llm.finish_reason"):
+        _poner(salida, semconv.GEN_AI_RESPONSE_FINISH_REASONS, [str(attrs["llm.finish_reason"])])
     _poner(salida, semconv.GEN_AI_SYSTEM, attrs.get("llm.provider") or attrs.get("llm.system"))
 
     _poner(salida, semconv.GEN_AI_USAGE_INPUT_TOKENS, attrs.get("llm.token_count.prompt"))
@@ -136,6 +144,13 @@ def _openinference(attrs: dict[str, Any], salida: dict[str, Any]) -> None:
         for nombre, valor in parametros.items():
             if isinstance(valor, (str, int, float, bool)):
                 _poner(salida, f"gen_ai.request.{nombre}", valor)
+        # OpenInference-js con Anthropic deja el `system` aquí y no entre los mensajes
+        # (D-165): sin él, el paso perdía la mitad de su identidad.
+        if str(salida.get(semconv.LAPLACE_SPAN_TYPE)) == semconv.SPAN_TYPE_LLM:
+            _unir_sistema(salida, _texto_de_bloques(parametros.get("system")))
+
+    if salida.get(semconv.LAPLACE_SPAN_TYPE) == semconv.SPAN_TYPE_LLM:
+        _salida_de_generaciones(attrs, salida)
 
     herramientas = [
         _json(v)
@@ -317,6 +332,153 @@ def _indexados(attrs: dict[str, Any], prefijo: str) -> str | None:
     if not por_indice:
         return None
     return json.dumps([por_indice[i] for i in sorted(por_indice)], ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------------
+# Las convenciones GenAI actuales: `parts` y `gen_ai.system_instructions`
+# ---------------------------------------------------------------------------------
+
+
+def _en_parts(attrs: dict[str, Any]) -> bool:
+    """Si algún mensaje viene en `parts`. Barato a propósito: nuestro SDK escribe los
+    mensajes con `content` y no hay que parsearlos en cada span para saberlo."""
+    return any(
+        isinstance(attrs.get(clave), str) and '"parts"' in attrs[clave]
+        for clave in (semconv.GEN_AI_INPUT_MESSAGES, semconv.GEN_AI_OUTPUT_MESSAGES)
+    )
+
+
+def _genai_actual(salida: dict[str, Any]) -> None:
+    for clave in (semconv.GEN_AI_INPUT_MESSAGES, semconv.GEN_AI_OUTPUT_MESSAGES):
+        valor = salida.get(clave)
+        if isinstance(valor, str) and '"parts"' in valor:
+            mensajes = _json(valor)
+            if isinstance(mensajes, list):
+                salida[clave] = json.dumps(
+                    [_mensaje_de_parts(m) for m in mensajes], ensure_ascii=False
+                )
+    instrucciones = _json(salida.get("gen_ai.system_instructions"))
+    if isinstance(instrucciones, list):
+        instrucciones = _texto_de_parts(instrucciones)
+    if isinstance(instrucciones, str):
+        _unir_sistema(salida, instrucciones)
+
+
+def _texto_de_parts(parts: list[Any]) -> str | None:
+    textos = [
+        str(p.get("content", ""))
+        for p in parts
+        if isinstance(p, dict) and p.get("type") == "text"
+    ]
+    return "".join(textos) if textos else None
+
+
+def _mensaje_de_parts(mensaje: Any) -> Any:
+    """Un mensaje en `parts` → la forma que escribe el SDK de Python (la de OpenAI).
+
+    Nunca pisa: si ya trae `content`, se queda como está. El texto se junta en
+    `content`; las llamadas a herramientas pasan a `tool_calls`, y su respuesta a un
+    mensaje `tool` con su `tool_call_id`. Lo que no es ni texto ni herramienta (una
+    imagen, un fichero) no se pierde: se quedan las `parts` enteras al lado.
+    """
+    if not isinstance(mensaje, dict) or "content" in mensaje:
+        return mensaje
+    partes = mensaje.get("parts")
+    if not isinstance(partes, list):
+        return mensaje
+    nuevo = {k: v for k, v in mensaje.items() if k != "parts"}
+    llamadas, respuestas, otras = [], [], False
+    for parte in partes:
+        tipo = parte.get("type") if isinstance(parte, dict) else None
+        if tipo == "tool_call":
+            argumentos = parte.get("arguments")
+            if not isinstance(argumentos, str):
+                argumentos = json.dumps(argumentos, ensure_ascii=False)
+            llamadas.append(
+                {
+                    "id": parte.get("id"),
+                    "type": "function",
+                    "function": {"name": parte.get("name"), "arguments": argumentos},
+                }
+            )
+        elif tipo == "tool_call_response":
+            respuestas.append(parte)
+        elif tipo != "text":
+            otras = True
+    texto = _texto_de_parts(partes)
+    if len(respuestas) == 1 and texto is None and not llamadas and not otras:
+        respuesta = respuestas[0].get("response")
+        nuevo["tool_call_id"] = respuestas[0].get("id")
+        nuevo["content"] = (
+            respuesta if isinstance(respuesta, str) else json.dumps(respuesta, ensure_ascii=False)
+        )
+        return nuevo
+    nuevo["content"] = texto
+    if llamadas:
+        nuevo["tool_calls"] = llamadas
+    if otras or respuestas:
+        nuevo["parts"] = partes
+    return nuevo
+
+
+def _texto_de_bloques(valor: Any) -> str | None:
+    """El `system` de Anthropic: una cadena o una lista de bloques `{type: text, text}`."""
+    if isinstance(valor, str):
+        return valor
+    if isinstance(valor, list):
+        textos = [
+            str(b.get("text", ""))
+            for b in valor
+            if isinstance(b, dict) and b.get("type") == "text"
+        ]
+        return "".join(textos) if textos else None
+    return None
+
+
+def _unir_sistema(salida: dict[str, Any], texto: str | None) -> None:
+    """Pone las instrucciones como primer mensaje, si no hay ya uno de sistema."""
+    if not texto:
+        return
+    mensajes = _json(salida.get(semconv.GEN_AI_INPUT_MESSAGES))
+    if mensajes is None:
+        mensajes = []
+    if not isinstance(mensajes, list):
+        return
+    if any(
+        isinstance(m, dict) and str(m.get("role", "")).lower() in ("system", "developer")
+        for m in mensajes
+    ):
+        return
+    salida[semconv.GEN_AI_INPUT_MESSAGES] = json.dumps(
+        [{"role": "system", "content": texto}, *mensajes], ensure_ascii=False
+    )
+
+
+def _salida_de_generaciones(attrs: dict[str, Any], salida: dict[str, Any]) -> None:
+    """La respuesta de LangChain.js cuando sus mensajes llegan sin texto.
+
+    La instrumentación de LangChain.js de OpenInference sólo manda el rol de la
+    respuesta cuando el contenido es una lista (siempre, con la Responses API de
+    OpenAI), pero deja en `output.value` el resultado de LangChain entero, con el texto
+    en `generations[i][0].text`. Sólo se rellena lo que falta.
+    """
+    mensajes = _json(salida.get(semconv.GEN_AI_OUTPUT_MESSAGES))
+    if not isinstance(mensajes, list) or not mensajes:
+        return
+    if any(isinstance(m, dict) and m.get("content") not in (None, "") for m in mensajes):
+        return
+    resultado = _json(attrs.get("output.value"))
+    if not isinstance(resultado, dict):
+        return
+    generaciones = resultado.get("generations")
+    if not isinstance(generaciones, list):
+        return
+    for mensaje, grupo in zip(mensajes, generaciones, strict=False):
+        if isinstance(mensaje, dict) and isinstance(grupo, list) and grupo:
+            texto = grupo[0].get("text") if isinstance(grupo[0], dict) else None
+            if isinstance(texto, str) and texto:
+                mensaje["content"] = texto
+    salida[semconv.GEN_AI_OUTPUT_MESSAGES] = json.dumps(mensajes, ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------------

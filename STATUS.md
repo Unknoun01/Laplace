@@ -330,8 +330,11 @@ Lo que **no** demuestran, punto por punto:
    subconsultas. La API de la lista de trazas sigue escaneando sin ventana si no se le
    pasa una (D-008b); la interfaz siempre la pasa.
 3. **TypeScript, sin SDK propio.** Un agente en Node se ve con OpenInference-js u
-   OpenLLMetry-js apuntados a Laplace, con una guía probada (`docs/typescript.md`),
-   pero sin gestión de prompts ni el resto de ayudas del SDK de Python.
+   OpenLLMetry-js (con OpenAI o Anthropic), el AI SDK de Vercel 7 o LangChain.js
+   apuntados a Laplace, con una guía probada (`docs/typescript.md`) y un banco que se
+   puede repetir (`scripts/integraciones_js`, D-165), pero sin gestión de prompts ni el
+   resto de ayudas del SDK de Python. Lo de D-165 se probó contra un proveedor falso,
+   no contra la API real.
 4. **Los paquetes no se han publicado.** `paquete.yml` construye los dos wheels con la
    interfaz dentro (D-134), pero publicarlos espera a que se reserven los nombres en
    PyPI.

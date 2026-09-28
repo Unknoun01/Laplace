@@ -222,6 +222,256 @@ def test_las_instrucciones_en_parts_hacen_la_identidad_del_paso():
     assert {s.step_hint for s in spans} == {"Clasifica el ticket.", "Resume el ticket."}
 
 
+def _genai_actual(**cambios) -> dict:
+    """Lo que mandan el AI SDK de Vercel 7 (con `@ai-sdk/otel`) y OpenLLMetry-js 0.27 con
+    Anthropic, copiado de trazas de verdad (D-165): las convenciones GenAI actuales,
+    con las instrucciones APARTE, en `gen_ai.system_instructions`, y los mensajes en
+    `parts`."""
+    atributos = {
+        "gen_ai.operation.name": "chat",
+        "gen_ai.provider.name": "anthropic",
+        "gen_ai.request.model": "claude-haiku-4-5",
+        "gen_ai.response.model": "claude-haiku-4-5",
+        "gen_ai.system_instructions": json.dumps(
+            [{"type": "text", "content": "Eres un asistente de equipaje."}]
+        ),
+        "gen_ai.input.messages": json.dumps(
+            [{"role": "user", "parts": [{"type": "text", "content": "¿Cuánto equipaje?"}]}]
+        ),
+        "gen_ai.output.messages": json.dumps(
+            [
+                {
+                    "role": "assistant",
+                    "parts": [{"type": "text", "content": "Una maleta de mano."}],
+                    "finish_reason": "stop",
+                }
+            ]
+        ),
+        "gen_ai.response.finish_reasons": ["stop"],
+        "gen_ai.usage.input_tokens": 1_200,
+        "gen_ai.usage.output_tokens": 12,
+    }
+    atributos.update(cambios)
+    return atributos
+
+
+def test_las_instrucciones_aparte_son_el_mensaje_de_sistema():
+    """Con las convenciones actuales el prompt de sistema no va entre los mensajes sino
+    en `gen_ai.system_instructions`. Sin leerlo, el paso perdía la mitad de su identidad:
+    todos los pasos con la misma pregunta de usuario caían en uno."""
+    _emitir("chat claude-haiku-4-5", _genai_actual())
+    _emitir(
+        "chat claude-haiku-4-5",
+        _genai_actual(
+            **{
+                "gen_ai.system_instructions": json.dumps(
+                    [{"type": "text", "content": "Eres un clasificador de tickets."}]
+                )
+            }
+        ),
+    )
+    spans = ingest()
+    assert spans[0].llm.input_messages[0] == {
+        "role": "system",
+        "content": "Eres un asistente de equipaje.",
+    }
+    assert len({s.step_key for s in spans}) == 2
+    assert {s.step_hint for s in spans} == {
+        "Eres un asistente de equipaje.",
+        "Eres un clasificador de tickets.",
+    }
+    assert "gen_ai.system_instructions" not in spans[0].attributes, (
+        "ya está en los mensajes: no se guarda otra vez en crudo"
+    )
+
+
+def test_las_instrucciones_aparte_no_duplican_un_sistema_que_ya_viene():
+    atributos = _genai_actual()
+    atributos["gen_ai.input.messages"] = json.dumps(
+        [
+            {"role": "system", "parts": [{"type": "text", "content": "Eres un asistente."}]},
+            {"role": "user", "parts": [{"type": "text", "content": "¿Cuánto equipaje?"}]},
+        ]
+    )
+    _emitir("chat", atributos)
+    (span,) = ingest()
+    assert [m["role"] for m in span.llm.input_messages] == ["system", "user"]
+
+
+def test_los_mensajes_en_parts_se_leen_como_texto():
+    """Guardados tal cual, sin `content`, la interfaz los enseñaba vacíos y las reglas
+    que miran el texto no tenían nada que mirar."""
+    _emitir("chat claude-haiku-4-5", _genai_actual())
+    (span,) = ingest()
+    assert span.llm.input_messages[1] == {"role": "user", "content": "¿Cuánto equipaje?"}
+    assert span.llm.output_messages == [
+        {"role": "assistant", "content": "Una maleta de mano.", "finish_reason": "stop"}
+    ]
+
+
+def test_las_llamadas_a_herramientas_en_parts():
+    """`tool_call` y `tool_call_response` pasan a la forma que escribe el SDK de Python
+    (la de OpenAI), para que una herramienta se lea igual venga de donde venga."""
+    atributos = _genai_actual()
+    atributos["gen_ai.input.messages"] = json.dumps(
+        [
+            {"role": "user", "parts": [{"type": "text", "content": "¿Tarifa MAD-BCN?"}]},
+            {
+                "role": "assistant",
+                "parts": [
+                    {
+                        "type": "tool_call",
+                        "id": "call_1",
+                        "name": "buscar_tarifa",
+                        "arguments": {"ruta": "MAD-BCN"},
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "parts": [{"type": "tool_call_response", "id": "call_1", "response": "básica"}],
+            },
+        ]
+    )
+    _emitir("chat", atributos)
+    (span,) = ingest()
+    _sistema, _usuario, asistente, herramienta = span.llm.input_messages
+    assert asistente["role"] == "assistant"
+    assert asistente["tool_calls"] == [
+        {
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "buscar_tarifa", "arguments": '{"ruta": "MAD-BCN"}'},
+        }
+    ]
+    assert herramienta == {"role": "tool", "tool_call_id": "call_1", "content": "básica"}
+
+
+def test_las_partes_que_no_son_texto_no_se_pierden():
+    atributos = _genai_actual()
+    atributos["gen_ai.input.messages"] = json.dumps(
+        [
+            {
+                "role": "user",
+                "parts": [
+                    {"type": "text", "content": "¿Cabe esta maleta?"},
+                    {"type": "blob", "modality": "image", "mime_type": "image/png", "content": "…"},
+                ],
+            }
+        ]
+    )
+    _emitir("chat", atributos)
+    (span,) = ingest()
+    usuario = span.llm.input_messages[1]
+    assert usuario["content"] == "¿Cabe esta maleta?"
+    assert usuario["parts"][1]["modality"] == "image", "lo que no es texto se guarda entero"
+
+
+def test_los_mensajes_en_parts_se_leen_sin_nada_mas_que_los_delate():
+    """Un span con sólo las convenciones GenAI (sin caché, sin instrucciones aparte, sin
+    atributos de ninguna familia), como los de la instrumentación oficial de
+    OpenTelemetry para OpenAI: los `parts` tienen que bastar para traducirlo."""
+    _emitir(
+        "chat gpt-5.6-luna",
+        {
+            "gen_ai.operation.name": "chat",
+            "gen_ai.request.model": "gpt-5.6-luna",
+            "gen_ai.usage.input_tokens": 100,
+            "gen_ai.usage.output_tokens": 5,
+            "gen_ai.input.messages": json.dumps(
+                [{"role": "user", "parts": [{"type": "text", "content": "Hola"}]}]
+            ),
+        },
+    )
+    (span,) = ingest()
+    assert span.llm.input_messages == [{"role": "user", "content": "Hola"}]
+
+
+def test_lo_nuestro_en_content_no_se_toca():
+    """El SDK de Python escribe `gen_ai.input.messages` con `content`: nada cambia."""
+    mensajes = [{"role": "system", "content": "Hola"}, {"role": "user", "content": "x"}]
+    _emitir(
+        "chat",
+        {
+            "gen_ai.request.model": "gpt-5.6-luna",
+            "gen_ai.usage.input_tokens": 10,
+            "gen_ai.usage.output_tokens": 1,
+            "gen_ai.input.messages": json.dumps(mensajes),
+        },
+    )
+    (span,) = ingest()
+    assert span.llm.input_messages == mensajes
+
+
+def _openinference_js_anthropic() -> dict:
+    """Lo que manda `@arizeai/openinference-instrumentation-anthropic` 0.2.8, copiado de
+    una traza de verdad (D-165): el `system` de Anthropic no va entre los mensajes sino
+    dentro de `llm.invocation_parameters`, y el motivo de parada, en singular."""
+    return {
+        "openinference.span.kind": "LLM",
+        "llm.model_name": "claude-haiku-4-5",
+        "llm.request.model_name": "claude-haiku-4-5",
+        "llm.response.model_name": "claude-haiku-4-5-20251001",
+        "llm.system": "anthropic",
+        "llm.provider": "anthropic",
+        "llm.finish_reason": "end_turn",
+        "llm.invocation_parameters": json.dumps(
+            {"model": "claude-haiku-4-5", "max_tokens": 64, "system": MANUAL, "stream": True}
+        ),
+        "llm.input_messages.0.message.role": "user",
+        "llm.input_messages.0.message.content": "¿Cuánto equipaje?",
+        "llm.output_messages.0.message.role": "assistant",
+        "llm.output_messages.0.message.content": "Una maleta de mano.",
+        "llm.token_count.prompt": 1_200,
+        "llm.token_count.completion": 12,
+        "llm.token_count.prompt_details.cache_read": 1_024,
+    }
+
+
+def test_el_system_de_anthropic_en_los_parametros_de_openinference():
+    _emitir("Anthropic Messages", _openinference_js_anthropic())
+    (span,) = ingest()
+    assert span.llm.input_messages[0] == {"role": "system", "content": MANUAL}
+    assert span.step_hint.startswith("Eres el asistente")
+    assert span.llm.response_model == "claude-haiku-4-5-20251001"
+    assert span.llm.finish_reasons == ["end_turn"]
+
+
+def test_el_system_de_anthropic_en_bloques():
+    atributos = _openinference_js_anthropic()
+    atributos["llm.invocation_parameters"] = json.dumps(
+        {
+            "model": "claude-haiku-4-5",
+            "system": [
+                {"type": "text", "text": "Eres un asistente. "},
+                {"type": "text", "text": "Responde breve.", "cache_control": {"type": "ephemeral"}},
+            ],
+        }
+    )
+    _emitir("Anthropic Messages", atributos)
+    (span,) = ingest()
+    assert span.llm.input_messages[0] == {
+        "role": "system",
+        "content": "Eres un asistente. Responde breve.",
+    }
+
+
+def test_la_respuesta_de_langchain_js_sale_de_sus_generaciones():
+    """`@arizeai/openinference-instrumentation-langchain` 4.1 sólo manda el rol de la
+    respuesta cuando el contenido de LangChain es una lista (con la Responses API de
+    OpenAI, siempre). El texto está en `output.value`, en la forma `generations` de
+    LangChain (D-165)."""
+    atributos = _openinference_llm()
+    del atributos["llm.output_messages.0.message.contents.0.message_content.text"]
+    atributos["output.value"] = json.dumps(
+        {"generations": [[{"text": "Diez kilos.", "message": {"lc": 1}}]], "llmOutput": {}}
+    )
+    atributos["output.mime_type"] = "application/json"
+    _emitir("ChatOpenAI", atributos)
+    (span,) = ingest()
+    assert span.llm.output_messages == [{"role": "assistant", "content": "Diez kilos."}]
+
+
 def test_el_nodo_de_langgraph_es_el_sitio_del_paso():
     """OpenInference no dice desde dónde se llama, pero con LangGraph deja el nodo en
     `metadata.langgraph_node`. Sin él, dos nodos con el mismo prompt de sistema se

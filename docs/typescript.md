@@ -8,7 +8,17 @@ dice cómo apuntarlas a Laplace y qué se ve con cada una.
 Probado el 26 de septiembre de 2026 con Node 24, `openai` 7.23.0,
 `@opentelemetry/sdk-trace-node` 2.11.0, los exportadores OTLP 0.222.0,
 `@arizeai/openinference-instrumentation-openai` 4.2.7 y `@traceloop/node-server-sdk`
-0.27.0, contra `laplace ui` en local. Lo que no está en esa lista no se ha probado.
+0.27.0, contra `laplace ui` en local.
+
+Probado el 28 de septiembre de 2026 con Node 22, contra `laplace ui` y un proveedor
+falso con la forma documentada de cada API (D-165): **Anthropic** (`@anthropic-ai/sdk`
+0.129.0) por OpenInference (`@arizeai/openinference-instrumentation-anthropic` 0.2.8) y
+por OpenLLMetry 0.27.0; el **AI SDK de Vercel** (`ai` 7.0.122 con `@ai-sdk/otel`
+1.0.122, `@ai-sdk/openai` 4.0.80 y `@ai-sdk/anthropic` 4.0.68); y **LangChain.js**
+(`@langchain/core` 1.2.13, `@langchain/openai` 1.6.0 y `@langchain/anthropic` 1.5.11,
+con `@arizeai/openinference-instrumentation-langchain` 4.1.1). El banco está en
+`scripts/integraciones_js` y se puede repetir. Lo que no está en estas listas no se ha
+probado.
 
 ## Con OpenInference (recomendado para OpenAI)
 
@@ -59,6 +69,21 @@ leían mal.
 **lecturas de caché**, coste, los mensajes enteros y el árbol de la traza. Las reglas de
 derroche funcionan igual que con el SDK de Python.
 
+**Con Anthropic** es igual, con `@arizeai/openinference-instrumentation-anthropic`:
+
+```js
+const { AnthropicInstrumentation } = require("@arizeai/openinference-instrumentation-anthropic");
+const instrumentacion = new AnthropicInstrumentation();
+instrumentacion.setTracerProvider(provider);
+const Anthropic = require("@anthropic-ai/sdk");
+instrumentacion.manuallyInstrument(Anthropic);
+```
+
+Se ven `messages.create`, con y sin streaming, y `messages.stream()`, con la caché
+leída. Esta instrumentación deja el `system` fuera de los mensajes, en los parámetros de
+la llamada; Laplace lo vuelve a poner como mensaje de sistema, que es lo que identifica
+el paso (hace falta Laplace posterior a D-165).
+
 ## El cliente de cada ejecución (margen por cliente)
 
 Para el margen por cliente (la pestaña de Clientes), cada ejecución tiene que decir para
@@ -106,13 +131,75 @@ traceloop.initialize({
 });
 ```
 
-**Qué se ve:** modelo, tokens, coste, mensajes y árbol, y los `withWorkflow` /
-`withTask` como pasos.
+Con Anthropic, `instrumentModules: { anthropic: Anthropic }` (el módulo de
+`@anthropic-ai/sdk`).
 
-**Qué no se ve:** con OpenAI, la versión 0.27.0 **no manda los tokens leídos de caché**
+**Qué se ve:** modelo, tokens, coste, mensajes y árbol, y los `withWorkflow` /
+`withTask` como pasos. Con Anthropic, también la caché leída. OpenLLMetry ya usa las
+convenciones GenAI actuales (los mensajes en `parts` y el prompt de sistema aparte, en
+`gen_ai.system_instructions`): hace falta Laplace posterior a D-165 para ver los
+mensajes y el prompt de sistema.
+
+**Qué no se ve:** en streaming no manda el motivo de parada. Y con OpenAI, la versión
+0.27.0 **no manda los tokens leídos de caché**
 aunque la respuesta los traiga. Laplace no tiene cómo saberlo, así que cobra toda la
 entrada a tarifa entera: en un agente con caché, el coste sale **por encima** de la
 factura. Si usas OpenAI y la caché importa, usa OpenInference.
+
+## Con el AI SDK de Vercel
+
+Desde la versión 7 la telemetría no sale sola: se registra una vez la integración de
+OpenTelemetry, y cada llamada lleva `telemetry` (antes `experimental_telemetry`, que la
+versión 7 ya no lee: con él no llega **nada**).
+
+```bash
+npm install ai @ai-sdk/otel @ai-sdk/openai   # o @ai-sdk/anthropic
+```
+
+```js
+// Primero el `NodeTracerProvider` apuntado a Laplace, como arriba, y después:
+const { generateText, registerTelemetry } = require("ai");
+const { OpenTelemetry } = require("@ai-sdk/otel");
+registerTelemetry(new OpenTelemetry());
+
+const { text } = await generateText({
+  model: openai("gpt-5.6-luna"),
+  system: "Eres un asistente de equipaje.",
+  prompt: pregunta,
+  telemetry: { functionId: "equipaje" }, // el nombre de la función, en la traza
+});
+```
+
+**Qué se ve:** con OpenAI (la Responses API, que es la de por defecto, y Chat) y con
+Anthropic, en `generateText` y en `streamText`: modelo, tokens, **caché leída**, coste,
+mensajes con el prompt de sistema, motivo de parada, y la llamada colgando de su agente
+y su paso (`invoke_agent` → `step 1` → `chat`). Usa las convenciones GenAI actuales, así
+que hace falta Laplace posterior a D-165.
+
+## Con LangChain.js
+
+Con la instrumentación de LangChain de OpenInference, sobre el mismo `provider`:
+
+```bash
+npm install @arizeai/openinference-instrumentation-langchain
+```
+
+```js
+const { LangChainInstrumentation } = require("@arizeai/openinference-instrumentation-langchain");
+const CallbackManagerModule = require("@langchain/core/callbacks/manager");
+const instrumentacion = new LangChainInstrumentation();
+instrumentacion.setTracerProvider(provider);
+instrumentacion.manuallyInstrument(CallbackManagerModule);
+```
+
+**Qué se ve:** `ChatOpenAI` y `ChatAnthropic`, en `invoke` y `stream`, con modelo,
+tokens, caché leída, coste y los mensajes con el prompt de sistema. Con `ChatOpenAI` 1.6
+(que va por la Responses API) la instrumentación no manda el texto de la respuesta
+entre los mensajes; Laplace lo saca del resultado de LangChain (posterior a D-165).
+
+**Qué no cuadra:** en streaming con Anthropic, LangChain.js 1.5 cuenta **un token de
+salida de más** por llamada (suma el que anuncia `message_start` al total final).
+Laplace guarda lo que dice LangChain: el coste de salida sale un token por encima.
 
 ## Lo que conviene saber
 
@@ -123,7 +210,7 @@ factura. Si usas OpenAI y la caché importa, usa OpenInference.
 - **Gestión de prompts, `laplace.guard` y el resto de ayudas del SDK de Python** no
   existen en TypeScript. Llegarán con un paquete fino (`init`, `observe`, `getPrompt`)
   cuando esté reservado el nombre en npm.
-- **Sin probar:** Anthropic por estas dos vías, el AI SDK de Vercel
-  (`experimental_telemetry`) y LangChain.js. Deberían llegar, porque todos emiten
-  atributos de una de las familias que la ingesta entiende, pero nadie lo ha
-  comprobado; si lo pruebas y algo falta, es un fallo nuestro.
+- **Lo del 28 de septiembre se probó contra un proveedor falso, no contra la API
+  real.** Responde con la forma documentada, pero una API real puede mandar algún campo
+  que no esté ahí; si algo falta, es un fallo nuestro.
+- **Sin probar:** LangGraph.js, el Agents SDK de OpenAI para TypeScript y Mastra.
