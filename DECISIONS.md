@@ -3220,3 +3220,37 @@ Lo que quedaba de la Fase 6 sin necesitar una clave.
 
 Pruebas: `test_stripe.py` (se trae una vez al día y no antes; si Stripe falla, lo último
 sigue valiendo; el bucle de fondo lo trae) y `test_otlp_json.py`.
+
+## 2026-09-28 — Restos de fases cerradas: las integraciones sin probar
+
+### D-164 — `client.beta.*` en Python: las llamadas que no se veían
+La hoja de ruta lo daba por «sin probar» y el README lo reconocía («no se ven las
+llamadas por `client.beta.*`»). Al probarlo contra los SDK de verdad (anthropic 1.9,
+openai 3.20) había dos huecos, y los dos eran llamadas que no existían para Laplace:
+
+* **`client.beta.messages` de Anthropic** es otra clase
+  (`anthropic.resources.beta.messages.Messages`), que no hereda de la normal y va
+  directa a la red. Todo lo nuevo de Anthropic se pide por ahí (gestión de contexto,
+  compactación, servidores MCP, el modo rápido), y quien lo usa manda **todo** su
+  tráfico por esa puerta: su agente salía sin coste ni hallazgos. Ahora se parchean
+  `create`, `parse` y `stream` en las dos, síncronas y asíncronas. `count_tokens` no:
+  no genera nada ni se factura como una llamada, y hay una prueba que lo exige.
+* **El gestor de `beta.messages.stream()`** guarda la petición en otro atributo privado
+  (`_BetaMessageStreamManager__api_request`). El nombre ya no se fija a mano: se busca
+  por la jerarquía del gestor con la regla de deformación de nombres de Python. Si una
+  versión lo mueve, se sigue avisando en el log.
+* **`client.beta.responses.create` de OpenAI** también es otra clase, y se añade a las
+  puertas. `client.beta.chat.completions` es la misma clase que `chat.completions` y ya
+  estaba cubierta; una prueba lo fija para enterarnos si cambia.
+* **Lo que sigue fuera, dicho en el README:** de `client.beta` de OpenAI, las Assistants
+  (`threads.runs`), Realtime, ChatKit y los agentes alojados, que no pasan por estas
+  puertas.
+
+Ninguna puerta nueva cuenta dos veces: `span_llm()` exige exactamente un span por
+llamada. Visto de paso y sin tocar: sin streaming, la salida de Anthropic se guarda como
+la lista de bloques (con `citations` y el resto), y en streaming como el texto
+acumulado; la misma llamada queda con dos formas según cómo se haga.
+
+Pruebas: `test_proveedores_beta.py` (15, con los clientes reales y el transporte
+falso). Sin el arreglo fallan 10, y si la búsqueda del atributo se salta la clase del
+gestor fallan las de `stream()`, las beta y las normales.

@@ -34,7 +34,7 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
   verde (`git merge --no-ff`); si no dice otra cosa, se sigue así.
 - **Nada entra sin su prueba.** Primero la prueba en rojo, después el arreglo.
 - **Hay que comprobar que la prueba muerde:** romper el código a propósito y verla fallar.
-- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-164**.
+- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-165**.
 - **Todo en español:** código, comentarios, commits y textos. Los textos de la interfaz y
   del backend, en los cinco idiomas a la vez (`apps/web/lib/mensajes/*.ts`,
   `apps/backend/laplace_backend/textos/*.json`); las pruebas exigen las mismas claves.

@@ -118,8 +118,10 @@ proceso ya instrumentado con OTel puede exportar a Laplace sin usar este SDK.
 
 - **OpenAI**: `chat.completions.create` y `.parse`, y la Responses API
   (`responses.create` y `.parse`, la que usa el Agents SDK). Los ayudantes `.stream()`
-  de las dos pasan por `create` y también se ven.
-- **Anthropic**: `messages.create`, `.parse` y el gestor `messages.stream()`.
+  de las dos pasan por `create` y también se ven. Por `client.beta`, `chat.completions`
+  (es la misma clase) y `responses.create`.
+- **Anthropic**: `messages.create`, `.parse` y el gestor `messages.stream()`, y lo mismo
+  por `client.beta.messages` (gestión de contexto, compactación, servidores MCP…).
 - Todo en síncrono y asíncrono, y en streaming con los tokens que manda el proveedor.
   Si no los manda (Chat sin `stream_options={"include_usage": True}`), se estiman y el
   span queda marcado como estimado.
@@ -136,7 +138,8 @@ ese instrumentador exporta a otro sitio y quieres las llamadas también en Lapla
   cualquier instrumentación de OpenInference u OpenLLMetry apuntada a Laplace.
 - `with_raw_response` se lee entero. `with_streaming_response` no, porque el cuerpo es
   del usuario: ahí los tokens se estiman y se marcan.
-- No se ven las llamadas por `client.beta.*`.
+- De `client.beta` de OpenAI no se ven las Assistants (`threads.runs`), Realtime,
+  ChatKit ni los agentes alojados: no pasan por estas puertas y no se instrumentan.
 
 ## Principio
 
