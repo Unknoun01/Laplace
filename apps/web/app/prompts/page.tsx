@@ -1,11 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { BackendDown, Cargando, NeedsKey, NoProject, NotYours } from "@/components/states";
 import {
   ApiError,
   createPrompt,
+  getOverview,
   getPrompt,
   getPrompts,
   listProjects,
@@ -14,7 +16,7 @@ import {
 } from "@/lib/api";
 import { money, number, timestamp, tokens } from "@/lib/format";
 import { usePermisos } from "@/lib/permisos";
-import type { PromptCard, PromptsView, Rate, VersionMetrics } from "@/lib/types";
+import type { Finding, PromptCard, PromptsView, Rate, VersionMetrics } from "@/lib/types";
 import { Detalle } from "./detalle";
 import { SinAdoptar, Observados } from "./observados";
 import { tr } from "@/lib/i18n";
@@ -47,8 +49,19 @@ function Contenido() {
   const [codigo, setCodigo] = useState("");
   const [vista, setVista] = useState<PromptsView | null>(null);
 
+  const [hallazgos, setHallazgos] = useState<Finding[]>([]);
+
   const recargar = useCallback(
-    async (id: string) => setVista(await getPrompts(id, days)),
+    async (id: string) => {
+      const [prompts, diagnostico] = await Promise.all([
+        getPrompts(id, days),
+        // Prompts es una fuente más de hallazgos (D-157): si el Diagnóstico tiene uno
+        // abierto de un prompt, su ficha lo dice. Si falla, la pestaña sigue igual.
+        getOverview(id, days).catch(() => null),
+      ]);
+      setVista(prompts);
+      setHallazgos(diagnostico?.findings.filter((f) => f.kind === "prompt_caro") ?? []);
+    },
     [days],
   );
 
@@ -98,6 +111,7 @@ function Contenido() {
         vista.prompts.map((prompt) => (
           <Ficha
             key={prompt.id}
+            hallazgo={hallazgos.find((f) => f.id.startsWith(`prompt_caro:${prompt.name}:v`))}
             prompt={prompt}
             project={project}
             days={days}
@@ -122,12 +136,14 @@ function Contenido() {
 
 function Ficha({
   prompt,
+  hallazgo,
   project,
   days,
   query,
   onChange,
 }: {
   prompt: PromptCard;
+  hallazgo?: Finding;
   project: string;
   days: number;
   query: string;
@@ -181,6 +197,15 @@ function Ficha({
           {abierto ? t("pr.cerrar") : t("pr.ver_versiones")}
         </button>
       </header>
+
+      {hallazgo && (
+        <p className="prompt-hallazgo">
+          {t("pr.hallazgo", { titulo: hallazgo.title })}{" "}
+          <Link href={`/problema${query}&id=${encodeURIComponent(hallazgo.id)}`}>
+            {t("pr.hallazgo.ver")}
+          </Link>
+        </p>
+      )}
 
       {ficha.comparison ? (
         <div className={`verdict ${veredicto}`}>

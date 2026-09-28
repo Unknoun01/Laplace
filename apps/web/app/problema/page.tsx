@@ -12,7 +12,8 @@ import { usePermisos } from "@/lib/permisos";
 import { useTitulo } from "@/lib/titulo";
 import { useApi } from "@/lib/useApi";
 import { Head, Repetitions, SpanAttributes, Markup } from "./tecnico";
-import { EstadoHallazgo, ProbarAntes } from "./seguimiento";
+import { EstadoHallazgo } from "./seguimiento";
+import { Ciclo, versionesDelPrompt } from "./ciclo";
 import { tr } from "@/lib/i18n";
 import { t } from "@/lib/textos";
 
@@ -210,11 +211,12 @@ function Contenido() {
           cae debajo, donde estaba. */}
       <aside className="prob-rail">
 
-      {/* Marcar, ignorar y crear conjuntos es escribir: un lector no lo ve ofrecido
-          (D-127). El backend lo rechazaría igual. */}
-      {permisos.escribir && finding.kind === "modelo_caro" && (
-        <ProbarAntes project={project} finding={finding} query={query} />
-      )}
+      {/* Dónde está el problema en el ciclo, y la prueba con sus llamadas reales
+          (D-156). Marcar, ignorar y crear conjuntos es escribir: un lector no lo ve
+          ofrecido (D-127). El backend lo rechazaría igual. */}
+      <Ciclo project={project} finding={finding} query={query} escribir={permisos.escribir} />
+
+      <VolverAVersion finding={finding} query={query} />
 
       {permisos.escribir ? (
         <EstadoHallazgo project={project} finding={finding} />
@@ -235,6 +237,25 @@ function Contenido() {
       </aside>
       </div>
     </main>
+  );
+}
+
+/**
+ * Un prompt encarecido se arregla en Prompts, no en el código (D-157): la ficha lleva
+ * allí, donde las dos versiones se ven con su coste y su acierto y la anterior vuelve
+ * a producción con un clic.
+ */
+function VolverAVersion({ finding, query }: { finding: FindingDetail; query: string }) {
+  const version = versionesDelPrompt(finding);
+  if (!version) return null;
+  return (
+    <section className="block">
+      <h2>{t("prob.prompt.titulo", { a: version.a })}</h2>
+      <p>{t("prob.prompt.texto", { prompt: version.prompt, a: version.a })}</p>
+      <p>
+        <Link href={`/prompts${query}`}>{t("prob.prompt.ir", { prompt: version.prompt })}</Link>
+      </p>
+    </section>
   );
 }
 

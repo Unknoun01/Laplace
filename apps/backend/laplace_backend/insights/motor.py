@@ -32,6 +32,8 @@ from .modelos import (
     _to_monthly,
     observed_days,
 )
+from .prompt_caro import KIND as PROMPT_CARO
+from .prompt_caro import _prompt_detail, _prompt_finding, pares
 from .repeticion import _repetition_detail, _repetition_finding
 
 # ---------------------------------------------------------------------------------
@@ -221,7 +223,7 @@ def desaparecidos(
 
 
 def detect(store: Any, project_id: str, window: Window) -> list[Finding]:
-    """Ejecuta las tres reglas y devuelve los hallazgos ordenados por dinero."""
+    """Ejecuta las reglas y devuelve los hallazgos ordenados por dinero."""
     summary = store.summarize_window(project_id, window)
     if summary.spans == 0:
         return []
@@ -273,6 +275,10 @@ def detect(store: Any, project_id: str, window: Window) -> list[Finding]:
         if contexto is not None:
             findings.append(_con_fecha(contexto, neto))
 
+    # Prompts como fuente de hallazgos (D-157). Va la última porque descuenta lo que
+    # las demás ya reclaman sobre las llamadas de la versión cara.
+    findings += _hallazgos_de_prompts(store, project_id, window, findings, summary, dias, base)
+
     # Primero lo que más dinero devuelve; los que sólo cuestan tiempo, al final,
     # ordenados por el tiempo que recuperan. Se ordena por el dinero YA GASTADO y no
     # por el proyectado: los dos dan el mismo orden —la proyección multiplica a todos
@@ -285,6 +291,34 @@ def detect(store: Any, project_id: str, window: Window) -> list[Finding]:
         reverse=True,
     )
     return findings
+
+
+def _reclamado_por_paso(findings: list[Finding]) -> dict[str, float]:
+    """El evitable que cada paso ya tiene reclamado por las reglas de trazas."""
+    salida: dict[str, float] = {}
+    for f in findings:
+        if f.kind != PROMPT_CARO and f.step_key:
+            salida[f.step_key] = salida.get(f.step_key, 0.0) + f.window_waste_usd
+    return salida
+
+
+def _hallazgos_de_prompts(
+    store: Any,
+    project_id: str,
+    window: Window,
+    findings: list[Finding],
+    summary: WindowSummary,
+    dias: float,
+    base: float | None,
+) -> list[Finding]:
+    reclamado = _reclamado_por_paso(findings)
+    salida = []
+    for anterior, actual in pares(store.prompt_usage(project_id, window, rules=True)):
+        ya = sum(reclamado.get(k, 0.0) for k in actual.step_keys)
+        hallazgo = _prompt_finding(anterior, actual, ya, summary, dias, base)
+        if hallazgo is not None:
+            salida.append(hallazgo)
+    return salida
 
 
 def overview(
@@ -341,8 +375,20 @@ def overview(
         llm_calls=summary.llm_calls, unknown_cost_calls=summary.unknown_cost_spans
     )
 
+    verificados = [
+        f.fix_check
+        for f in [*findings, *apartados]
+        if f.fix_check is not None
+        and f.fix_check.unit == "usd"
+        and f.fix_check.verdict in ("arreglado", "mejor")
+        and f.fix_check.saved
+    ]
+
     return Overview(
         project_id=project_id,
+        saved_usd=sum(c.saved or 0.0 for c in verificados),
+        saved_findings=len(verificados),
+        saved_is_floor=any(c.cost_is_floor for c in verificados),
         days=window.days,
         unknown_cost_spans=summary.unknown_cost_spans,
         models_without_price=summary.models_without_price,
@@ -443,6 +489,26 @@ def _detalle_modelo(
     return None
 
 
+def _detalle_prompt(
+    store: Any, project_id: str, window: Window, key: str, ctx: _Contexto
+) -> FindingDetail | None:
+    """La ficha de un prompt encarecido. Recalcula las demás reglas porque su cifra es
+    lo que queda después de lo que ellas reclaman: la ficha y la tarjeta no pueden
+    decir dos importes distintos."""
+    nombre, _, version = key.rpartition(":v")
+    if not nombre or not version.isdigit():
+        return None
+    otras = [f for f in detect(store, project_id, window) if f.kind != PROMPT_CARO]
+    reclamado = _reclamado_por_paso(otras)
+    for anterior, actual in pares(store.prompt_usage(project_id, window, rules=True)):
+        if actual.name != nombre or actual.version != int(version):
+            continue
+        ya = sum(reclamado.get(k, 0.0) for k in actual.step_keys)
+        finding = _prompt_finding(anterior, actual, ya, ctx.summary, ctx.dias, ctx.base)
+        return _prompt_detail(finding, anterior, actual, ya) if finding else None
+    return None
+
+
 @dataclass
 class _Contexto:
     """Lo que toda ficha necesita saber de la ventana, calculado una sola vez."""
@@ -464,6 +530,7 @@ _DETALLADORES = {
     "bucle": _detalle_bucle,
     "modelo_caro": _detalle_modelo,
     "contexto_fijo": _detalle_modelo,
+    PROMPT_CARO: _detalle_prompt,
 }
 
 #: Los tipos que `detail()` sabe reconstruir. Derivado, nunca escrito a mano: una lista

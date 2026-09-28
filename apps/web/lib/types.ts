@@ -227,7 +227,13 @@ export interface ProjectStats {
 // No forma parte del contrato de traza: son modelos de la API de diagnóstico.
 // ---------------------------------------------------------------------------------
 
-export type FindingKind = "repeticion" | "modelo_caro" | "contexto_fijo" | "bucle";
+export type FindingKind =
+  | "repeticion"
+  | "modelo_caro"
+  | "contexto_fijo"
+  | "bucle"
+  /** Una versión nueva de un prompt gestionado que encarece cada ejecución (D-157). */
+  | "prompt_caro";
 export type Difficulty = "easy" | "mid" | "hard";
 
 export interface TechItem {
@@ -414,6 +420,13 @@ export interface Overview {
   avoidable_ratio: number;
   /** El evitable pasa del umbral de cautela: presentarlo con reservas. */
   savings_needs_caution: boolean;
+  /**
+   * El paso «verificar» del ciclo (D-156): lo que ya no se ha pagado desde que se
+   * arreglaron los problemas marcados. Sólo lo verificado por el seguimiento.
+   */
+  saved_usd: number;
+  saved_findings: number;
+  saved_is_floor: boolean;
   findings: Finding[];
   /** Cuánto de este proyecto entendemos. Va delante del dinero si es baja. */
   coverage: Coverage | null;

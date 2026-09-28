@@ -14,7 +14,8 @@ Tres principios que condicionan todo lo de aquí:
 3. **Toda cifra estimada lleva su cálculo detrás**, visible en modo avanzado.
 
 El motor está partido por reglas (D-130): `modelos` (tipos, umbrales y redacción),
-una por regla (`repeticion`, `bucle`, `modelo_caro`, `contexto_fijo`) y `motor`, que las
+una por regla (`repeticion`, `bucle`, `modelo_caro`, `contexto_fijo`, `prompt_caro`) y
+`motor`, que las
 junta. Aquí se reexporta todo, así que `from .insights import X` sigue valiendo.
 """
 
@@ -94,6 +95,10 @@ from .motor import (  # noqa: F401
     detail,
     detect,
     overview,
+)
+from .prompt_caro import (  # noqa: F401
+    _prompt_detail,
+    _prompt_finding,
 )
 from .repeticion import (  # noqa: F401
     _repetition_detail,

@@ -19,7 +19,7 @@ from ..textos import t, tn
 
 logger = logging.getLogger("laplace.insights")
 
-FindingKind = Literal["repeticion", "modelo_caro", "contexto_fijo", "bucle"]
+FindingKind = Literal["repeticion", "modelo_caro", "contexto_fijo", "bucle", "prompt_caro"]
 Difficulty = Literal["easy", "mid", "hard"]
 
 DAYS_PER_MONTH = 30
@@ -271,6 +271,15 @@ class Overview(BaseModel):
     #: True cuando el evitable pasa del umbral de cautela: la UI lo presenta con
     #: reservas en lugar de como promesa.
     savings_needs_caution: bool = False
+
+    #: El paso «verificar» del ciclo (D-156): lo que ya no se ha pagado desde que se
+    #: arreglaron los problemas marcados, medido por ejecución antes y después
+    #: (`FixCheck.saved`). Sólo lo verificado —`arreglado` o `mejor`— y sólo en dinero.
+    #: Es la otra mitad de la cifra del producto: ahorrado y recuperable.
+    saved_usd: float = 0.0
+    saved_findings: int = 0
+    #: Alguno de esos ahorros sale de un coste que era un suelo: lo ahorrado también.
+    saved_is_floor: bool = False
 
     findings: list[Finding] = Field(default_factory=list)
     #: Los que el usuario ha marcado como arreglados o ignorados. No suman al evitable:

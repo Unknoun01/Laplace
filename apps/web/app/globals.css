@@ -1642,9 +1642,11 @@ code {
   /* Las seis pestañas a la vista, en dos filas de tres: desplazables escondían
      «Prompts» y «Ajustes» detrás del borde, y nadie desplaza una barra que no parece
      desplazable. */
+  /* Cada columna mide al menos lo que su pestaña más larga y el resto se reparte: con
+     tres tercios exactos, «Tableau de bord» no cabía a 375 px en Linux (D-156). */
   .nav {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(max-content, 1fr));
     gap: 2px;
     overflow: visible;
   }
@@ -3637,4 +3639,136 @@ details.porque-bloque > summary {
 }
 .grafo-agente .punta {
   fill: var(--ink-4);
+}
+
+/* ---------------------------------------------------------------------------
+   El ciclo de un problema (D-156): detectar → probar → arreglar → verificar.
+   Una marca por paso: rellena si está hecho, con borde si está en curso, hueca si
+   está pendiente y rosa si no funcionó. El estado va también en texto, oculto a la
+   vista y no a los lectores de pantalla: el color solo no dice nada a quien no lo ve.
+   --------------------------------------------------------------------------- */
+.sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.ciclo-pasos {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.ciclo-paso {
+  position: relative;
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: var(--sp-3);
+  padding-bottom: var(--sp-3);
+}
+.ciclo-paso:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 20px;
+  bottom: 2px;
+  width: 2px;
+  background: var(--hair-strong);
+}
+.ciclo-paso.hecho:not(:last-child)::before {
+  background: var(--teal-line);
+}
+.ciclo-marca {
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  border-radius: 50%;
+  border: 2px solid var(--hair-strong);
+  background: transparent;
+}
+.ciclo-paso.hecho .ciclo-marca {
+  border-color: var(--teal);
+  background: var(--teal);
+}
+.ciclo-paso.en_curso .ciclo-marca {
+  border-color: var(--amber);
+  background: var(--amber-bg);
+}
+.ciclo-paso.fallo .ciclo-marca {
+  border-color: var(--rose);
+  background: var(--rose-bg);
+}
+.ciclo-paso b {
+  font-size: var(--fs-md);
+}
+.ciclo-paso p {
+  margin: 2px 0 0;
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+}
+.ciclo-paso.pendiente b {
+  color: var(--ink-2);
+}
+
+/* Lo ya ahorrado, en el héroe: la otra mitad de la cifra (D-156). */
+.hero .ahorrado {
+  margin: var(--sp-3) 0 0;
+  color: var(--teal);
+  font-size: var(--fs-md);
+}
+.hero .ahorrado strong {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Arreglos por probar (D-156). */
+.por-probar {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.por-probar li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--sp-2) var(--sp-4);
+  padding: var(--sp-3) 0;
+  border-top: 1px solid var(--hair-soft);
+}
+.por-probar li:first-child {
+  border-top: 0;
+}
+.por-probar .pp-titulo {
+  min-width: 0;
+}
+.por-probar .pp-titulo a {
+  color: var(--ink);
+}
+.por-probar .pp-dinero {
+  text-align: right;
+  color: var(--amber);
+  font-family: var(--mono);
+}
+.por-probar .pp-estado {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+}
+.por-probar pre {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+/* En Prompts, el problema que ese prompt tiene abierto en el Diagnóstico (D-157). */
+.prompt-hallazgo {
+  margin: 0 0 var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--amber-line);
+  background: var(--amber-bg);
+  border-radius: var(--r);
+  font-size: var(--fs-md);
 }

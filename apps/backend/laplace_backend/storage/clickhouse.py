@@ -1068,13 +1068,18 @@ class ClickHouseStore:
 
     # -- prompts (Fase 6) --------------------------------------------------------------
 
-    def prompt_usage(self, project_id: str, window: Window) -> list[PromptUsage]:
+    def prompt_usage(
+        self, project_id: str, window: Window, *, rules: bool = False
+    ) -> list[PromptUsage]:
         """Coste y volumen por versión de prompt gestionado.
 
         `uniqExact` y no `count()` en el denominador: lo que se enseña es coste **por
         ejecución**, igual que en el panel, y un prompt llamado dos veces por ejecución
         no cuesta el doble por ejecución.
         """
+        donde = RULES_WHERE if rules else WINDOW_WHERE
+        pasos = "groupUniqArray(step_key)" if rules else "emptyArrayString()"
+        ejemplo = "max((step_key, trace_id))" if rules else "('', '')"
         filas = _named(
             self._client.query(
                 f"""
@@ -1090,9 +1095,11 @@ class ClickHouseStore:
                     countIf(cost_unknown = 1)      AS sin_tarifa,
                     countIf(cost_rate_assumed = 1) AS asumida,
                     min(start_time)                AS primero,
-                    max(start_time)                AS ultimo
+                    max(start_time)                AS ultimo,
+                    {pasos}                        AS pasos,
+                    {ejemplo}                      AS ejemplo
                 FROM spans FINAL
-                WHERE {WINDOW_WHERE} AND prompt_name != ''
+                WHERE {donde} AND prompt_name != ''
                 GROUP BY prompt_name, prompt_version
                 ORDER BY nombre, version DESC
                 """,

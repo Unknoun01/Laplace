@@ -232,4 +232,5 @@ export const REGLAS = [
   ["bucle", "aj.regla.bucle"],
   ["modelo_caro", "aj.regla.modelo_caro"],
   ["contexto_fijo", "aj.regla.contexto_fijo"],
+  ["prompt_caro", "aj.regla.prompt_caro"],
 ] as const;
