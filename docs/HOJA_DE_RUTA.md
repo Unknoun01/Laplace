@@ -3,7 +3,7 @@
 Documento de traspaso entre sesiones. Última actualización: 28 de septiembre de 2026.
 Aquí sólo está **lo que queda**: lo hecho vive en `DECISIONS.md` y en la historia de git.
 Léelo entero antes de tocar nada; después lee `STATUS.md` y las últimas entradas de
-`DECISIONS.md` (D-147 a D-153).
+`DECISIONS.md` (D-147 a D-157).
 
 ## 1. Qué es y hacia dónde va
 
@@ -25,6 +25,8 @@ probada: `laplace ui` (un proceso + SQLite) y Docker (ClickHouse + Postgres + Ne
 - **Primera función nueva, después de las fases técnicas:** margen por cliente final.
 - **En vez de un editor tipo n8n:** un **plano de control**.
   - Grafo del agente sacado de las trazas (ya existe por traza, D-153; falta el de todo el proyecto).
+  - El ciclo ya tiene su sitio en la interfaz (D-156): Probar es el paso 2, la ficha dice
+    en qué paso está cada problema y el héroe suma lo ya ahorrado.
   - Controles desde la interfaz que aplica el SDK: modelo por paso, tope de gasto, botón de parada y repartos A/B.
   - Siempre con copia de reserva si Laplace no responde.
 
@@ -35,7 +37,7 @@ probada: `laplace ui` (un proceso + SQLite) y Docker (ClickHouse + Postgres + Ne
 - **Por fases:** una rama por fase y un commit por bloque. Se enseña al usuario y se fusiona a `master` sólo cuando lo aprueba (`git merge --no-ff`).
 - **Nada entra sin su prueba.** Primero la prueba en rojo, después el arreglo.
 - **Hay que comprobar que la prueba muerde:** romper el código a propósito y verla fallar.
-- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-154**.
+- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-158**.
 - **Todo en español:** código, comentarios, commits y textos.
 - **Los commits terminan con** `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - **Reglas del producto que no se tocan:**
@@ -58,21 +60,20 @@ probada: `laplace ui` (un proceso + SQLite) y Docker (ClickHouse + Postgres + Ne
 - **Servidor local:** la configuración «local» de `.claude/launch.json` (puerto 8100). Tras tocar Python hay que reiniciarlo.
 - **Demo:** `.venv/Scripts/python.exe -m laplace.cli demo --endpoint http://127.0.0.1:8100` carga un mes de datos.
 - **Pantallas:** `test_pantallas.py` usa Playwright con Chromium, ya instalados en `.venv`.
-- **Estado:** la última pasada completa (D-153) dio 810 pruebas bien y 4 saltadas (las que necesitan clave de proveedor). Las del espejo con la web necesitan Node 22.6 o posterior.
+- **Estado:** la última pasada completa (D-157, en Linux con ClickHouse y Postgres) dio 853 pruebas bien y 16 saltadas: las 4 vivas que necesitan clave de proveedor y 12 que necesitan Ollama con un modelo. Las del espejo con la web necesitan Node 22.6 o posterior.
+- **Fuera de Windows** (contenedor Linux): `.venv/bin/python` en lugar de `.venv/Scripts/python.exe`, y Playwright 1.56 para el Chromium que ya trae la máquina. ClickHouse no arranca con el `ulimits` del compose en un contenedor sin permiso para subirlos: `docker run` sin esa línea.
 - **Prueba de carga:** `python scripts/carga.py --spans 10000000` genera un día de tráfico en ClickHouse y mide las pantallas; `--borrar` lo quita. Con 10 millones hacen falta unos 8 GB para Docker.
 
 ## 3. Pendiente, por orden
 
-### Fase 5: lo que queda (lo demás, fusionado en `master` el 28 de septiembre, D-149 a D-153)
-La batería completa pasó: 810 bien y 4 saltadas; dos de ClickHouse fallaron con Docker muy lento (la pasada tardó 86 minutos) y pasan al repetirlas (`test_auditoria_p2.py`, `test_busqueda_contenido.py`).
-1. Medir el Diagnóstico con la prueba de carga: `step_cost_series` (D-152) es una lectura más.
-2. **Identidad visual:** el tema oscuro como insignia y un tema claro neutro en lugar del rosa.
-3. **Rediseño alrededor del ciclo:** Evaluaciones pasa a ser el paso «probar» y Prompts una fuente más de hallazgos.
-4. Repaso por encima de la historia del proyecto buscando pendientes sueltos (lo pidió el usuario).
+### Fase 5: cerrada (pendiente de enseñar y fusionar, rama `claude/nifty-cray-cr8ya8`)
+Hecho en esta tanda: la medida con la prueba de carga (D-154), el oscuro por defecto y el
+claro neutro (D-155), el rediseño alrededor del ciclo (D-156), Prompts como fuente de
+hallazgos (D-157) y el repaso de pendientes, que está en la sección 4.
 
 ### Restos de fases cerradas
 - **Fase 3:** sin probar todavía Anthropic por OpenInference-js/OpenLLMetry-js, el AI SDK de Vercel, LangChain.js y `client.beta.*` en Python. Paquete fino `@laplace/sdk` (`init`, `observe`, `getPrompt`) cuando el usuario reserve el scope de npm.
-- **Fase 4:** medir con semanas de histórico (hace falta una máquina con más memoria) para decidir sobre acotar por tiempo las subconsultas de `_where` y sobre `FINAL` con partes sin fusionar. El Diagnóstico tarda unos 4 s la primera vez con 10 millones de spans al día (objetivo 1,5 s); los preagregados lo bajarían a unos 2,5 s y están aparcados hasta que esa primera carga importe.
+- **Fase 4:** medir con semanas de histórico (hace falta una máquina con más memoria) para decidir sobre acotar por tiempo las subconsultas de `_where` y sobre `FINAL` con partes sin fusionar. El Diagnóstico tarda unos 4 s la primera vez con 10 millones de spans al día en el portátil (objetivo 1,5 s); los preagregados lo bajarían a unos 2,5 s y están aparcados hasta que esa primera carga importe. Si se hacen, la serie del gráfico (`step_cost_series`, un 13 % del Diagnóstico, D-154) entra en la lista: tiene exactamente la forma de un preagregado por hora.
 
 ### Fase 6: margen por cliente (primera función nueva elegida)
 - `customer_id` en `set_context` y en el contrato, con paridad en los dos almacenes.
@@ -98,13 +99,51 @@ La batería completa pasó: 810 bien y 4 saltadas; dos de ClickHouse fallaron co
   - SSO/SAML, SCIM y verificación de correo.
 
 ## 4. Deuda y detalles sueltos
+
+### Del repaso de la historia (28 de septiembre)
+Lo que `DECISIONS.md`, `STATUS.md`, `ANALISIS.md` y `docs/` dejaron dicho como pendiente y
+no estaba en esta hoja. Lo que se resolvió después (el streaming de D-016, la marca de
+tarifa sin verificar en lo agregado de D-141, el wheel con la interfaz dentro, el
+volumen medido) no está.
+- **Decidir contigo — Prompts cuenta las tiradas de evaluación y la regla no (D-157).** En
+  la demo, Prompts dice que la v2 cuesta un 60 % más y el Diagnóstico un 70 %, porque la
+  comparación A/B de ayer corre con la v2 y el modelo barato. Lo coherente con «tráfico
+  real» sería que Prompts tampoco las contara, pero es cambiar lo que esa pestaña ha
+  enseñado siempre.
+- **Decidir contigo — dos cosas que `STATUS.md` dejó abiertas a propósito:** el árbol de
+  traza pinta un envoltorio de un solo hijo con los mismos tokens y coste que su padre, y
+  `_modelo_mas_rapido()` promedia medianas sin ponderar por llamadas (cambiarlo cambia
+  qué modelo se recomienda).
+- **Guardia estructural para reglas nuevas.** `test_catalogo_hallazgos` exige ficha y
+  trazas a cada tipo, pero nada exige que una regla nueva desambigüe su título (D-115) ni
+  que entre en el descuento del doble conteo (D-117). La de Prompts (D-157) se hizo
+  mirándolo a mano, que es justo lo que `STATUS.md` pide no tener que hacer.
+- **Retención por proyecto** (D-009): hoy `LAPLACE_RETENTION_DAYS` vale para toda la
+  instalación. Y no hay forma de borrar los datos de un usuario final concreto (`user_id`),
+  que es lo que pediría un cliente de un cliente.
+- **La API de la lista de trazas escanea sin ventana** si no se le pasa una (D-008b). La
+  interfaz siempre la pasa; un cliente de la API, no tiene por qué.
+- **Lo que la auditoría del rediseño no revisó** (`docs/auditoria-rediseno.md`): las
+  pantallas con sesión de la versión Docker (organización, invitaciones, claves), los
+  flujos de escritura de punta a punta y los navegadores que no son Chromium (Safari
+  trata distinto `backdrop-filter` y `color-mix`, y todo el color sale de `color-mix`).
+- **El contraste se mide sobre los tokens, no sobre cada pantalla** (D-155): los
+  resplandores de detrás del cristal y los degradados de los botones no entran en la
+  cuenta.
+- **En español a propósito, y por decidir si sigue así** (D-148): la línea de órdenes
+  (`laplace ui`, `laplace demo`) y los logs.
+- **Las alertas incluyen la regla nueva** `prompt_caro` desde D-157: una instalación con
+  alertas encendidas puede recibir avisos de un tipo que no conocía. Se silencia por
+  proyecto en Ajustes.
+
+### De antes
 - `globals.css` tiene 3.631 líneas en un solo fichero: partirlo.
 - Al cargar se piden dos veces `/api/projects` y `/api/auth/me`.
 - `/health` en modo local dice `clickhouse: true, postgres: true`.
 - `laplace demo` escribe caracteres rotos en la consola de Windows (la salida no va en UTF-8).
 - `DECISIONS.md` pesa 150 KB: hace falta un índice por tema y documentación de cara al usuario aparte (Mintlify, Docusaurus o Starlight).
-- En `STATUS.md`, «Qué queda» está desfasado: actualizarlo al cerrar cada fase.
-- `test_pantallas.py`: un fallo antiguo en la pantalla de Prompts (no cargó en 15 s en una pasada completa) no se ha vuelto a ver ni se ha explicado.
+- `STATUS.md` se ha puesto al día al cerrar la Fase 5 («Qué queda» y «No aguanta todavía»): mantenerlo así al cerrar cada fase.
+- `test_pantallas.py`: un fallo antiguo en la pantalla de Prompts (no cargó en 15 s en una pasada completa) no se ha vuelto a ver ni se ha explicado. El otro que sólo salía fuera de Windows («Tableau de bord» a 375 px) está arreglado (D-156).
 - Tras la caída de Docker del 26 de septiembre quedaron apartadas `%LOCALAPPDATA%\Docker\run.viejo-*` y `docker-secrets-engine.viejo-*` con sockets bloqueados; se pueden borrar tras reiniciar Windows.
 - Las tiradas de evaluación se registran con la fecha de ahora aunque sus trazas sean de ayer (en la demo).
 - El pie del gráfico de gasto por día (D-152) usa `dayHour` y enseña la hora aunque el tramo sea un día.

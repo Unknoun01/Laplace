@@ -131,6 +131,14 @@ export function TopBar() {
           }>
           {t("nav.diagnostico")}
         </Link>
+        {/* Probar va justo después del Diagnóstico: es el paso siguiente del ciclo
+            (D-156). La ruta sigue siendo /evaluaciones: los enlaces guardados valen. */}
+        <Link
+          href={`/evaluaciones${query}`}
+          aria-current={pathname.startsWith("/evaluaciones") ? "page" : undefined}
+        >
+          {t("nav.evaluaciones")}
+        </Link>
         <Link
           href={`/trazas${query}`}
           aria-current={
@@ -141,24 +149,18 @@ export function TopBar() {
         >
           {t("nav.trazas")}
         </Link>
-        <Link href={`/panel${query}`} aria-current={pathname === "/panel" ? "page" : undefined}>
+        <Link href={`/panel${query}`} aria-current={pathname.startsWith("/panel") ? "page" : undefined}>
           {t("nav.panel")}
         </Link>
         <Link
-          href={`/evaluaciones${query}`}
-          aria-current={pathname === "/evaluaciones" ? "page" : undefined}
-        >
-          {t("nav.evaluaciones")}
-        </Link>
-        <Link
           href={`/prompts${query}`}
-          aria-current={pathname === "/prompts" ? "page" : undefined}
+          aria-current={pathname.startsWith("/prompts") ? "page" : undefined}
         >
           {t("nav.prompts")}
         </Link>
         <Link
           href={`/ajustes${query}`}
-          aria-current={pathname === "/ajustes" ? "page" : undefined}
+          aria-current={pathname.startsWith("/ajustes") ? "page" : undefined}
         >
           {t("nav.ajustes")}
         </Link>

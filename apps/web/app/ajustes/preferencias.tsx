@@ -6,29 +6,32 @@ import { Aviso } from "./aviso";
 import { t } from "@/lib/textos";
 
 /**
- * Tema claro u oscuro (D-125). Por defecto sigue al sistema; lo elegido aquí se guarda
- * en este navegador y lo aplica el script del layout antes del primer pintado.
+ * Tema oscuro, claro o el del sistema (D-125, D-155). El oscuro es el de partida: sin
+ * nada guardado no se toca `data-theme`. Lo elegido se guarda en este navegador y lo
+ * aplica el script del layout antes del primer pintado.
  */
+type Tema = "dark" | "light" | "system";
+
 export function Apariencia() {
-  const [tema, setTema] = useState<"sistema" | "light" | "dark">("sistema");
+  const [tema, setTema] = useState<Tema>("dark");
   useEffect(() => {
     try {
       const guardado = window.localStorage.getItem("laplace.theme");
-      if (guardado === "light" || guardado === "dark") setTema(guardado);
+      if (guardado === "light" || guardado === "system") setTema(guardado);
     } catch {
-      /* almacenamiento bloqueado: se queda en el del sistema */
+      /* almacenamiento bloqueado: se queda en el oscuro */
     }
   }, []);
 
-  function elegir(valor: "sistema" | "light" | "dark") {
+  function elegir(valor: Tema) {
     setTema(valor);
     try {
-      if (valor === "sistema") window.localStorage.removeItem("laplace.theme");
+      if (valor === "dark") window.localStorage.removeItem("laplace.theme");
       else window.localStorage.setItem("laplace.theme", valor);
     } catch {
       /* dura lo que la pestaña */
     }
-    if (valor === "sistema") delete document.documentElement.dataset.theme;
+    if (valor === "dark") delete document.documentElement.dataset.theme;
     else document.documentElement.dataset.theme = valor;
   }
 
@@ -38,9 +41,9 @@ export function Apariencia() {
       <p className="lead">{t("aj.en_navegador")}</p>
       <div className="seg" role="group" aria-label={t("aj.tema")}>
         {([
-          ["sistema", t("aj.tema.sistema")],
-          ["light", t("aj.tema.claro")],
           ["dark", t("aj.tema.oscuro")],
+          ["light", t("aj.tema.claro")],
+          ["system", t("aj.tema.sistema")],
         ] as const).map(([valor, nombre]) => (
           <button key={valor} type="button" aria-pressed={tema === valor} onClick={() => elegir(valor)}>
             {nombre}

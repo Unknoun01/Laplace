@@ -3,15 +3,19 @@
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { BackendDown, Cargando, NeedsKey, NoProject, NotYours } from "@/components/states";
-import { ApiError, judgeStatus, listDatasets, listProjects, listRuns, parseDays } from "@/lib/api";
-import type { Dataset, JudgeStatus, RunSummary } from "@/lib/types";
+import { ApiError, getOverview, judgeStatus, listDatasets, listProjects, listRuns, parseDays } from "@/lib/api";
+import { usePermisos } from "@/lib/permisos";
+import type { Dataset, Finding, JudgeStatus, RunSummary } from "@/lib/types";
 import { Conjuntos, Tiradas } from "./conjuntos";
 import { Experimento } from "./experimento";
+import { PorProbar } from "./porprobar";
 import { t } from "@/lib/textos";
 
 /**
- * Evaluaciones: «¿mi agente responde bien?», frente a Diagnóstico, que responde a
- * «¿cuesta lo que debe?».
+ * Probar (antes Evaluaciones): el segundo paso del ciclo detectar → probar → arreglar →
+ * verificar (D-156). Diagnóstico responde a «¿cuesta lo que debe?»; esto, a «¿el
+ * arreglo acierta igual?». Arriba, los arreglos que el Diagnóstico propone y si ya
+ * tienen su prueba; debajo, lo de siempre.
  *
  * El orden de la pantalla es el orden de lo que vale: **A vs B primero**, porque es lo
  * que convierte a Laplace en algo que se abre antes de desplegar y no sólo cuando algo
@@ -34,9 +38,17 @@ function Contenido() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [juez, setJuez] = useState<JudgeStatus | null>(null);
+  const [hallazgos, setHallazgos] = useState<Finding[]>([]);
+  const permisos = usePermisos(project);
 
   const recargar = useCallback(
     async (id: string) => {
+      // Lo que hay por probar sale del Diagnóstico, que con volumen tarda segundos: se
+      // pide aparte y la pantalla no lo espera. Si falla, sigue en pie con lo de
+      // siempre, que no es lo único que hay aquí.
+      getOverview(id, days)
+        .then((vista) => setHallazgos(vista.findings))
+        .catch(() => setHallazgos([]));
       const [ds, rs, jz] = await Promise.all([
         listDatasets(id),
         listRuns(id),
@@ -46,7 +58,7 @@ function Contenido() {
       setRuns(rs);
       setJuez(jz);
     },
-    [],
+    [days],
   );
 
   useEffect(() => {
@@ -89,6 +101,16 @@ function Contenido() {
         <h1>{t("ev.titulo", { proyecto: project })}</h1>
         <p className="lead">{t("ev.lead")}</p>
       </section>
+
+      <PorProbar
+        project={project}
+        findings={hallazgos}
+        datasets={datasets}
+        runs={runs}
+        escribir={permisos.escribir}
+        query={query}
+        onChange={() => recargar(project)}
+      />
 
       <Experimento
         project={project}

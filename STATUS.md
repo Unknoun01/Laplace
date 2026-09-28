@@ -1,6 +1,6 @@
 # Estado de Laplace
 
-Última actualización: 26 de septiembre de 2026.
+Última actualización: 28 de septiembre de 2026.
 
 ## Dónde está el producto
 
@@ -8,7 +8,7 @@ Laplace observa agentes de IA y responde a dos preguntas: **cuánto cuestan** y 
 responden bien**. Los dos ciclos están cerrados y funcionando de punta a punta por los
 dos caminos —la instalación de nube con Docker y el modo local de un solo proceso—. Un
 agente instrumentado con una línea de Python emite trazas por OTLP, la ingesta les
-calcula el coste por tramos de tokens, tres reglas deterministas encuentran el derroche,
+calcula el coste por tramos de tokens, cinco reglas deterministas encuentran el derroche,
 la interfaz lo cuenta en dinero con el cálculo detrás, una alerta a Slack avisa cuando
 algo pasa del umbral, el panel dice si el gasto sube porque hay más trabajo o porque el
 trabajo se ha encarecido, la pestaña de Evaluaciones compara dos versiones del agente
@@ -162,12 +162,13 @@ Lo que sostiene esas casillas, en concreto:
 ## Qué queda
 
 El orden y el detalle están en [`docs/HOJA_DE_RUTA.md`](docs/HOJA_DE_RUTA.md), que es
-el documento que se mantiene al día. En corto: las fases 3 y 4 están cerradas (la
-escala medida con 10 millones de spans al día, la búsqueda en el contenido y la latencia
-en el Panel); la interfaz y el motor hablan cinco idiomas (Fase 5, D-147 y D-148);
-queda el resto de la Fase 5 —menos texto, gráficos, maquetación—, el paquete fino de
-TypeScript, que espera el nombre en npm, y el margen por cliente. El diagnóstico automático con modelo
-sigue con su hueco reservado en el contrato, el esquema y la API.
+el documento que se mantiene al día. En corto: las fases 3, 4 y 5 están cerradas. La
+Fase 5 dejó el producto en cinco idiomas (D-147 a D-149), con menos texto, gráficos y
+grafo del agente (D-150 a D-153), el oscuro como tema por defecto (D-155) y la interfaz
+alrededor del ciclo detectar → probar → arreglar → verificar, con Prompts como fuente de
+hallazgos (D-156, D-157). Lo siguiente es el margen por cliente (Fase 6). El paquete fino
+de TypeScript espera el nombre en npm, y el diagnóstico automático con modelo sigue con
+su hueco reservado en el contrato, el esquema y la API.
 
 ## Con un framework de verdad: LangGraph, y un agente en Node
 
@@ -326,20 +327,23 @@ Lo que **no** demuestran, punto por punto:
    esté: es que el modelo de permisos de este producto se ha comprobado **dos veces con
    la misma prueba** —«¿puede una clave leer las trazas de otro proyecto?»— y las dos
    veces se dio por bueno el resto sin mirarlo.
-2. **No ha corrido con volumen.** Todas las cifras que se han visto salen de decenas o
-   cientos de trazas sembradas. La lista de trazas escanea sin ventana temporal por
-   defecto (D-008b), no hay rollups, cada consulta lleva `FINAL` y los payloads se guardan
-   enteros sin retención ni TTL. Con una semana de un agente real, algo se pondrá lento y
-   no sé qué.
+2. **Volumen: medido con un día, no con semanas.** Con 10 millones de spans en un día
+   todo aguanta y casi todo pasa del objetivo de 1,5 s por poco: el Diagnóstico tarda
+   unos 4 s en la primera carga en el portátil de D-142, y 6 en la máquina de D-154, y
+   lo que lo bajaría son preagregados por hora. Lo que no se ha medido es un histórico de
+   semanas, que es donde se decidirían `FINAL` y el acotado por tiempo de las
+   subconsultas. La API de la lista de trazas sigue escaneando sin ventana si no se le
+   pasa una (D-008b); la interfaz siempre la pasa.
 3. **TypeScript, sin SDK propio.** Un agente en Node se ve con OpenInference-js u
    OpenLLMetry-js apuntados a Laplace, con una guía probada (`docs/typescript.md`),
    pero sin gestión de prompts ni el resto de ayudas del SDK de Python.
-4. **El wheel publicable no se ha construido nunca.** `laplace ui` dentro del paquete
-   depende de `scripts/build_ui.py` ejecutado antes de empaquetar; si se olvida, el primer
-   `pip install` de un desconocido arranca la API y no sirve interfaz.
-5. **No hay borrado ni retención.** `delete_project` existe y sólo lo usan las pruebas.
-   Un cliente que pida que se vayan sus datos hoy se atiende a mano, y los prompts y
-   respuestas en crudo se guardan sin caducidad.
+4. **Los paquetes no se han publicado.** `paquete.yml` construye los dos wheels con la
+   interfaz dentro (D-134), pero publicarlos espera a que se reserven los nombres en
+   PyPI.
+5. **La retención es de toda la instalación, no por proyecto.** Desde D-123 se borra un
+   proyecto desde Ajustes y `LAPLACE_RETENTION_DAYS` caduca las trazas, pero el mismo
+   plazo vale para todos: D-009 pedía retención por proyecto y sigue sin hacerse. Borrar
+   los datos de un usuario final concreto (por `user_id`) tampoco existe.
 6. **Los precios caducan cada 30 días** y hay que reverificarlos. Tres tests lo avisan.
    El `cache_write_tokens` de OpenAI que estaba anotado como incompleto ya está cerrado
    (D-101), pero el aviso de fondo sigue: un campo nuevo en la respuesta de un proveedor

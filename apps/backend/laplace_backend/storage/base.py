@@ -414,6 +414,15 @@ class PromptUsage:
     assumed_rate_spans: int = 0
     first_seen: datetime | None = None
     last_seen: datetime | None = None
+    #: Las identidades de paso (`step_key`) de esas llamadas, ordenadas. Sólo las trae
+    #: la lectura de las reglas (`rules=True`): es con lo que la regla de Prompts sabe
+    #: qué dinero de esas llamadas ya reclama otro hallazgo (D-157).
+    step_keys: tuple[str, ...] = ()
+    #: Una traza de esa versión y el paso por el que pasa, elegidos sin azar (la
+    #: mayor pareja `(step_key, trace_id)`): son el ejemplo de la ficha y el filtro de
+    #: «ver las trazas afectadas». Sólo con `rules=True`.
+    sample_step_key: str = ""
+    sample_trace_id: str = ""
 
 
 @dataclass
@@ -717,8 +726,13 @@ class SpanStore(Protocol):
     ) -> dict[str, TraceCost]:
         """Coste, tokens y duración de unas trazas concretas (evaluación, Fase 5)."""
 
-    def prompt_usage(self, project_id: str, window: Window) -> list[PromptUsage]:
-        """Coste y volumen por versión de prompt gestionado (Fase 6)."""
+    def prompt_usage(
+        self, project_id: str, window: Window, *, rules: bool = False
+    ) -> list[PromptUsage]:
+        """Coste y volumen por versión de prompt gestionado (Fase 6).
+
+        Con `rules=True` es la lectura de las reglas (D-157): sin tiradas de evaluación,
+        como el resto de reglas, y con los `step_keys` de cada versión."""
 
     def prompt_versions_by_trace(
         self, project_id: str, trace_ids: list[str]

@@ -2,8 +2,8 @@
 
 import { usePathname } from "next/navigation";
 import { Fragment, createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { ETIQUETAS, IDIOMAS, NOMBRES, detectar, fijarIdioma, recordar, type Idioma } from "./idioma";
-import { t, type Clave } from "./textos";
+import { ETIQUETAS, IDIOMAS, NOMBRES, detectar, fijarIdioma, idiomaActual, recordar, type Idioma } from "./idioma";
+import { t, type Clave, type ClavePlural } from "./textos";
 
 /** La sección de la URL y la clave de su título. */
 const TITULOS: Record<string, Clave> = {
@@ -95,6 +95,13 @@ export function tr(clave: Clave, piezas: Record<string, ReactNode>): ReactNode {
   return trozos.map((trozo, i) =>
     i % 2 === 0 ? trozo : <Fragment key={i}>{trozo in piezas ? piezas[trozo] : `{${trozo}}`}</Fragment>,
   );
+}
+
+/** `tr` con singular o plural según `n`, como `tn` (D-156). */
+export function trn(base: ClavePlural, n: number, piezas: Record<string, ReactNode>): ReactNode {
+  const forma = new Intl.PluralRules(ETIQUETAS[idiomaActual()]).select(n);
+  const clave = (forma === "one" ? `${base}_one` : `${base}_other`) as Clave;
+  return tr(clave, piezas);
 }
 
 /** El selector de idioma: cada uno por su nombre en su idioma. */

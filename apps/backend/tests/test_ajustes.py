@@ -125,6 +125,38 @@ def test_un_arreglado_que_sigue_saliendo_vuelve_a_la_lista(store):
     assert vuelto.fix_check and vuelto.fix_check.verdict == "sigue"
 
 
+def test_el_heroe_suma_lo_ya_ahorrado_y_solo_lo_verificado(store):
+    """El paso «verificar» del ciclo (D-156): lo que se enseña como ahorrado es la
+    suma de `saved` de los arreglos que el seguimiento ha dado por buenos."""
+    marcado = AHORA - timedelta(days=1)
+    store.insert_spans(_en(_agente("p"), marcado - timedelta(days=2)))
+    store.insert_spans(_en(_agente("p"), marcado + timedelta(hours=2), sano=True))
+    rep = _repeticion(store, "p")
+    estados = {rep.id: {"status": "arreglado", "at": marcado.isoformat()}}
+    vista = insights.overview(store, "p", _ventana(), states=estados)
+    apartado = next(f for f in vista.set_aside if f.id == rep.id)
+    assert vista.saved_findings == 1
+    assert vista.saved_usd == pytest.approx(apartado.fix_check.saved)
+    assert vista.saved_usd > 0
+
+    # Sin marcar nada, nada ahorrado.
+    assert insights.overview(store, "p", _ventana()).saved_usd == 0
+
+
+def test_lo_que_reaparece_o_espera_no_cuenta_como_ahorrado(store):
+    marcado = AHORA - timedelta(days=1)
+    store.insert_spans(_en(_agente("p"), marcado - timedelta(days=2)))
+    store.insert_spans(_en(_agente("p"), marcado + timedelta(hours=2)))
+    rep = _repeticion(store, "p")
+    # Sigue saliendo igual: reaparecido, sin ahorro.
+    estados = {rep.id: {"status": "arreglado", "at": marcado.isoformat()}}
+    assert insights.overview(store, "p", _ventana(), states=estados).saved_usd == 0
+    # Marcado hace un minuto: pendiente, sin ahorro.
+    estados = {rep.id: {"status": "arreglado", "at": AHORA.isoformat()}}
+    vista = insights.overview(store, "p", _ventana(), states=estados)
+    assert vista.saved_usd == 0 and vista.saved_findings == 0
+
+
 # ---------------------------------------------------------------------------------
 # Presupuesto
 # ---------------------------------------------------------------------------------

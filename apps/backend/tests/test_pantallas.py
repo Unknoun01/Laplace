@@ -497,3 +497,141 @@ def test_la_traza_ensena_el_grafo_del_agente(servidor, navegador):
         assert errores == [], errores
     finally:
         pagina.close()
+
+
+@pytest.mark.parametrize(
+    ("guardado", "sistema", "oscuro"),
+    [
+        (None, "light", True),
+        ("light", "dark", False),
+        ("dark", "light", True),
+        ("system", "light", False),
+        ("system", "dark", True),
+    ],
+)
+def test_el_tema_oscuro_es_el_de_partida(servidor, navegador, guardado, sistema, oscuro):
+    """D-155: sin nada elegido se ve el oscuro, aunque el sistema esté en claro; el claro
+    entra por elección o por «como el sistema». Se mide el fondo pintado, no la clase."""
+    contexto = navegador.new_context(color_scheme=sistema, locale="es-ES")
+    try:
+        if guardado:
+            contexto.add_init_script(f"localStorage.setItem('laplace.theme', '{guardado}')")
+        pagina = contexto.new_page()
+        pagina.goto(servidor + "/ajustes/?project=demo", wait_until="networkidle")
+        pagina.locator("main").wait_for(timeout=15_000)
+        luz = pagina.evaluate(
+            """() => {
+                const [r, g, b] = getComputedStyle(document.body).backgroundColor
+                    .match(/[\\d.]+/g).map(Number);
+                return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+            }"""
+        )
+        assert (luz < 0.2) is oscuro, (guardado, sistema, luz)
+        # El selector de Ajustes marca lo que se ve.
+        marcado = {None: "Oscuro", "dark": "Oscuro", "light": "Claro",
+                   "system": "Como el sistema"}[guardado]
+        boton = pagina.get_by_role("button", name=marcado, exact=True)
+        assert boton.get_attribute("aria-pressed") == "true"
+    finally:
+        contexto.close()
+
+
+def _texto_de(pagina, selector: str = "main") -> str:
+    pagina.locator(selector).first.wait_for(timeout=15_000)
+    return pagina.locator(selector).first.inner_text()
+
+
+def test_el_heroe_dice_lo_ya_ahorrado(servidor, navegador):
+    """D-156: la demo marca la repetición como arreglada; el seguimiento la verifica y
+    el héroe dice lo que ya no se ha pagado, además de lo que se puede dejar de pagar."""
+    pagina, errores = _abrir(navegador, servidor + "/?project=demo&days=30", "escritorio")
+    try:
+        pagina.wait_for_function(
+            "() => document.querySelector('.hero .ahorrado')", timeout=15_000
+        )
+        ahorrado = pagina.locator(".hero .ahorrado").inner_text()
+        assert "Ya has dejado de pagar" in ahorrado and "un problema" in ahorrado, ahorrado
+        assert errores == [], errores
+    finally:
+        pagina.close()
+
+
+def test_prompts_es_una_fuente_de_hallazgos(servidor, navegador):
+    """D-157: la v2 de «atencion» cuesta más y sale en el Diagnóstico; su ficha lleva a
+    Prompts y enseña el ciclo, y la ficha de Prompts avisa del problema abierto."""
+    pagina, errores = _abrir(navegador, servidor + "/?project=demo&days=30", "escritorio")
+    try:
+        pagina.wait_for_function(
+            "() => document.querySelector('main')?.innerText.includes('La v2 de «atencion»')",
+            timeout=15_000,
+        )
+        pagina.get_by_text("La v2 de «atencion»").first.click()
+        pagina.wait_for_function(
+            "() => document.querySelector('.ciclo-pasos')", timeout=15_000
+        )
+        pasos = pagina.locator(".ciclo-paso")
+        assert pasos.count() == 4
+        assert "hecho" in (pasos.nth(0).get_attribute("class") or "")
+        assert "Detectar" in pasos.nth(0).inner_text()
+        assert "(pendiente)" in pasos.nth(2).inner_text()
+        assert pagina.get_by_role("link", name="Abrir «atencion» en Prompts →").count() == 1
+        assert errores == [], errores
+    finally:
+        pagina.close()
+
+    pagina, errores = _abrir(navegador, servidor + "/prompts/?project=demo&days=30", "escritorio")
+    try:
+        pagina.wait_for_function(
+            "() => document.querySelector('.prompt-hallazgo')", timeout=15_000
+        )
+        aviso = pagina.locator(".prompt-hallazgo").inner_text()
+        assert "Sale en el Diagnóstico" in aviso and "v2" in aviso, aviso
+        assert errores == [], errores
+    finally:
+        pagina.close()
+
+
+def test_probar_empieza_por_los_arreglos_del_diagnostico(servidor, navegador):
+    """D-156: la pestaña de Probar (antes Evaluaciones) lista los problemas abiertos
+    con su dinero y si ya tienen prueba, antes que las tiradas."""
+    pagina, errores = _abrir(navegador, servidor + "/evaluaciones/?project=demo&days=30",
+                             "escritorio")
+    try:
+        pagina.wait_for_function(
+            "() => document.querySelector('.por-probar li')", timeout=15_000
+        )
+        filas = pagina.locator(".por-probar li")
+        assert filas.count() >= 3
+        assert "sin probar" in filas.first.inner_text()
+        texto = _texto_de(pagina)
+        assert texto.index("Arreglos por probar") < texto.index("regresiones-atencion")
+        assert errores == [], errores
+    finally:
+        pagina.close()
+
+
+@pytest.mark.parametrize(
+    ("ruta", "pestana"),
+    [
+        ("/?project=demo", "Diagnóstico"),
+        ("/evaluaciones/?project=demo", "Probar"),
+        ("/trazas/?project=demo", "Trazas"),
+        ("/panel/?project=demo", "Panel"),
+        ("/prompts/?project=demo", "Prompts"),
+        ("/ajustes/?project=demo", "Ajustes"),
+    ],
+)
+def test_la_pestana_de_cada_pantalla_sale_marcada(servidor, navegador, ruta, pestana):
+    """Con la exportación estática las rutas llevan «/» al final, y las pestañas que
+    comparaban la ruta exacta no se marcaban nunca."""
+    pagina, _ = _abrir(navegador, servidor + ruta, "escritorio")
+    try:
+        pagina.locator("nav.nav a").first.wait_for(timeout=15_000)
+        marcada = pagina.locator("nav.nav a[aria-current='page']")
+        assert marcada.count() == 1
+        assert marcada.inner_text() == pestana
+        # Probar va justo después del Diagnóstico: es el paso siguiente del ciclo.
+        orden = pagina.locator("nav.nav a").all_inner_texts()
+        assert orden[:2] == ["Diagnóstico", "Probar"], orden
+    finally:
+        pagina.close()

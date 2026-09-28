@@ -174,6 +174,25 @@ def _medir(nombre: str, fn, veces: int = 3) -> float:
     return peor
 
 
+def _desglose(cron: Cronometrado) -> None:
+    """Todas las lecturas del Diagnóstico, no sólo las cuatro más pesadas: una lectura
+    nueva (`step_cost_series`, D-152) tiene que verse aunque no esté arriba del todo.
+
+    Con `Recordado` cada lectura se hace una vez por Diagnóstico, así que la media de
+    cada método entre las tres medidas es lo que cuesta en una carga, y la suma de las
+    medias se compara con el total para ver qué parte es Python y no consulta (D-154).
+    """
+    medias = {m: sum(t) / 3 for m, t in cron.tiempos.items()}
+    total = sum(medias.values())
+    for metodo, media in sorted(medias.items(), key=lambda kv: -kv[1]):
+        veces = len(cron.tiempos[metodo]) / 3
+        print(
+            f"        {metodo:<32} {media:6.2f} s  {media / total:4.0%}"
+            + (f"  ×{veces:.0f}" if veces > 1 else "")
+        )
+    print(f"        {'suma de lecturas':<32} {total:6.2f} s")
+
+
 def medir(store: ClickHouseStore) -> dict[str, float]:
     ahora = datetime.now(timezone.utc)
     resultados: dict[str, float] = {}
@@ -189,9 +208,7 @@ def medir(store: ClickHouseStore) -> dict[str, float]:
             f"Diagnóstico, proyecto grande, {dias} d",
             lambda v=ventana, c=cron: insights.overview(c, GRANDE, v),
         )
-        pesadas = sorted(cron.tiempos.items(), key=lambda kv: -max(kv[1]))[:4]
-        for metodo, t in pesadas:
-            print(f"        {metodo:<40} {max(t):6.2f} s")
+        _desglose(cron)
         resultados[f"panel {dias}d"] = _medir(
             f"Panel, proyecto grande, {dias} d",
             lambda v=ventana: panel.build(store, GRANDE, v),

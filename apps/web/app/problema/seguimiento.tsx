@@ -1,8 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useState } from "react";
-import { clearFindingState, createDataset, setFindingState } from "@/lib/api";
+import { clearFindingState, setFindingState } from "@/lib/api";
 import { duration, money, number, timestamp, tokens } from "@/lib/format";
 import type { FindingDetail } from "@/lib/types";
 import { t } from "@/lib/textos";
@@ -123,73 +122,6 @@ export function EstadoHallazgo({ project, finding }: { project: string; finding:
           </>
         )}
       </div>
-      {error && <p className="verr">{error}</p>}
-    </section>
-  );
-}
-
-/**
- * Cambiar a un modelo más barato ahorra seguro; que acierte igual, no (D-123).
- *
- * La regla del modelo caro dice cuánto se ahorra y no promete la calidad, porque eso
- * exige evaluar. Este bloque lleva de una cosa a la otra: guarda las ejecuciones reales
- * de este paso como conjunto de casos y da la línea para lanzar la tirada con el modelo
- * nuevo.
- */
-export function ProbarAntes({
-  project,
-  finding,
-  query,
-}: {
-  project: string;
-  finding: FindingDetail;
-  query: string;
-}) {
-  const alternativa =
-    finding.tech
-      // El valor con «→» es el cambio de modelo; la etiqueta llega traducida (D-148).
-      .find((item) => item.value.includes("→"))
-      ?.value.split("→")
-      .pop()
-      ?.trim() ?? "";
-  const nombre = `ab-${finding.step_key.slice(0, 8)}`;
-  const [creado, setCreado] = useState(false);
-  const [error, setError] = useState("");
-
-  async function crear() {
-    try {
-      await createDataset({
-        project_id: project,
-        name: nombre,
-        filter: { step_key: finding.step_key, sort: "recent" },
-        limit: 50,
-      });
-      setCreado(true);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t("seg.error.crear"));
-    }
-  }
-
-  return (
-    <section className="block">
-      <h2>{t("seg.probar.titulo")}</h2>
-      <p>{t("seg.probar.texto", { modelo: alternativa || t("seg.probar.barato") })}</p>
-      {creado ? (
-        <>
-          <pre>{`import laplace
-laplace.init(project="${project}")
-laplace.run_dataset("${nombre}", mi_agente, variant="${alternativa || "modelo-barato"}")`}</pre>
-          <p>
-            <Link href={`/evaluaciones${query}`}>{t("seg.probar.ir")}</Link>
-          </p>
-        </>
-      ) : (
-        <div className="actions" style={{ paddingTop: 0 }}>
-          <button type="button" className="btn" onClick={crear}>
-            {t("seg.probar.crear", { nombre })}
-          </button>
-        </div>
-      )}
       {error && <p className="verr">{error}</p>}
     </section>
   );

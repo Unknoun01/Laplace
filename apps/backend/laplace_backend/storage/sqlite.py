@@ -1182,13 +1182,18 @@ class SQLiteStore:
 
     # -- prompts (Fase 6) --------------------------------------------------------------
 
-    def prompt_usage(self, project_id: str, window: Window) -> list[PromptUsage]:
+    def prompt_usage(
+        self, project_id: str, window: Window, *, rules: bool = False
+    ) -> list[PromptUsage]:
         """Coste y volumen por versión de prompt gestionado.
 
         El denominador es `COUNT(DISTINCT trace_id)` y no el número de llamadas: lo que
         se enseña es coste **por ejecución**, igual que en el panel, porque un prompt
         que se llame dos veces por ejecución no es el doble de caro por ejecución.
         """
+        donde = RULES_WHERE if rules else WINDOW_WHERE
+        pasos = "GROUP_CONCAT(DISTINCT step_key)" if rules else "''"
+        ejemplo = "MAX(step_key || char(31) || trace_id)" if rules else "''"
         filas = self._query(
             f"""
             SELECT
@@ -1203,9 +1208,11 @@ class SQLiteStore:
                 SUM(cost_unknown = 1)      AS sin_tarifa,
                 SUM(cost_rate_assumed = 1) AS asumida,
                 MIN(start_time)            AS primero,
-                MAX(start_time)            AS ultimo
+                MAX(start_time)            AS ultimo,
+                {pasos}                    AS pasos,
+                {ejemplo}                  AS ejemplo
             FROM spans
-            WHERE {WINDOW_WHERE} AND prompt_name != ''
+            WHERE {donde} AND prompt_name != ''
             GROUP BY prompt_name, prompt_version
             ORDER BY prompt_name, prompt_version DESC
             """,

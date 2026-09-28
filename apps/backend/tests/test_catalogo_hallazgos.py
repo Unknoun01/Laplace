@@ -14,7 +14,7 @@ mitad, y la suite entera en verde.
 Por eso aquí hay dos pruebas y no una:
 
 1. **Sobre tráfico de verdad**, que cada hallazgo que sale de `detect()` tenga ficha. Y
-   antes de comprobarlo, que el tráfico produzca **los cuatro tipos**: sin eso la prueba
+   antes de comprobarlo, que el tráfico produzca **todos los tipos**: sin eso la prueba
    pasaría sin haber mirado el que falla, que es exactamente cómo el fallo sobrevivió.
 2. **Estructural**, que los tipos que `detail()` reconoce sean los tipos que existen.
    La primera prueba depende de que alguien recuerde sembrar tráfico del tipo nuevo; la
@@ -187,6 +187,25 @@ def almacen_con_los_cuatro_tipos(tmp_path):
                 ms=900,
             )
         )
+
+    # Regla 5 — Prompts como fuente (D-157): la v2 de «saludo», que es la que corre
+    # ahora, cuesta más por ejecución que la v1. Salida larga y entrada corta, para que
+    # ninguna otra regla reclame ese dinero.
+    for version, coste, desde in ((1, 0.001, 1200), (2, 0.003, 1500)):
+        for t in range(6):
+            span = _span(
+                f"saludo-v{version}-{t}",
+                paso="saludar",
+                clave=f"k-saludo-v{version}",
+                entrada_tokens=150,
+                salida_tokens=120,
+                i=desde + t * 20,
+                dedup=f"saludo-{version}-{t}",
+            )
+            span.prompt_name = "saludo"
+            span.prompt_version = version
+            span.llm.cost = Cost(total_usd=coste, input_usd=coste / 2, output_usd=coste / 2)
+            spans.append(span)
 
     store.insert_spans(spans)
     return store

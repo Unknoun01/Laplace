@@ -11,7 +11,7 @@ import { dayHour, duration, money, number, percent, spanLabel, tokens, windowLab
 import type { Budget, Finding, Overview } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
 import { CasiTodoEvitable, CASI_TODO_EVITABLE, CoberturaBloque, CoberturaLinea, Confianza, SinDinero } from "./avisos";
-import { tr } from "@/lib/i18n";
+import { tr, trn } from "@/lib/i18n";
 import { Graficos } from "./graficos";
 import { t, tn } from "@/lib/textos";
 
@@ -153,6 +153,23 @@ function Contenido() {
 
         {casiTodo && !overview.cost_unavailable && (
           <CasiTodoEvitable overview={overview} total={total} evitable={evitable} />
+        )}
+
+        {/* La otra mitad de la cifra: lo ya ahorrado, verificado después de arreglar
+            (D-156). Sólo lo que el seguimiento ha medido; nada si no hay. */}
+        {overview.saved_usd > 0 && (
+          <p className="ahorrado">
+            {trn("diag.ahorrado", overview.saved_findings, {
+              n: number(overview.saved_findings),
+              coste: (
+                <strong>
+                  {overview.saved_is_floor
+                    ? t("diag.ahorrado.suelo", { coste: money(overview.saved_usd, overview.currency) })
+                    : money(overview.saved_usd, overview.currency)}
+                </strong>
+              ),
+            })}
+          </p>
         )}
       </section>
 

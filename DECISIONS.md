@@ -2856,3 +2856,161 @@ hacia atrás va curvada por debajo. Ámbar el paso con un problema del Diagnóst
 traza, rosa el que falló. Sin tarifa no cuesta cero: el nodo dice «sin tarifa» o «≥ X».
 Sale del árbol que ya llega a la web, sin backend nuevo. Prueba de pantallas: nodos y
 aristas en una traza de la demo, y «×n» en una con bucle.
+
+## 2026-09-28 — Fase 5: el cierre
+
+### D-154 — El Diagnóstico medido otra vez, con el gráfico dentro
+`step_cost_series` (D-152) es una lectura más en cada Diagnóstico y no se había medido
+con volumen. `scripts/carga.py` enseñaba sólo las cuatro lecturas más pesadas, así que
+una lectura nueva podía pesar sin verse; ahora da el desglose entero, con la media de
+cada lectura y su parte de la suma.
+
+**Dónde:** 10 millones de spans en un día (proyecto grande, 5 millones), en un
+contenedor Linux con 4 núcleos y 16 GB, **unas tres veces más lento que el portátil de
+D-142**: genera 40.000 spans/s frente a 120.000. Las cifras absolutas no se comparan con
+las de D-142; el reparto sí.
+
+* **Con las partes recién escritas** (medida justo después de generar), el Diagnóstico
+  tardó 10,5–11,4 s. **Con las partes ya fusionadas** (la misma tabla minutos después),
+  5,8–6,7 s con un día de rango y 5,3–5,6 con siete. La primera cifra es la del peor
+  momento de un servidor que ingiere sin parar; la segunda, la de uno tranquilo.
+* **`step_cost_series`: 0,75–0,80 s, un 13–14 % de la suma de lecturas**, en el mismo
+  orden que las otras cinco (bucles 21 %, repeticiones 20 %, uso por paso 16 %, resumen
+  14–16 %, cobertura 14–15 %). No es la que manda, pero es una sexta consulta que recorre
+  la ventana entera.
+* **Probado y no hecho: juntar sus dos pasadas en una.** Hoy hace una para el gasto total
+  por tramo y otra, con el filtro de las reglas, para el de cada paso. En una sola
+  (agrupando por paso y tramo, con `sumIf` para lo que no es tirada de evaluación) baja
+  de 0,73 a 0,57 s: **0,2 s de 6, un 3 %**, a cambio de reescribir la consulta en los dos
+  almacenes con su paridad. No acerca el objetivo de 1,5 s, que sigue pidiendo lo mismo
+  que en D-142: preagregados por hora para uso por paso, resumen, cobertura y ahora
+  también la serie del gráfico, que es exactamente la forma de un preagregado por hora.
+* **El Panel** tarda 1,6–1,8 s aquí (1,2–1,4 en el portátil) y la lista de trazas
+  1,0–1,1: el mismo orden que en D-142 con el factor de la máquina.
+
+Queda en la hoja de ruta: la serie del gráfico entra en la lista de lecturas que
+cubrirían los preagregados, y sigue faltando medir con semanas de histórico.
+
+### D-155 — El oscuro es la insignia; el claro, neutro
+Sustituye la parte de D-133 que ponía el claro «Rose Gold & Amanecer» por defecto.
+
+* **El oscuro por defecto.** Quien no ha elegido nada ve «Tech Abisal», tenga el sistema
+  como lo tenga: es la cara del producto en capturas, demos y la primera apertura de
+  `laplace ui`. Ajustes ofrece tres opciones, en este orden: Oscuro (sin nada guardado),
+  Claro y Como el sistema. Lo que ya estaba guardado sigue valiendo: `light` y `dark`
+  se leen igual; quien tenía «como el sistema» no tenía nada guardado y pasa al oscuro,
+  que es justo el cambio pedido.
+* **El claro, neutro.** El rosa hacía que el producto pareciera otro al cambiar de tema.
+  Ahora el fondo es gris frío (ningún canal se separa más de un 6 % de los otros), el
+  cristal casi blanco y los acentos son los del oscuro —violeta, cian, ámbar— con el
+  mismo tono; como letra se oscurecen hacia su propio color hasta pasar AA, y como
+  relleno (barras, el botón principal) se usan tal cual. El botón principal lleva letra
+  oscura sobre el degradado en los dos temas.
+* **El claro está escrito dos veces**, elegido a mano y «como el sistema» con el sistema
+  en claro: CSS no deja nombrar un bloque de variables. Antes pasaba lo mismo con el
+  oscuro, sin nada que vigilara que las dos copias no se separasen.
+* **El contraste, medido en cada pasada.** `test_tema.py` lee los tokens de
+  `globals.css`, resuelve `var()` y `color-mix()` como el navegador, compone el cristal
+  sobre los tres puntos del degradado y exige 4,5:1 a toda tinta de texto (`--ink`,
+  `--ink-2`, `--ink-3`, `--iris`, `--teal`, `--amber`, `--rose`, `--rose-ink`) y 3:1 a la
+  decorativa, en los dos temas. Lo primero que encontró fue del **oscuro**, no del claro:
+  la auditoría medía sobre el color del medio, y en la esquina iluminada del degradado,
+  donde van el logo y el proyecto, el violeta de los enlaces daba 4,1:1 y la tinta
+  decorativa 2,1. `--iris` en oscuro es ahora el violeta con un 12 % de blanco y
+  `--ink-4` sube del 60 al 80 % de `--muted`. La prueba exige también que las dos copias
+  del claro sean idénticas, que el fondo claro no tenga tinte, y comprueba que el claro
+  rosa con el ámbar de antes de la auditoría no pasaría.
+* **En pantalla**, `test_pantallas.py` abre Ajustes con cada combinación de lo guardado
+  y del sistema y mide la luminancia del fondo pintado, no una clase: sin nada y el
+  sistema en claro, oscuro; «como el sistema» con el sistema en claro, claro. Rompiendo
+  a propósito el script del layout (sin «system»), falla.
+
+### D-156 — El producto alrededor del ciclo: detectar, probar, arreglar, verificar
+La cifra que vende Laplace es «ahorrado y recuperable», y un problema pasa de lo segundo
+a lo primero recorriendo cuatro pasos. Las piezas existían —el hallazgo, el conjunto para
+probarlo (sólo en el modelo caro), el botón de marcarlo y el antes y después (D-123)—,
+pero ninguna pantalla decía en qué paso estaba cada cosa ni enseñaba la mitad
+«ahorrado».
+
+* **Evaluaciones pasa a ser «Probar»** y va en la barra justo después del Diagnóstico.
+  La ruta sigue siendo `/evaluaciones`, para no romper enlaces guardados. Arriba,
+  **«Arreglos por probar»**: los problemas abiertos de un paso con dinero (los seis que
+  más devuelven), con lo que devuelven y si ya tienen su prueba (sin probar, guardado
+  sin tirada, n tiradas); guardar sus ejecuciones crea el conjunto con las llamadas
+  reales de ese paso. El Diagnóstico se pide aparte y la pantalla no lo espera: con
+  volumen tarda segundos (D-154), y lo mismo en Prompts. Debajo, lo de siempre (A vs B, conjuntos, tiradas). Los textos
+  que nombraban la pestaña cambian en los cinco idiomas, también en el backend.
+* **La ficha dice dónde está el problema en el ciclo**: cuatro pasos con su estado
+  (hecho, en curso, pendiente, no ha funcionado), sacado sólo de lo que se sabe. Probar
+  está hecho si hay un conjunto guardado con el filtro de su paso (`source_filter.step_key`)
+  y alguna tirada sobre él. Arreglar está hecho si se marcó. Verificar sale del
+  seguimiento: hecho si lo ha dado por arreglado, en curso si espera ejecuciones o ha
+  mejorado sin desaparecer, y no ha funcionado si reaparece. El estado va también en
+  texto para lectores de pantalla, no sólo en el color de la marca.
+* **Probar ya no es sólo del modelo caro.** Cualquier problema de un paso ofrece guardar
+  sus llamadas reales y la línea para lanzarlas: con el modelo barato, con cada versión
+  del prompt (D-157) o con el arreglo puesto. Si el conjunto ya existe, se dice en vez de
+  ofrecer crearlo otra vez.
+* **El héroe dice lo ya ahorrado**, debajo de lo que se puede dejar de pagar: «Ya has
+  dejado de pagar X desde que arreglaste N problemas». Es la suma de `FixCheck.saved` de
+  lo que el seguimiento ha verificado (`arreglado` o `mejor`, en dinero), con «al menos»
+  si alguno salía de un coste que era un suelo. Lo pendiente o lo que reaparece no
+  cuenta. En la demo: 2,64 $ de la repetición arreglada.
+* **De paso:** las pestañas Probar, Panel, Prompts y Ajustes no salían marcadas nunca
+  en la interfaz exportada, porque se comparaba la ruta exacta y la exportación añade
+  «/» al final. Y la barra de móvil repartía tres tercios exactos y «Tableau de bord»
+  no cabía a 375 px en Linux (el fallo de `test_pantallas` que sólo se veía fuera de
+  Windows): cada columna mide ahora al menos lo que su pestaña.
+
+Pruebas: `test_ajustes.py` (lo ahorrado suma sólo lo verificado; lo pendiente y lo que
+reaparece, nada) y `test_pantallas.py` (el héroe con lo ahorrado, el ciclo en la ficha,
+Probar empieza por los arreglos del Diagnóstico y la pestaña de cada pantalla sale
+marcada, con Probar la segunda).
+
+### D-157 — Prompts como fuente de hallazgos
+La pestaña de Prompts sabía que la v2 de «atencion» cuesta un 60 % más por ejecución, y
+el Diagnóstico, que es donde se decide qué arreglar, no se enteraba. Ahora es una regla
+más (`insights/prompt_caro.py`, tipo `prompt_caro`):
+
+* **Cuándo sale.** La versión que corre ahora (la de la última llamada vista) es más
+  nueva que la anterior con tráfico y cuesta por ejecución más de un 5 % por encima
+  (`MATERIAL_COST_CHANGE`, el de Evaluaciones), con al menos cinco ejecuciones en cada
+  una (el mínimo de la comparación de Prompts; no se importa porque el panel importa el
+  motor, y una prueba exige que sean iguales). Tras volver atrás, la que corre es la
+  vieja y no hay nada que decir. La versión 0 (el texto de reserva del SDK) no cuenta.
+* **Cuándo se calla.** Si alguna llamada de las dos versiones no tiene tarifa: una resta
+  con un sumando desconocido no es un suelo, es otro desconocido. Y sin las tiradas de
+  evaluación, como el resto de reglas: la lectura de las reglas es `prompt_usage(...,
+  rules=True)`, con `RULES_WHERE` y con las `step_keys` de cada versión y una traza de
+  ejemplo, en los dos almacenes y con paridad probada.
+* **No contar dos veces el mismo dinero, sin callar de más.** Lo primero que se escribió
+  restaba a la diferencia todo lo que otras reglas reclaman sobre las llamadas de la
+  versión cara, y en la demo la regla salía muda: el modelo caro reclama 31 $ sobre esas
+  llamadas y la diferencia es de 19. Pero los arreglos **se componen**: si cambiar de
+  modelo abarata un 64 % esas llamadas, volver a la versión anterior ahorra después su
+  diferencia a ese precio, no nada. La diferencia se escala por la parte del coste de la
+  versión que no reclaman ya otras reglas; la suma de todo nunca pasa de lo que costaron
+  esas llamadas. En la demo sale tercera, con 5,60 $.
+* **Lo que no sabe:** si la versión cara acierta más. Los veredictos viven en la base de
+  metadatos y el motor lee sólo trazas, así que no lo afirma en ningún sentido. El
+  arreglo tiene tres pasos: comparar el acierto en Prompts (o probarlo con las mismas
+  llamadas, D-156), volver a la anterior con un clic, o quedarse con lo que mejoró y
+  quitar lo que encarece.
+* **El id lleva la versión cara** (`prompt_caro:atencion:v2`): si después la v3 vuelve a
+  encarecer, es otro problema y no hereda lo que se dijo de la v2. Volver atrás y
+  marcarlo arreglado se verifica como cualquier otro hallazgo, sin código aparte.
+* **En Prompts**, la ficha de un prompt con el problema abierto lo dice y enlaza a él; y
+  la ficha del problema enlaza a Prompts, donde se vuelve a la versión anterior.
+* **Discrepancia que queda, anotada en la hoja de ruta:** la pestaña de Prompts cuenta
+  las tiradas de evaluación en el coste de cada versión y la regla no. En la demo, la
+  comparación A/B de ayer corre con la v2 y el modelo barato, y abarata la v2 en
+  Prompts: allí dice un 60 % más, aquí un 70 %.
+
+Pruebas en `test_regla_prompt_caro.py`, en los dos almacenes: sale con la cifra medida;
+no sale tras volver atrás, con la nueva más barata, con un 3 %, con pocas ejecuciones
+en cualquiera de las dos, sin tarifa ni sólo en tiradas de evaluación; la reserva no
+cuenta; lo reclamado por otra regla abarata la diferencia en proporción y nunca se pasa
+del coste; la ficha dice lo mismo que la tarjeta; volver atrás se verifica; las dos
+lecturas dan lo mismo en los dos almacenes. `test_catalogo_hallazgos.py` siembra también
+un prompt encarecido y exige que tenga ficha y trazas. Rompiendo a propósito el
+escalado, el filtro de evaluaciones o la guarda de tarifa, fallan.

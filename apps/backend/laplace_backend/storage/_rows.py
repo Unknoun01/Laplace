@@ -170,7 +170,29 @@ def row_to_prompt_usage(f: Any) -> Any:
         assumed_rate_spans=int(f["asumida"] or 0),
         first_seen=_instante(f["primero"]),
         last_seen=_instante(f["ultimo"]),
+        step_keys=_claves(f["pasos"]) if "pasos" in f.keys() else (),
+        sample_step_key=_pareja(f.get("ejemplo"))[0],
+        sample_trace_id=_pareja(f.get("ejemplo"))[1],
     )
+
+
+def _pareja(valor: Any) -> tuple[str, str]:
+    """`(step_key, trace_id)`: tupla en ClickHouse, texto con un separador en SQLite."""
+    if not valor:
+        return ("", "")
+    if isinstance(valor, str):
+        paso, _, traza = valor.partition("\x1f")
+        return (paso, traza)
+    return (str(valor[0]), str(valor[1]))
+
+
+def _claves(valor: Any) -> tuple[str, ...]:
+    """Las claves de paso de una fila: lista en ClickHouse, texto separado por comas en
+    SQLite (`GROUP_CONCAT`; una clave es un hash, no lleva comas). Ordenadas y sin
+    vacías, para que los dos almacenes den lo mismo."""
+    if isinstance(valor, str):
+        valor = valor.split(",")
+    return tuple(sorted({str(v) for v in (valor or []) if v}))
 
 
 def row_to_observed_prompt(f: Any) -> Any:
