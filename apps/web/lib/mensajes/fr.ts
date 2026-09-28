@@ -894,4 +894,6 @@ export const fr: Mensajes = {
   "ev.por_probar.guardado_como": "Enregistré sous « {nombre} ». Lancez-le avec la correction en place :",
   "ev.por_probar.ver": "Voir le problème",
   "ev.por_probar.error": "impossible d’enregistrer",
+  "aj.contraste.alto": "Contraste élevé",
+  "aj.contraste.texto": "Fonds opaques, sans transparence ni flou, et texte au contraste maximal. Fonctionne avec le thème clair comme avec le sombre.",
 };

@@ -899,6 +899,8 @@ export const es = {
   "ev.por_probar.guardado_como": "Guardado como «{nombre}». Lánzalo con el arreglo puesto:",
   "ev.por_probar.ver": "Ver el problema",
   "ev.por_probar.error": "no se ha podido guardar",
+  "aj.contraste.alto": "Alto contraste",
+  "aj.contraste.texto": "Fondos opacos, sin transparencias ni desenfoque, y letra al máximo contraste. Vale para el tema claro y para el oscuro.",
 } as const;
 
 export type Clave = keyof typeof es;

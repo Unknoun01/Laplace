@@ -890,4 +890,6 @@ export const zh: Mensajes = {
   "ev.por_probar.guardado_como": "已保存为“{nombre}”。在应用修复后运行它：",
   "ev.por_probar.ver": "查看问题",
   "ev.por_probar.error": "无法保存",
+  "aj.contraste.alto": "高对比度",
+  "aj.contraste.texto": "不透明背景，没有透明和模糊效果，文字达到最高对比度。浅色和深色主题都适用。",
 };

@@ -39,7 +39,8 @@ El mismo producto sirve a dos públicos con un interruptor. En modo **Sencillo**
 cristiano y manda el dinero; en **Avanzado** aparece la capa técnica: la consulta que
 disparó cada alerta, los atributos de cada span, el árbol completo y la exportación en
 JSON. El modo es global y se recuerda. El tema oscuro va por defecto; en Ajustes se puede
-elegir el claro, que es neutro, o seguir al sistema.
+elegir el claro, Rose Gold con cristal líquido, o seguir al sistema, y encender el alto
+contraste en cualquiera de ellos.
 
 - **Diagnóstico** (`/`) — cuánto te cuesta el agente, cuánto puedes dejar de pagar, cuánto
   has dejado de pagar ya con lo arreglado, y las cosas que arreglar ordenadas por dinero

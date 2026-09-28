@@ -50,7 +50,43 @@ export function Apariencia() {
           </button>
         ))}
       </div>
+      <AltoContraste />
     </section>
+  );
+}
+
+/**
+ * Alto contraste (D-159), para el tema claro y para el oscuro: fondos opacos, sin
+ * cristal ni desenfoque, y letra a 7:1. Se guarda en este navegador y lo aplica el
+ * script del layout antes del primer pintado, igual que el tema.
+ */
+function AltoContraste() {
+  const [alto, setAlto] = useState(false);
+  useEffect(() => {
+    setAlto(document.documentElement.dataset.contrast === "high");
+  }, []);
+
+  function cambiar() {
+    const nuevo = !alto;
+    setAlto(nuevo);
+    try {
+      if (nuevo) window.localStorage.setItem("laplace.contrast", "high");
+      else window.localStorage.removeItem("laplace.contrast");
+    } catch {
+      /* dura lo que la pestaña */
+    }
+    if (nuevo) document.documentElement.dataset.contrast = "high";
+    else delete document.documentElement.dataset.contrast;
+  }
+
+  return (
+    <div className="contraste">
+      <button type="button" className="btn" aria-pressed={alto} onClick={cambiar}>
+        <span aria-hidden className="contraste-icono">◐</span>
+        {t("aj.contraste.alto")}
+      </button>
+      <p className="muted">{t("aj.contraste.texto")}</p>
+    </div>
   );
 }
 

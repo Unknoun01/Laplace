@@ -892,4 +892,6 @@ export const en: Mensajes = {
   "ev.por_probar.guardado_como": "Saved as “{nombre}”. Run it with the fix in place:",
   "ev.por_probar.ver": "See the problem",
   "ev.por_probar.error": "couldn't save",
+  "aj.contraste.alto": "High contrast",
+  "aj.contraste.texto": "Opaque backgrounds, no transparency or blur, and text at maximum contrast. Works with both the light and the dark theme.",
 };

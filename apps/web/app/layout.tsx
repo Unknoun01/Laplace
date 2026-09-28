@@ -45,6 +45,8 @@ try {
   var t = localStorage.getItem("laplace.theme");
   // Sin nada guardado no se toca: el oscuro es el de partida (D-155).
   if (t === "light" || t === "dark" || t === "system") document.documentElement.dataset.theme = t;
+  // Alto contraste, encima del tema que sea (D-159).
+  if (localStorage.getItem("laplace.contrast") === "high") document.documentElement.dataset.contrast = "high";
 } catch (e) {
   document.body.dataset.mode = "simple";
 }`;
