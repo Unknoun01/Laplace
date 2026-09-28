@@ -2937,7 +2937,8 @@ pero ninguna pantalla decía en qué paso estaba cada cosa ni enseñaba la mitad
   **«Arreglos por probar»**: los problemas abiertos de un paso con dinero (los seis que
   más devuelven), con lo que devuelven y si ya tienen su prueba (sin probar, guardado
   sin tirada, n tiradas); guardar sus ejecuciones crea el conjunto con las llamadas
-  reales de ese paso. Debajo, lo de siempre (A vs B, conjuntos, tiradas). Los textos
+  reales de ese paso. El Diagnóstico se pide aparte y la pantalla no lo espera: con
+  volumen tarda segundos (D-154), y lo mismo en Prompts. Debajo, lo de siempre (A vs B, conjuntos, tiradas). Los textos
   que nombraban la pestaña cambian en los cinco idiomas, también en el backend.
 * **La ficha dice dónde está el problema en el ciclo**: cuatro pasos con su estado
   (hecho, en curso, pendiente, no ha funcionado), sacado sólo de lo que se sabe. Probar

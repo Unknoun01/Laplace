@@ -43,18 +43,20 @@ function Contenido() {
 
   const recargar = useCallback(
     async (id: string) => {
-      const [ds, rs, jz, vista] = await Promise.all([
+      // Lo que hay por probar sale del Diagnóstico, que con volumen tarda segundos: se
+      // pide aparte y la pantalla no lo espera. Si falla, sigue en pie con lo de
+      // siempre, que no es lo único que hay aquí.
+      getOverview(id, days)
+        .then((vista) => setHallazgos(vista.findings))
+        .catch(() => setHallazgos([]));
+      const [ds, rs, jz] = await Promise.all([
         listDatasets(id),
         listRuns(id),
         judgeStatus().catch(() => null),
-        // Lo que hay por probar sale del Diagnóstico. Si falla, la pantalla sigue en
-        // pie con lo de siempre: no es lo único que hay aquí.
-        getOverview(id, days).catch(() => null),
       ]);
       setDatasets(ds);
       setRuns(rs);
       setJuez(jz);
-      setHallazgos(vista?.findings ?? []);
     },
     [days],
   );

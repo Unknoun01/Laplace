@@ -8,8 +8,11 @@ librería con una línea y cada ejecución queda registrada como una traza jerá
 paso se dio, qué prompt se envió, qué respondió el modelo, qué herramienta se llamó,
 cuántos tokens y cuánto costó cada nodo.
 
-El ciclo completo es **observar → evaluar → optimizar**. Hoy está construida la primera
-parte y los cimientos de las otras dos.
+La función principal es el **ahorro verificado**, un ciclo en cuatro pasos: **detectar**
+el derroche, **probar** el arreglo sobre llamadas reales, **arreglar** y **verificar** el
+ahorro después. La cifra que lo resume es «ahorrado y recuperable». La observabilidad
+completa sigue ahí para el análisis en profundidad. La interfaz y el motor hablan
+español, inglés, portugués de Brasil, francés y chino simplificado.
 
 ## Estado
 
@@ -35,30 +38,33 @@ trazas.
 El mismo producto sirve a dos públicos con un interruptor. En modo **Sencillo** se habla en
 cristiano y manda el dinero; en **Avanzado** aparece la capa técnica: la consulta que
 disparó cada alerta, los atributos de cada span, el árbol completo y la exportación en
-JSON. El modo es global y se recuerda. Hay tema claro y oscuro: sigue al sistema, y en
-Ajustes se puede fijar uno.
+JSON. El modo es global y se recuerda. El tema oscuro va por defecto; en Ajustes se puede
+elegir el claro, que es neutro, o seguir al sistema.
 
-- **Diagnóstico** (`/`) — cuánto te cuesta el agente, cuánto puedes dejar de pagar, y
-  las cosas que arreglar ordenadas por dinero recuperable. Encabezado, cuando hace falta,
-  por cuánto de tu agente entendemos: una cifra de ahorro sin eso no se puede leer.
+- **Diagnóstico** (`/`) — cuánto te cuesta el agente, cuánto puedes dejar de pagar, cuánto
+  has dejado de pagar ya con lo arreglado, y las cosas que arreglar ordenadas por dinero
+  recuperable, con el gasto por día y por paso. Encabezado, cuando hace falta, por
+  cuánto de tu agente entendemos: una cifra de ahorro sin eso no se puede leer.
+- **Probar** (`/evaluaciones`) — el segundo paso del ciclo: los arreglos que propone el
+  Diagnóstico y si ya tienen su prueba, y si la versión nueva acierta igual y cuesta
+  menos.
 - **Panel** (`/panel`) — si el gasto sube porque hay más trabajo o porque el trabajo se
   ha encarecido, dicho con palabras, y los tramos que se salen de lo normal con su causa.
-- **Evaluaciones** (`/evaluaciones`) — si tu agente responde bien, y si la versión nueva
-  acierta igual y cuesta menos.
 - **Prompts** (`/prompts`) — qué versión está en producción, qué cambió entre una y otra,
-  y qué costó y qué acertó cada una sobre el tráfico que la usó.
-- **Problema** (`/problemas/…`) — qué pasa, por qué, cómo se ha detectado, cómo se
-  arregla y cuánto te ahorras, con el cálculo detrás.
+  y qué costó y qué acertó cada una sobre el tráfico que la usó. Una versión que encarece
+  el agente sale además en el Diagnóstico.
+- **Problema** (`/problema?id=…`) — qué pasa, por qué, cómo se ha detectado, cómo se
+  arregla y cuánto te ahorras, con el cálculo detrás, y en qué paso del ciclo está.
 - **Trazas** (`/trazas`) — exploración libre: filtros, búsqueda y orden por coste,
   exportar a CSV y guardar lo filtrado como conjunto de casos.
-- **Traza** (`/trazas/…`) — el árbol navegable, con coste por rama, repeticiones
-  marcadas y los problemas detectados que pasan en esa ejecución.
+- **Traza** (`/traza?id=…`) — el grafo del agente y el árbol navegable, con coste por rama,
+  repeticiones marcadas y los problemas detectados que pasan en esa ejecución.
 - **Ajustes** (`/ajustes`) — presupuesto mensual, alertas (Slack, webhook y correo),
   tarifas propias, equivalente en euros y borrado del proyecto.
 
 ## Qué detecta hoy
 
-Cuatro reglas deterministas, sin modelo de por medio
+Cinco reglas deterministas, sin modelo de por medio
 ([`insights/`](apps/backend/laplace_backend/insights/), una por módulo):
 
 | Regla | Qué busca | Cómo calcula el ahorro |
@@ -67,6 +73,7 @@ Cuatro reglas deterministas, sin modelo de por medio
 | Bucle | El mismo paso llamado una y otra vez sin que su resultado avance, aunque la entrada cambie (un contador de intentos) | Coste de las vueltas que no aportaron nada |
 | Modelo caro | Un paso con salida media corta que usa un modelo con alternativa más barata | Diferencia de tarifa sobre los tokens reales |
 | Contexto fijo | Un prompt con un suelo grande de tokens que se reenvía sin caché | Diferencia entre tarifa normal y de caché, menos lo que cuesta escribirla |
+| Prompt más caro | La versión de un prompt gestionado que corre ahora cuesta por ejecución más que la anterior | Diferencia por ejecución sobre el tráfico de la versión nueva, escalada por lo que ya reclaman las otras reglas |
 
 Cinco cosas que **no** hace, a propósito: no inventa dinero donde no lo hay (un bucle de
 herramientas no gasta tokens, así que enseña el tiempo perdido y lo dice), no cuenta dos
@@ -132,9 +139,10 @@ la lista** como reaparecido aunque esté marcado: fiarse de lo que dice el usuar
 mirar sería esconder justo el caso que importa. Lo arreglado y lo ignorado no cuentan en
 el evitable del inicio ni mandan alertas.
 
-Para un modelo caro, la ficha lleva además a Evaluaciones: guarda las ejecuciones reales
-de ese paso como conjunto de casos y da la línea para lanzarlas con el modelo barato,
-porque el ahorro está medido y la calidad no.
+Antes de eso, la ficha lleva a **Probar**: guarda las ejecuciones reales de ese paso como
+conjunto de casos y da la línea para lanzarlas con el arreglo puesto —el modelo barato,
+la versión anterior del prompt—, porque el ahorro está medido y la calidad no. La ficha
+dice en qué paso del ciclo está cada problema, y el Diagnóstico suma lo ya ahorrado.
 
 ## Presupuesto, alertas y quién gasta
 
@@ -176,7 +184,7 @@ API de lectura, no WebSockets (D-079).
 
 ## Saber si responde bien, antes de desplegar
 
-Diagnóstico responde a «¿cuesta lo que debe?». La pestaña **Evaluaciones** responde a
+Diagnóstico responde a «¿cuesta lo que debe?». La pestaña **Probar** (antes Evaluaciones) responde a
 «¿responde bien?», y sobre todo a la pregunta que se hace antes de un despliegue:
 
 > **B acierta igual —hasta donde se puede saber— y cuesta un 90 % menos por caso.**

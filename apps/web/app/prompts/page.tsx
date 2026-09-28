@@ -53,14 +53,13 @@ function Contenido() {
 
   const recargar = useCallback(
     async (id: string) => {
-      const [prompts, diagnostico] = await Promise.all([
-        getPrompts(id, days),
-        // Prompts es una fuente más de hallazgos (D-157): si el Diagnóstico tiene uno
-        // abierto de un prompt, su ficha lo dice. Si falla, la pestaña sigue igual.
-        getOverview(id, days).catch(() => null),
-      ]);
-      setVista(prompts);
-      setHallazgos(diagnostico?.findings.filter((f) => f.kind === "prompt_caro") ?? []);
+      // Prompts es una fuente más de hallazgos (D-157): si el Diagnóstico tiene uno
+      // abierto de un prompt, su ficha lo dice. Se pide aparte y no se espera: con
+      // volumen tarda segundos, y si falla la pestaña sigue igual.
+      getOverview(id, days)
+        .then((vista) => setHallazgos(vista.findings.filter((f) => f.kind === "prompt_caro")))
+        .catch(() => setHallazgos([]));
+      setVista(await getPrompts(id, days));
     },
     [days],
   );
