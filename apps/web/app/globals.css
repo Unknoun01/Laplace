@@ -150,41 +150,43 @@
 /* ALTO CONTRASTE (D-159), para los dos temas. Sin transparencias, sin desenfoque, sin
    resplandores ni tintes de fondo: blanco, negro y los tres colores que significan algo
    (ámbar lo que se tira, verde lo ahorrado, rosa lo que falla), con letra a 7:1 como
-   mínimo (AAA). En el claro no queda nada del rose gold: el alto contraste es otro
-   modo, no el mismo tema con más tinta. El
+   mínimo (AAA). Los dos con el mismo estilo, sobrio y cálido: en el claro no queda nada
+   del rose gold y en el oscuro nada del neón; marfil, champán, oro y jade. El
    oscuro por defecto; el claro, elegido o del sistema, con su propia copia (y la
    prueba exige que sean iguales). */
 :root[data-contrast="high"] {
-  --bg-gradient-start: #000000;
-  --bg-gradient-mid: #000000;
-  --bg-gradient-end: #000000;
-  --text: #ffffff;
-  --muted: #d5dbe5;
-  --glass: #0a0d12;
-  --line: #9aa6b6;
-  --accent-1: #b8b5ff;
-  --accent-2: #86f2e0;
-  --accent-3: #ffd27a;
+  /* Dark luxury (D-159): negro cálido, marfil y champán en lugar del violeta y el cian
+     del oscuro normal. El mismo estilo que el claro de alto contraste, invertido. */
+  --bg-gradient-start: #0a0908;
+  --bg-gradient-mid: #0a0908;
+  --bg-gradient-end: #0a0908;
+  --text: #faf6ee;
+  --muted: #d8d0c4;
+  --glass: #13110f;
+  --line: #8c8375;
+  --accent-1: #ecdcb8;
+  --accent-2: #9fd8c2;
+  --accent-3: #eec46e;
   --glow-color: transparent;
 
-  --glass-strong: #0a0d12;
-  --line-soft: #6b7686;
-  --line-strong: #ffffff;
-  --ink-2: #eef2f8;
+  --glass-strong: #13110f;
+  --line-soft: #5f584e;
+  --line-strong: #faf6ee;
+  --ink-2: #efe9df;
   --ink-3: var(--muted);
-  --ink-4: #a9b3c1;
+  --ink-4: #aaa196;
   --iris: var(--accent-1);
   --teal: var(--accent-2);
   --amber: var(--accent-3);
-  --rose: #ffa3ad;
-  --rose-ink: #ffccd1;
+  --rose: #f2a39c;
+  --rose-ink: #f7c9c3;
   --teal-bg: transparent;
   --amber-bg: transparent;
   --iris-bg: transparent;
   --rose-bg: transparent;
-  --on-iris: #000000;
+  --on-iris: #0a0908;
   --shadow: none;
-  --flash: rgba(255, 255, 255, 0.16);
+  --flash: rgba(250, 246, 238, 0.14);
   --glass-sheen: 0 0 #0000;
   --blur: none;
   --bg-layers: linear-gradient(transparent, transparent);
@@ -277,6 +279,12 @@
 }
 :root[data-contrast="high"] :focus-visible {
   outline-width: 3px;
+}
+/* Las casillas y los controles nativos, en el acento del tema y no en el azul del
+   navegador, que en alto contraste era el único color fuera de la paleta. */
+:root[data-contrast="high"] input,
+:root[data-contrast="high"] select {
+  accent-color: var(--accent-1);
 }
 
 /* Los tokens de siempre, ahora como alias de los de arriba: valen para los dos temas y

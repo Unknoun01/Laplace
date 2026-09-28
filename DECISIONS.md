@@ -3050,6 +3050,13 @@ aplica el script del layout antes del primer pintado, como el tema (`data-contra
   tenían fondo beige y los grises eran tostados— y el usuario lo vio como una
   inconsistencia; ahora la prueba exige que los tintes sean transparentes y que el acento
   principal del claro sea casi negro.
+* **El mismo estilo en los dos: luxury, no tech.** La primera versión del oscuro de alto
+  contraste llevaba el violeta y el cian del oscuro normal subidos de brillo, y al lado
+  del claro sobrio se veía neón; el usuario pidió «dark luxury». Ahora es negro cálido
+  (#0a0908), letra marfil, enlaces y botón en champán, lo ahorrado en jade claro y lo que
+  se tira en oro. La prueba exige acentos de poca saturación y un negro que no tire a
+  azul. Las casillas y los controles nativos toman el acento del tema en vez del azul
+  del navegador.
 * **Letra a 7:1 como mínimo (AAA)** y la tinta decorativa a 4,5, medidas igual que en los
   temas normales. El botón principal va en negro con letra blanca en el claro, y al
   revés en el oscuro.
@@ -3057,5 +3064,5 @@ aplica el script del layout antes del primer pintado, como el tema (`data-contra
   borde) y el contorno del foco pasa a 3 px.
 * El claro de alto contraste también está escrito dos veces (elegido y del sistema), y
   la prueba exige que las copias sean iguales. En pantalla, `test_pantallas.py` lo
-  enciende desde el botón en los dos temas, mide que el fondo sea negro o blanco puro y
+  enciende desde el botón en los dos temas, mide que el fondo sea negro cálido o blanco y
   que la barra no desenfoque, recarga, y lo apaga.
