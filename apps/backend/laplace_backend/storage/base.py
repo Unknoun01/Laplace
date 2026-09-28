@@ -775,9 +775,21 @@ class SpanStore(Protocol):
         """Pasos que se repiten con la misma entrada sin avanzar (D-117)."""
 
     def cost_by(
-        self, project_id: str, window: Window, dimension: str, limit: int = 20
+        self,
+        project_id: str,
+        window: Window,
+        dimension: str,
+        limit: int = 20,
+        *,
+        rules: bool = False,
     ) -> list[CostGroup]:
-        """Gasto agrupado por usuario o por sesión."""
+        """Gasto agrupado por usuario, por sesión o por cliente (`customer`, D-161).
+
+        Con `rules=True`, sin tiradas de evaluación: son trabajo del desarrollador, no
+        de un cliente, aunque el agente fije un `customer_id` dentro de la tirada.
+
+        Por ejecución: cada traza cuenta entera para la clave que lleve alguno de sus
+        spans (normalmente la raíz), y las que no llevan ninguna van juntas bajo `""`."""
 
     def unpriced_models(self, project_ids: list[str] | None, window: Window) -> list[str]:
         """Modelos con llamadas sin tarifa en la ventana; `None` son todos los proyectos."""

@@ -105,6 +105,8 @@ CREATE TABLE IF NOT EXISTS spans
     prompt_name         LowCardinality(String),
     prompt_version      UInt32,
 
+    customer_id         String,
+
     events              String CODEC(ZSTD(3)),
     attributes          String CODEC(ZSTD(3)),
 
@@ -175,6 +177,9 @@ ALTER TABLE spans ADD COLUMN IF NOT EXISTS loop_out_hash String DEFAULT '';
 -- deducirlas del texto, que es justo lo que no se puede hacer sin mentir.
 ALTER TABLE spans ADD COLUMN IF NOT EXISTS prompt_name LowCardinality(String) DEFAULT '';
 ALTER TABLE spans ADD COLUMN IF NOT EXISTS prompt_version UInt32 DEFAULT 0;
+
+-- Instalaciones anteriores al margen por cliente (D-161): quien paga por el trabajo.
+ALTER TABLE spans ADD COLUMN IF NOT EXISTS customer_id String DEFAULT '';
 
 -- Instalaciones anteriores a D-142. Los payloads son casi todo el disco, y con ZSTD(3)
 -- ocupan menos de la mitad que con el LZ4 por defecto (medido con la prueba de carga).

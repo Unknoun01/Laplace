@@ -3098,3 +3098,53 @@ Pruebas: `test_prompts.py` (una tirada barata y anotada como fallo no mueve ni e
 ni el acierto de la v8; rompiendo cualquiera de las dos exclusiones, falla),
 `test_regla_prompt_caro.py` (las dos lecturas nuevas, iguales en SQLite y ClickHouse),
 `test_arbol_envoltorio.py` y `test_modelo_rapido.py`.
+
+## 2026-09-28 — Fase 6: margen por cliente
+
+### D-161 — Qué clientes te hacen perder dinero
+La primera función nueva, elegida por el usuario: lo que te paga cada cliente frente a lo
+que te cuesta su trabajo, al mes, y el aviso de quién te hace perder dinero. Laplace sabe
+lo que cuesta cada ejecución; faltaba saber de quién es y cuánto paga.
+
+* **`customer_id` de punta a punta.** `laplace.set_context(customer_id="acme")` en el SDK,
+  el atributo `laplace.customer.id` en el contrato, la ingesta, y una columna nueva en los
+  dos almacenes (tardía en los dos: `COLUMNAS_TARDIAS` en SQLite y `ADD COLUMN IF NOT
+  EXISTS` en ClickHouse, para las instalaciones que ya existen). No es el usuario: una
+  empresa cliente tiene muchos usuarios, y el margen es por quien factura. El coste de
+  cada cliente es el de sus ejecuciones enteras, con la lectura de siempre del Panel
+  (`cost_by`, que ya agrupaba por usuario y por sesión) y una dimensión más.
+* **Lo que paga cada uno lo pone el usuario**, en dólares al mes, desde la propia pestaña
+  (la hoja de ruta decía Ajustes; al lado de su coste se entiende mejor lo que se está
+  escribiendo). Se guarda como ajuste del proyecto (`revenue:<cliente>`). Desde Stripe,
+  después. Un cliente con ingresos y sin ejecuciones en el rango se sigue enseñando, y se
+  puede poner lo que paga uno que todavía no ha llegado.
+* **Las reglas de siempre.** El coste al mes es la proyección del héroe, sobre los días de
+  datos del proyecto, así que suma lo mismo; sin un día de datos no se compara con lo que
+  pagan al mes y no se afirma que nadie pierda. Con llamadas sin tarifa el coste es un
+  suelo y el margen un techo: «te deja como mucho», y «pierdes al menos», que sigue
+  siendo cierto con más coste. El trabajo sin cliente se cuenta aparte, nunca repartido.
+* **Sin tiradas de evaluación.** La primera versión las contaba, y en la demo la
+  comparación A/B de ayer heredaba el cliente del último `set_context` y se le cobraba a
+  él: 55 ejecuciones de más. Arreglarlo en el SDK no bastaba —el agente puede fijar un
+  `customer_id` dentro de la tirada—, así que el margen lee `cost_by(..., rules=True)`,
+  como las reglas y como Prompts desde D-160. Una prueba del arreglo no es trabajo de
+  ningún cliente.
+* **Cuatro estados, con el umbral escrito:** pierde (margen negativo), ajustado (menos
+  del 20 % de lo que paga, `MARGEN_AJUSTADO`: cualquier cambio de modelo o de tráfico lo
+  pasa a pérdidas), deja margen, y sin ingresos. Los que pierden van primero.
+* **La pantalla**, pestaña «Clientes» después de Panel: el aviso en rosa arriba («Este
+  cliente te hace perder dinero», con su frase), la tabla con coste, lo que paga
+  (editable) y margen al mes, lo que no tiene cliente aparte y la línea para decir de
+  quién es cada ejecución. **El Diagnóstico lo avisa en su carril**, por encima del
+  presupuesto, sólo cuando hay alguno.
+* **La demo** reparte sus usuarios en cuatro empresas y les pone ingresos como múltiplo
+  de su coste real, para que salgan las cuatro historias pase lo que pase con los
+  precios: el que más trabajo da (iberviajes) no cubre su coste, uno ajustado, uno que
+  deja margen y uno sin ingresos puestos.
+
+Pruebas en `test_margen.py`: el cliente viaja del SDK a la traza; coste por cliente y lo
+que no tiene cliente aparte, en los dos almacenes; el margen y el aviso; ajustado; sin un
+día de datos no se compara; sin tarifa el margen es un techo; un cliente sin tráfico no
+desaparece; sin clientes se dice; una tirada que fija cliente no se le cobra; y la API
+pone y quita ingresos. Rompiendo la proyección o el suelo, fallan. En pantalla, el aviso
+en Clientes y en el carril del Diagnóstico, y la séptima pestaña cabe en móvil.

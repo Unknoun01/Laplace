@@ -804,6 +804,46 @@ export interface Diff {
 // Ajustes del proyecto (D-123)
 // ---------------------------------------------------------------------------------
 
+/** Margen por cliente (Fase 6, D-161). Espejo de laplace_backend/margen.py. */
+export type EstadoMargen =
+  | "pierde"
+  | "ajustado"
+  | "gana"
+  | "sin-ingresos"
+  | "sin-proyeccion"
+  | "sin-trafico";
+
+export interface CustomerMargin {
+  customer_id: string;
+  traces: number;
+  window_cost_usd: number;
+  /** `null` sin un día de datos: no se proyecta (D-073). */
+  monthly_cost_usd: number | null;
+  /** Lo que paga al mes, puesto por el usuario. */
+  monthly_revenue: number | null;
+  margin_usd: number | null;
+  margin_ratio: number | null;
+  /** Hay llamadas sin tarifa: el coste es un suelo y el margen un techo. */
+  cost_is_floor: boolean;
+  unknown_cost_spans: number;
+  status: EstadoMargen;
+  headline: string;
+}
+
+export interface MarginView {
+  project_id: string;
+  days: number;
+  currency: string;
+  projected: boolean;
+  observed_days: number;
+  customers: CustomerMargin[];
+  losing: number;
+  unassigned_traces: number;
+  unassigned_cost_usd: number;
+  assigned_share: number;
+  headline: string;
+}
+
 export interface Budget {
   project_id: string;
   monthly_usd: number | null;

@@ -14,6 +14,7 @@ import type {
   FindingDetail,
   Instance,
   JudgeStatus,
+  MarginView,
   Overview,
   Panel,
   ProjectStats,
@@ -463,6 +464,28 @@ export function setFindingState(input: {
 export function clearFindingState(projectId: string, findingId: string): Promise<unknown> {
   const q = new URLSearchParams({ project_id: projectId, finding_id: findingId });
   return send(`/api/finding-state?${q}`, "DELETE");
+}
+
+/** Coste, ingresos y margen de cada cliente (D-161). */
+export function getCustomers(
+  projectId: string,
+  days: number,
+  senal?: AbortSignal,
+): Promise<MarginView> {
+  return get<MarginView>("/api/customers", { project_id: projectId, days }, senal);
+}
+
+/** Lo que paga un cliente al mes; `null` lo quita. */
+export function setCustomerRevenue(
+  projectId: string,
+  customerId: string,
+  monthly: number | null,
+): Promise<{ customer_id: string; monthly: number | null }> {
+  return send("/api/customers/revenue", "PUT", {
+    project_id: projectId,
+    customer_id: customerId,
+    monthly,
+  });
 }
 
 export function getBudget(projectId: string, senal?: AbortSignal): Promise<Budget> {

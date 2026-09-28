@@ -8,6 +8,7 @@ import { t, type Clave, type ClavePlural } from "./textos";
 /** La sección de la URL y la clave de su título. */
 const TITULOS: Record<string, Clave> = {
   ajustes: "titulo.ajustes",
+  clientes: "titulo.clientes",
   configurar: "titulo.configurar",
   entrar: "titulo.entrar",
   evaluaciones: "titulo.evaluaciones",

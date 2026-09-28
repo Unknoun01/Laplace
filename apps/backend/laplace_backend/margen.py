@@ -1,0 +1,235 @@
+"""Margen por cliente (Fase 6, D-161): lo que te paga cada cliente frente a lo que te
+cuesta su trabajo.
+
+Laplace sabe lo que cuesta cada ejecución; con `laplace.set_context(customer_id=…)` sabe
+también para quién era. Lo que no sabe es lo que te paga cada cliente, y eso lo pone el
+usuario a mano, en dinero al mes (más adelante, desde Stripe). Con las dos cosas, la
+pregunta que nadie más contesta: **¿qué clientes te hacen perder dinero?**
+
+Las reglas del producto valen aquí igual que en el héroe:
+
+* **No se proyecta desde menos de un día de datos** (D-073). Los ingresos son al mes y el
+  coste de una hora no se puede comparar con ellos: se enseña lo gastado y se dice
+  cuánto falta. La proyección es la misma del Diagnóstico, sobre los días de datos del
+  proyecto, así que el coste al mes de todos los clientes suma el del héroe.
+* **Un modelo sin tarifa no cuesta cero.** Si un cliente tiene llamadas sin tarifa, su
+  coste es un suelo y su margen un techo: se dice «como mucho». Un margen negativo sigue
+  siendo negativo con más coste, así que «pierdes al menos» sí se puede afirmar.
+* **El trabajo sin cliente se cuenta aparte**, nunca repartido entre los clientes: no
+  sabemos de quién es, y repartirlo sería inventarse a quién cobrárselo. Las tiradas de
+  evaluación no cuentan en ningún lado: son del desarrollador.
+"""
+
+from __future__ import annotations
+
+import math
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
+
+from . import cifras
+from .insights import MIN_DAYS_FOR_PROJECTION, observed_days, span_label
+from .insights.modelos import DAYS_PER_MONTH, _projection_base
+from .storage.base import Window
+from .textos import t, tn
+
+#: Clave de ajuste de cada cliente: `revenue:<customer_id>` → `{"monthly": 1200.0}`.
+PREFIJO = "revenue:"
+#: Por debajo de esta parte de lo que paga, el margen se llama ajustado: un cliente que
+#: deja un 5 % pasa a perder dinero con cualquier cambio de modelo o de tráfico. Es una
+#: elección de producto, escrita aquí para que se pueda discutir.
+MARGEN_AJUSTADO = 0.2
+#: Clientes que se leen del almacén. Más que eso no cabe en una tabla que se lea.
+MAX_CLIENTES = 500
+
+Estado = Literal["pierde", "ajustado", "gana", "sin-ingresos", "sin-proyeccion", "sin-trafico"]
+
+
+class CustomerMargin(BaseModel):
+    """Un cliente: lo que cuesta, lo que paga y lo que queda."""
+
+    customer_id: str
+    traces: int = 0
+    #: Lo gastado en la ventana, medido.
+    window_cost_usd: float = 0.0
+    #: El mismo gasto al mes, al ritmo de la ventana. `None` sin un día de datos.
+    monthly_cost_usd: float | None = None
+    #: Lo que paga al mes, puesto por el usuario. Sin `_usd`: es un dato suyo, no una
+    #: cifra que el producto afirme (el guardia de D-107 va por esas).
+    monthly_revenue: float | None = None
+    #: Ingresos menos coste, al mes. `None` sin ingresos o sin proyección.
+    margin_usd: float | None = None
+    #: Margen entre ingresos. `None` cuando no hay margen.
+    margin_ratio: float | None = None
+    #: Hay llamadas sin tarifa: el coste es un suelo y el margen, un techo.
+    cost_is_floor: bool = False
+    unknown_cost_spans: int = 0
+    status: Estado = "sin-ingresos"
+    headline: str = ""
+
+
+class MarginView(BaseModel):
+    """Lo que pinta la pestaña de Clientes."""
+
+    project_id: str
+    days: int
+    currency: str = "USD"
+    projected: bool = False
+    observed_days: float = 0.0
+    customers: list[CustomerMargin] = Field(default_factory=list)
+    #: Cuántos te hacen perder dinero: es el aviso de la pestaña y del Diagnóstico.
+    losing: int = 0
+    #: El trabajo que no dice de qué cliente es. Se cuenta aparte, nunca se reparte.
+    unassigned_traces: int = 0
+    unassigned_cost_usd: float = 0.0
+    #: Parte del gasto de la ventana que tiene cliente, entre 0 y 1.
+    assigned_share: float = 0.0
+    headline: str = ""
+
+
+def clave(customer_id: str) -> str:
+    return f"{PREFIJO}{customer_id}"
+
+
+def leer_ingresos(metadata: Any, project_id: str) -> dict[str, float]:
+    """Lo que paga cada cliente. Sin base de metadatos, nada: no es un error."""
+    try:
+        filas = metadata.list_settings(project_id, PREFIJO)
+    except Exception:  # noqa: BLE001
+        return {}
+    salida: dict[str, float] = {}
+    for k, v in filas.items():
+        try:
+            importe = float((v or {}).get("monthly"))
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(importe) and importe > 0:
+            salida[k[len(PREFIJO) :]] = importe
+    return salida
+
+
+def _fila(
+    cliente: str,
+    trazas: int,
+    coste: float,
+    sin_tarifa: int,
+    ingreso: float | None,
+    base: float | None,
+    dias: float,
+) -> CustomerMargin:
+    fila = CustomerMargin(
+        customer_id=cliente,
+        traces=trazas,
+        window_cost_usd=coste,
+        monthly_revenue=ingreso,
+        cost_is_floor=sin_tarifa > 0,
+        unknown_cost_spans=sin_tarifa,
+    )
+    if base is not None:
+        fila.monthly_cost_usd = coste / base * DAYS_PER_MONTH
+
+    suelo = fila.cost_is_floor
+    if trazas == 0:
+        fila.status = "sin-trafico"
+        fila.headline = t("margen.fila.sin_trafico")
+        return fila
+    if fila.monthly_cost_usd is None:
+        fila.status = "sin-proyeccion"
+        fila.headline = t(
+            "margen.fila.sin_proyeccion_suelo" if suelo else "margen.fila.sin_proyeccion",
+            coste=cifras.dinero(coste),
+            tiempo=span_label(dias),
+        )
+        return fila
+    coste_mes = cifras.dinero(fila.monthly_cost_usd)
+    if ingreso is None:
+        fila.status = "sin-ingresos"
+        fila.headline = t(
+            "margen.fila.sin_ingresos_suelo" if suelo else "margen.fila.sin_ingresos",
+            coste=coste_mes,
+        )
+        return fila
+
+    fila.margin_usd = ingreso - fila.monthly_cost_usd
+    fila.margin_ratio = fila.margin_usd / ingreso
+    valores = {
+        "coste": coste_mes,
+        "ingreso": cifras.dinero(ingreso),
+        "margen": cifras.dinero(abs(fila.margin_usd)),
+        "pct": cifras.porcentaje(abs(fila.margin_ratio)),
+    }
+    if fila.margin_usd < 0:
+        # Con más coste por contar, pierde más: «al menos» es cierto.
+        fila.status = "pierde"
+        fila.headline = t("margen.fila.pierde_suelo" if suelo else "margen.fila.pierde", **valores)
+    elif fila.margin_ratio < MARGEN_AJUSTADO:
+        fila.status = "ajustado"
+        fila.headline = t(
+            "margen.fila.ajustado_suelo" if suelo else "margen.fila.ajustado", **valores
+        )
+    else:
+        fila.status = "gana"
+        fila.headline = t("margen.fila.gana_suelo" if suelo else "margen.fila.gana", **valores)
+    return fila
+
+
+_ORDEN = {"pierde": 0, "ajustado": 1, "gana": 2, "sin-ingresos": 3, "sin-proyeccion": 3,
+          "sin-trafico": 4}
+
+
+def calcular(
+    store: Any, project_id: str, window: Window, ingresos: dict[str, float]
+) -> MarginView:
+    resumen = store.summarize_window(project_id, window)
+    base = _projection_base(resumen, window)
+    dias = observed_days(resumen, window)
+    # Sin tiradas de evaluación: una prueba del arreglo no es trabajo de ningún cliente,
+    # aunque el agente fije un `customer_id` dentro. En la demo, la comparación A/B
+    # heredaba el cliente del último `set_context` y se le cobraba a él.
+    grupos = store.cost_by(project_id, window, "customer", limit=MAX_CLIENTES, rules=True)
+
+    vista = MarginView(
+        project_id=project_id, days=window.days, projected=base is not None, observed_days=dias
+    )
+    vistos: set[str] = set()
+    for g in grupos:
+        if not g.key:
+            vista.unassigned_traces = g.traces
+            vista.unassigned_cost_usd = g.cost_usd
+            continue
+        vistos.add(g.key)
+        vista.customers.append(
+            _fila(g.key, g.traces, g.cost_usd, g.unknown_cost_spans, ingresos.get(g.key),
+                  base, dias)
+        )
+    # Un cliente con ingresos puestos y sin tráfico en el rango también se enseña: que
+    # desaparezca de la tabla haría pensar que se ha borrado lo que se escribió.
+    for cliente, ingreso in ingresos.items():
+        if cliente not in vistos:
+            vista.customers.append(_fila(cliente, 0, 0.0, 0, ingreso, base, dias))
+
+    vista.customers.sort(
+        key=lambda c: (_ORDEN[c.status], c.margin_usd if c.margin_usd is not None else 0.0,
+                       -c.window_cost_usd, c.customer_id)
+    )
+    vista.losing = sum(1 for c in vista.customers if c.status == "pierde")
+    asignado = sum(c.window_cost_usd for c in vista.customers)
+    total = asignado + vista.unassigned_cost_usd
+    vista.assigned_share = asignado / total if total > 0 else 0.0
+
+    con_trafico = [c for c in vista.customers if c.traces > 0]
+    if not con_trafico:
+        vista.headline = t("margen.titular.sin_clientes")
+    elif base is None:
+        vista.headline = t(
+            "margen.titular.sin_proyeccion",
+            hay=span_label(dias),
+            minimo=span_label(MIN_DAYS_FOR_PROJECTION),
+        )
+    elif vista.losing:
+        vista.headline = tn("margen.titular.pierden", vista.losing, n=vista.losing)
+    elif not ingresos:
+        vista.headline = t("margen.titular.sin_ingresos")
+    else:
+        vista.headline = t("margen.titular.bien")
+    return vista

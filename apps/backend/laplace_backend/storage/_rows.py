@@ -97,6 +97,9 @@ COLUMNS = (
     "prompt_version",
     "events",
     "attributes",
+    # Al final y no junto a `user_id`: el orden es el de las filas de `span_to_row`, y
+    # las columnas tardías van detrás en los dos almacenes (D-161).
+    "customer_id",
 )
 
 
@@ -343,6 +346,7 @@ def row_to_span(r: dict[str, Any]) -> Span:
         output=loads(r["output_payload"], None),
         session_id=r["session_id"] or None,
         user_id=r["user_id"] or None,
+        customer_id=(r["customer_id"] if "customer_id" in r.keys() else "") or None,
         tags=as_list(r["tags"]),
         metadata=loads(r["metadata"], {}) or {},
         dedup_hash=r["dedup_hash"],
@@ -527,4 +531,5 @@ def span_to_row(span: Span) -> list[Any]:
         int(span.prompt_version or 0),
         dumps([event.model_dump(mode="json") for event in span.events]),
         dumps(span.attributes),
+        span.customer_id or "",
     ]

@@ -1284,9 +1284,17 @@ class ClickHouseStore:
         ]
 
     def cost_by(
-        self, project_id: str, window: Window, dimension: str, limit: int = 20
+        self,
+        project_id: str,
+        window: Window,
+        dimension: str,
+        limit: int = 20,
+        *,
+        rules: bool = False,
     ) -> list[CostGroup]:
-        columna = {"user": "user_id", "session": "session_id"}[dimension]
+        columna = {"user": "user_id", "session": "session_id", "customer": "customer_id"}[
+            dimension
+        ]
         params = {**self._window_params(project_id, window), "limit": limit}
         sql = f"""
             SELECT clave, count() AS trazas, sum(coste) AS coste, sum(tokens) AS tokens,
@@ -1298,7 +1306,7 @@ class ClickHouseStore:
                        sum(input_tokens + output_tokens)                 AS tokens,
                        countIf(span_type = 'llm' AND cost_unknown = 1)   AS sin_tarifa
                 FROM spans FINAL
-                WHERE {WINDOW_WHERE}
+                WHERE {RULES_WHERE if rules else WINDOW_WHERE}
                 GROUP BY trace_id
             )
             GROUP BY clave
