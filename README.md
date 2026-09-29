@@ -466,6 +466,22 @@ costaría de verdad. Genera a propósito las patologías que el producto tiene q
 enseñar: un bucle de tool calls, un paso trivial resuelto con un modelo caro, un agente
 iterativo de ~30 pasos que se atasca, y una traza que falla.
 
+### Si ya tenías datos: la clave de ordenación por día
+
+Las instalaciones creadas antes de D-168 ordenan la tabla de spans de una forma con la
+que cada pantalla lee todo el histórico del proyecto, aunque mires un solo día. El
+backend lo avisa al arrancar. Migrarla es una copia entera de la tabla, así que no se
+hace sola:
+
+```bash
+docker compose exec backend python -m laplace_backend.storage.migrar_orden            # qué haría
+docker compose exec backend python -m laplace_backend.storage.migrar_orden --hacerlo   # hacerlo
+```
+
+La ingesta sigue funcionando mientras copia, necesita sitio libre para una segunda copia
+de la tabla (lo comprueba antes) y no borra la tabla vieja: queda como
+`spans_antes_d168` hasta que la borres tú.
+
 ### Desarrollo sin Docker
 
 ```bash

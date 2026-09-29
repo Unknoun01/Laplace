@@ -128,7 +128,10 @@ CREATE TABLE IF NOT EXISTS spans
 )
 ENGINE = ReplacingMergeTree(ingested_at)
 PARTITION BY toYYYYMM(start_time)
-ORDER BY (project_id, trace_id, span_id)
+-- El día va antes que la traza (D-168): con `(project_id, trace_id, span_id)` los días se
+-- mezclaban en cada gránulo, y una ventana de un día leía casi todo el histórico del
+-- proyecto. Las tablas de antes se migran con `python -m laplace_backend.storage.migrar_orden`.
+ORDER BY (project_id, toDate(start_time), trace_id, span_id)
 SETTINGS index_granularity = 8192;
 
 -- Instalaciones anteriores al índice de trace_id: CREATE TABLE IF NOT EXISTS no toca

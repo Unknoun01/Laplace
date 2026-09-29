@@ -403,3 +403,71 @@ def test_los_argmax_llevan_su_desempate():
         and re.search(r"arg(Max|Min)\([^,]+,\s*[^(\s]", linea.split("--")[0])
     ]
     assert not sueltos, "argMax/argMin sin desempate: " + "; ".join(sueltos)
+
+
+# ---------------------------------------------------------------------------------
+# Los filtros por traza, acotados a la ventana (D-168)
+# ---------------------------------------------------------------------------------
+
+
+def _traza_que_cruza_el_borde(project: str, desde: datetime) -> tuple[str, list[Span]]:
+    """Una traza cuyo span raíz —el que lleva la sesión— empezó 20 minutos antes de la
+    ventana y cuyas llamadas caen dentro. Y otra, de la misma sesión, de hace tres días,
+    que no tiene nada en la ventana."""
+    dentro = uuid.uuid4().hex
+    raiz = _llm(
+        project,
+        dentro,
+        uuid.uuid4().hex[:16],
+        nombre="atender",
+        dedup="r",
+        paso="atender",
+        instante=desde - timedelta(minutes=20),
+    )
+    raiz.session_id = "conv-borde"
+    raiz.status = "error"
+    hijo = _llm(
+        project,
+        dentro,
+        uuid.uuid4().hex[:16],
+        nombre="chat",
+        dedup="h",
+        paso="responder",
+        instante=desde + timedelta(minutes=5),
+        parent=raiz.span_id,
+    )
+    vieja = _llm(
+        project,
+        uuid.uuid4().hex,
+        uuid.uuid4().hex[:16],
+        nombre="atender",
+        dedup="v",
+        paso="atender",
+        instante=desde - timedelta(days=3),
+    )
+    vieja.session_id = "conv-borde"
+    return dentro, [raiz, hijo, vieja]
+
+
+@pytest.mark.parametrize(
+    "filtro", [{"session_id": "conv-borde"}, {"status": "error"}], ids=["sesion", "estado"]
+)
+def test_una_traza_que_cruza_el_borde_se_sigue_encontrando(tmp_path, filtro):
+    """Acotar las subconsultas a la ventana es lo que deja leer sólo sus días; el margen
+    es lo que evita perder la traza cuyo span raíz empezó un poco antes. Igual en los dos
+    almacenes."""
+    nube = _nube()
+    project = f"borde-{uuid.uuid4().hex[:8]}"
+    local = SQLiteStore(tmp_path / "b.db")
+    local.migrate()
+    desde = AHORA - timedelta(hours=6)
+    dentro, spans = _traza_que_cruza_el_borde(project, desde)
+    local.insert_spans(spans)
+    nube.insert_spans(spans)
+    try:
+        filtros = TraceFilter(project_id=project, since=desde, until=AHORA, **filtro)
+        aqui = [t.trace_id for t in local.list_traces(filtros).traces]
+        alli = [t.trace_id for t in nube.list_traces(filtros).traces]
+        assert aqui == alli == [dentro]
+    finally:
+        nube.delete_project(project)
