@@ -43,6 +43,7 @@ from ._rows import (
     utc,
 )
 from .base import (
+    MARGEN_FILTROS,
     Bucket,
     CostGroup,
     CoverageFacts,
@@ -638,6 +639,13 @@ class SQLiteStore:
         if filters.until is not None:
             clauses.append("start_time <= :until")
             params["until"] = _iso(filters.until)
+        # Y a la ventana, con el mismo margen que la nube (D-168).
+        if filters.since is not None:
+            acotar += " AND start_time >= :sub_since"
+            params["sub_since"] = _iso(filters.since - MARGEN_FILTROS)
+        if filters.until is not None:
+            acotar += " AND start_time <= :sub_until"
+            params["sub_until"] = _iso(filters.until + MARGEN_FILTROS)
         # Sesión y usuario los lleva el span raíz, no cada llamada: filtrar los spans
         # por ellos dejaba fuera los hijos y la traza salía con coste y tokens a cero.
         # Se filtran trazas, igual que el modelo (D-123).

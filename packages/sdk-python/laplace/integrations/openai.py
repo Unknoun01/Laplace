@@ -34,6 +34,9 @@ _PUERTAS = (
     ("openai.resources.chat.completions", ("Completions", "AsyncCompletions"), "parse", "chat"),
     ("openai.resources.responses", ("Responses", "AsyncResponses"), "create", "responses"),
     ("openai.resources.responses", ("Responses", "AsyncResponses"), "parse", "responses"),
+    # `client.beta.responses` es otra clase, con su `create` directo a la red. La de
+    # `client.beta.chat.completions`, en cambio, es la misma que `chat.completions`.
+    ("openai.resources.beta.responses", ("Responses", "AsyncResponses"), "create", "responses"),
 )
 
 

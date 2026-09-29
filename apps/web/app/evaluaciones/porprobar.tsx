@@ -6,7 +6,7 @@ import { createDataset } from "@/lib/api";
 import { money } from "@/lib/format";
 import type { Dataset, Finding, RunSummary } from "@/lib/types";
 import { t, tn } from "@/lib/textos";
-import { pruebasDelPaso } from "../problema/ciclo";
+import { lineaDeReplay, pruebasDelPaso } from "../problema/ciclo";
 
 /** Cuántos problemas se listan: los que más devuelven. El resto sigue en el Diagnóstico. */
 const MAX = 6;
@@ -121,7 +121,10 @@ function Fila({
       {guardado && (
         <>
           <p className="pp-estado">{t("ev.por_probar.guardado_como", { nombre: guardado })}</p>
-          <pre>{`laplace.run_dataset("${guardado}", mi_agente, variant="${t("seg.probar.arreglado")}")`}</pre>
+          <pre>
+            {lineaDeReplay(project, guardado, finding) ||
+              `laplace.run_dataset("${guardado}", mi_agente, variant="${t("seg.probar.arreglado")}")`}
+          </pre>
         </>
       )}
       {error && <p className="verr">{error}</p>}

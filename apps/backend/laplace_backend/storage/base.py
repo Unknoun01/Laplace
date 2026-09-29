@@ -491,6 +491,14 @@ class CoverageFacts:
     split_steps: list[str] = field(default_factory=list)
 
 
+#: Cuánto se ensanchan por cada lado las subconsultas de los filtros por traza respecto
+#: de la ventana (D-168). Acotarlas es lo que deja a ClickHouse leer sólo los días de la
+#: ventana; el margen es para una traza que empezó un poco antes: la sesión, el usuario y
+#: el cliente los lleva su span raíz, y sin margen una traza que cruza el borde no se
+#: encontraría por ellos aunque sus llamadas estén dentro.
+MARGEN_FILTROS = timedelta(hours=1)
+
+
 @dataclass
 class TraceCost:
     """Lo que costó una traza concreta, para comparar dos tiradas de evaluación.

@@ -408,6 +408,11 @@ class EvalRunItem(_Model):
     #: fallo, no se descarta: descartarlo subiría el acierto por romperse más.
     failed: bool = False
     error: str = ""
+    #: Si no está vacío, el coste de este caso es sólo el de estos spans de la traza, no
+    #: el de la traza entera. Lo usa el replay (D-167): la tirada «original» apunta a las
+    #: llamadas reenviadas dentro de las trazas reales, y compararla con la traza entera
+    #: pondría todo el agente de un lado y un solo paso del otro.
+    span_ids: list[str] = Field(default_factory=list)
 
 
 class EvalRun(_Model):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import importlib
 import logging
 from typing import Any
 
@@ -21,11 +22,33 @@ _patched = False
 
 #: Los métodos que llaman al modelo. `stream()` y `parse()` van directos a la red sin
 #: pasar por `create`, así que cada uno necesita su parche y ninguno cuenta dos veces.
+#: `count_tokens` no está: no genera nada ni se factura como una llamada.
 _METODOS = ("create", "parse", "stream")
+
+#: Dónde viven las clases que llaman al modelo. `client.beta.messages` es otra clase
+#: que no hereda de la normal y va directa a la red: lo que sólo se pide por ahí
+#: (gestión de contexto, compactación, servidores MCP, el modo rápido) no se veía.
+_MODULOS = ("anthropic.resources.messages", "anthropic.resources.beta.messages")
+
+
+def _clases() -> list[tuple[Any, bool]]:
+    """Las clases de mensajes que existen en la versión instalada, con si son async."""
+    encontradas = []
+    for modulo in _MODULOS:
+        try:
+            mod = importlib.import_module(modulo)
+        except Exception:  # noqa: BLE001 - una versión vieja sin `beta` no es un error
+            continue
+        for nombre, asincrono in (("Messages", False), ("AsyncMessages", True)):
+            cls = getattr(mod, nombre, None)
+            if cls is not None:
+                encontradas.append((cls, asincrono))
+    return encontradas
 
 
 def instrument() -> bool:
-    """Parchea `messages.create`, `messages.parse` y `messages.stream` (sync y async).
+    """Parchea `create`, `parse` y `stream` de `messages` y de `beta.messages` (sync y
+    async).
 
     Idempotente.
     """
@@ -33,14 +56,11 @@ def instrument() -> bool:
     if _patched:
         return True
     try:
-        from anthropic.resources import messages as messages_module
+        import anthropic  # noqa: F401
     except Exception:  # noqa: BLE001 - anthropic no instalado: no es un error
         return False
 
-    for cls_name, asincrono in (("Messages", False), ("AsyncMessages", True)):
-        cls = getattr(messages_module, cls_name, None)
-        if cls is None:
-            continue
+    for cls, asincrono in _clases():
         for metodo in _METODOS:
             original = getattr(cls, metodo, None)
             if original is None or getattr(original, "_laplace_patched", False):
@@ -59,15 +79,10 @@ def instrument() -> bool:
 def uninstrument() -> None:
     """Deshace el parcheo. Pensado para tests."""
     global _patched
-    try:
-        from anthropic.resources import messages as messages_module
-    except Exception:  # noqa: BLE001
-        return
-    for cls_name in ("Messages", "AsyncMessages"):
-        cls = getattr(messages_module, cls_name, None)
+    for cls, _asincrono in _clases():
         for metodo in _METODOS:
             original = getattr(getattr(cls, metodo, None), "_laplace_original", None)
-            if cls is not None and original is not None:
+            if original is not None:
                 setattr(cls, metodo, original)
     _patched = False
 
@@ -302,19 +317,25 @@ def _wrap_async(original: Any) -> Any:
 # todo (iterar, `text_stream`, `get_final_message()`), así que todos los caminos pasan
 # por nuestro acumulador, y al cerrarlo se cierra el span.
 #
-# La petición vive en un atributo privado del gestor. Si una versión futura lo mueve,
-# no se rompe nada del usuario: se avisa en el log y esa llamada no se ve. Las pruebas
-# contra el SDK real lo detectan al actualizarlo.
-
-_PETICION = {
-    False: "_MessageStreamManager__api_request",
-    True: "_AsyncMessageStreamManager__api_request",
-}
+# La petición vive en un atributo privado del gestor, con el nombre deformado por la
+# clase que lo define (`_MessageStreamManager__api_request`,
+# `_BetaAsyncMessageStreamManager__api_request`...): se busca por la jerarquía del
+# gestor en vez de fijar los nombres, porque la beta tiene los suyos. Si una versión
+# futura lo mueve, no se rompe nada del usuario: se avisa en el log y esa llamada no se
+# ve. Las pruebas contra el SDK real lo detectan al actualizarlo.
 
 
-def _sustituir_peticion(gestor: Any, asincrono: bool, nueva: Any) -> None:
-    atributo = _PETICION[asincrono]
-    if not hasattr(gestor, atributo):
+def _atributo_peticion(gestor: Any) -> str | None:
+    for cls in type(gestor).__mro__:
+        atributo = f"_{cls.__name__.lstrip('_')}__api_request"
+        if hasattr(gestor, atributo):
+            return atributo
+    return None
+
+
+def _sustituir_peticion(gestor: Any, nueva: Any) -> None:
+    atributo = _atributo_peticion(gestor)
+    if atributo is None:
         logger.warning(
             "laplace: esta versión de anthropic ha cambiado messages.stream(); "
             "esas llamadas no se van a ver"
@@ -346,7 +367,7 @@ def _wrap_stream_sync(original: Any) -> Any:
             return lanzar
 
         try:
-            _sustituir_peticion(gestor, False, envolver)
+            _sustituir_peticion(gestor, envolver)
         except Exception:  # noqa: BLE001 - nunca romper la llamada del usuario
             logger.debug("laplace: no se pudo envolver messages.stream()", exc_info=True)
         return gestor
@@ -380,7 +401,7 @@ def _wrap_stream_async(original: Any) -> Any:
             return lanzar()
 
         try:
-            _sustituir_peticion(gestor, True, envolver)
+            _sustituir_peticion(gestor, envolver)
         except Exception:  # noqa: BLE001
             logger.debug("laplace: no se pudo envolver messages.stream()", exc_info=True)
         return gestor

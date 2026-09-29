@@ -130,6 +130,65 @@ def comando_demo(args: argparse.Namespace) -> int:
     return 0
 
 
+def comando_replay(args: argparse.Namespace) -> int:
+    """Reenvía las llamadas reales de un paso al modelo barato, con tope y permiso."""
+    from . import init
+    from .evals import EvalError
+    from .replay import replay_dataset
+
+    init(project=args.proyecto, endpoint=args.endpoint)
+
+    def permiso(plan) -> bool:
+        print(plan.describe())
+        if args.si:
+            return True
+        if not sys.stdin.isatty():
+            print(
+                "\nNo se gasta nada sin permiso, y aquí no hay nadie a quien preguntar: "
+                "vuelve a lanzarlo con --si.",
+                file=sys.stderr,
+            )
+            return False
+        return input("\n¿Seguir? [s/N] ").strip().lower() in ("s", "si", "sí", "y", "yes")
+
+    try:
+        resultado = replay_dataset(
+            args.conjunto,
+            model=args.modelo,
+            max_usd=args.tope,
+            project=args.proyecto,
+            endpoint=args.endpoint,
+            provider=args.proveedor,
+            judge=not args.sin_juez,
+            confirm=permiso,
+            on_call=lambda n, total: print(f"  {n}/{total}", end="\r", flush=True),
+        )
+    except EvalError as exc:
+        print(f"laplace replay: {exc}", file=sys.stderr)
+        return 1
+    if resultado.cancelled:
+        print("No se ha reenviado nada.")
+        return 1
+    print(f"\nReenviadas {resultado.calls_done} llamadas; gastado como mucho "
+          f"{resultado.spent_usd:.4f} $ (el coste medido sale en la comparación).")
+    if resultado.calls_skipped_by_cap:
+        print(f"{resultado.calls_skipped_by_cap} no se han reenviado para no pasar del tope.")
+    if resultado.cases_failed:
+        print(
+            f"{resultado.cases_failed} ejecuciones han fallado al reenviarlas "
+            "y cuentan como fallo."
+        )
+    if resultado.judged:
+        print(f"El juez da por buenas {resultado.passed} de {resultado.judged} respuestas "
+              f"(juzgar ha costado {resultado.judge_cost_usd:.4f} $).")
+    elif resultado.judge_note:
+        print(resultado.judge_note)
+    if resultado.replay_run_id:
+        print("Compáralas en la pestaña Probar: "
+              f"«{resultado.plan.model}» contra la original ({resultado.replay_run_id}).")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="laplace",
@@ -148,6 +207,22 @@ def main(argv: list[str] | None = None) -> int:
     demo = sub.add_parser("demo", help="manda trazas de ejemplo para ver qué detecta")
     demo.add_argument("--endpoint", default=f"http://127.0.0.1:{DEFAULT_PORT}")
     demo.set_defaults(func=comando_demo)
+
+    replay = sub.add_parser(
+        "replay",
+        help="reenvía las llamadas reales de un paso a otro modelo, con tope de gasto",
+    )
+    replay.add_argument("conjunto", help="nombre o id del conjunto (se guarda en Probar)")
+    replay.add_argument("--modelo", required=True, help="el modelo al que reenviarlas")
+    replay.add_argument(
+        "--tope", type=float, required=True, help="lo máximo que se puede gastar, en dólares"
+    )
+    replay.add_argument("--proyecto", default=None, help="por defecto, LAPLACE_PROJECT")
+    replay.add_argument("--endpoint", default=None, help="por defecto, LAPLACE_ENDPOINT")
+    replay.add_argument("--proveedor", choices=("openai", "anthropic"), default=None)
+    replay.add_argument("--sin-juez", action="store_true", help="no juzgar las respuestas")
+    replay.add_argument("--si", action="store_true", help="no preguntar antes de gastar")
+    replay.set_defaults(func=comando_replay)
 
     args = parser.parse_args(argv)
     if not getattr(args, "func", None):

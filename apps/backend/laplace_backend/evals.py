@@ -24,7 +24,7 @@ import logging
 import math
 from typing import Any, Literal
 
-from laplace.schema import Annotation, AnnotationSource, EvalRun
+from laplace.schema import Annotation, AnnotationSource, EvalRun, EvalRunItem, Span
 from pydantic import BaseModel, Field
 
 from . import cifras
@@ -272,6 +272,36 @@ def prompt_labels(
     )
 
 
+def cost_key(item: EvalRunItem) -> str:
+    """Con qué clave se busca el coste de un caso: la traza, o la traza y sus spans.
+
+    Una misma traza puede contar entera en una tirada y sólo por unos spans en otra
+    (D-167): con la misma clave, una pisaría a la otra.
+    """
+    if not item.span_ids:
+        return item.trace_id
+    return f"{item.trace_id}#{','.join(sorted(item.span_ids))}"
+
+
+def coste_de_spans(trace_id: str, spans: list[Span], ids: set[str]) -> TraceCost:
+    """El coste de unos spans concretos de una traza, con las marcas de siempre."""
+    elegidos = [s for s in spans if s.span_id in ids]
+    llms = [s.llm for s in elegidos if s.llm is not None]
+    return TraceCost(
+        trace_id=trace_id,
+        cost_usd=sum(llm.cost.total_usd for llm in llms),
+        input_tokens=sum(llm.usage.input_tokens for llm in llms),
+        output_tokens=sum(llm.usage.output_tokens for llm in llms),
+        duration_ms=sum(s.duration_ms for s in elegidos),
+        spans=len(elegidos),
+        error=any(s.status == "error" for s in elegidos),
+        # Un span pedido que ya no está (caducado, borrado) no puede costar cero sin
+        # decirlo: cuenta como coste desconocido, que convierte el total en un suelo.
+        unknown_cost_spans=sum(1 for llm in llms if llm.cost.unknown) + len(ids) - len(elegidos),
+        assumed_rate_spans=sum(1 for llm in llms if llm.cost.rate_assumed),
+    )
+
+
 def side_for(
     run: EvalRun,
     annotations: dict[str, list[Annotation]],
@@ -282,7 +312,7 @@ def side_for(
     casos = len(run.items)
     reventados = sum(1 for i in run.items if i.failed)
 
-    trazas = [costs[i.trace_id] for i in run.items if i.trace_id in costs]
+    trazas = [costs[cost_key(i)] for i in run.items if cost_key(i) in costs]
     coste = sum(t.cost_usd for t in trazas)
     suelo = any(t.unknown_cost_spans or t.assumed_rate_spans for t in trazas)
 
@@ -525,7 +555,7 @@ def summarize_run(
         cost_usd=lado.cost_usd,
         judge_cost_usd=lado.judge_cost_usd,
         unknown_cost_spans=sum(
-            costs[i.trace_id].unknown_cost_spans for i in run.items if i.trace_id in costs
+            costs[cost_key(i)].unknown_cost_spans for i in run.items if cost_key(i) in costs
         ),
         rates=lado.rates,
         prompt_versions=lado.prompt_versions,

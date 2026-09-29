@@ -3220,3 +3220,301 @@ Lo que quedaba de la Fase 6 sin necesitar una clave.
 
 Pruebas: `test_stripe.py` (se trae una vez al día y no antes; si Stripe falla, lo último
 sigue valiendo; el bucle de fondo lo trae) y `test_otlp_json.py`.
+
+## 2026-09-28 — Restos de fases cerradas: las integraciones sin probar
+
+### D-164 — `client.beta.*` en Python: las llamadas que no se veían
+La hoja de ruta lo daba por «sin probar» y el README lo reconocía («no se ven las
+llamadas por `client.beta.*`»). Al probarlo contra los SDK de verdad (anthropic 1.9,
+openai 3.20) había dos huecos, y los dos eran llamadas que no existían para Laplace:
+
+* **`client.beta.messages` de Anthropic** es otra clase
+  (`anthropic.resources.beta.messages.Messages`), que no hereda de la normal y va
+  directa a la red. Todo lo nuevo de Anthropic se pide por ahí (gestión de contexto,
+  compactación, servidores MCP, el modo rápido), y quien lo usa manda **todo** su
+  tráfico por esa puerta: su agente salía sin coste ni hallazgos. Ahora se parchean
+  `create`, `parse` y `stream` en las dos, síncronas y asíncronas. `count_tokens` no:
+  no genera nada ni se factura como una llamada, y hay una prueba que lo exige.
+* **El gestor de `beta.messages.stream()`** guarda la petición en otro atributo privado
+  (`_BetaMessageStreamManager__api_request`). El nombre ya no se fija a mano: se busca
+  por la jerarquía del gestor con la regla de deformación de nombres de Python. Si una
+  versión lo mueve, se sigue avisando en el log.
+* **`client.beta.responses.create` de OpenAI** también es otra clase, y se añade a las
+  puertas. `client.beta.chat.completions` es la misma clase que `chat.completions` y ya
+  estaba cubierta; una prueba lo fija para enterarnos si cambia.
+* **Lo que sigue fuera, dicho en el README:** de `client.beta` de OpenAI, las Assistants
+  (`threads.runs`), Realtime, ChatKit y los agentes alojados, que no pasan por estas
+  puertas.
+
+Ninguna puerta nueva cuenta dos veces: `span_llm()` exige exactamente un span por
+llamada. Visto de paso y sin tocar: sin streaming, la salida de Anthropic se guarda como
+la lista de bloques (con `citations` y el resto), y en streaming como el texto
+acumulado; la misma llamada queda con dos formas según cómo se haga.
+
+Pruebas: `test_proveedores_beta.py` (15, con los clientes reales y el transporte
+falso). Sin el arreglo fallan 10, y si la búsqueda del atributo se salta la clase del
+gestor fallan las de `stream()`, las beta y las normales.
+
+### D-165 — Las integraciones de TypeScript que faltaban, probadas: y lo que se perdía
+Anthropic por OpenInference-js y por OpenLLMetry-js, el AI SDK de Vercel y LangChain.js
+estaban en la guía como «deberían llegar, nadie lo ha comprobado». Se han probado con
+agentes de Node de verdad contra `laplace ui` y un proveedor falso con la forma
+documentada de cada API (sin clave ni gasto). Los tokens, la caché y el coste llegaban
+bien por las cuatro vías. Lo demás, no:
+
+* **El AI SDK de Vercel 7 no mandaba nada.** La versión 7 ya no lee
+  `experimental_telemetry`, que es lo que decía la guía: hace falta
+  `registerTelemetry(new OpenTelemetry())` de `@ai-sdk/otel` y `telemetry` en cada
+  llamada. La guía lo explica ahora.
+* **Las convenciones GenAI actuales se leían a medias.** Vercel 7 y OpenLLMetry-js
+  mandan los mensajes en `parts` (no en `content`) y el prompt de sistema **aparte**, en
+  `gen_ai.system_instructions`. Los mensajes se guardaban tal cual —la interfaz los
+  enseñaba vacíos y las reglas que miran el texto no tenían nada que mirar— y el prompt
+  de sistema se perdía, con él la mitad de la identidad del paso: dos pasos con la misma
+  pregunta caían en uno. La ingesta pasa ahora cada mensaje en `parts` a la forma del SDK
+  de Python (la de OpenAI): el texto a `content`, las llamadas a herramientas a
+  `tool_calls` y su respuesta a un mensaje `tool`; lo que no es texto ni herramienta
+  (una imagen) se queda en `parts` al lado. Las instrucciones aparte se unen como primer
+  mensaje de sistema si no hay ya uno. Nunca se pisa un mensaje que ya trae `content`, y
+  para saber si hay `parts` se busca la cadena antes de parsear nada: los spans de
+  nuestro SDK no pagan el cambio.
+* **OpenInference-js con Anthropic deja el `system` en `llm.invocation_parameters`**, no
+  entre los mensajes: se une igual (cadena o bloques de texto). Además se leen su
+  `llm.response.model_name` y su `llm.finish_reason`, en singular.
+* **La respuesta de LangChain.js con `ChatOpenAI` 1.6 llegaba sin texto.** Va por la
+  Responses API, su contenido es una lista y la instrumentación de OpenInference sólo
+  manda el rol. El texto está en `output.value`, en `generations[i][0].text`, y se saca
+  de ahí si los mensajes de salida no traen ninguno.
+* **Lo que no es nuestro y se deja dicho en la guía:** LangChain.js 1.5, en streaming con
+  Anthropic, cuenta un token de salida de más (suma el de `message_start` al total), y
+  OpenLLMetry no manda el motivo de parada en streaming.
+
+El banco queda en `scripts/integraciones_js`, con las versiones fijadas y un
+`verificar.py` que exige a cada llamada modelo, tokens con la caché dentro, coste
+medido, el prompt de sistema y la respuesta en texto. Contra la ingesta de antes da 21
+fallos, y contra la de ahora, ninguno. Sigue sin probarse contra las API reales, y
+LangGraph.js, el Agents SDK de TypeScript y Mastra no se han probado.
+
+Pruebas: 10 nuevas en `test_convenciones.py`, con los atributos copiados de las trazas
+de verdad. Entre ellas, una con un span que sólo trae `parts` y nada más que lo delate
+(como la instrumentación oficial de OpenTelemetry para OpenAI), porque sin ella nada
+fallaba al romper la detección.
+
+## 2026-09-29 — Escala: dos semanas de histórico
+
+### D-166 — Con semanas de histórico, una ventana de un día lee el mes entero
+La hoja de ruta dejaba por decidir, a falta de medir con semanas de histórico, dos
+cosas: acotar por tiempo las subconsultas de `_where` y el `FINAL` con partes sin
+fusionar. Medido en un contenedor de 4 núcleos y 16 GB, con `scripts/carga.py`, que
+ahora genera varios días (`--dias`, `--dias-atras`). Son 10 millones de spans al día
+(el proyecto grande, la mitad), primero con un día guardado y después con catorce.
+
+**Lo que empeora sin cambiar la ventana:**
+
+| Proyecto grande, ventana de 1 día | 1 día guardado | 14 días guardados |
+|---|---|---|
+| Diagnóstico | 9–11 s | 15–19 s |
+| Panel | 2,4 s | 7,8 s |
+| Filas leídas por un Diagnóstico | 112 millones | **590 millones** |
+
+El Diagnóstico de 7 días, con esos 7 días llenos, tarda 100 s y el Panel 46 s. La lista
+de trazas de 7 días, 16 s. Abrir una traza sigue en 0,03 s. En disco son 10,9 GB para
+140 millones de spans (12×).
+
+**La causa no es ninguna de las dos que se sospechaban: es la clave de ordenación.** La
+tabla se ordena por `(project_id, trace_id, span_id)`, y los `trace_id` son aleatorios,
+así que cada gránulo mezcla trazas de todos los días. En cuanto las partes se fusionan
+(al medir quedaban 8 activas), el índice `minmax` de `start_time` ya no descarta nada, y
+cada consulta de una ventana recorre casi todo el histórico del proyecto en la
+partición mensual. Con retención de 30 días, una ventana de un día cuesta como el mes.
+
+**Comprobado con una copia.** Se hizo una muestra del proyecto grande (una de cada cuatro
+trazas, 17,5 millones de spans, 14 días), guardada en dos tablas idénticas salvo la clave
+y fusionadas en una parte cada una. Mismas consultas, con la forma de las del almacén:
+
+| Ventana de 1 día | `(project_id, trace_id, span_id)` | `(project_id, toDate(start_time), trace_id, span_id)` |
+|---|---|---|
+| Resumen con `FINAL` | 17,5 M filas, 0,34 s | 1,24 M filas, 0,05 s |
+| Repeticiones por traza | 17,5 M, 0,44 s | 1,24 M, 0,10 s |
+| Lista de errores, subconsulta como hoy | 35 M, 0,53 s | 18,8 M, 0,25 s |
+| Lista de errores, subconsulta acotada | 30 M, 0,43 s | 2,5 M, 0,06 s |
+| Abrir una traza (con proyecto / sólo id) | 5.016 filas, 78 / 30 ms | 10.042 filas, 42 / 28 ms |
+
+**Lo que se decide con esto:**
+
+* **Acotar por tiempo las subconsultas de `_where`: sólo junto con la clave nueva.** Con
+  la de hoy no sirve de nada (35 → 30 M filas); con la nueva divide por siete.
+* **`FINAL`: no es el problema.** Con la clave nueva, el resumen con `FINAL` lee lo mismo
+  que la ventana.
+* **La propuesta es ordenar por día, sin tocar la partición mensual.** La ventana de un
+  día lee 1/14 de lo que lee hoy con dos semanas guardadas, y el coste pasa a crecer con
+  la ventana, no con el histórico. Abrir una traza no empeora, porque ahí manda el índice
+  bloom de `trace_id`. Un span reenviado conserva su `start_time`, así que
+  `ReplacingMergeTree` lo sigue deduplicando.
+* **Sigue sin hacer y espera al usuario:** el esquema nuevo y la migración de las
+  instalaciones que ya existen. Hay que crear la tabla con la clave nueva, copiar los
+  datos por particiones y cambiarlas con `EXCHANGE TABLES`. Es una operación larga sobre
+  datos de clientes y se hace con permiso, no de paso. Con ella, acotar las subconsultas
+  de `_where` por la ventana.
+* **Los preagregados por hora (D-143) quedan detrás.** Con la clave nueva, el Diagnóstico
+  de un día tendría que volver a la escala de la medida de un día guardado, y hay que
+  medirlo otra vez antes de decidir si hacen falta.
+
+## 2026-09-29 — Funciones diferenciales: el replay contrafactual
+
+### D-167 — Probar el modelo barato reenviando las llamadas reales, sin escribir código
+El paso «probar» del ciclo (D-156) pedía guardar las ejecuciones de un paso y escribir
+una función que corriese el agente sobre cada caso con el modelo nuevo. Para la pregunta
+más común —«¿el modelo barato respondería igual en este paso?»— no hace falta el agente:
+basta con reenviar **las mismas llamadas** que hizo el paso, con los mismos mensajes, al
+modelo barato, y comparar las respuestas. Es lo que hace `laplace replay`.
+
+* **Corre en el SDK, con las claves del usuario** (decidido con el usuario). El backend
+  dice qué llamadas se pueden reenviar (`GET /api/datasets/{id}/replay`); las reenvía el
+  cliente de OpenAI o Anthropic del proceso del usuario, con la clave de su entorno.
+  Laplace no guarda claves de proveedor ni gasta dinero de nadie, que es D-086 aplicado a
+  algo que no es ejecutar el agente pero se le parece. La otra opción, un botón que
+  reenviase desde el backend, era mejor experiencia a cambio de custodiar claves.
+* **Qué se reenvía.** Sólo lo que no puede tener efectos ni cambiar de sentido al
+  reenviarse:
+  - llamadas **hoja** del paso del conjunto;
+  - **sin herramientas**, ni declaradas, ni pedidas en la respuesta, ni resultados de
+    herramienta entre los mensajes;
+  - con **todos los mensajes en texto y con rol**, lo que también deja fuera los mensajes
+    que el SDK recortó por tamaño;
+  - que salieron **bien** y con **respuesta**;
+  - que **no son de una tirada**.
+
+  Lo demás se cuenta por motivo y se enseña al pedir permiso. De los parámetros se
+  llevan `temperature`, `top_p` y `max_tokens`, y los dos primeros sólo si el SDK
+  instalado los acepta: `anthropic` 1.x ya no tiene ninguno de los dos en
+  `messages.create`, y pasarlos hacía fallar cada llamada (lo encontró la prueba con el
+  cliente real).
+* **El tope se cumple por construcción.** Antes de cada caso se suma lo peor que puede
+  costar: la entrada original con un 30 % de margen, porque otro tokenizador puede contar
+  más, y la salida máxima, que es la fijada por el original o cuatro veces su respuesta,
+  entre 256 y 4.096. Si con eso se pasaría, no se hace. La salida máxima va también en la
+  petición, así que el proveedor no puede pasarse de ella. Un caso se reenvía entero o no
+  se reenvía: medio caso compararía menos llamadas en un lado que en el otro. Sin tarifa
+  del modelo de destino no hay tope que cumplir, y no se reenvía nada.
+* **Con permiso.** Antes de gastar se enseña cuántas llamadas son, lo que costaron (medido),
+  lo que costarán si el modelo responde lo mismo y lo peor. Desde la línea de órdenes se
+  pregunta; `--si` se lo salta, y sin nadie delante y sin `--si` no se gasta nada.
+* **Una comparación justa.** Quedan dos tiradas del conjunto:
+  - la **original**, que no gasta nada: apunta a las llamadas reenviadas dentro de las
+    trazas reales, con los `span_ids` nuevos de cada caso de una tirada;
+  - la del **modelo nuevo**, con sus trazas, marcadas como tirada de evaluación y fuera de
+    las reglas.
+
+  Sin los `span_ids`, el lado original habría costado el agente entero y el nuevo un solo
+  paso. El coste de un caso limitado a unos spans se suma con los spans de su traza, y un
+  span que ya no está cuenta como coste desconocido, así que el total pasa a ser un suelo
+  y no una cifra más baja que parece exacta. `cost_key` separa en la comparación la misma
+  traza entera y limitada. Los `span_ids` se guardan en los dos almacenes de metadatos,
+  con migración.
+* **El juez, contra la respuesta de esa llamada.** `POST /api/judge` acepta la referencia
+  de cada traza. En un paso intermedio, como clasificar un ticket, la salida final del
+  agente no dice nada de si el paso respondió igual; la respuesta original de la llamada,
+  sí. Si el juez está apagado, se dice que la comparación sólo tendrá el coste.
+* **En la interfaz**, la ficha de un problema de modelo caro y «Arreglos por probar» dan
+  la orden de `laplace replay` con el modelo barato que propone el hallazgo, en vez del
+  código de `run_dataset`. El texto dice que corre en tu máquina, con tu clave y un tope,
+  en los cinco idiomas. Los demás arreglos siguen con `run_dataset`, porque no cambian de
+  modelo.
+
+Pruebas:
+- `test_replay.py` (10): qué se reenvía y por qué no lo demás, la tarifa, el coste de la
+  tirada original limitado a sus spans, un span que falta hace del coste un suelo, y el
+  juez con la referencia por traza.
+- `test_replay_sdk.py` (11): de punta a punta con el backend en memoria y los clientes
+  reales de OpenAI y Anthropic con el transporte falso: lo que llega al proveedor, las dos
+  tiradas y su comparación, el tope, sin permiso no se gasta, sin tarifa no se reenvía, un
+  caso que falla no corta, las instrucciones a `system` en Anthropic, el juez y la línea
+  de órdenes.
+- `test_pantallas.py`: la ficha del modelo caro da la orden de `laplace replay`.
+- `test_evals.py`: los dos almacenes de metadatos devuelven los mismos `span_ids`,
+  probado contra Postgres de verdad.
+
+Cada garantía se ha roto a propósito y alguna prueba falla. El margen del 30 % no
+mordía, porque la prueba del tope calculaba lo peor con la misma función, y tiene ahora
+una prueba con las cifras escritas a mano.
+
+**Lo que no hace:**
+- no reenvía llamadas con herramientas, que exigirían ejecutarlas y eso es correr el
+  agente;
+- no convierte imágenes ni bloques entre proveedores;
+- no se ha probado contra las API reales, porque espera la clave de la sección 5 de la
+  hoja de ruta.
+
+## 2026-09-29 — Escala: la tabla ordenada por día
+
+### D-168 — La clave de ordenación por día, su migración y los filtros acotados
+Lo que D-166 midió y dejó por decidir, decidido con el usuario y hecho.
+
+* **La clave nueva.** Las instalaciones nuevas crean `spans` con `ORDER BY (project_id,
+  toDate(start_time), trace_id, span_id)`. La partición sigue siendo mensual. Un span
+  reenviado conserva su `start_time` y se sigue deduplicando, y hay una prueba que lo
+  exige. `recalcular_coste` reinserta los spans con el mismo instante, así que tampoco se
+  duplican.
+* **La migración de las que ya existen, a mano** (`python -m
+  laplace_backend.storage.migrar_orden`, que sin `--hacerlo` sólo dice qué haría). El
+  backend avisa al arrancar si la tabla tiene la clave vieja, pero no migra solo: es una
+  copia entera, y una migración a medias en el arranque sería peor que ninguna.
+  - **La copia:** va a una tabla nueva, partición a partición y día a día. Si se corta,
+    se vuelve a lanzar: una partición que ya cuadra se salta y una a medias se tira entera.
+  - **La ingesta no se para.** Lo que llega mientras se copia se recoge al final por su
+    `ingested_at`, y otra vez justo después del `EXCHANGE TABLES`, que es atómico.
+  - **El TTL de retención se vuelve a poner**, porque no pasa con `CREATE TABLE ... AS`.
+  - **Sitio:** comprueba antes que hay disco para una segunda copia.
+  - **La tabla vieja no se borra**: queda como `spans_antes_d168` hasta que alguien la
+    borre.
+
+  Probada a escala con 10 millones de spans creados con la clave vieja: tardó 6,5 minutos
+  en este contenedor (3,5 de ellos copiando) y cuadran los 10 millones de spans distintos.
+* **Los filtros por traza acotados a la ventana**, con una hora de margen por cada lado,
+  en los dos almacenes. Con la clave vieja no servía de nada (D-166); con la nueva, sí. La
+  lista de trazas ya resumía sólo los spans de la ventana, así que filtrar con los de la
+  ventana es coherente con lo que se enseña. El margen es para la traza cuyo span raíz, el
+  que lleva la sesión, el usuario y el cliente, empezó justo antes: sin él no se
+  encontraría por ellos.
+
+**Medido con 14 días guardados** (10 millones de spans al día, el mismo contenedor de 4
+núcleos que en D-166):
+
+| Proyecto grande | Clave vieja | Clave por día |
+|---|---|---|
+| Diagnóstico, ventana de 1 día | 15–19 s, 590 M filas | **5,2–6,5 s, 175 M filas** |
+| Panel, 1 día | 7,8–8,2 s | 3,4–3,6 s |
+| Lista de errores, 1 día | 2,2 s | 0,6 s |
+| Diagnóstico, 7 días | 101–107 s | 55–66 s |
+| Panel, 7 días | 46–50 s | 23–26 s |
+| Lista de trazas, 7 días | 16–18 s | 10–12 s |
+| Abrir una traza | 0,03 s | 0,03 s |
+
+Con un día guardado y la clave vieja, el Diagnóstico de un día tardaba 8,5–10 s. Ahora,
+con catorce días guardados, tarda **menos que eso**: el coste ya sigue a la ventana y no
+al histórico, que era lo que había que arreglar.
+
+**Lo que sigue sin cumplirse, y qué pide.** El objetivo de 1,5 s queda lejos en este
+contenedor, que es unas tres veces más lento que el portátil de D-142:
+- un día con 5 millones de spans en el proyecto son unos 5 s;
+- siete días son casi un minuto, porque de verdad hay que recorrer 35 millones de spans.
+
+Ya no es un problema de lo que se lee de más, sino de lo que hay que leer. Es lo que
+resuelven los preagregados por hora de D-143, que ahora tienen el número que les faltaba.
+
+Pruebas:
+- `test_migrar_orden.py` (6, contra ClickHouse de verdad y en una base propia): una
+  instalación nueva nace con la clave; la migración conserva todo y cambia la clave;
+  deja la vieja; vuelve a poner el TTL; no pierde lo que llega mientras copia ni lo que
+  llega justo antes del cambio de nombre; rehace una copia a medias sin dejar filas de
+  más; y un span reenviado se sigue deduplicando.
+- `test_paridad.py`: una traza que cruza el borde de la ventana se sigue encontrando
+  por sesión y por estado, igual en los dos almacenes.
+
+Cada garantía se ha roto a propósito y alguna prueba falla. Tres no fallaban al
+principio, por culpa de la prueba, y se corrigieron:
+- los datos sembrados llevaban el `ingested_at` de ahora, así que la puesta al día del
+  final los recogía todos y tapaba cualquier fallo de la copia;
+- el span que «llegaba durante la copia» entraba antes de copiarse su día;
+- la segunda puesta al día tapaba a la primera por su margen.

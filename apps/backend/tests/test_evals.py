@@ -708,7 +708,11 @@ def test_los_dos_almacenes_de_metadatos_dicen_lo_mismo(tmp_path):
     tirada = EvalRun(
         id=f"run_{uuid.uuid4().hex[:8]}", project_id=project, dataset_id=conjunto.id,
         variant="A", created_at=AHORA,
-        items=[EvalRunItem(case_id=c.id, trace_id=trace) for c in casos],
+        # Uno sin spans (la traza entera) y dos limitados a unos spans (D-167).
+        items=[
+            EvalRunItem(case_id=c.id, trace_id=trace, span_ids=["a" * 16, f"{i:016x}"][:i])
+            for i, c in enumerate(casos)
+        ],
     )
 
     def sembrar(store):
@@ -731,7 +735,7 @@ def test_los_dos_almacenes_de_metadatos_dicen_lo_mismo(tmp_path):
         return (
             anotaciones,
             (ds.name, ds.item_count, ds.source_filter),
-            (corrida.variant, sorted(i.case_id for i in corrida.items)),
+            (corrida.variant, sorted((i.case_id, tuple(i.span_ids)) for i in corrida.items)),
         )
 
     try:

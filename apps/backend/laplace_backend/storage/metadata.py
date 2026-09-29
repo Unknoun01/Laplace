@@ -382,6 +382,7 @@ CREATE TABLE IF NOT EXISTS eval_run_items (
     trace_id  TEXT NOT NULL,
     failed    INTEGER NOT NULL DEFAULT 0,
     error     TEXT NOT NULL DEFAULT '',
+    span_ids  TEXT NOT NULL DEFAULT '[]',
     PRIMARY KEY (run_id, case_id)
 );
 
@@ -527,6 +528,13 @@ class SQLiteMetadataStore:
                     conn.execute(f"ALTER TABLE api_keys ADD COLUMN {columna} TEXT")
                 except sqlite3.OperationalError:
                     pass
+            # Ficheros de antes de D-167.
+            try:
+                conn.execute(
+                    "ALTER TABLE eval_run_items ADD COLUMN span_ids TEXT NOT NULL DEFAULT '[]'"
+                )
+            except sqlite3.OperationalError:
+                pass
 
     def health(self) -> bool:
         try:
@@ -748,8 +756,11 @@ class SQLiteMetadataStore:
             )
             conn.executemany(
                 "INSERT OR REPLACE INTO eval_run_items (run_id, case_id, trace_id, "
-                "failed, error) VALUES (?, ?, ?, ?, ?)",
-                [(run.id, i.case_id, i.trace_id, int(i.failed), i.error) for i in run.items],
+                "failed, error, span_ids) VALUES (?, ?, ?, ?, ?, ?)",
+                [
+                    (run.id, i.case_id, i.trace_id, int(i.failed), i.error, json.dumps(i.span_ids))
+                    for i in run.items
+                ],
             )
         return run
 
@@ -786,7 +797,8 @@ class SQLiteMetadataStore:
     @staticmethod
     def _items_of(conn: sqlite3.Connection, run_id: str) -> list[EvalRunItem]:
         filas = conn.execute(
-            "SELECT case_id, trace_id, failed, error FROM eval_run_items WHERE run_id = ?",
+            "SELECT case_id, trace_id, failed, error, span_ids FROM eval_run_items "
+            "WHERE run_id = ?",
             (run_id,),
         ).fetchall()
         return [
@@ -795,6 +807,7 @@ class SQLiteMetadataStore:
                 trace_id=f["trace_id"],
                 failed=bool(f["failed"]),
                 error=f["error"] or "",
+                span_ids=json.loads(f["span_ids"] or "[]"),
             )
             for f in filas
         ]

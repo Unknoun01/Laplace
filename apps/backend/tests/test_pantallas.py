@@ -19,10 +19,12 @@ Playwright o si la interfaz no está construida (`python scripts/build_ui.py`).
 from __future__ import annotations
 
 import os
+import re
 import socket
 import subprocess
 import sys
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -718,6 +720,35 @@ def test_del_cliente_a_sus_ejecuciones(servidor, navegador):
         assert sesiones and all(
             any(f"u-0{n}-" in s for n in (1, 2, 3)) for s in sesiones
         ), sesiones[:5]
+        assert errores == [], errores
+    finally:
+        pagina.close()
+
+
+def test_el_modelo_caro_se_prueba_con_replay(servidor, navegador):
+    """D-167: con el modelo caro, la ficha no pide escribir código: da la orden de
+    `laplace replay` con el modelo barato que propone el hallazgo."""
+    import json as _json
+
+    with urllib.request.urlopen(f"{servidor}/api/overview?project_id=demo&days=30") as r:
+        hallazgos = _json.load(r)["findings"]
+    caro = next(h for h in hallazgos if h["kind"] == "modelo_caro")
+    pagina, errores = _abrir(
+        navegador,
+        f"{servidor}/problema/?project=demo&days=30&id={urllib.parse.quote(caro['id'])}",
+        "escritorio",
+    )
+    try:
+        pagina.get_by_role("button", name=re.compile("Crear el conjunto")).click()
+        pagina.wait_for_function(
+            "() => [...document.querySelectorAll('#probar pre')]"
+            ".some(p => p.textContent.includes('laplace replay'))",
+            timeout=15_000,
+        )
+        orden = pagina.locator("#probar pre").inner_text()
+        assert "--modelo " in orden and "--tope " in orden and "--proyecto demo" in orden
+        assert "run_dataset" not in orden
+        assert "tu clave" in _texto_de(pagina, "#probar")
         assert errores == [], errores
     finally:
         pagina.close()

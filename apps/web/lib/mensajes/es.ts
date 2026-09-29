@@ -231,7 +231,7 @@ export const es = {
   "seg.arreglado.boton": "Lo he arreglado: compruébalo",
   "seg.no_problema": "No es un problema para mí",
   "seg.probar.titulo": "Antes de cambiarlo, compruébalo",
-  "seg.probar.texto": "El ahorro está medido; que {modelo} responda igual de bien, no. Guarda las ejecuciones reales de este paso como conjunto de casos y lánzalas con el modelo nuevo: Probar te dirá si acierta igual y cuánto cuesta menos.",
+  "seg.probar.texto": "El ahorro está medido; que {modelo} responda igual de bien, no. Guarda las ejecuciones reales de este paso y reenvía sus llamadas a {modelo} con la orden de abajo: corre en tu máquina, con tu clave y un tope de gasto, y el juez compara cada respuesta con la original. Probar te dirá si acierta igual y cuánto cuesta menos.",
   "seg.probar.barato": "el modelo barato",
   "seg.probar.ir": "Ir a Probar →",
   "seg.probar.crear": "Crear el conjunto «{nombre}» con estas ejecuciones",

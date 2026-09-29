@@ -25,6 +25,7 @@ from ._rows import (
 )
 from ._rows import utc as _utc
 from .base import (
+    MARGEN_FILTROS,
     Bucket,
     CostGroup,
     CoverageFacts,
@@ -377,6 +378,16 @@ class ClickHouseStore:
         for statement in _statements(_SCHEMA.read_text(encoding="utf-8")):
             self._client.command(statement)
         logger.info("esquema de clickhouse aplicado")
+        # `CREATE TABLE IF NOT EXISTS` no cambia la clave de una tabla que ya existe, y
+        # migrarla es una copia entera: no se hace sola al arrancar, se avisa (D-168).
+        from .migrar_orden import necesita
+
+        if necesita(self._client):
+            logger.warning(
+                "la tabla spans tiene la clave de ordenación de antes de D-168 y cada "
+                "ventana lee todo el histórico del proyecto. Para migrarla: "
+                "python -m laplace_backend.storage.migrar_orden"
+            )
 
     # -- escritura -----------------------------------------------------------------
 
@@ -486,6 +497,14 @@ class ClickHouseStore:
         if filters.until is not None:
             clauses.append("start_time <= %(until)s")
             params["until"] = _utc(filters.until)
+        # Y a la ventana, con margen (D-168): con la clave por día, es lo que evita que
+        # cada filtro recorra todo el histórico del proyecto.
+        if filters.since is not None:
+            acotar += " AND start_time >= %(sub_since)s"
+            params["sub_since"] = _utc(filters.since - MARGEN_FILTROS)
+        if filters.until is not None:
+            acotar += " AND start_time <= %(sub_until)s"
+            params["sub_until"] = _utc(filters.until + MARGEN_FILTROS)
         # Sesión y usuario los lleva el span raíz: se filtran trazas, no spans (D-123).
         if filters.session_id:
             clauses.append(

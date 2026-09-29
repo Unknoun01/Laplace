@@ -224,7 +224,7 @@ export const pt: Mensajes = {
   "seg.arreglado.boton": "Já corrigi: verifique",
   "seg.no_problema": "Não é um problema para mim",
   "seg.probar.titulo": "Antes de trocar, verifique",
-  "seg.probar.texto": "A economia está medida; que {modelo} responda igualmente bem, não. Salve as execuções reais desta etapa como conjunto de casos e rode-as com o modelo novo: Testar dirá se acerta igual e quanto custa menos.",
+  "seg.probar.texto": "A economia está medida; que {modelo} responda igualmente bem, não. Salve as execuções reais desta etapa e reenvie as chamadas delas para {modelo} com o comando abaixo: roda na sua máquina, com a sua chave e um teto de gasto, e o juiz compara cada resposta com a original. Testar dirá se acerta igual e quanto custa menos.",
   "seg.probar.barato": "o modelo barato",
   "seg.probar.ir": "Ir para Testar →",
   "seg.probar.crear": "Criar o conjunto “{nombre}” com estas execuções",

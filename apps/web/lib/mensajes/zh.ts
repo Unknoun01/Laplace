@@ -222,7 +222,7 @@ export const zh: Mensajes = {
   "seg.arreglado.boton": "我已修复：请验证",
   "seg.no_problema": "这对我来说不是问题",
   "seg.probar.titulo": "切换前先验证",
-  "seg.probar.texto": "节省是实测的；但 {modelo} 能否答得一样好还不知道。把这个步骤的真实运行保存为案例集，用新模型运行：“测试”会告诉你它是否同样准确、便宜多少。",
+  "seg.probar.texto": "节省是实测的；但 {modelo} 能否答得一样好还不知道。保存这个步骤的真实运行，用下面的命令把它们的调用重新发给 {modelo}：在你的机器上、用你的密钥并设有花费上限运行，评审会把每个回答与原来的比较。“测试”会告诉你它是否同样准确、便宜多少。",
   "seg.probar.barato": "便宜的模型",
   "seg.probar.ir": "前往“测试” →",
   "seg.probar.crear": "用这些运行创建“{nombre}”案例集",

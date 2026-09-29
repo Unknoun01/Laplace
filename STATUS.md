@@ -322,16 +322,18 @@ Lo que **no** demuestran, punto por punto:
    esté: es que el modelo de permisos de este producto se ha comprobado **dos veces con
    la misma prueba** —«¿puede una clave leer las trazas de otro proyecto?»— y las dos
    veces se dio por bueno el resto sin mirarlo.
-2. **Volumen: medido con un día, no con semanas.** Con 10 millones de spans en un día
-   todo aguanta y casi todo pasa del objetivo de 1,5 s por poco: el Diagnóstico tarda
-   unos 4 s en la primera carga en el portátil de D-142, y 6 en la máquina de D-154, y
-   lo que lo bajaría son preagregados por hora. Lo que no se ha medido es un histórico de
-   semanas, que es donde se decidirían `FINAL` y el acotado por tiempo de las
-   subconsultas. La API de la lista de trazas sigue escaneando sin ventana si no se le
-   pasa una (D-008b); la interfaz siempre la pasa.
+2. **Volumen: el coste ya sigue a la ventana, pero no llega al objetivo.** Con la tabla
+   ordenada por día (D-168), el Diagnóstico de un día con 14 días guardados tarda 5–6,5 s
+   en un contenedor de 4 núcleos, frente a 15–19 s con la clave de antes. El de 7 días
+   tarda casi un minuto. Bajar de ahí pide preagregados por hora. Las instalaciones que
+   ya existen se migran a mano (`migrar_orden`). La API de la lista de trazas sigue
+   escaneando sin ventana si no se le pasa una (D-008b); la interfaz siempre la pasa.
 3. **TypeScript, sin SDK propio.** Un agente en Node se ve con OpenInference-js u
-   OpenLLMetry-js apuntados a Laplace, con una guía probada (`docs/typescript.md`),
-   pero sin gestión de prompts ni el resto de ayudas del SDK de Python.
+   OpenLLMetry-js (con OpenAI o Anthropic), el AI SDK de Vercel 7 o LangChain.js
+   apuntados a Laplace, con una guía probada (`docs/typescript.md`) y un banco que se
+   puede repetir (`scripts/integraciones_js`, D-165), pero sin gestión de prompts ni el
+   resto de ayudas del SDK de Python. Lo de D-165 se probó contra un proveedor falso,
+   no contra la API real.
 4. **Los paquetes no se han publicado.** `paquete.yml` construye los dos wheels con la
    interfaz dentro (D-134), pero publicarlos espera a que se reserven los nombres en
    PyPI.

@@ -87,6 +87,31 @@ laplace.set_context(session_id="conv-42", user_id="u-7")
 
 Agrupa varias trazas de una misma conversación y permite ver el coste por usuario final.
 
+### Probar el modelo barato sin escribir código
+
+Cuando el Diagnóstico dice que un paso usa un modelo más caro de lo necesario, guarda
+sus ejecuciones en Probar y reenvía sus llamadas reales al modelo barato:
+
+```bash
+laplace replay "ab-3f9c2e1a" --modelo gpt-5.6-luna --tope 1 --proyecto mi-agente
+```
+
+- **Corre en tu máquina, con tu clave** (la de `OPENAI_API_KEY` o `ANTHROPIC_API_KEY`).
+  Laplace dice qué llamadas se pueden reenviar; no guarda claves de proveedor ni gasta
+  nada por su cuenta.
+- **No pasa del tope.** Antes de cada llamada suma lo peor que puede costar —la entrada
+  original con un 30 % de margen y la salida máxima— y si se pasaría, no la hace. Un
+  modelo sin tarifa no tiene tope que cumplir, y no se reenvía nada.
+- **Pide permiso** antes de gastar: cuántas llamadas, lo que costaron y lo que
+  costarán como mucho. `--si` se lo salta; sin nadie delante y sin `--si`, no gasta.
+- **Sólo lo que no tiene efectos:** llamadas hoja del paso, sin herramientas, con los
+  mensajes en texto. Lo demás se cuenta por motivo.
+
+Deja dos tiradas del conjunto para comparar en Probar: «original», con el coste de
+esas mismas llamadas, y la del modelo nuevo. Si el juez de Laplace está encendido,
+juzga cada respuesta contra la que dio el original. Desde Python:
+`laplace.replay_dataset("ab-3f9c2e1a", model="gpt-5.6-luna", max_usd=1)`.
+
 ## Configuración
 
 Todo se puede fijar por entorno, para no tener que tocar el código en cada despliegue.
@@ -118,8 +143,10 @@ proceso ya instrumentado con OTel puede exportar a Laplace sin usar este SDK.
 
 - **OpenAI**: `chat.completions.create` y `.parse`, y la Responses API
   (`responses.create` y `.parse`, la que usa el Agents SDK). Los ayudantes `.stream()`
-  de las dos pasan por `create` y también se ven.
-- **Anthropic**: `messages.create`, `.parse` y el gestor `messages.stream()`.
+  de las dos pasan por `create` y también se ven. Por `client.beta`, `chat.completions`
+  (es la misma clase) y `responses.create`.
+- **Anthropic**: `messages.create`, `.parse` y el gestor `messages.stream()`, y lo mismo
+  por `client.beta.messages` (gestión de contexto, compactación, servidores MCP…).
 - Todo en síncrono y asíncrono, y en streaming con los tokens que manda el proveedor.
   Si no los manda (Chat sin `stream_options={"include_usage": True}`), se estiman y el
   span queda marcado como estimado.
@@ -136,7 +163,8 @@ ese instrumentador exporta a otro sitio y quieres las llamadas también en Lapla
   cualquier instrumentación de OpenInference u OpenLLMetry apuntada a Laplace.
 - `with_raw_response` se lee entero. `with_streaming_response` no, porque el cuerpo es
   del usuario: ahí los tokens se estiman y se marcan.
-- No se ven las llamadas por `client.beta.*`.
+- De `client.beta` de OpenAI no se ven las Assistants (`threads.runs`), Realtime,
+  ChatKit ni los agentes alojados: no pasan por estas puertas y no se instrumentan.
 
 ## Principio
 

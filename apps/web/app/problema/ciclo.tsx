@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { createDataset, listDatasets, listRuns } from "@/lib/api";
 import { number, timestamp } from "@/lib/format";
-import type { Dataset, FindingDetail, RunSummary } from "@/lib/types";
+import type { Dataset, Finding, FindingDetail, RunSummary } from "@/lib/types";
 import { t, tn } from "@/lib/textos";
 
 /**
@@ -252,7 +252,7 @@ function Probar({
 }
 
 /** El modelo barato que propone el hallazgo: el valor con «→» de su línea técnica. */
-function alternativa(finding: FindingDetail): string {
+export function alternativa(finding: Finding): string {
   return (
     finding.tech
       .find((item) => item.value.includes("→") && !/^v\d+ /.test(item.value))
@@ -291,9 +291,18 @@ function lineaDePrueba(project: string, conjunto: string, finding: FindingDetail
       `                        variant=f"${version.prompt} v{v}")`
     );
   }
-  const variante =
-    finding.kind === "modelo_caro"
-      ? alternativa(finding) || "modelo-barato"
-      : t("seg.probar.arreglado");
-  return cabecera + `laplace.run_dataset("${conjunto}", mi_agente, variant="${variante}")`;
+  const replay = lineaDeReplay(project, conjunto, finding);
+  if (replay) return replay;
+  return cabecera + `laplace.run_dataset("${conjunto}", mi_agente, variant="${t("seg.probar.arreglado")}")`;
+}
+
+/**
+ * Con el modelo caro no hace falta el agente: `laplace replay` reenvía las llamadas
+ * reales del paso al modelo barato, en la máquina del usuario, con su clave y un tope
+ * de gasto (D-167). Vacío si no es un modelo caro o no se sabe a qué modelo cambiar.
+ */
+export function lineaDeReplay(project: string, conjunto: string, finding: Finding): string {
+  const modelo = finding.kind === "modelo_caro" ? alternativa(finding) : "";
+  if (!modelo) return "";
+  return `laplace replay "${conjunto}" --modelo ${modelo} --tope 1 --proyecto ${project}`;
 }

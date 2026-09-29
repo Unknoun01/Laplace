@@ -5,6 +5,10 @@ pantallas sobre ellos (Fase 4).
     python scripts/carga.py --solo-medir            # mide lo que ya hay
     python scripts/carga.py --borrar                # quita los datos de carga
 
+    # Semanas de histórico con el mismo volumen diario: 13 días más, justo antes del
+    # que ya hay, para comparar la misma ventana con 1 y con 14 días guardados.
+    python scripts/carga.py --spans 10000000 --dias 13 --dias-atras 1
+
 Los spans se generan **dentro** de ClickHouse con `INSERT … SELECT FROM numbers()`: desde
 Python, diez millones de filas son media hora y aquí son segundos. Tienen la forma de un
 agente de verdad —trazas de ocho spans: un agente, tres llamadas a modelo, dos
@@ -138,11 +142,15 @@ class Cronometrado:
         return medido
 
 
-def generar(store: ClickHouseStore, spans: int, lote: int) -> None:
-    hoy = datetime.now(timezone.utc)
-    desde = hoy - timedelta(days=1)
+def generar(
+    store: ClickHouseStore, spans: int, lote: int, dias: int = 1, dias_atras: int = 0
+) -> None:
+    """`spans` al día durante `dias` días, que acaban `dias_atras` días antes de ahora."""
+    hasta = datetime.now(timezone.utc) - timedelta(days=dias_atras)
+    desde = hasta - timedelta(days=dias)
+    spans *= dias
     trazas = spans // SPANS_POR_TRAZA
-    ms_por_traza = 86_400_000 / max(trazas, 1)
+    ms_por_traza = 86_400_000 * dias / max(trazas, 1)
     semilla = f"{time.time_ns()}-"
     inicio = time.perf_counter()
     for comienzo in range(0, spans, lote):
@@ -271,6 +279,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--spans", type=int, default=10_000_000)
     parser.add_argument("--lote", type=int, default=1_000_000)
+    parser.add_argument("--dias", type=int, default=1, help="días de tráfico, con --spans al día")
+    parser.add_argument(
+        "--dias-atras", type=int, default=0, help="cuántos días antes de ahora acaba lo generado"
+    )
     parser.add_argument("--solo-medir", action="store_true")
     parser.add_argument("--borrar", action="store_true")
     args = parser.parse_args()
@@ -285,11 +297,14 @@ def main() -> int:
         print("datos de carga borrados")
         return 0
     if not args.solo_medir:
-        print(f"Generando {args.spans:,} spans en un día…")
+        print(
+            f"Generando {args.spans:,} spans al día durante {args.dias} día(s), "
+            f"hasta hace {args.dias_atras} día(s)…"
+        )
         # Sin OPTIMIZE FINAL: una tabla recién fusionada es más rápida que la de un
         # servidor de verdad, que siempre tiene partes sin fusionar, y fusionar diez
         # millones de filas a la vez que se mide tumbó Docker en este portátil (D-142).
-        generar(store, args.spans, args.lote)
+        generar(store, args.spans, args.lote, args.dias, args.dias_atras)
     medir(store)
     return 0
 

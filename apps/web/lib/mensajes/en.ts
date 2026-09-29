@@ -224,7 +224,7 @@ export const en: Mensajes = {
   "seg.arreglado.boton": "I've fixed it: check it",
   "seg.no_problema": "It's not a problem for me",
   "seg.probar.titulo": "Before switching, test it",
-  "seg.probar.texto": "The saving is measured; whether {modelo} answers just as well isn't. Save this step's real runs as a case set and run them with the new model: Test will tell you whether it's just as accurate and how much less it costs.",
+  "seg.probar.texto": "The saving is measured; whether {modelo} answers just as well isn't. Save this step's real runs and resend their calls to {modelo} with the command below: it runs on your machine, with your key and a spending cap, and the judge compares each answer with the original. Test will tell you whether it's just as accurate and how much less it costs.",
   "seg.probar.barato": "the cheap model",
   "seg.probar.ir": "Go to Test →",
   "seg.probar.crear": "Create the “{nombre}” set with these runs",
