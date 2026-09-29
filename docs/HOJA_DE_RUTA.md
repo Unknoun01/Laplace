@@ -4,7 +4,7 @@ Documento de traspaso entre sesiones. Última actualización: 28 de septiembre d
 tras probar las integraciones que faltaban (D-164 y D-165) y con el replay contrafactual
 (D-167). Aquí sólo está **lo que
 queda**: lo hecho vive en `DECISIONS.md` y en la historia de git. Léelo entero antes de tocar nada; después lee `STATUS.md` y las
-últimas entradas de `DECISIONS.md` (D-154 a D-167).
+últimas entradas de `DECISIONS.md` (D-154 a D-168).
 
 ## 1. Qué es y hacia dónde va
 
@@ -35,7 +35,7 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
   verde (`git merge --no-ff`); si no dice otra cosa, se sigue así.
 - **Nada entra sin su prueba.** Primero la prueba en rojo, después el arreglo.
 - **Hay que comprobar que la prueba muerde:** romper el código a propósito y verla fallar.
-- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-168**.
+- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-169**.
 - **Todo en español:** código, comentarios, commits y textos. Los textos de la interfaz y
   del backend, en los cinco idiomas a la vez (`apps/web/lib/mensajes/*.ts`,
   `apps/backend/laplace_backend/textos/*.json`); las pruebas exigen las mismas claves.
@@ -81,7 +81,7 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
 
 ### Restos de fases cerradas
 - **Integraciones:** hechas `client.beta.*` en Python (D-164) y Anthropic por OpenInference-js y OpenLLMetry-js, el AI SDK de Vercel 7 y LangChain.js (D-165), todas contra un proveedor falso. Faltan: pasar el banco de `scripts/integraciones_js` contra las API reales (con las claves de la sección 5), y probar LangGraph.js, el Agents SDK de OpenAI para TypeScript y Mastra.
-- **Escala (medido, D-166): falta decidir la migración.** Con 14 días guardados, una ventana de un día lee casi todo el histórico del proyecto (590 frente a 112 millones de filas por Diagnóstico) porque la clave de ordenación `(project_id, trace_id, span_id)` mezcla los días en cada gránulo. Ordenar por `(project_id, toDate(start_time), trace_id, span_id)` lo divide por catorce en una copia, sin empeorar abrir una traza. Hacerlo pide migrar la tabla de las instalaciones existentes (tabla nueva, copia por particiones, `EXCHANGE TABLES`): **confirmar con el usuario**. Con ella, acotar por la ventana las subconsultas de `_where`, que con la clave de hoy no sirve. `FINAL` no es el problema. Los preagregados (D-143) se vuelven a medir después.
+- **Escala:** la tabla ya se ordena por día y los filtros se acotan a la ventana (D-168). Con 14 días guardados, el Diagnóstico de un día bajó de 15–19 s a 5–6,5 s en el contenedor de 4 núcleos. Sigue lejos del objetivo de 1,5 s, y el de 7 días tarda casi un minuto: ahora el límite es lo que de verdad hay que leer. **Siguiente: los preagregados por hora** (D-143) para el uso por paso, el resumen, la cobertura y la serie del gráfico. Las instalaciones que ya existen se migran a mano con `python -m laplace_backend.storage.migrar_orden`.
 
 ### Siguiente: funciones diferenciales (confirmar el orden con el usuario)
 - **Replay contrafactual, más allá** (lo básico está hecho, D-167): llamadas con herramientas (habría que simular sus resultados con los grabados, sin ejecutarlas), imágenes y bloques entre proveedores, y un botón en la versión local que lo lance sin copiar la orden.

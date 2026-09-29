@@ -3445,3 +3445,76 @@ una prueba con las cifras escritas a mano.
 - no convierte imágenes ni bloques entre proveedores;
 - no se ha probado contra las API reales, porque espera la clave de la sección 5 de la
   hoja de ruta.
+
+## 2026-09-29 — Escala: la tabla ordenada por día
+
+### D-168 — La clave de ordenación por día, su migración y los filtros acotados
+Lo que D-166 midió y dejó por decidir, decidido con el usuario y hecho.
+
+* **La clave nueva.** Las instalaciones nuevas crean `spans` con `ORDER BY (project_id,
+  toDate(start_time), trace_id, span_id)`. La partición sigue siendo mensual. Un span
+  reenviado conserva su `start_time` y se sigue deduplicando, y hay una prueba que lo
+  exige. `recalcular_coste` reinserta los spans con el mismo instante, así que tampoco se
+  duplican.
+* **La migración de las que ya existen, a mano** (`python -m
+  laplace_backend.storage.migrar_orden`, que sin `--hacerlo` sólo dice qué haría). El
+  backend avisa al arrancar si la tabla tiene la clave vieja, pero no migra solo: es una
+  copia entera, y una migración a medias en el arranque sería peor que ninguna.
+  - **La copia:** va a una tabla nueva, partición a partición y día a día. Si se corta,
+    se vuelve a lanzar: una partición que ya cuadra se salta y una a medias se tira entera.
+  - **La ingesta no se para.** Lo que llega mientras se copia se recoge al final por su
+    `ingested_at`, y otra vez justo después del `EXCHANGE TABLES`, que es atómico.
+  - **El TTL de retención se vuelve a poner**, porque no pasa con `CREATE TABLE ... AS`.
+  - **Sitio:** comprueba antes que hay disco para una segunda copia.
+  - **La tabla vieja no se borra**: queda como `spans_antes_d168` hasta que alguien la
+    borre.
+
+  Probada a escala con 10 millones de spans creados con la clave vieja: tardó 6,5 minutos
+  en este contenedor (3,5 de ellos copiando) y cuadran los 10 millones de spans distintos.
+* **Los filtros por traza acotados a la ventana**, con una hora de margen por cada lado,
+  en los dos almacenes. Con la clave vieja no servía de nada (D-166); con la nueva, sí. La
+  lista de trazas ya resumía sólo los spans de la ventana, así que filtrar con los de la
+  ventana es coherente con lo que se enseña. El margen es para la traza cuyo span raíz, el
+  que lleva la sesión, el usuario y el cliente, empezó justo antes: sin él no se
+  encontraría por ellos.
+
+**Medido con 14 días guardados** (10 millones de spans al día, el mismo contenedor de 4
+núcleos que en D-166):
+
+| Proyecto grande | Clave vieja | Clave por día |
+|---|---|---|
+| Diagnóstico, ventana de 1 día | 15–19 s, 590 M filas | **5,2–6,5 s, 175 M filas** |
+| Panel, 1 día | 7,8–8,2 s | 3,4–3,6 s |
+| Lista de errores, 1 día | 2,2 s | 0,6 s |
+| Diagnóstico, 7 días | 101–107 s | 55–66 s |
+| Panel, 7 días | 46–50 s | 23–26 s |
+| Lista de trazas, 7 días | 16–18 s | 10–12 s |
+| Abrir una traza | 0,03 s | 0,03 s |
+
+Con un día guardado y la clave vieja, el Diagnóstico de un día tardaba 8,5–10 s. Ahora,
+con catorce días guardados, tarda **menos que eso**: el coste ya sigue a la ventana y no
+al histórico, que era lo que había que arreglar.
+
+**Lo que sigue sin cumplirse, y qué pide.** El objetivo de 1,5 s queda lejos en este
+contenedor, que es unas tres veces más lento que el portátil de D-142:
+- un día con 5 millones de spans en el proyecto son unos 5 s;
+- siete días son casi un minuto, porque de verdad hay que recorrer 35 millones de spans.
+
+Ya no es un problema de lo que se lee de más, sino de lo que hay que leer. Es lo que
+resuelven los preagregados por hora de D-143, que ahora tienen el número que les faltaba.
+
+Pruebas:
+- `test_migrar_orden.py` (6, contra ClickHouse de verdad y en una base propia): una
+  instalación nueva nace con la clave; la migración conserva todo y cambia la clave;
+  deja la vieja; vuelve a poner el TTL; no pierde lo que llega mientras copia ni lo que
+  llega justo antes del cambio de nombre; rehace una copia a medias sin dejar filas de
+  más; y un span reenviado se sigue deduplicando.
+- `test_paridad.py`: una traza que cruza el borde de la ventana se sigue encontrando
+  por sesión y por estado, igual en los dos almacenes.
+
+Cada garantía se ha roto a propósito y alguna prueba falla. Tres no fallaban al
+principio, por culpa de la prueba, y se corrigieron:
+- los datos sembrados llevaban el `ingested_at` de ahora, así que la puesta al día del
+  final los recogía todos y tapaba cualquier fallo de la copia;
+- el span que «llegaba durante la copia» entraba antes de copiarse su día;
+- la segunda puesta al día tapaba a la primera por su margen.
