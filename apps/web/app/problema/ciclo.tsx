@@ -28,7 +28,7 @@ interface Paso {
 }
 
 /** Los conjuntos guardados con las llamadas de este paso, y sus tiradas. */
-export interface Pruebas {
+interface Pruebas {
   conjunto: Dataset | null;
   tiradas: RunSummary[];
 }
@@ -56,7 +56,7 @@ export function pruebasDelPaso(
   return elegido ? { conjunto: elegido.d, tiradas: elegido.tiradas } : { conjunto: null, tiradas: [] };
 }
 
-export function pasosDelCiclo(finding: FindingDetail, pruebas: Pruebas | null): Paso[] {
+function pasosDelCiclo(finding: FindingDetail, pruebas: Pruebas | null): Paso[] {
   const probar: Paso = { nombre: t("ciclo.probar"), estado: "pendiente", texto: "" };
   if (!finding.step_key) {
     probar.texto = t("ciclo.probar.sin_paso");
@@ -252,7 +252,7 @@ function Probar({
 }
 
 /** El modelo barato que propone el hallazgo: el valor con «→» de su línea técnica. */
-export function alternativa(finding: Finding): string {
+function alternativa(finding: Finding): string {
   return (
     finding.tech
       .find((item) => item.value.includes("→") && !/^v\d+ /.test(item.value))

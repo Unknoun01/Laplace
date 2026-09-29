@@ -24,7 +24,7 @@ export type { Clave } from "./mensajes/es";
 
 export const CATALOGOS: Record<Idioma, Mensajes> = { es, en, pt, fr, zh };
 
-export type Valores = Record<string, string | number>;
+type Valores = Record<string, string | number>;
 
 function rellenar(texto: string, valores?: Valores): string {
   if (!valores) return texto;

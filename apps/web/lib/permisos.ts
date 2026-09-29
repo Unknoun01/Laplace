@@ -13,7 +13,7 @@ import { type Me, getMe } from "./api";
  * backend dirá que no si no se puede, y una pantalla sin botones por un fallo de red
  * sería peor.
  */
-export interface Permisos {
+interface Permisos {
   escribir: boolean;
   administrar: boolean;
   rol: string | null;
@@ -29,7 +29,7 @@ function cargarMe(): Promise<Me | null> {
   return pendiente;
 }
 
-export function permisosDe(me: Me | null, project: string): Permisos {
+function permisosDe(me: Me | null, project: string): Permisos {
   // Local, sin respuesta, o una clave de API: la clave ya está atada a su proyecto.
   if (!me || me.mode === "local" || !me.user) return TODO;
   if (me.user.is_admin) return { ...TODO, rol: "propietario" };

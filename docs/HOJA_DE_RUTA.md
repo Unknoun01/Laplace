@@ -62,10 +62,10 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
 - **Tras tocar la web:** `.venv/Scripts/python.exe scripts/build_ui.py`, que construye `apps/web/out`, lo que sirve `laplace ui`.
 - **Servidor local:** la configuración «local» de `.claude/launch.json` (puerto 8100). Tras tocar Python hay que reiniciarlo.
 - **Demo:** `.venv/Scripts/python.exe -m laplace.cli demo --endpoint http://127.0.0.1:8100` carga un mes de datos, con cuatro clientes (uno que hace perder dinero).
-- **Pantallas:** `test_pantallas.py` usa Playwright con Chromium, ya instalados en `.venv`.
+- **Pantallas:** `test_pantallas.py` usa Playwright con Chromium, ya instalados en `.venv`. Prueban la interfaz construida en `apps/web/out`: tras un pull, `scripts/build_ui.py` antes de pasarlas, o fallan contra la vieja.
 - **Estado:** la última pasada completa (D-162, en Linux con ClickHouse y Postgres) dio 902 pruebas bien y 16 saltadas —las 4 vivas que necesitan clave de proveedor y 12 que necesitan Ollama con un modelo— y una de pantalla que dependía del reloj, arreglada después. Las del espejo con la web necesitan Node 22.6 o posterior.
 - **Fuera de Windows** (contenedor Linux): `.venv/bin/python` en lugar de `.venv/Scripts/python.exe`, y Playwright 1.56 para el Chromium que ya trae la máquina. Docker no arranca solo: `dockerd &` y después `docker start laplace-clickhouse laplace-postgres` (el contenedor de la sesión se reinicia y hay que repetirlo). ClickHouse no arranca con el `ulimits` del compose en un contenedor sin permiso para subirlos: `docker run` sin esa línea. Ojo con `pkill -f "laplace.cli ui"` en la misma orden que lo arranca: se mata a sí misma.
-- **Prueba de carga:** `python scripts/carga.py --spans 10000000` genera un día de tráfico en ClickHouse y mide las pantallas con el desglose de cada lectura; `--borrar` lo quita. Con 10 millones hacen falta unos 8 GB para Docker.
+- **Prueba de carga:** `python scripts/carga.py --spans 10000000` genera un día de tráfico en ClickHouse y mide las pantallas con el desglose de cada lectura; `--borrar` lo quita. Con 10 millones hacen falta unos 8 GB para Docker. Quitarlos al acabar: con ellos en la base, la suite tarda horas y los `ALTER` de las pruebas se quedan sin tiempo.
 
 ## 3. Pendiente, por orden
 
@@ -130,7 +130,6 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
 - `globals.css` pasa de 4.100 líneas en un solo fichero: partirlo.
 - Al cargar se piden dos veces `/api/projects` y `/api/auth/me` (y el Diagnóstico pide
   además el margen por cliente para su aviso).
-- `/health` en modo local dice `clickhouse: true, postgres: true`.
 - `laplace demo` escribe caracteres rotos en la consola de Windows (la salida no va en UTF-8).
 - `DECISIONS.md` pasa de 220 KB: hace falta un índice por tema y documentación de cara al usuario aparte (Mintlify, Docusaurus o Starlight).
 - `STATUS.md` se puso al día al cerrar las fases 5 y 6: mantenerlo así al cerrar cada fase.

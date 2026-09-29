@@ -276,7 +276,6 @@ function Contenido() {
         <Listado
           page={page}
           project={project}
-          days={days}
           sort={sort}
           cursor={cursor}
           context={context}

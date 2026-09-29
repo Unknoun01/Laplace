@@ -242,14 +242,14 @@ laplace.run_dataset("${conjunto}", mi_agente, variant="actual")`}</pre>
 }
 
 /** El veredicto que manda en el titular, para darle color al bloque. */
-export function principal(comp: Comparison): string {
+function principal(comp: Comparison): string {
   const conBase = comp.by_source.filter((c) => c.verdict !== "sin-base");
   if (conBase.some((c) => c.verdict === "peor")) return "peor";
   if (conBase.some((c) => c.verdict === "mejor")) return "mejor";
   return conBase.length > 0 ? "empate" : "sin-base";
 }
 
-export function BloqueFuente({ comparacion }: { comparacion: SourceComparison }) {
+function BloqueFuente({ comparacion }: { comparacion: SourceComparison }) {
   const etiqueta =
     comparacion.source === "human" ? t("ev.fuente.personas") : t("ev.fuente.juez");
   return (
@@ -273,7 +273,7 @@ export function BloqueFuente({ comparacion }: { comparacion: SourceComparison })
  * Cuando no hay casos suficientes se enseñan los casos en bruto y el motivo, nunca un
  * porcentaje: es el mismo patrón del 468 $/mes y del 193.100 %, y ya mordió tres veces.
  */
-export function Acierto({ rate, etiqueta }: { rate: Rate; etiqueta: string }) {
+function Acierto({ rate, etiqueta }: { rate: Rate; etiqueta: string }) {
   return (
     <div className="acierto">
       <small>{etiqueta}</small>
@@ -300,7 +300,7 @@ export function Acierto({ rate, etiqueta }: { rate: Rate; etiqueta: string }) {
   );
 }
 
-export function Coste({ lado, etiqueta }: { lado: VariantSide; etiqueta: string }) {
+function Coste({ lado, etiqueta }: { lado: VariantSide; etiqueta: string }) {
   const suelo = lado.cost_is_floor ? "≥ " : "";
   return (
     <div className="mcard">

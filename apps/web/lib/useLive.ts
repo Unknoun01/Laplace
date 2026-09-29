@@ -27,7 +27,7 @@ export const LIVE_INTERVAL_MS = 5000;
  * Cuántas trazas se guardan en la lista en vivo. Con el modo encendido toda una tarde,
  * la lista crecía sin fin y cada vuelta recorría y pintaba miles de filas.
  */
-export const LIVE_MAX_TRACES = 500;
+const LIVE_MAX_TRACES = 500;
 
 export interface Live {
   /** Las trazas a pintar: las nuevas delante, las de la carga inicial detrás. */

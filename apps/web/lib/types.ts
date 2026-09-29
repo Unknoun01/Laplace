@@ -440,7 +440,7 @@ export interface Overview {
 // Panel (Fase 4). Espejo de apps/backend/laplace_backend/panel.py.
 // ---------------------------------------------------------------------------------
 
-export type Verdict = "sin-base" | "estable" | "normal" | "revisar" | "mejora" | "mixto";
+type Verdict = "sin-base" | "estable" | "normal" | "revisar" | "mejora" | "mixto";
 
 export interface Metric {
   label: string;
@@ -554,17 +554,6 @@ export interface JudgeRun {
   prompt_version: string;
 }
 
-export interface DatasetItem {
-  id: string;
-  dataset_id: string;
-  /** La traza real de la que salió el caso. Sin esto sería un caso inventado. */
-  trace_id: string;
-  span_id: string | null;
-  input: unknown;
-  expected: unknown;
-  created_at: string;
-}
-
 export interface Dataset {
   id: string;
   project_id: string;
@@ -574,24 +563,6 @@ export interface Dataset {
   item_count: number;
   /** El filtro del explorador con el que se materializó. Se enseña en avanzado. */
   source_filter: Record<string, string>;
-}
-
-export interface EvalRunItem {
-  case_id: string;
-  trace_id: string;
-  /** La ejecución del agente reventó. Cuenta como fallo, no se descarta. */
-  failed: boolean;
-  error: string;
-}
-
-export interface EvalRun {
-  id: string;
-  project_id: string;
-  dataset_id: string;
-  variant: string;
-  created_at: string;
-  items: EvalRunItem[];
-  notes: string;
 }
 
 /** Una proporción de acierto con su guarda puesta (D-087). */

@@ -3518,3 +3518,38 @@ principio, por culpa de la prueba, y se corrigieron:
   final los recogía todos y tapaba cualquier fallo de la copia;
 - el span que «llegaba durante la copia» entraba antes de copiarse su día;
 - la segunda puesta al día tapaba a la primera por su margen.
+
+### D-169 — `/health` nombra el almacén que hay, y la limpieza
+**`/health` ya no afirma lo que no ha comprobado.** En modo local contestaba
+`clickhouse: true, postgres: true`: era la salud de SQLite con los nombres de la nube.
+Ahora dice qué hay (`store`: `clickhouse` o `sqlite`; `metadata`: `postgres`, `sqlite` o
+`none`) y si responde (`store_ok`, `metadata_ok`). Las claves `clickhouse` y `postgres`
+siguen, para no romper a quien las lea, pero valen `null` donde ese almacén no existe.
+Nadie de dentro las leía: el CI y el orquestador sólo miran el 200.
+
+Prueba: `test_local_mode.py::test_la_salud_en_local_no_dice_que_hay_clickhouse`. Muerde:
+con las claves nuevas pero `clickhouse: store_ok` como antes, falla (`True is None`).
+
+**La limpieza.** Fuera lo que nadie usaba, buscado con vulture y knip y comprobado con
+grep en todo el repo, pruebas incluidas:
+- Python: `se_puede_afirmar`, `enviar_trazas_de_ejemplo`, `safe`,
+  `PriceTable.unverified_models` y `alerts.destino_inseguro` (sólo la llamaba una prueba,
+  que ahora usa `resolver_destino`).
+- Web: `backendReachable`, `getDataset`, `Tokens`, `EvalRun`, `EvalRunItem` y
+  `DatasetItem`, y el `export` de una treintena de piezas que sólo se usan en su fichero.
+  Siguen exportados `moneyExact`, `miles` y `CATALOGOS`: los importan las pruebas espejo
+  de Node, aunque knip no lo vea.
+- SDK: `pytest-asyncio`, que no se usaba. Se queda `EvalRunResult.url_hint` aunque nadie
+  la lea: es API pública del paquete.
+- `ANALISIS.md`, la auditoría ya cerrada, a `docs/auditoria-producto.md`.
+
+**La suite entera en Windows**, con ClickHouse y Postgres: 953 bien, 4 saltadas, 20 fallos
+y 2 errores. Ninguno venía de la limpieza:
+- Las 19 de pantalla fallaban contra una `apps/web/out` de antes del último pull, sin
+  `/clientes`. Reconstruida (`scripts/build_ui.py`), pasan todas.
+- `test_otlp_json` borraba su base SQLite con la conexión abierta, y Windows no deja.
+  Ahora usa `tmp_path`, y pasa.
+- Las 2 de búsqueda por contenido en ClickHouse daban error: un `ALTER` se quedaba sin
+  tiempo esperando el bloqueo de `spans`, con millones de spans de la prueba de carga en
+  la base local. Con ellos la suite tardó más de dos horas en lugar de minutos. Quitados con
+  `scripts/carga.py --borrar`, pasan.

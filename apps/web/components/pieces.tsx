@@ -193,7 +193,3 @@ export function Readout({ items }: { items: [string, string][] }) {
     </div>
   );
 }
-
-export function Tokens({ value }: { value: number }) {
-  return <>{tokens(value)}</>;
-}

@@ -452,10 +452,26 @@ async def pricing_reload(request: Request) -> dict[str, Any]:
 
 @router.get("/health")
 async def health(request: Request) -> dict[str, Any]:
-    store_ok = await run_in_threadpool(_store(request).health)
-    metadata_ok = await run_in_threadpool(_metadata(request).health)
+    """Qué almacenes hay y si responden. Sólo se afirma lo que se ha comprobado.
+
+    En modo local no hay ClickHouse ni Postgres: antes se decía `clickhouse: true,
+    postgres: true` porque se contestaba con la salud de SQLite bajo esos nombres. Ahora
+    se nombra lo que hay, y las claves de la nube valen `null` donde no existen.
+    """
+    store, metadata = _store(request), _metadata(request)
+    store_ok = await run_in_threadpool(store.health)
+    metadata_ok = await run_in_threadpool(metadata.health)
+    tipo_store = "clickhouse" if type(store).__name__ == "ClickHouseStore" else "sqlite"
+    tipo_meta = {
+        "PostgresMetadataStore": "postgres",
+        "SQLiteMetadataStore": "sqlite",
+    }.get(type(metadata).__name__, "none")
     return {
         "status": "ok" if store_ok else "degraded",
-        "clickhouse": store_ok,
-        "postgres": metadata_ok,
+        "store": tipo_store,
+        "store_ok": store_ok,
+        "metadata": tipo_meta,
+        "metadata_ok": metadata_ok,
+        "clickhouse": store_ok if tipo_store == "clickhouse" else None,
+        "postgres": metadata_ok if tipo_meta == "postgres" else None,
     }

@@ -131,7 +131,7 @@ export function Verdicts({
  * gasto real: si no se enseñara, sabríamos menos de nuestro propio gasto que del del
  * usuario (D-088).
  */
-export function JudgeChip({ annotation }: { annotation: Annotation }) {
+function JudgeChip({ annotation }: { annotation: Annotation }) {
   const juez = annotation.judge;
   return (
     <span

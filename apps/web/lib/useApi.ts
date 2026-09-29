@@ -12,7 +12,7 @@ import { ApiError } from "./api";
  * no cabría en un `pip install` (D-069). En la nube el resultado es el mismo, porque
  * mirar trazas es mirar lo que acaba de pasar y nada de esto se cachea.
  */
-export type Estado<T> =
+type Estado<T> =
   | { fase: "cargando" }
   | { fase: "listo"; datos: T }
   | { fase: "sin-backend" }
