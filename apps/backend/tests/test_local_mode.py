@@ -166,3 +166,11 @@ def test_una_traza_se_abre_con_el_id_corto_que_ensena_la_interfaz(app_local):
     assert app_local.get(
         "/api/traces/ffffffffffff", params={"project_id": proyecto}
     ).status_code == 404
+
+
+def test_la_salud_en_local_no_dice_que_hay_clickhouse(app_local):
+    """En local no hay ClickHouse ni Postgres, y `/health` decía `true` para los dos
+    porque contestaba con la salud de SQLite bajo esos nombres."""
+    salud = app_local.get("/health").json()
+    assert salud["store"] == "sqlite" and salud["store_ok"] is True
+    assert salud["clickhouse"] is None and salud["postgres"] is None

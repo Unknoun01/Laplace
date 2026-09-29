@@ -69,6 +69,16 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
 
 ## 3. Pendiente, por orden
 
+### Lo primero en la siguiente sesión: comprobar lo último, que se subió sin probar
+- **La limpieza (commit `47230fe`)** se subió con el lint, los tipos y la construcción de
+  la interfaz en verde, pero sin que terminara la suite. Pasar la suite entera, con
+  ClickHouse, Postgres y las pruebas de pantalla, antes de fusionarla a `master`.
+- **`/health` dice qué almacén hay de verdad** (`api.py`, con su prueba en
+  `test_local_mode.py`). Está escrito pero no se ha probado nunca. En modo local decía
+  `clickhouse: true, postgres: true` sin haberlos. Probarlo, comprobar que la prueba
+  muerde (deshacer el cambio y verla fallar) y escribir su entrada en `DECISIONS.md`
+  (la siguiente libre, D-169).
+
 ### Espera al usuario (sección 5)
 - **Stripe contra la API real:** la traída de ingresos (D-162) y la diaria (D-163) están
   probadas contra una Stripe falsa con la forma documentada de las facturas. Con una
@@ -130,7 +140,6 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
 - `globals.css` pasa de 4.100 líneas en un solo fichero: partirlo.
 - Al cargar se piden dos veces `/api/projects` y `/api/auth/me` (y el Diagnóstico pide
   además el margen por cliente para su aviso).
-- `/health` en modo local dice `clickhouse: true, postgres: true`.
 - `laplace demo` escribe caracteres rotos en la consola de Windows (la salida no va en UTF-8).
 - `DECISIONS.md` pasa de 220 KB: hace falta un índice por tema y documentación de cara al usuario aparte (Mintlify, Docusaurus o Starlight).
 - `STATUS.md` se puso al día al cerrar las fases 5 y 6: mantenerlo así al cerrar cada fase.
