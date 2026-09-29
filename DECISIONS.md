@@ -3372,6 +3372,8 @@ Pruebas:
   caso que falla no corta, las instrucciones a `system` en Anthropic, el juez y la línea
   de órdenes.
 - `test_pantallas.py`: la ficha del modelo caro da la orden de `laplace replay`.
+- `test_evals.py`: los dos almacenes de metadatos devuelven los mismos `span_ids`,
+  probado contra Postgres de verdad.
 
 Cada garantía se ha roto a propósito y alguna prueba falla. El margen del 30 % no
 mordía, porque la prueba del tope calculaba lo peor con la misma función, y tiene ahora
