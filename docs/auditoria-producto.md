@@ -7,7 +7,7 @@ el 22 de septiembre de 2026 sobre el commit `da82646`.
 > la red que lo habría cazado puesta antes que el arreglo (D-113 a D-118). Al hacerlo
 > apareció un sexto fallo que este informe no vio: dos reglas reclamando el mismo dinero,
 > que es lo que producía el 100 % evitable. Lo que queda del P2 está en la lista de
-> [`STATUS.md`](STATUS.md), en «Lo que sólo se ve mirando la pantalla».
+> [`STATUS.md`](../STATUS.md), en «Lo que sólo se ve mirando la pantalla».
 
 El método importa para leer lo que sigue: no es una lectura de código. Se levantó el
 modo local (`laplace ui`), se le metió tráfico con `laplace demo` y con
@@ -27,7 +27,7 @@ Lo que lo separa de un visor de trazas no es la traza: es que **se niega a afirm
 que no sabe**. Sin datos suficientes no hay porcentaje; con los márgenes solapados no
 hay ganador; por debajo de un día no se proyecta el mes; un modelo sin tarifa no cuesta
 cero, cuesta «no lo sabemos». Esa disciplina está escrita en 112 decisiones
-([`DECISIONS.md`](DECISIONS.md)) y sostenida por pruebas. Es el activo principal del
+([`DECISIONS.md`](../DECISIONS.md)) y sostenida por pruebas. Es el activo principal del
 proyecto, por encima de cualquier funcionalidad concreta.
 
 ## 2. Arquitectura y superficie
@@ -80,7 +80,7 @@ escritos uno a uno.
 
 ## 5. Defectos encontrados
 
-Ninguno de éstos estaba en [`STATUS.md`](STATUS.md). Los dos primeros son el mismo fallo
+Ninguno de éstos estaba en [`STATUS.md`](../STATUS.md). Los dos primeros son el mismo fallo
 con dos caras, y eso importa más que cualquiera de los dos por separado.
 
 ### P0 — La ficha de todo hallazgo de tipo `bucle` devuelve 404

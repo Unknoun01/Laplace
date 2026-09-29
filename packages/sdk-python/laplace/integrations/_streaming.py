@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import logging
 import weakref
-from collections.abc import Callable
 from typing import Any, Protocol
 
 from opentelemetry.trace import Span as OtelSpan
@@ -251,11 +250,3 @@ def record_missing_usage(span: OtelSpan, response: Any, messages: Any) -> None:
         return
     c.set_attr(span, semconv.GEN_AI_USAGE_INPUT_TOKENS, estimate_messages_tokens(messages))
     c.set_attr(span, semconv.LAPLACE_USAGE_ESTIMATED, True)
-
-
-def safe(fn: Callable[[], None]) -> None:
-    """Ejecuta algo del SDK sin dejar que reviente el stream del usuario."""
-    try:
-        fn()
-    except Exception:  # noqa: BLE001
-        logger.debug("laplace: fallo acumulando el stream", exc_info=True)

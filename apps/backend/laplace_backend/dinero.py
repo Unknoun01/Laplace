@@ -78,8 +78,3 @@ def motivo_sin_dinero(*, llm_calls: int, unknown_cost_calls: int) -> str:
     if llm_calls <= 0 or unknown_cost_calls < llm_calls:
         return ""
     return t("dinero.sin_precio", llamadas=cifras.miles(llm_calls))
-
-
-def se_puede_afirmar(*, llm_calls: int, unknown_cost_calls: int) -> bool:
-    """Atajo legible para el caso contrario."""
-    return not motivo_sin_dinero(llm_calls=llm_calls, unknown_cost_calls=unknown_cost_calls)

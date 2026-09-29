@@ -576,24 +576,6 @@ export interface Dataset {
   source_filter: Record<string, string>;
 }
 
-export interface EvalRunItem {
-  case_id: string;
-  trace_id: string;
-  /** La ejecución del agente reventó. Cuenta como fallo, no se descarta. */
-  failed: boolean;
-  error: string;
-}
-
-export interface EvalRun {
-  id: string;
-  project_id: string;
-  dataset_id: string;
-  variant: string;
-  created_at: string;
-  items: EvalRunItem[];
-  notes: string;
-}
-
 /** Una proporción de acierto con su guarda puesta (D-087). */
 export interface Rate {
   source: AnnotationSource;

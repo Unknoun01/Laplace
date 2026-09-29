@@ -422,12 +422,3 @@ def _una_ejecucion(pregunta: str, esc: Escenario) -> str | None:
     except TimeoutError:
         pass
     return _ultima_traza
-
-
-def enviar_trazas_de_ejemplo(endpoint: str, project: str = "demo") -> int:
-    """Emite el mes de tráfico. Devuelve cuántas ejecuciones ha mandado.
-
-    Sólo las trazas: para la demo entera, con prompts, evaluaciones y el arreglo
-    marcado, está `laplace_backend.demo.cargar_demo`, que es lo que llama `laplace demo`.
-    """
-    return len(generar_mes(endpoint, project).trazas)

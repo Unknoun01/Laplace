@@ -9,7 +9,6 @@ import type {
   Comparison,
   CustomPrices,
   Dataset,
-  DatasetItem,
   Diff,
   FindingDetail,
   Instance,
@@ -255,16 +254,6 @@ export async function listProjects(senal?: AbortSignal): Promise<ProjectStats[]>
   return data.projects;
 }
 
-/** True si el backend responde. Distingue "no hay datos" de "no hay backend". */
-export async function backendReachable(): Promise<boolean> {
-  try {
-    await get<unknown>("/health");
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** Inicio de la ventana activa, en ISO, para filtrar la lista de trazas. */
 export function windowStart(days: number): string {
   return new Date(Date.now() - days * 86_400_000).toISOString();
@@ -353,10 +342,6 @@ export function judgePrompt(projectId: string, traceId: string): Promise<{ syste
 export async function listDatasets(projectId: string): Promise<Dataset[]> {
   const data = await get<{ datasets: Dataset[] }>("/api/datasets", { project_id: projectId });
   return data.datasets;
-}
-
-export function getDataset(id: string): Promise<{ dataset: Dataset; items: DatasetItem[] }> {
-  return get<{ dataset: Dataset; items: DatasetItem[] }>(`/api/datasets/${encodeURIComponent(id)}`);
 }
 
 /** Crea un conjunto a partir de un filtro del explorador: tráfico real, no inventado. */

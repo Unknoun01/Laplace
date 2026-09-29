@@ -39,11 +39,9 @@ anthropic = ["anthropic>=0.30"]
 # servidor. No entra por defecto porque un SDK de trazas no puede arrastrar FastAPI a
 # la imagen de producción de nadie (D-068).
 ui = ["laplace-backend>=0.1.0", "uvicorn[standard]>=0.29"]
-dev = [
-    "pytest>=8.0",
-    "pytest-asyncio>=0.23",
-    "ruff>=0.5",
-]
+# Las pruebas del SDK viven con las del backend (`apps/backend/tests`), porque casi
+# todas siguen una traza hasta la ingesta: `pip install -e "apps/backend[dev]"`.
+dev = ["ruff>=0.5"]
 
 [project.urls]
 Homepage = "https://github.com/Unknoun01/Laplace"
@@ -62,10 +60,6 @@ artifacts = ["laplace/ui/**"]
 [tool.hatch.build.targets.sdist]
 include = ["laplace", "README.md", "pyproject.toml"]
 artifacts = ["laplace/ui/**"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 100

@@ -8,7 +8,6 @@ import { duration, money, relative, timestamp, tokens } from "@/lib/format";
 import type { Annotation, TraceListPage, TraceSummary } from "@/lib/types";
 import { usePermisos } from "@/lib/permisos";
 import { LIVE_INTERVAL_MS, type Live, useLive } from "@/lib/useLive";
-import { tr } from "@/lib/i18n";
 import { t, tn } from "@/lib/textos";
 
 /**
@@ -22,7 +21,6 @@ import { t, tn } from "@/lib/textos";
 export function Listado({
   page,
   project,
-  days,
   sort,
   cursor,
   context,
@@ -32,7 +30,6 @@ export function Listado({
 }: {
   page: TraceListPage;
   project: string;
-  days: number;
   sort: string;
   cursor: string;
   context: string;

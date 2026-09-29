@@ -207,7 +207,7 @@ OpenInference-js 4.2.7 y con OpenLLMetry-js 0.27 (D-139).
 Lo que aguantaría un usuario real mañana y lo que no, actualizado después de cerrar
 cobertura, autenticación y proveedores, y después de **mirar el producto entero en
 pantalla con tráfico real delante** en lugar de leer el código. Ese repaso está en
-[`ANALISIS.md`](ANALISIS.md) y encontró seis cosas que ninguna prueba veía, dos de ellas
+[`docs/auditoria-producto.md`](docs/auditoria-producto.md) y encontró seis cosas que ninguna prueba veía, dos de ellas
 graves, porque todas se manifestaban en la pantalla y ninguna en una aserción. **La
 lección es del método, no de los fallos:** una suite de 333 pruebas en verde no dice que
 el producto se lea bien, y este producto es sobre todo lo que el usuario lee.
