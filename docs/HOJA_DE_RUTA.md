@@ -35,7 +35,7 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
   verde (`git merge --no-ff`); si no dice otra cosa, se sigue así.
 - **Nada entra sin su prueba.** Primero la prueba en rojo, después el arreglo.
 - **Hay que comprobar que la prueba muerde:** romper el código a propósito y verla fallar.
-- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-168** (D-166 queda para la medida de escala con semanas de histórico, en curso).
+- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-168**.
 - **Todo en español:** código, comentarios, commits y textos. Los textos de la interfaz y
   del backend, en los cinco idiomas a la vez (`apps/web/lib/mensajes/*.ts`,
   `apps/backend/laplace_backend/textos/*.json`); las pruebas exigen las mismas claves.
@@ -81,7 +81,7 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
 
 ### Restos de fases cerradas
 - **Integraciones:** hechas `client.beta.*` en Python (D-164) y Anthropic por OpenInference-js y OpenLLMetry-js, el AI SDK de Vercel 7 y LangChain.js (D-165), todas contra un proveedor falso. Faltan: pasar el banco de `scripts/integraciones_js` contra las API reales (con las claves de la sección 5), y probar LangGraph.js, el Agents SDK de OpenAI para TypeScript y Mastra.
-- **Escala:** medir con semanas de histórico (hace falta una máquina con más memoria) para decidir sobre acotar por tiempo las subconsultas de `_where` y sobre `FINAL` con partes sin fusionar. El Diagnóstico tarda unos 4 s la primera vez con 10 millones de spans al día en el portátil (objetivo 1,5 s); los preagregados por hora lo bajarían y están aparcados hasta que esa primera carga importe. Si se hacen, entran el uso por paso, el resumen, la cobertura y la serie del gráfico (`step_cost_series`, un 13 % del Diagnóstico, D-154).
+- **Escala (medido, D-166): falta decidir la migración.** Con 14 días guardados, una ventana de un día lee casi todo el histórico del proyecto (590 frente a 112 millones de filas por Diagnóstico) porque la clave de ordenación `(project_id, trace_id, span_id)` mezcla los días en cada gránulo. Ordenar por `(project_id, toDate(start_time), trace_id, span_id)` lo divide por catorce en una copia, sin empeorar abrir una traza. Hacerlo pide migrar la tabla de las instalaciones existentes (tabla nueva, copia por particiones, `EXCHANGE TABLES`): **confirmar con el usuario**. Con ella, acotar por la ventana las subconsultas de `_where`, que con la clave de hoy no sirve. `FINAL` no es el problema. Los preagregados (D-143) se vuelven a medir después.
 
 ### Siguiente: funciones diferenciales (confirmar el orden con el usuario)
 - **Replay contrafactual, más allá** (lo básico está hecho, D-167): llamadas con herramientas (habría que simular sus resultados con los grabados, sin ejecutarlas), imágenes y bloques entre proveedores, y un botón en la versión local que lo lance sin copiar la orden.

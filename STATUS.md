@@ -322,13 +322,14 @@ Lo que **no** demuestran, punto por punto:
    esté: es que el modelo de permisos de este producto se ha comprobado **dos veces con
    la misma prueba** —«¿puede una clave leer las trazas de otro proyecto?»— y las dos
    veces se dio por bueno el resto sin mirarlo.
-2. **Volumen: medido con un día, no con semanas.** Con 10 millones de spans en un día
-   todo aguanta y casi todo pasa del objetivo de 1,5 s por poco: el Diagnóstico tarda
-   unos 4 s en la primera carga en el portátil de D-142, y 6 en la máquina de D-154, y
-   lo que lo bajaría son preagregados por hora. Lo que no se ha medido es un histórico de
-   semanas, que es donde se decidirían `FINAL` y el acotado por tiempo de las
-   subconsultas. La API de la lista de trazas sigue escaneando sin ventana si no se le
-   pasa una (D-008b); la interfaz siempre la pasa.
+2. **Volumen: con semanas de histórico, la clave de ordenación no escala.** Con 10
+   millones de spans al día y 14 días guardados, un Diagnóstico de un día lee casi todo
+   el histórico del proyecto: 590 millones de filas frente a 112 con un día guardado, y
+   15–19 s frente a 9–11. Los días se mezclan en cada gránulo porque la tabla se ordena
+   por `(project_id, trace_id, span_id)`. Ordenar por día lo divide por catorce (D-166),
+   pero exige migrar la tabla de las instalaciones que ya existen, y eso está por
+   decidir. La API de la lista de trazas sigue escaneando sin ventana si no se le pasa
+   una (D-008b); la interfaz siempre la pasa.
 3. **TypeScript, sin SDK propio.** Un agente en Node se ve con OpenInference-js u
    OpenLLMetry-js (con OpenAI o Anthropic), el AI SDK de Vercel 7 o LangChain.js
    apuntados a Laplace, con una guía probada (`docs/typescript.md`) y un banco que se

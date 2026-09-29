@@ -3300,6 +3300,66 @@ de verdad. Entre ellas, una con un span que sólo trae `parts` y nada más que l
 (como la instrumentación oficial de OpenTelemetry para OpenAI), porque sin ella nada
 fallaba al romper la detección.
 
+## 2026-09-29 — Escala: dos semanas de histórico
+
+### D-166 — Con semanas de histórico, una ventana de un día lee el mes entero
+La hoja de ruta dejaba por decidir, a falta de medir con semanas de histórico, dos
+cosas: acotar por tiempo las subconsultas de `_where` y el `FINAL` con partes sin
+fusionar. Medido en un contenedor de 4 núcleos y 16 GB, con `scripts/carga.py`, que
+ahora genera varios días (`--dias`, `--dias-atras`). Son 10 millones de spans al día
+(el proyecto grande, la mitad), primero con un día guardado y después con catorce.
+
+**Lo que empeora sin cambiar la ventana:**
+
+| Proyecto grande, ventana de 1 día | 1 día guardado | 14 días guardados |
+|---|---|---|
+| Diagnóstico | 9–11 s | 15–19 s |
+| Panel | 2,4 s | 7,8 s |
+| Filas leídas por un Diagnóstico | 112 millones | **590 millones** |
+
+El Diagnóstico de 7 días, con esos 7 días llenos, tarda 100 s y el Panel 46 s. La lista
+de trazas de 7 días, 16 s. Abrir una traza sigue en 0,03 s. En disco son 10,9 GB para
+140 millones de spans (12×).
+
+**La causa no es ninguna de las dos que se sospechaban: es la clave de ordenación.** La
+tabla se ordena por `(project_id, trace_id, span_id)`, y los `trace_id` son aleatorios,
+así que cada gránulo mezcla trazas de todos los días. En cuanto las partes se fusionan
+(al medir quedaban 8 activas), el índice `minmax` de `start_time` ya no descarta nada, y
+cada consulta de una ventana recorre casi todo el histórico del proyecto en la
+partición mensual. Con retención de 30 días, una ventana de un día cuesta como el mes.
+
+**Comprobado con una copia.** Se hizo una muestra del proyecto grande (una de cada cuatro
+trazas, 17,5 millones de spans, 14 días), guardada en dos tablas idénticas salvo la clave
+y fusionadas en una parte cada una. Mismas consultas, con la forma de las del almacén:
+
+| Ventana de 1 día | `(project_id, trace_id, span_id)` | `(project_id, toDate(start_time), trace_id, span_id)` |
+|---|---|---|
+| Resumen con `FINAL` | 17,5 M filas, 0,34 s | 1,24 M filas, 0,05 s |
+| Repeticiones por traza | 17,5 M, 0,44 s | 1,24 M, 0,10 s |
+| Lista de errores, subconsulta como hoy | 35 M, 0,53 s | 18,8 M, 0,25 s |
+| Lista de errores, subconsulta acotada | 30 M, 0,43 s | 2,5 M, 0,06 s |
+| Abrir una traza (con proyecto / sólo id) | 5.016 filas, 78 / 30 ms | 10.042 filas, 42 / 28 ms |
+
+**Lo que se decide con esto:**
+
+* **Acotar por tiempo las subconsultas de `_where`: sólo junto con la clave nueva.** Con
+  la de hoy no sirve de nada (35 → 30 M filas); con la nueva divide por siete.
+* **`FINAL`: no es el problema.** Con la clave nueva, el resumen con `FINAL` lee lo mismo
+  que la ventana.
+* **La propuesta es ordenar por día, sin tocar la partición mensual.** La ventana de un
+  día lee 1/14 de lo que lee hoy con dos semanas guardadas, y el coste pasa a crecer con
+  la ventana, no con el histórico. Abrir una traza no empeora, porque ahí manda el índice
+  bloom de `trace_id`. Un span reenviado conserva su `start_time`, así que
+  `ReplacingMergeTree` lo sigue deduplicando.
+* **Sigue sin hacer y espera al usuario:** el esquema nuevo y la migración de las
+  instalaciones que ya existen. Hay que crear la tabla con la clave nueva, copiar los
+  datos por particiones y cambiarlas con `EXCHANGE TABLES`. Es una operación larga sobre
+  datos de clientes y se hace con permiso, no de paso. Con ella, acotar las subconsultas
+  de `_where` por la ventana.
+* **Los preagregados por hora (D-143) quedan detrás.** Con la clave nueva, el Diagnóstico
+  de un día tendría que volver a la escala de la medida de un día guardado, y hay que
+  medirlo otra vez antes de decidir si hacen falta.
+
 ## 2026-09-29 — Funciones diferenciales: el replay contrafactual
 
 ### D-167 — Probar el modelo barato reenviando las llamadas reales, sin escribir código
