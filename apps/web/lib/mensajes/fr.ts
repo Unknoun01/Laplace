@@ -226,7 +226,7 @@ export const fr: Mensajes = {
   "seg.arreglado.boton": "Je l’ai corrigé : vérifiez",
   "seg.no_problema": "Ce n’est pas un problème pour moi",
   "seg.probar.titulo": "Avant de changer, testez",
-  "seg.probar.texto": "L’économie est mesurée ; que {modelo} réponde aussi bien, non. Enregistrez les exécutions réelles de cette étape comme jeu de cas et lancez-les avec le nouveau modèle : Tester vous dira s’il est aussi juste et combien il coûte en moins.",
+  "seg.probar.texto": "L’économie est mesurée ; que {modelo} réponde aussi bien, non. Enregistrez les exécutions réelles de cette étape et renvoyez leurs appels à {modelo} avec la commande ci-dessous : elle tourne sur votre machine, avec votre clé et un plafond de dépense, et le juge compare chaque réponse à l’originale. Tester vous dira s’il est aussi juste et combien il coûte en moins.",
   "seg.probar.barato": "le modèle bon marché",
   "seg.probar.ir": "Aller à Tester →",
   "seg.probar.crear": "Créer le jeu « {nombre} » avec ces exécutions",

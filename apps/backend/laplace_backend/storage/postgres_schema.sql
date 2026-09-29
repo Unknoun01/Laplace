@@ -133,6 +133,9 @@ CREATE TABLE IF NOT EXISTS eval_run_items (
     PRIMARY KEY (run_id, case_id)
 );
 
+-- Los casos de la tirada original de un replay cuentan sólo unos spans (D-167).
+ALTER TABLE eval_run_items ADD COLUMN IF NOT EXISTS span_ids TEXT NOT NULL DEFAULT '[]';
+
 CREATE INDEX IF NOT EXISTS eval_runs_project_idx ON eval_runs (project_id, created_at DESC);
 
 -- ---------------------------------------------------------------------------

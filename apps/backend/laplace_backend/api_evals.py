@@ -21,8 +21,9 @@ from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from .auth import identity_of
-from .evals import Comparison, RunSummary, compare, summarize_run
+from .evals import Comparison, RunSummary, compare, cost_key, coste_de_spans, summarize_run
 from .judge import JudgeConfig, JudgeUnavailable, build_prompt, judge_trace
+from .replay import Reenviables, reenviables, tarifa
 from .storage.base import TraceFilter
 from .storage.metadata import MetadataUnavailable, new_id
 from .textos import t
@@ -170,6 +171,11 @@ class JudgeIn(BaseModel):
     #: Trazas sueltas, o todas las de una tirada.
     trace_ids: list[str] = Field(default_factory=list, max_length=1000)
     run_id: str | None = None
+    #: La referencia de cada traza, si no es la del caso. El replay (D-167) juzga cada
+    #: llamada reenviada contra la respuesta de **esa llamada**, no contra la salida
+    #: final del agente: en un paso intermedio (clasificar un ticket), la salida final
+    #: no dice nada de si el paso respondió igual. Es dato para el juez, como el resto.
+    expected: dict[str, Any] = Field(default_factory=dict, max_length=1000)
 
 
 @router.get("/judge")
@@ -213,6 +219,8 @@ async def run_judge(request: Request, body: JudgeIn) -> dict[str, Any]:
             for i in tirada.items
             if i.case_id in casos
         }
+
+    esperados.update(body.expected)
 
     tope = request.app.state.settings.evals_judge_max_batch
     if len(ids) > tope:
@@ -385,6 +393,37 @@ async def get_dataset(request: Request, dataset_id: str) -> dict[str, Any]:
     }
 
 
+@router.get("/datasets/{dataset_id}/replay", response_model=Reenviables)
+async def replay_calls(
+    request: Request,
+    dataset_id: str,
+    model: str = Query("", max_length=200, description="modelo al que se reenviará"),
+) -> Reenviables:
+    """Las llamadas reales de un conjunto que se pueden reenviar a otro modelo (D-167).
+
+    Las lee `laplace replay` desde la máquina del usuario, que es donde se reenvían con
+    sus claves. Con `model`, además la tarifa de ese modelo para respetar el tope.
+    """
+    meta = _meta(request)
+    conjunto = await run_in_threadpool(meta.get_dataset, dataset_id)
+    if conjunto is None or _de_otro(request, conjunto.project_id):
+        raise HTTPException(status_code=404, detail=t("error.conjunto_no_existe"))
+    items = await run_in_threadpool(meta.list_dataset_items, dataset_id)
+    store = _store(request)
+    casos = [
+        (
+            item.id,
+            await run_in_threadpool(store.get_trace_spans, item.trace_id, conjunto.project_id),
+        )
+        for item in items
+    ]
+    paso = str(conjunto.source_filter.get("step_key") or "")
+    resultado = reenviables(dataset_id, paso, casos)
+    if model:
+        resultado.target = tarifa(model)
+    return resultado
+
+
 @router.delete("/datasets/{dataset_id}")
 async def delete_dataset(request: Request, dataset_id: str) -> dict[str, bool]:
     borrado = await run_in_threadpool(
@@ -463,7 +502,16 @@ async def _context_for(request: Request, project_id: str, *tiradas: EvalRun):
     """
     ids = [i.trace_id for t in tiradas for i in t.items]
     anotaciones = await run_in_threadpool(_meta(request).annotations_for, ids, project_id)
-    costes = await run_in_threadpool(_store(request).costs_for_traces, project_id, ids)
+    enteras = [i.trace_id for tirada in tiradas for i in tirada.items if not i.span_ids]
+    costes = await run_in_threadpool(_store(request).costs_for_traces, project_id, enteras)
+    # Los casos limitados a unos spans (la tirada original de un replay, D-167) se
+    # suman aquí con los spans de su traza: son unas decenas y no merecen una consulta
+    # nueva en los dos almacenes.
+    for item in (i for tirada in tiradas for i in tirada.items if i.span_ids):
+        spans = await run_in_threadpool(
+            _store(request).get_trace_spans, item.trace_id, project_id
+        )
+        costes[cost_key(item)] = coste_de_spans(item.trace_id, spans, set(item.span_ids))
     prompts = await run_in_threadpool(
         _store(request).prompt_versions_by_trace, project_id, ids
     )

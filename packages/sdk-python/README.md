@@ -87,6 +87,31 @@ laplace.set_context(session_id="conv-42", user_id="u-7")
 
 Agrupa varias trazas de una misma conversación y permite ver el coste por usuario final.
 
+### Probar el modelo barato sin escribir código
+
+Cuando el Diagnóstico dice que un paso usa un modelo más caro de lo necesario, guarda
+sus ejecuciones en Probar y reenvía sus llamadas reales al modelo barato:
+
+```bash
+laplace replay "ab-3f9c2e1a" --modelo gpt-5.6-luna --tope 1 --proyecto mi-agente
+```
+
+- **Corre en tu máquina, con tu clave** (la de `OPENAI_API_KEY` o `ANTHROPIC_API_KEY`).
+  Laplace dice qué llamadas se pueden reenviar; no guarda claves de proveedor ni gasta
+  nada por su cuenta.
+- **No pasa del tope.** Antes de cada llamada suma lo peor que puede costar —la entrada
+  original con un 30 % de margen y la salida máxima— y si se pasaría, no la hace. Un
+  modelo sin tarifa no tiene tope que cumplir, y no se reenvía nada.
+- **Pide permiso** antes de gastar: cuántas llamadas, lo que costaron y lo que
+  costarán como mucho. `--si` se lo salta; sin nadie delante y sin `--si`, no gasta.
+- **Sólo lo que no tiene efectos:** llamadas hoja del paso, sin herramientas, con los
+  mensajes en texto. Lo demás se cuenta por motivo.
+
+Deja dos tiradas del conjunto para comparar en Probar: «original», con el coste de
+esas mismas llamadas, y la del modelo nuevo. Si el juez de Laplace está encendido,
+juzga cada respuesta contra la que dio el original. Desde Python:
+`laplace.replay_dataset("ab-3f9c2e1a", model="gpt-5.6-luna", max_usd=1)`.
+
 ## Configuración
 
 Todo se puede fijar por entorno, para no tener que tocar el código en cada despliegue.

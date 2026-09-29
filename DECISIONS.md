@@ -3299,3 +3299,87 @@ Pruebas: 10 nuevas en `test_convenciones.py`, con los atributos copiados de las 
 de verdad. Entre ellas, una con un span que sólo trae `parts` y nada más que lo delate
 (como la instrumentación oficial de OpenTelemetry para OpenAI), porque sin ella nada
 fallaba al romper la detección.
+
+## 2026-09-29 — Funciones diferenciales: el replay contrafactual
+
+### D-167 — Probar el modelo barato reenviando las llamadas reales, sin escribir código
+El paso «probar» del ciclo (D-156) pedía guardar las ejecuciones de un paso y escribir
+una función que corriese el agente sobre cada caso con el modelo nuevo. Para la pregunta
+más común —«¿el modelo barato respondería igual en este paso?»— no hace falta el agente:
+basta con reenviar **las mismas llamadas** que hizo el paso, con los mismos mensajes, al
+modelo barato, y comparar las respuestas. Es lo que hace `laplace replay`.
+
+* **Corre en el SDK, con las claves del usuario** (decidido con el usuario). El backend
+  dice qué llamadas se pueden reenviar (`GET /api/datasets/{id}/replay`); las reenvía el
+  cliente de OpenAI o Anthropic del proceso del usuario, con la clave de su entorno.
+  Laplace no guarda claves de proveedor ni gasta dinero de nadie, que es D-086 aplicado a
+  algo que no es ejecutar el agente pero se le parece. La otra opción, un botón que
+  reenviase desde el backend, era mejor experiencia a cambio de custodiar claves.
+* **Qué se reenvía.** Sólo lo que no puede tener efectos ni cambiar de sentido al
+  reenviarse:
+  - llamadas **hoja** del paso del conjunto;
+  - **sin herramientas**, ni declaradas, ni pedidas en la respuesta, ni resultados de
+    herramienta entre los mensajes;
+  - con **todos los mensajes en texto y con rol**, lo que también deja fuera los mensajes
+    que el SDK recortó por tamaño;
+  - que salieron **bien** y con **respuesta**;
+  - que **no son de una tirada**.
+
+  Lo demás se cuenta por motivo y se enseña al pedir permiso. De los parámetros se
+  llevan `temperature`, `top_p` y `max_tokens`, y los dos primeros sólo si el SDK
+  instalado los acepta: `anthropic` 1.x ya no tiene ninguno de los dos en
+  `messages.create`, y pasarlos hacía fallar cada llamada (lo encontró la prueba con el
+  cliente real).
+* **El tope se cumple por construcción.** Antes de cada caso se suma lo peor que puede
+  costar: la entrada original con un 30 % de margen, porque otro tokenizador puede contar
+  más, y la salida máxima, que es la fijada por el original o cuatro veces su respuesta,
+  entre 256 y 4.096. Si con eso se pasaría, no se hace. La salida máxima va también en la
+  petición, así que el proveedor no puede pasarse de ella. Un caso se reenvía entero o no
+  se reenvía: medio caso compararía menos llamadas en un lado que en el otro. Sin tarifa
+  del modelo de destino no hay tope que cumplir, y no se reenvía nada.
+* **Con permiso.** Antes de gastar se enseña cuántas llamadas son, lo que costaron (medido),
+  lo que costarán si el modelo responde lo mismo y lo peor. Desde la línea de órdenes se
+  pregunta; `--si` se lo salta, y sin nadie delante y sin `--si` no se gasta nada.
+* **Una comparación justa.** Quedan dos tiradas del conjunto:
+  - la **original**, que no gasta nada: apunta a las llamadas reenviadas dentro de las
+    trazas reales, con los `span_ids` nuevos de cada caso de una tirada;
+  - la del **modelo nuevo**, con sus trazas, marcadas como tirada de evaluación y fuera de
+    las reglas.
+
+  Sin los `span_ids`, el lado original habría costado el agente entero y el nuevo un solo
+  paso. El coste de un caso limitado a unos spans se suma con los spans de su traza, y un
+  span que ya no está cuenta como coste desconocido, así que el total pasa a ser un suelo
+  y no una cifra más baja que parece exacta. `cost_key` separa en la comparación la misma
+  traza entera y limitada. Los `span_ids` se guardan en los dos almacenes de metadatos,
+  con migración.
+* **El juez, contra la respuesta de esa llamada.** `POST /api/judge` acepta la referencia
+  de cada traza. En un paso intermedio, como clasificar un ticket, la salida final del
+  agente no dice nada de si el paso respondió igual; la respuesta original de la llamada,
+  sí. Si el juez está apagado, se dice que la comparación sólo tendrá el coste.
+* **En la interfaz**, la ficha de un problema de modelo caro y «Arreglos por probar» dan
+  la orden de `laplace replay` con el modelo barato que propone el hallazgo, en vez del
+  código de `run_dataset`. El texto dice que corre en tu máquina, con tu clave y un tope,
+  en los cinco idiomas. Los demás arreglos siguen con `run_dataset`, porque no cambian de
+  modelo.
+
+Pruebas:
+- `test_replay.py` (10): qué se reenvía y por qué no lo demás, la tarifa, el coste de la
+  tirada original limitado a sus spans, un span que falta hace del coste un suelo, y el
+  juez con la referencia por traza.
+- `test_replay_sdk.py` (11): de punta a punta con el backend en memoria y los clientes
+  reales de OpenAI y Anthropic con el transporte falso: lo que llega al proveedor, las dos
+  tiradas y su comparación, el tope, sin permiso no se gasta, sin tarifa no se reenvía, un
+  caso que falla no corta, las instrucciones a `system` en Anthropic, el juez y la línea
+  de órdenes.
+- `test_pantallas.py`: la ficha del modelo caro da la orden de `laplace replay`.
+
+Cada garantía se ha roto a propósito y alguna prueba falla. El margen del 30 % no
+mordía, porque la prueba del tope calculaba lo peor con la misma función, y tiene ahora
+una prueba con las cifras escritas a mano.
+
+**Lo que no hace:**
+- no reenvía llamadas con herramientas, que exigirían ejecutarlas y eso es correr el
+  agente;
+- no convierte imágenes ni bloques entre proveedores;
+- no se ha probado contra las API reales, porque espera la clave de la sección 5 de la
+  hoja de ruta.

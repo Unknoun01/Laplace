@@ -1,9 +1,10 @@
 # Hoja de ruta de Laplace
 
 Documento de traspaso entre sesiones. Última actualización: 28 de septiembre de 2026,
-tras probar las integraciones que faltaban (D-164 y D-165). Aquí sólo está **lo que
+tras probar las integraciones que faltaban (D-164 y D-165) y con el replay contrafactual
+(D-167). Aquí sólo está **lo que
 queda**: lo hecho vive en `DECISIONS.md` y en la historia de git. Léelo entero antes de tocar nada; después lee `STATUS.md` y las
-últimas entradas de `DECISIONS.md` (D-154 a D-165).
+últimas entradas de `DECISIONS.md` (D-154 a D-167).
 
 ## 1. Qué es y hacia dónde va
 
@@ -17,8 +18,8 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
 **Posicionamiento decidido con el usuario:**
 - Función principal: **ahorro verificado**, un ciclo en cuatro pasos —detectar, probar el
   arreglo sobre llamadas reales, arreglar, verificar— con la cifra «ahorrado y
-  recuperable». Ya tiene su sitio en la interfaz (D-156); lo que le falta es automatizar
-  el paso «probar» (el replay, sección 3).
+  recuperable». Ya tiene su sitio en la interfaz (D-156), y el paso «probar» del modelo
+  caro ya no pide código: `laplace replay` (D-167).
 - La observabilidad completa se mantiene para el análisis en profundidad.
 - **Margen por cliente:** hecho (D-161 a D-163), salvo lo que espera al usuario.
 - **En vez de un editor tipo n8n:** un **plano de control**. Laplace no ejecuta agentes.
@@ -34,7 +35,7 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
   verde (`git merge --no-ff`); si no dice otra cosa, se sigue así.
 - **Nada entra sin su prueba.** Primero la prueba en rojo, después el arreglo.
 - **Hay que comprobar que la prueba muerde:** romper el código a propósito y verla fallar.
-- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-166**.
+- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-168** (D-166 queda para la medida de escala con semanas de histórico, en curso).
 - **Todo en español:** código, comentarios, commits y textos. Los textos de la interfaz y
   del backend, en los cinco idiomas a la vez (`apps/web/lib/mensajes/*.ts`,
   `apps/backend/laplace_backend/textos/*.json`); las pruebas exigen las mismas claves.
@@ -76,13 +77,14 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
   customerId })`, `getPrompt`): espera el nombre del scope en npm. Mientras tanto, un
   agente en Node usa OpenInference/OpenLLMetry y los atributos `laplace.*` (probado, D-163).
 - **Las 4 pruebas vivas** que validan las cifras contra la factura del proveedor.
+- **`laplace replay` contra la API real** (D-167): probado con los clientes reales y el transporte falso; con una clave, pasar un replay de verdad y comprobar que lo gastado cuadra con la factura.
 
 ### Restos de fases cerradas
 - **Integraciones:** hechas `client.beta.*` en Python (D-164) y Anthropic por OpenInference-js y OpenLLMetry-js, el AI SDK de Vercel 7 y LangChain.js (D-165), todas contra un proveedor falso. Faltan: pasar el banco de `scripts/integraciones_js` contra las API reales (con las claves de la sección 5), y probar LangGraph.js, el Agents SDK de OpenAI para TypeScript y Mastra.
 - **Escala:** medir con semanas de histórico (hace falta una máquina con más memoria) para decidir sobre acotar por tiempo las subconsultas de `_where` y sobre `FINAL` con partes sin fusionar. El Diagnóstico tarda unos 4 s la primera vez con 10 millones de spans al día en el portátil (objetivo 1,5 s); los preagregados por hora lo bajarían y están aparcados hasta que esa primera carga importe. Si se hacen, entran el uso por paso, el resumen, la cobertura y la serie del gráfico (`step_cost_series`, un 13 % del Diagnóstico, D-154).
 
 ### Siguiente: funciones diferenciales (confirmar el orden con el usuario)
-- **Replay contrafactual:** reenviar, con tope de gasto y permiso, las llamadas reales de un paso al modelo barato y compararlas con el juez. Sólo llamadas hoja sin herramientas con efectos. Automatiza el paso «probar» del ciclo, que hoy es guardar el conjunto y lanzar la tirada a mano.
+- **Replay contrafactual, más allá** (lo básico está hecho, D-167): llamadas con herramientas (habría que simular sus resultados con los grabados, sin ejecutarlas), imágenes y bloques entre proveedores, y un botón en la versión local que lo lance sin copiar la orden.
 - **`laplace.guard(max_usd_per_run, max_loop)`:** cortacircuitos en el SDK.
 - **Bot de pull requests** (GitHub App): cambio de modelo, `cache_control`, `max_iterations`. `step_site` dice dónde está el código.
 - **Plano de control** (sección 1), empezando por el grafo del agente de todo el proyecto.

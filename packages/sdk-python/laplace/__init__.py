@@ -24,11 +24,13 @@ from .decorators import (
 from .evals import Case, RunResult, fetch_dataset, run_dataset
 from .manual import llm_span
 from .prompts import PromptError, ServedPrompt, get_prompt
+from .replay import ReplayResult, replay_dataset
 from .version import __version__
 
 __all__ = [
     "Case",
     "PromptError",
+    "ReplayResult",
     "RunResult",
     "ServedPrompt",
     "__version__",
@@ -41,6 +43,7 @@ __all__ = [
     "is_enabled",
     "llm_span",
     "observe",
+    "replay_dataset",
     "run_dataset",
     "set_context",
     "shutdown",

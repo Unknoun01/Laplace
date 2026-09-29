@@ -353,12 +353,20 @@ class PostgresMetadataStore:
             )
             for item in run.items:
                 conn.execute(
-                    "INSERT INTO eval_run_items (run_id, case_id, trace_id, failed, error) "
-                    "VALUES (%s, %s, %s, %s, %s) "
+                    "INSERT INTO eval_run_items "
+                    "(run_id, case_id, trace_id, failed, error, span_ids) "
+                    "VALUES (%s, %s, %s, %s, %s, %s) "
                     "ON CONFLICT (run_id, case_id) DO UPDATE SET "
                     "trace_id = EXCLUDED.trace_id, failed = EXCLUDED.failed, "
-                    "error = EXCLUDED.error",
-                    (run.id, item.case_id, item.trace_id, item.failed, item.error),
+                    "error = EXCLUDED.error, span_ids = EXCLUDED.span_ids",
+                    (
+                        run.id,
+                        item.case_id,
+                        item.trace_id,
+                        item.failed,
+                        item.error,
+                        json.dumps(item.span_ids),
+                    ),
                 )
         return run
 
@@ -395,11 +403,18 @@ class PostgresMetadataStore:
     @staticmethod
     def _items(conn: Any, run_id: str) -> list[EvalRunItem]:
         filas = conn.execute(
-            "SELECT case_id, trace_id, failed, error FROM eval_run_items WHERE run_id = %s",
+            "SELECT case_id, trace_id, failed, error, span_ids FROM eval_run_items "
+            "WHERE run_id = %s",
             (run_id,),
         ).fetchall()
         return [
-            EvalRunItem(case_id=f[0], trace_id=f[1], failed=bool(f[2]), error=f[3] or "")
+            EvalRunItem(
+                case_id=f[0],
+                trace_id=f[1],
+                failed=bool(f[2]),
+                error=f[3] or "",
+                span_ids=json.loads(f[4] or "[]"),
+            )
             for f in filas
         ]
 
