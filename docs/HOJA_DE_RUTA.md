@@ -73,6 +73,10 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
 - **La limpieza (commit `47230fe`)** se subió con el lint, los tipos y la construcción de
   la interfaz en verde, pero sin que terminara la suite. Pasar la suite entera, con
   ClickHouse, Postgres y las pruebas de pantalla, antes de fusionarla a `master`.
+  La pasada que llegó a terminar dio 941 bien, 17 fallos y 68 errores. Los que se
+  miraron son de ClickHouse: los `DELETE` de limpieza de las pruebas no caben en disco con
+  los 140 millones de spans de `scripts/carga.py` dentro. Se repite con una base limpia
+  (`python scripts/carga.py --borrar`, o sin la carga) antes de dar nada por roto.
 - **`/health` dice qué almacén hay de verdad** (`api.py`, con su prueba en
   `test_local_mode.py`). Está escrito pero no se ha probado nunca. En modo local decía
   `clickhouse: true, postgres: true` sin haberlos. Probarlo, comprobar que la prueba
