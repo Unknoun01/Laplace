@@ -139,7 +139,7 @@ export function Listado({
 }
 
 /** El estado del modo en vivo, dicho en una línea. */
-export function Latido({ live }: { live: Live }) {
+function Latido({ live }: { live: Live }) {
   if (live.fallando) return <>{t("lista.sin_backend")}</>;
   return (
     <>
@@ -156,7 +156,7 @@ export function Latido({ live }: { live: Live }) {
   );
 }
 
-export function Row({
+function Row({
   trace,
   context,
   project,

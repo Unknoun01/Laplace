@@ -440,7 +440,7 @@ export interface Overview {
 // Panel (Fase 4). Espejo de apps/backend/laplace_backend/panel.py.
 // ---------------------------------------------------------------------------------
 
-export type Verdict = "sin-base" | "estable" | "normal" | "revisar" | "mejora" | "mixto";
+type Verdict = "sin-base" | "estable" | "normal" | "revisar" | "mejora" | "mixto";
 
 export interface Metric {
   label: string;
@@ -552,17 +552,6 @@ export interface JudgeRun {
   /** El modelo del juez no está en la tabla de precios: su coste es «no lo sabemos». */
   cost_unknown: boolean;
   prompt_version: string;
-}
-
-export interface DatasetItem {
-  id: string;
-  dataset_id: string;
-  /** La traza real de la que salió el caso. Sin esto sería un caso inventado. */
-  trace_id: string;
-  span_id: string | null;
-  input: unknown;
-  expected: unknown;
-  created_at: string;
 }
 
 export interface Dataset {

@@ -42,7 +42,7 @@ export function fijarIdioma(idioma: Idioma): void {
 }
 
 /** `pt-BR` → `pt`; lo que no sea uno de los cinco, `null`. */
-export function valido(etiqueta: string | null | undefined): Idioma | null {
+function valido(etiqueta: string | null | undefined): Idioma | null {
   if (!etiqueta) return null;
   const base = etiqueta.trim().toLowerCase().replace("_", "-").split("-")[0];
   return (IDIOMAS as readonly string[]).includes(base) ? (base as Idioma) : null;

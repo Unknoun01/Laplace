@@ -62,26 +62,19 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
 - **Tras tocar la web:** `.venv/Scripts/python.exe scripts/build_ui.py`, que construye `apps/web/out`, lo que sirve `laplace ui`.
 - **Servidor local:** la configuración «local» de `.claude/launch.json` (puerto 8100). Tras tocar Python hay que reiniciarlo.
 - **Demo:** `.venv/Scripts/python.exe -m laplace.cli demo --endpoint http://127.0.0.1:8100` carga un mes de datos, con cuatro clientes (uno que hace perder dinero).
-- **Pantallas:** `test_pantallas.py` usa Playwright con Chromium, ya instalados en `.venv`.
+- **Pantallas:** `test_pantallas.py` usa Playwright con Chromium, ya instalados en `.venv`. Prueban la interfaz construida en `apps/web/out`: tras un pull, `scripts/build_ui.py` antes de pasarlas, o fallan contra la vieja.
 - **Estado:** la última pasada completa (D-162, en Linux con ClickHouse y Postgres) dio 902 pruebas bien y 16 saltadas —las 4 vivas que necesitan clave de proveedor y 12 que necesitan Ollama con un modelo— y una de pantalla que dependía del reloj, arreglada después. Las del espejo con la web necesitan Node 22.6 o posterior.
 - **Fuera de Windows** (contenedor Linux): `.venv/bin/python` en lugar de `.venv/Scripts/python.exe`, y Playwright 1.56 para el Chromium que ya trae la máquina. Docker no arranca solo: `dockerd &` y después `docker start laplace-clickhouse laplace-postgres` (el contenedor de la sesión se reinicia y hay que repetirlo). ClickHouse no arranca con el `ulimits` del compose en un contenedor sin permiso para subirlos: `docker run` sin esa línea. Ojo con `pkill -f "laplace.cli ui"` en la misma orden que lo arranca: se mata a sí misma.
-- **Prueba de carga:** `python scripts/carga.py --spans 10000000` genera un día de tráfico en ClickHouse y mide las pantallas con el desglose de cada lectura; `--borrar` lo quita. Con 10 millones hacen falta unos 8 GB para Docker.
+- **Prueba de carga:** `python scripts/carga.py --spans 10000000` genera un día de tráfico en ClickHouse y mide las pantallas con el desglose de cada lectura; `--borrar` lo quita. Con 10 millones hacen falta unos 8 GB para Docker. Quitarlos al acabar: con ellos en la base, la suite tarda horas y los `ALTER` de las pruebas se quedan sin tiempo.
 
 ## 3. Pendiente, por orden
 
-### Lo primero en la siguiente sesión: comprobar lo último, que se subió sin probar
-- **La limpieza (commit `47230fe`)** se subió con el lint, los tipos y la construcción de
-  la interfaz en verde, pero sin que terminara la suite. Pasar la suite entera, con
-  ClickHouse, Postgres y las pruebas de pantalla, antes de fusionarla a `master`.
-  La pasada que llegó a terminar dio 941 bien, 17 fallos y 68 errores. Los que se
-  miraron son de ClickHouse: los `DELETE` de limpieza de las pruebas no caben en disco con
-  los 140 millones de spans de `scripts/carga.py` dentro. Se repite con una base limpia
-  (`python scripts/carga.py --borrar`, o sin la carga) antes de dar nada por roto.
-- **`/health` dice qué almacén hay de verdad** (`api.py`, con su prueba en
-  `test_local_mode.py`). Está escrito pero no se ha probado nunca. En modo local decía
-  `clickhouse: true, postgres: true` sin haberlos. Probarlo, comprobar que la prueba
-  muerde (deshacer el cambio y verla fallar) y escribir su entrada en `DECISIONS.md`
-  (la siguiente libre, D-169).
+### Lo primero: las 2 pruebas de ClickHouse que quedaron sin pasar (D-169)
+- La limpieza y `/health` están probados, salvo las 2 de
+  `test_busqueda_contenido.py` contra ClickHouse, que daban error por un `ALTER` que
+  esperaba al bloqueo de `spans` con los millones de spans de la prueba de carga en la
+  base local. Quitarlos (`python scripts/carga.py --borrar`, sólo borra los proyectos
+  `carga-*`) y pasar ese fichero.
 
 ### Espera al usuario (sección 5)
 - **Stripe contra la API real:** la traída de ingresos (D-162) y la diaria (D-163) están

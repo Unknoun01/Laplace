@@ -81,7 +81,7 @@ export function ProveedorIdioma({ children }: { children: ReactNode }) {
   );
 }
 
-export function useIdioma() {
+function useIdioma() {
   return useContext(Contexto);
 }
 

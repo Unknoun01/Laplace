@@ -206,7 +206,7 @@ export async function getFinding(
   }
 }
 
-export interface TraceQuery {
+interface TraceQuery {
   project_id?: string;
   search?: string;
   /** Texto dentro de prompts, respuestas y herramientas; al menos 3 caracteres. */
@@ -314,7 +314,7 @@ export function judgeStatus(): Promise<JudgeStatus> {
   return get<JudgeStatus>("/api/judge");
 }
 
-export interface JudgeResult {
+interface JudgeResult {
   judged: number;
   failed: { trace_id: string; error: string }[];
   cost_usd: number;

@@ -353,7 +353,7 @@ export function NotFound({ title, body, back }: { title: string; body: string; b
 }
 
 /** Esqueletos de carga: sobrios y del tamaño real, para que nada salte al llegar. */
-export function HeroSkeleton() {
+function HeroSkeleton() {
   return (
     <section className="hero">
       <span className="sk" style={{ width: 260, height: 15, marginBottom: 22 }} />
@@ -366,7 +366,7 @@ export function HeroSkeleton() {
   );
 }
 
-export function CardsSkeleton({ count = 3 }: { count?: number }) {
+function CardsSkeleton({ count = 3 }: { count?: number }) {
   return (
     <section className="sec">
       <span className="sk" style={{ width: 200, height: 17, marginBottom: 18 }} />

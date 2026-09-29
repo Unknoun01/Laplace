@@ -127,7 +127,7 @@ export function EstadoHallazgo({ project, finding }: { project: string; finding:
   );
 }
 
-export function porEjecucion(valor: number, unidad: "usd" | "tokens" | "ms"): string {
+function porEjecucion(valor: number, unidad: "usd" | "tokens" | "ms"): string {
   if (unidad === "usd") return money(valor);
   if (unidad === "tokens") return t("seg.tokens", { n: tokens(valor) });
   return duration(valor);

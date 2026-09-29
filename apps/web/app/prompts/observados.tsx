@@ -66,7 +66,7 @@ export function Observados({
   );
 }
 
-export function PasoObservado({ paso }: { paso: ObservedStep }) {
+function PasoObservado({ paso }: { paso: ObservedStep }) {
   return (
     <article className="card static">
       <div className="card-top">

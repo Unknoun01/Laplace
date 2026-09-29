@@ -314,11 +314,6 @@ class PriceTable:
         return dict(self._models)
 
     @property
-    def unverified_models(self) -> dict[str, ModelPrice]:
-        """Los de la capa de LiteLLM, que sólo se usan si la verificada no resuelve."""
-        return dict(self._unverified)
-
-    @property
     def sources(self) -> dict[str, Source]:
         return dict(self._sources)
 

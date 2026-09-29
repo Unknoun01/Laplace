@@ -49,7 +49,7 @@ function identidad(node: TraceTreeNode): string {
   return node.span.step_key || `${node.span.type}:${node.span.name}`;
 }
 
-export function construirGrafo(trace: Trace): { nodos: Nodo[]; aristas: Arista[] } {
+function construirGrafo(trace: Trace): { nodos: Nodo[]; aristas: Arista[] } {
   const nodos = new Map<string, Nodo>();
   const aristas = new Map<string, Arista>();
   const orden: string[] = [];

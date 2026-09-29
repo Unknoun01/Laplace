@@ -1,6 +1,6 @@
 import type { TraceTreeNode } from "./types";
 
-export interface Row {
+interface Row {
   node: TraceTreeNode;
   depth: number;
 }

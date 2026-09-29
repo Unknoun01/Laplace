@@ -35,7 +35,7 @@ interface Convencion {
   porcentaje: string;
 }
 
-export const CONVENCIONES: Record<Idioma, Convencion> = {
+const CONVENCIONES: Record<Idioma, Convencion> = {
   es: { millar: ".", decimal: ",", dinero: `{n}${NBSP}{s}`, simbolos: { USD: "US$", EUR: "€" }, porcentaje: `{n}${NBSP}%` },
   en: { millar: ",", decimal: ".", dinero: "{s}{n}", simbolos: { USD: "$", EUR: "€" }, porcentaje: "{n}%" },
   pt: { millar: ".", decimal: ",", dinero: `{s}${NBSP}{n}`, simbolos: { USD: "US$", EUR: "€" }, porcentaje: "{n}%" },

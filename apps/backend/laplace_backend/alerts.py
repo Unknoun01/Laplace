@@ -766,11 +766,6 @@ def resolver_destino(url: str, *, permitir_local: bool = False) -> tuple[str, li
     return "", direcciones
 
 
-def destino_inseguro(url: str, *, permitir_local: bool = False) -> str:
-    """El motivo por el que no se manda a esa URL, o cadena vacía si se puede."""
-    return resolver_destino(url, permitir_local=permitir_local)[0]
-
-
 def _conectar(ips: list[str], puerto: int, timeout: float | None) -> socket.socket:
     """La primera de `ips` que conteste. Sólo éstas: son las que se han comprobado."""
     ultimo: OSError | None = None

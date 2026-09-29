@@ -35,7 +35,7 @@ export function guardarTipo(tipo: number | null): void {
 }
 
 /** El tipo en vigor, y se actualiza si se cambia en otra pantalla. */
-export function useTipoEuro(): number | null {
+function useTipoEuro(): number | null {
   const [tipo, setTipo] = useState<number | null>(null);
   useEffect(() => {
     const actualizar = () => setTipo(leerTipo());
@@ -46,7 +46,7 @@ export function useTipoEuro(): number | null {
   return tipo;
 }
 
-export function euros(usd: number, tipo: number): string {
+function euros(usd: number, tipo: number): string {
   const valor = usd * tipo;
   // Con el formato de euros del idioma (D-147): «≈ 12,40 €», «≈ €12.40».
   return `≈ ${money(valor, "EUR")}`;

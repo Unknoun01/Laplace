@@ -91,7 +91,7 @@ export function CoberturaLinea({ cobertura }: { cobertura: Coverage }) {
  * Sin porcentaje cuando no hay llamadas suficientes: se dice por qué, igual que en
  * todas las demás proporciones del producto (D-087).
  */
-export function Señales({ cobertura }: { cobertura: Coverage }) {
+function Señales({ cobertura }: { cobertura: Coverage }) {
   return (
     <ul className="senales">
       {cobertura.signals.map((s) => (

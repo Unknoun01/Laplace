@@ -216,7 +216,7 @@ export function Tiradas({
 }
 
 /** Una celda de acierto: porcentaje si lo hay, casos en bruto si no. */
-export function Celda({ rate }: { rate?: Rate }) {
+function Celda({ rate }: { rate?: Rate }) {
   if (!rate || rate.judged === 0) return <span style={{ color: "var(--ink-3)" }}>—</span>;
   if (rate.value === null)
     return (

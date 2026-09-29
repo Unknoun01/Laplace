@@ -10,7 +10,7 @@
  * de descarga.
  */
 
-export type Celda = string | number | null | undefined;
+type Celda = string | number | null | undefined;
 
 function celda(valor: Celda): string {
   if (valor === null || valor === undefined) return "";

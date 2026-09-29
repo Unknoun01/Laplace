@@ -184,7 +184,7 @@ export function Alertas({ project, inicial }: { project: string; inicial: AlertS
   );
 }
 
-export function Canal(props: {
+function Canal(props: {
   titulo: string;
   actual: string;
   valor: string;
@@ -227,7 +227,7 @@ export function Canal(props: {
 
 // ---------------------------------------------------------------------------------
 
-export const REGLAS = [
+const REGLAS = [
   ["repeticion", "aj.regla.repeticion"],
   ["bucle", "aj.regla.bucle"],
   ["modelo_caro", "aj.regla.modelo_caro"],

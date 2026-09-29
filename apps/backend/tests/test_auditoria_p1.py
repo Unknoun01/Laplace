@@ -372,7 +372,7 @@ def test_un_nombre_público_que_resuelve_a_una_ip_interna_no_se_usa(monkeypatch)
         lambda *a, **k: [(2, 1, 6, "", ("10.1.2.3", 443))],
     )
     assert alerts.webhook_valido("https://parece-publico.example/hook")
-    assert "no pública" in alerts.destino_inseguro("https://parece-publico.example/hook")
+    assert "no pública" in alerts.resolver_destino("https://parece-publico.example/hook")[0]
 
 
 def test_la_api_rechaza_guardar_un_webhook_interno(cerrado):
