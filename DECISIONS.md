@@ -3551,4 +3551,5 @@ y 2 errores. Ninguno venía de la limpieza:
   Ahora usa `tmp_path`, y pasa.
 - Las 2 de búsqueda por contenido en ClickHouse daban error: un `ALTER` se quedaba sin
   tiempo esperando el bloqueo de `spans`, con millones de spans de la prueba de carga en
-  la base local. Con ellos la suite tardó más de dos horas en lugar de minutos.
+  la base local. Con ellos la suite tardó más de dos horas en lugar de minutos. Quitados con
+  `scripts/carga.py --borrar`, pasan.

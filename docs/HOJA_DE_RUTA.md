@@ -69,13 +69,6 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
 
 ## 3. Pendiente, por orden
 
-### Lo primero: las 2 pruebas de ClickHouse que quedaron sin pasar (D-169)
-- La limpieza y `/health` están probados, salvo las 2 de
-  `test_busqueda_contenido.py` contra ClickHouse, que daban error por un `ALTER` que
-  esperaba al bloqueo de `spans` con los millones de spans de la prueba de carga en la
-  base local. Quitarlos (`python scripts/carga.py --borrar`, sólo borra los proyectos
-  `carga-*`) y pasar ese fichero.
-
 ### Espera al usuario (sección 5)
 - **Stripe contra la API real:** la traída de ingresos (D-162) y la diaria (D-163) están
   probadas contra una Stripe falsa con la forma documentada de las facturas. Con una
