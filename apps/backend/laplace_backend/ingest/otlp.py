@@ -35,7 +35,7 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTrace
 
 from ..pricing import get_price_table
 from ..textos import t
-from .convenciones import TRADUCIDOS, normalizar
+from .convenciones import ENTRADAS_DEL_PADRE, TRADUCIDOS, mensajes_del_padre, normalizar
 
 logger = logging.getLogger("laplace.ingest")
 
@@ -365,6 +365,7 @@ def parse_spans(request: ExportTraceServiceRequest) -> list[Span]:
     """Aplana la petición OTLP en spans del contrato, ya con coste calculado."""
     prices = get_price_table()
     spans: list[Span] = []
+    padres, entradas = _entradas_de_los_padres(request)
 
     for resource_spans in request.resource_spans:
         resource = _attributes(resource_spans.resource.attributes)
@@ -376,16 +377,73 @@ def parse_spans(request: ExportTraceServiceRequest) -> list[Span]:
         for scope_spans in resource_spans.scope_spans:
             for proto_span in scope_spans.spans:
                 try:
-                    spans.append(_build_span(proto_span, project_id, resource, prices))
+                    spans.append(
+                        _build_span(
+                            proto_span,
+                            project_id,
+                            resource,
+                            prices,
+                            _entrada_heredada(proto_span, padres, entradas),
+                        )
+                    )
                 except Exception:  # noqa: BLE001 - un span roto no invalida el lote
                     logger.exception("no se pudo procesar un span; se descarta")
     return spans
 
 
-def _build_span(proto_span: Any, project_id: str, resource: dict[str, Any], prices: Any) -> Span:
+def _entradas_de_los_padres(request: Any) -> tuple[dict[bytes, bytes], dict[bytes, Any]]:
+    """Del lote: el padre de cada span, y los mensajes que dejó Mastra en sus pasos.
+
+    La llamada al modelo de Mastra (`model_inference`) no lleva sus mensajes: los lleva el
+    paso que la envuelve (D-170). Sólo se miran las claves, que es barato; el valor sólo
+    se lee en los spans que lo tienen.
+    """
+    padres: dict[bytes, bytes] = {}
+    entradas: dict[bytes, Any] = {}
+    for resource_spans in request.resource_spans:
+        for scope_spans in resource_spans.scope_spans:
+            for proto_span in scope_spans.spans:
+                padres[proto_span.span_id] = proto_span.parent_span_id
+                for par in proto_span.attributes:
+                    if par.key in ENTRADAS_DEL_PADRE:
+                        entradas.setdefault(proto_span.span_id, _any_value(par.value))
+    return padres, entradas
+
+
+def _entrada_heredada(
+    proto_span: Any, padres: dict[bytes, bytes], entradas: dict[bytes, Any]
+) -> str | None:
+    """Los mensajes del paso de Mastra que envuelve esta llamada, si están en el lote."""
+    if not entradas:
+        return None
+    if not any(
+        par.key == "mastra.span.type" and _any_value(par.value) == "model_inference"
+        for par in proto_span.attributes
+    ):
+        return None
+    actual = proto_span.parent_span_id
+    for _ in range(3):  # el paso, y por encima la generación
+        if not actual:
+            return None
+        if actual in entradas:
+            return mensajes_del_padre(entradas[actual])
+        actual = padres.get(actual, b"")
+    return None
+
+
+def _build_span(
+    proto_span: Any,
+    project_id: str,
+    resource: dict[str, Any],
+    prices: Any,
+    entrada_heredada: str | None = None,
+) -> Span:
     # Lo que venga de OpenInference u OpenLLMetry se traduce aquí, antes de clasificar:
     # a partir de esta línea el span habla nuestro idioma (D-136).
-    attrs = normalizar(_attributes(proto_span.attributes))
+    crudos = _attributes(proto_span.attributes)
+    if entrada_heredada and not crudos.get(semconv.GEN_AI_INPUT_MESSAGES):
+        crudos[semconv.GEN_AI_INPUT_MESSAGES] = entrada_heredada
+    attrs = normalizar(crudos)
     span_type = classify(attrs)
     name = proto_span.name
 

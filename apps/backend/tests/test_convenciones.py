@@ -531,3 +531,94 @@ def _limpio():
     exporter.clear()
     yield
     exporter.clear()
+
+
+# ---------------------------------------------------------------------------------
+# Mastra (D-170)
+# ---------------------------------------------------------------------------------
+
+
+def _mastra(sistema: str = "Eres un asistente de equipaje.") -> None:
+    """Lo que manda `@mastra/otel-exporter` 1.4 con `@mastra/core` 1.72, copiado de una
+    traza de verdad: la llamada al modelo (`model_inference`) no lleva sus mensajes; los
+    lleva el paso que la envuelve, en `mastra.model_step.input`."""
+    tracer = otel_trace.get_tracer("mastra")
+    with tracer.start_as_current_span("agent_step equipaje") as paso:
+        paso.set_attribute("mastra.span.type", "model_step")
+        paso.set_attribute(
+            "mastra.model_step.input",
+            json.dumps(
+                [
+                    {"role": "system", "content": sistema},
+                    {"role": "user", "content": [{"type": "text", "text": "¿Cuánto equipaje?"}]},
+                ]
+            ),
+        )
+        with tracer.start_as_current_span("chat gpt-5.6-luna") as llm:
+            for clave, valor in {
+                "gen_ai.operation.name": "chat",
+                "mastra.span.type": "model_inference",
+                "gen_ai.request.model": "gpt-5.6-luna",
+                "gen_ai.response.model": "gpt-5.6-luna",
+                "gen_ai.provider.name": "openai.chat",
+                "gen_ai.usage.input_tokens": 1_200,
+                "gen_ai.usage.output_tokens": 12,
+                "gen_ai.usage.cache_read.input_tokens": 1_024,
+                "gen_ai.response.finish_reasons": '["stop"]',
+                "gen_ai.output.messages": json.dumps(
+                    [{"role": "assistant", "parts": [{"type": "text", "content": "Una maleta."}]}]
+                ),
+            }.items():
+                llm.set_attribute(clave, valor)
+
+
+def _llm_de(spans):
+    (llm,) = [s for s in spans if s.type == "llm"]
+    return llm
+
+
+def test_mastra_los_mensajes_salen_del_paso_que_envuelve_la_llamada():
+    """Sin ellos, el paso perdía el prompt de sistema, que es la mitad de su identidad."""
+    _mastra()
+    llm = _llm_de(ingest())
+    assert llm.llm.input_messages == [
+        {"role": "system", "content": "Eres un asistente de equipaje."},
+        {"role": "user", "content": "¿Cuánto equipaje?"},
+    ]
+    assert llm.step_hint == "Eres un asistente de equipaje."
+
+
+def test_mastra_dos_agentes_con_instrucciones_distintas_son_dos_pasos():
+    _mastra("Eres un asistente de equipaje.")
+    _mastra("Eres un clasificador de tickets.")
+    llms = [s for s in ingest() if s.type == "llm"]
+    assert len({s.step_key for s in llms}) == 2
+
+
+def test_mastra_el_motivo_de_parada_en_json_se_lee_como_lista():
+    """Mastra lo manda como la cadena `'["stop"]'`, no como un array de OTel."""
+    _mastra()
+    assert _llm_de(ingest()).llm.finish_reasons == ["stop"]
+
+
+def test_el_proveedor_del_ai_sdk_se_queda_en_el_proveedor():
+    """El AI SDK (y Mastra encima) nombra el proveedor con su API: `openai.chat`,
+    `openai.responses`, `anthropic.messages`. El proveedor es lo de antes del punto."""
+    _mastra()
+    assert _llm_de(ingest()).llm.system == "openai"
+
+
+def test_un_paso_con_sus_mensajes_no_se_pisa_con_los_del_padre():
+    tracer = otel_trace.get_tracer("mastra")
+    with tracer.start_as_current_span("agent_step") as paso:
+        padre = json.dumps([{"role": "user", "content": "padre"}])
+        paso.set_attribute("mastra.model_step.input", padre)
+        with tracer.start_as_current_span("chat") as llm:
+            llm.set_attribute("mastra.span.type", "model_inference")
+            llm.set_attribute("gen_ai.request.model", "gpt-5.6-luna")
+            llm.set_attribute("gen_ai.usage.input_tokens", 10)
+            llm.set_attribute("gen_ai.usage.output_tokens", 1)
+            llm.set_attribute(
+                "gen_ai.input.messages", json.dumps([{"role": "user", "content": "propio"}])
+            )
+    assert _llm_de(ingest()).llm.input_messages == [{"role": "user", "content": "propio"}]

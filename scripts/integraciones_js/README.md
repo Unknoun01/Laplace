@@ -1,7 +1,7 @@
 # Agentes en Node contra Laplace
 
 El banco con el que se prueban las integraciones de TypeScript de `docs/typescript.md`
-(D-165). Cuatro agentes, cada uno a su proyecto, llaman a un **proveedor falso** con la
+(D-165 y D-170). Siete agentes, cada uno a su proyecto, llaman a un **proveedor falso** con la
 forma documentada de Anthropic y OpenAI (sin clave ni gasto) y mandan sus trazas a
 `laplace ui`. El uso es fijo —1.200 de entrada con 1.024 de caché y 12 de salida— para
 comparar con lo que llega.
@@ -12,6 +12,9 @@ comparar con lo que llega.
 | `ol-anthropic.js` | OpenLLMetry (Traceloop) con `@anthropic-ai/sdk` | `js-ol-anthropic` |
 | `vercel.js` | AI SDK de Vercel 7 (`generateText` y `streamText` con OpenAI Responses, OpenAI Chat y Anthropic) | `js-vercel` |
 | `langchain.js` | LangChain.js con OpenInference (`ChatOpenAI` y `ChatAnthropic`, `invoke` y `stream`) | `js-langchain` |
+| `langgraph.js` | LangGraph.js: un grafo de dos nodos con el mismo prompt de sistema, que tienen que salir como dos pasos | `js-langgraph` |
+| `openai-agents.js` | El Agents SDK de OpenAI con OpenInference (`run` y en streaming, por la Responses API) | `js-openai-agents` |
+| `mastra.js` | Mastra con su exportador de OpenTelemetry (`generate` y `stream`) | `js-mastra` |
 
 ```bash
 cd scripts/integraciones_js

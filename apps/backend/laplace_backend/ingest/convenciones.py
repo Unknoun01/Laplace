@@ -77,6 +77,7 @@ TRADUCIDOS = (
 
 def normalizar(attrs: dict[str, Any]) -> dict[str, Any]:
     """Los atributos del span con los nuestros rellenos desde la familia que traiga."""
+    attrs = _formas_del_ai_sdk(attrs)
     if not any(k.startswith(("openinference.", "llm.", "traceloop.", "gen_ai.prompt.",
                              "gen_ai.completion.", "gen_ai.usage.prompt_tokens",
                              "gen_ai.usage.cache_", "gen_ai.system_instructions",
@@ -89,6 +90,61 @@ def normalizar(attrs: dict[str, Any]) -> dict[str, Any]:
     _genai_actual(salida)
     _tokens_de_cache_coherentes(salida)
     return salida
+
+
+def _formas_del_ai_sdk(attrs: dict[str, Any]) -> dict[str, Any]:
+    """Dos formas del AI SDK de Vercel y de Mastra encima de él (D-170).
+
+    El proveedor lleva la API detrás (`openai.chat`, `openai.responses`,
+    `anthropic.messages`): el proveedor es lo de antes del punto. Y Mastra manda los
+    motivos de parada como la cadena JSON `'["stop"]'` en lugar de un array de OTel.
+    Barato a propósito: sólo copia el diccionario si hay algo que cambiar.
+    """
+    proveedor = attrs.get("gen_ai.provider.name")
+    motivos = attrs.get(semconv.GEN_AI_RESPONSE_FINISH_REASONS)
+    arreglar_proveedor = isinstance(proveedor, str) and "." in proveedor
+    arreglar_motivos = isinstance(motivos, str) and motivos.startswith("[")
+    if not (arreglar_proveedor or arreglar_motivos):
+        return attrs
+    salida = dict(attrs)
+    if arreglar_proveedor:
+        salida["gen_ai.provider.name"] = proveedor.split(".", 1)[0]
+    if arreglar_motivos:
+        lista = _json(motivos)
+        if isinstance(lista, list):
+            salida[semconv.GEN_AI_RESPONSE_FINISH_REASONS] = [str(m) for m in lista]
+    return salida
+
+
+#: Dónde deja Mastra los mensajes de una llamada: en el paso que la envuelve, o en la
+#: generación que envuelve al paso. Su span `model_inference` no los lleva (D-170).
+ENTRADAS_DEL_PADRE = ("mastra.model_step.input", "mastra.model_generation.input")
+
+
+def mensajes_del_padre(valor: Any) -> str | None:
+    """Los mensajes de Mastra (`[{role, content}]` o `{"messages": [...]}`), con el
+    contenido en partes de texto juntado en `content`."""
+    datos = _json(valor)
+    if isinstance(datos, dict):
+        datos = datos.get("messages")
+    if not isinstance(datos, list) or not datos:
+        return None
+    mensajes = []
+    for mensaje in datos:
+        if not isinstance(mensaje, dict) or "role" not in mensaje:
+            return None
+        nuevo = dict(mensaje)
+        contenido = nuevo.get("content")
+        if isinstance(contenido, list):
+            textos = [
+                str(p.get("text", ""))
+                for p in contenido
+                if isinstance(p, dict) and p.get("type") == "text"
+            ]
+            if len(textos) == len(contenido):
+                nuevo["content"] = "".join(textos)
+        mensajes.append(nuevo)
+    return json.dumps(mensajes, ensure_ascii=False)
 
 
 def _poner(salida: dict[str, Any], clave: str, valor: Any) -> None:

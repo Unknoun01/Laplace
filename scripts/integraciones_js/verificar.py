@@ -19,7 +19,19 @@ SISTEMA = "Eres un asistente de equipaje."
 RESPUESTA = "Una maleta de mano."
 
 #: Proyecto → cuántas llamadas al modelo manda su agente.
-ESPERADO = {"js-oi-anthropic": 3, "js-ol-anthropic": 2, "js-vercel": 6, "js-langchain": 4}
+ESPERADO = {
+    "js-oi-anthropic": 3,
+    "js-ol-anthropic": 2,
+    "js-vercel": 6,
+    "js-langchain": 4,
+    "js-langgraph": 2,
+    "js-openai-agents": 2,
+    "js-mastra": 2,
+}
+
+#: Proyectos cuyas llamadas tienen que caer en pasos distintos aunque compartan prompt
+#: de sistema: en LangGraph, el nodo es el sitio del paso (D-141).
+PASOS_DISTINTOS = {"js-langgraph": 2}
 
 #: LangChain.js suma el token de salida de `message_start` al total de `message_delta`
 #: cuando hace streaming con Anthropic: Laplace guarda lo que él dice (D-165).
@@ -72,6 +84,10 @@ def main() -> int:
             salida = llm.get("output_messages") or [{}]
             if _texto(salida[0].get("content")) != RESPUESTA:
                 fallos.append(f"{donde}: respuesta {salida[0]}")
+        if proyecto in PASOS_DISTINTOS:
+            pasos = {s.get("step_key") for s in llms}
+            if len(pasos) != PASOS_DISTINTOS[proyecto]:
+                fallos.append(f"{proyecto}: {len(pasos)} pasos, se esperaban {PASOS_DISTINTOS[proyecto]}")
         print(f"{proyecto}: {len(llms)} llamadas")
     for fallo in fallos:
         print("FALLO", fallo)

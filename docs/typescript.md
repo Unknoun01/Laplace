@@ -201,6 +201,83 @@ entre los mensajes; Laplace lo saca del resultado de LangChain (posterior a D-16
 salida de más** por llamada (suma el que anuncia `message_start` al total final).
 Laplace guarda lo que dice LangChain: el coste de salida sale un token por encima.
 
+## Con LangGraph.js
+
+LangGraph va sobre LangChain, así que se instrumenta igual que LangChain.js, con
+`@arizeai/openinference-instrumentation-langchain` sobre el mismo `provider`.
+
+**Qué se ve:** el grafo entero en una traza (`LangGraph`, y debajo cada nodo), y cada
+llamada al modelo con modelo, tokens, caché, coste y mensajes. **Cada nodo es su propio
+paso**, aunque dos nodos usen el mismo prompt de sistema: la instrumentación deja el
+nombre del nodo en los metadatos y Laplace lo usa como sitio del paso (D-141).
+
+Probado el 30 de septiembre de 2026 con `@langchain/langgraph` 1.4.18.
+
+## Con el Agents SDK de OpenAI
+
+```bash
+npm install @openai/agents @arizeai/openinference-instrumentation-openai-agents
+```
+
+```js
+const agents = require("@openai/agents");
+const { OpenAIAgentsInstrumentation } = require("@arizeai/openinference-instrumentation-openai-agents");
+new OpenAIAgentsInstrumentation({ tracerProvider: provider }).manuallyInstrument(agents);
+```
+
+Se engancha al sistema de trazas del propio SDK. Por defecto **sustituye** al exportador
+de OpenAI; con `manuallyInstrument(agents, { exclusiveProcessor: false })` los dos
+conviven.
+
+**Qué se ve:** cada ejecución (`Agent workflow`, el agente y cada turno) y cada llamada al
+modelo con modelo, tokens, caché, coste, las instrucciones del agente como prompt de
+sistema y la respuesta, con `run` y en streaming. Antes de salir de un script:
+`await agents.getGlobalTraceProvider().forceFlush()` y después el del `provider`.
+
+Probado el 30 de septiembre de 2026 con `@openai/agents` 0.18.0 y
+`@arizeai/openinference-instrumentation-openai-agents` 0.2.15.
+
+## Con Mastra
+
+Mastra trae su propia observabilidad. Se apunta a Laplace con su exportador de
+OpenTelemetry, sin `NodeTracerProvider`; el proyecto de Laplace es el `serviceName`:
+
+```bash
+npm install @mastra/observability @mastra/otel-exporter @opentelemetry/exporter-trace-otlp-proto
+```
+
+```js
+const { Observability } = require("@mastra/observability");
+const { OtelExporter } = require("@mastra/otel-exporter");
+
+const mastra = new Mastra({
+  agents: { equipaje },
+  observability: new Observability({
+    configs: {
+      otel: {
+        serviceName: "mi-agente",
+        exporters: [
+          new OtelExporter({
+            provider: {
+              custom: { endpoint: "http://localhost:8100/v1/traces", protocol: "http/protobuf" },
+            },
+          }),
+        ],
+      },
+    },
+  }),
+});
+```
+
+**Qué se ve:** cada ejecución del agente, sus pasos y cada llamada al modelo con modelo,
+tokens, caché, coste, mensajes y motivo de parada, con `generate` y `stream`. Mastra no
+pone los mensajes en su span de la llamada al modelo sino en el paso que la envuelve;
+Laplace los toma de ahí si llegan en el mismo lote, que es lo normal, porque el paso
+termina justo después de la llamada. Hace falta Laplace posterior a D-170.
+
+Probado el 30 de septiembre de 2026 con `@mastra/core` 1.72.0, `@mastra/observability`
+1.18.2 y `@mastra/otel-exporter` 1.4.3.
+
 ## Lo que conviene saber
 
 - **Los pasos.** Laplace distingue un paso de otro por las instrucciones (el prompt de
@@ -213,4 +290,5 @@ Laplace guarda lo que dice LangChain: el coste de salida sale un token por encim
 - **Lo del 28 de septiembre se probó contra un proveedor falso, no contra la API
   real.** Responde con la forma documentada, pero una API real puede mandar algún campo
   que no esté ahí; si algo falta, es un fallo nuestro.
-- **Sin probar:** LangGraph.js, el Agents SDK de OpenAI para TypeScript y Mastra.
+- **Sin probar contra las API reales:** nada de lo del 28 y el 30 de septiembre. Espera
+  una clave de proveedor.
