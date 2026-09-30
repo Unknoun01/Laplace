@@ -174,3 +174,28 @@ def test_la_salud_en_local_no_dice_que_hay_clickhouse(app_local):
     salud = app_local.get("/health").json()
     assert salud["store"] == "sqlite" and salud["store_ok"] is True
     assert salud["clickhouse"] is None and salud["postgres"] is None
+
+
+def test_la_salud_en_la_nube_nombra_clickhouse_y_postgres():
+    """La otra mitad: con ClickHouse y Postgres de verdad, `/health` los nombra y dice
+    que responden. Se salta si no están."""
+    import asyncio
+    from types import SimpleNamespace
+
+    import pytest
+
+    from laplace_backend import api
+    from laplace_backend.config import Settings
+    from laplace_backend.storage.clickhouse import ClickHouseStore
+    from laplace_backend.storage.postgres import PostgresMetadataStore
+
+    ajustes = Settings()
+    store, metadata = ClickHouseStore(ajustes), PostgresMetadataStore(ajustes)
+    if not (store.health() and metadata.health()):
+        pytest.skip("no hay ClickHouse y Postgres escuchando")
+    peticion = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(store=store, metadata=metadata))
+    )
+    salud = asyncio.run(api.health(peticion))
+    assert salud["store"] == "clickhouse" and salud["metadata"] == "postgres"
+    assert salud["clickhouse"] is True and salud["postgres"] is True

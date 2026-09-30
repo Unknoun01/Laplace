@@ -3529,6 +3529,9 @@ Nadie de dentro las leía: el CI y el orquestador sólo miran el 200.
 
 Prueba: `test_local_mode.py::test_la_salud_en_local_no_dice_que_hay_clickhouse`. Muerde:
 con las claves nuevas pero `clickhouse: store_ok` como antes, falla (`True is None`).
+La otra mitad, `test_la_salud_en_la_nube_nombra_clickhouse_y_postgres`, llama a `/health`
+con ClickHouse y Postgres de verdad (se salta si no están) y exige que los nombre y diga
+que responden. Sin el cambio, falla.
 
 **La limpieza.** Fuera lo que nadie usaba, buscado con vulture y knip y comprobado con
 grep en todo el repo, pruebas incluidas:
