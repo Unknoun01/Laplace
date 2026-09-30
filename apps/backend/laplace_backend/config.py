@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     clickhouse_password: str = "laplace"
     clickhouse_database: str = "laplace"
     clickhouse_secure: bool = False
+    #: Los preagregados por minuto del Diagnóstico (D-177). Apagarlos vuelve a las
+    #: consultas en crudo, que dan lo mismo más despacio: sirve para comparar.
+    preagregados: bool = True
 
     postgres_dsn: str = "postgresql://laplace:laplace@127.0.0.1:5433/laplace"
     #: Postgres sólo guarda metadatos y las tablas reservadas de Fases 3-4. Si no está

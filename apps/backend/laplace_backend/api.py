@@ -253,9 +253,16 @@ async def get_trace(
 
 
 def _window(days: int) -> Window:
-    """Ventana de análisis. Todas las pantallas comparten el mismo rango."""
+    """Ventana de análisis. Todas las pantallas comparten el mismo rango.
+
+    El principio, en minuto entero: los preagregados son por minuto, y un principio a
+    mitad de minuto obligaba a leer ese trozo en crudo en cada lector (D-177). Son menos
+    de sesenta segundos más de ventana. El final sigue siendo ahora, para que lo que
+    acaba de llegar se vea.
+    """
     until = datetime.now(timezone.utc)
-    return Window(since=until - timedelta(days=days), until=until, days=days)
+    since = (until - timedelta(days=days)).replace(second=0, microsecond=0)
+    return Window(since=since, until=until, days=days)
 
 
 #: El Diagnóstico recordado un minuto en la nube; lo borra cualquier cambio por la API.

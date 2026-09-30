@@ -280,6 +280,11 @@ async def lifespan(app: FastAPI):
             renovar_siempre(CACHE_DIAGNOSTICO, settings.cache_diagnostico_s)
         )
         tareas.append(app.state.renovador_diagnostico)
+    # Los preagregados del Diagnóstico, al día en segundo plano (D-177).
+    if settings.preagregados and hasattr(app.state.store, "recalcular_preagregados"):
+        from .storage.preagregados import bucle as bucle_preagregados
+
+        tareas.append(asyncio.create_task(bucle_preagregados(app.state.store)))
     if settings.alerts_enabled:
         logger.info(
             "alertas a Slack activas — repaso cada %ds, umbral %s$, calma %sh",
