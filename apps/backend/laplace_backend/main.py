@@ -99,7 +99,7 @@ def build_alerts(settings: Settings, store, metadata=None):
         from .storage._pg import turno_exclusivo
 
         turno = partial(turno_exclusivo, settings.postgres_dsn, CANDADO_ALERTAS)
-    return AlertRunner(
+    runner = AlertRunner(
         store,
         config,
         build_alert_state(settings),
@@ -108,6 +108,8 @@ def build_alerts(settings: Settings, store, metadata=None):
         webhook=WebhookNotifier(permitir_local=settings.store == "sqlite"),
         email=EmailNotifier(settings),
     )
+    runner.retencion_instalacion = settings.retention_days
+    return runner
 
 
 class PreparacionMetadatos:

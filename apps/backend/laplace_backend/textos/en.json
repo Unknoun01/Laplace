@@ -356,6 +356,8 @@
   "error.modelo_sin_tarifa_propia": "that model has no custom rate",
   "error.demo_solo_local": "sample data only exists in local mode",
   "error.confirmar_proyecto": "confirm has to repeat the project",
+  "error.sujeto_uno": "say one person (user_id) or one customer (customer_id), not both",
+  "error.confirmar_sujeto": "confirm has to repeat the person's or customer's id",
   "error.borrado_a_medias": "settings, prompts, case sets and keys were deleted, but not the traces. Repeat the deletion to finish it.",
   "error.sin_cuentas": "this installation has no accounts database",
   "error.solo_personas": "this is for signed-in people",

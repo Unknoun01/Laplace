@@ -285,6 +285,7 @@ def main() -> int:
     )
     parser.add_argument("--solo-medir", action="store_true")
     parser.add_argument("--borrar", action="store_true")
+    parser.add_argument("--sin-medir", action="store_true", help="sólo generar")
     args = parser.parse_args()
 
     store = ClickHouseStore(Settings())
@@ -305,6 +306,8 @@ def main() -> int:
         # servidor de verdad, que siempre tiene partes sin fusionar, y fusionar diez
         # millones de filas a la vez que se mide tumbó Docker en este portátil (D-142).
         generar(store, args.spans, args.lote, args.dias, args.dias_atras)
+    if args.sin_medir:
+        return 0
     medir(store)
     return 0
 

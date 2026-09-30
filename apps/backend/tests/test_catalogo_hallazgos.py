@@ -441,3 +441,96 @@ def test_el_codigo_de_ejemplo_no_lleva_el_titulo_dentro(fixture, request):
             if paso.code and any(c in paso.code for c in ("→", "«", "»")):
                 malos.append((hallazgo.id, paso.code.splitlines()[0]))
     assert malos == [], f"código de ejemplo con decoración de título dentro: {malos}"
+
+
+# ---------------------------------------------------------------------------------
+# La guardia de las reglas nuevas (D-172)
+# ---------------------------------------------------------------------------------
+
+
+def test_toda_regla_dice_como_se_nombra_y_como_no_cuenta_dos_veces():
+    """La gemela de la de arriba: una regla nueva en `FindingKind` sin su entrada en
+    `GARANTIAS` pone esto en rojo el mismo día. Antes nada lo exigía, y la de Prompts
+    (D-157) se hizo mirándolo a mano."""
+    tipos = set(get_args(insights.FindingKind))
+    assert set(insights.GARANTIAS) == tipos, (
+        f"sin garantías declaradas: {tipos - set(insights.GARANTIAS)}"
+    )
+    for tipo, garantias in insights.GARANTIAS.items():
+        assert garantias.get("nombre") and garantias.get("descuento"), tipo
+
+
+@pytest.fixture(scope="module")
+def mes_de_demo(tmp_path_factory):
+    """Un mes de tráfico con todas las patologías a la vez, por la ingesta de verdad."""
+    from datetime import datetime, timedelta, timezone
+
+    from helpers import exporter, ingest
+    from laplace import demo
+
+    parche = pytest.MonkeyPatch()
+    parche.setattr(demo, "init", lambda **_: None)
+    parche.setattr(demo, "flush", lambda: None)
+    parche.setattr(demo, "set_context", lambda **_: None)
+    try:
+        exporter.clear()
+        fin = datetime(2026, 9, 26, 12, 30, tzinfo=timezone.utc)
+        demo.generar_mes("http://nadie", project="demo", ahora=fin)
+        store = SQLiteStore(tmp_path_factory.mktemp("mes") / "d.db")
+        store.migrate()
+        spans = ingest()
+        for span in spans:
+            span.project_id = "demo"
+        store.insert_spans(spans)
+        exporter.clear()
+    finally:
+        parche.undo()
+    ventana = Window(since=fin - timedelta(days=30), until=fin, days=30)
+    return store, ventana
+
+
+def test_dos_hallazgos_no_se_titulan_igual(mes_de_demo):
+    store, ventana = mes_de_demo
+    titulos = [f.title for f in insights.detect(store, "demo", ventana)]
+    assert len(titulos) >= 4
+    assert len(titulos) == len(set(titulos)), titulos
+
+
+def test_ninguna_regla_reclama_mas_de_lo_que_costo_el_paso(mes_de_demo):
+    """Lo que todas las reglas juntas dicen que se puede ahorrar en un paso no puede
+    pasar de lo que ese paso costó: si pasa, dos reglas reclaman el mismo dinero (D-117)."""
+    store, ventana = mes_de_demo
+    coste: dict[str, float] = {}
+    for uso in store.model_usage("demo", ventana, min_calls=1, limit=500):
+        coste[uso.key] = coste.get(uso.key, 0.0) + uso.cost_usd
+    reclamado: dict[str, float] = {}
+    for f in insights.detect(store, "demo", ventana):
+        if f.step_key:
+            reclamado[f.step_key] = reclamado.get(f.step_key, 0.0) + f.window_waste_usd
+    assert reclamado, "la demo tiene que dar hallazgos con paso"
+    for paso, dinero in reclamado.items():
+        assert dinero <= coste.get(paso, 0.0) * (1 + 1e-9), (paso, dinero, coste.get(paso))
+
+
+def test_la_regla_de_prompts_no_reclama_lo_que_ya_reclaman_las_demas(mes_de_demo):
+    """La de prompts no lleva paso: lo suyo son las llamadas de la versión cara. Lo que
+    las demás reclaman sobre esos pasos más lo que reclama ella no puede pasar de lo que
+    costaron esas llamadas (D-157)."""
+    from laplace_backend.insights.prompt_caro import pares
+
+    store, ventana = mes_de_demo
+    hallazgos = insights.detect(store, "demo", ventana)
+    por_paso: dict[str, float] = {}
+    for f in hallazgos:
+        if f.step_key and f.kind != "prompt_caro":
+            por_paso[f.step_key] = por_paso.get(f.step_key, 0.0) + f.window_waste_usd
+    prompts = [f for f in hallazgos if f.kind == "prompt_caro"]
+    assert prompts, "la demo tiene un problema de prompt"
+    for _anterior, actual in pares(store.prompt_usage("demo", ventana, rules=True)):
+        (hallazgo,) = [f for f in prompts if f"v{actual.version}" in f.title] or [None]
+        if hallazgo is None:
+            continue
+        ya = sum(por_paso.get(k, 0.0) for k in actual.step_keys)
+        assert ya + hallazgo.window_waste_usd <= actual.cost_usd * (1 + 1e-9), (
+            ya, hallazgo.window_waste_usd, actual.cost_usd,
+        )

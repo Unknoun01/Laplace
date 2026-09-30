@@ -44,6 +44,7 @@ from .base import (
     Window,
     WindowFacts,
     WindowSummary,
+    _sujeto,
     densify,
     densify_steps,
     disambiguate,
@@ -1271,6 +1272,32 @@ class ClickHouseStore:
             "DELETE FROM spans WHERE project_id = %(project_id)s",
             parameters={"project_id": project_id},
         )
+
+    def delete_project_before(self, project_id: str, cutoff: datetime) -> None:
+        # Con la clave por día (D-168) esto toca sólo las partes con días viejos.
+        self._client.command(
+            "DELETE FROM spans WHERE project_id = %(p)s AND start_time < %(c)s",
+            parameters={"p": project_id, "c": _utc(cutoff)},
+        )
+
+    def delete_subject(
+        self, project_id: str, *, user_id: str | None = None, customer_id: str | None = None
+    ) -> int:
+        columna, valor = _sujeto(user_id, customer_id)
+        sub = (
+            f"SELECT DISTINCT trace_id FROM spans WHERE project_id = %(p)s AND {columna} = %(v)s"
+        )
+        parametros = {"p": project_id, "v": valor}
+        cuantas = int(
+            self._client.query(f"SELECT count() FROM ({sub})", parameters=parametros)
+            .result_rows[0][0]
+        )
+        if cuantas:
+            self._client.command(
+                f"DELETE FROM spans WHERE project_id = %(p)s AND trace_id IN ({sub})",
+                parameters=parametros,
+            )
+        return cuantas
 
     # -- tarifas propias, reparto por usuario y retención (D-123) -------------------
 

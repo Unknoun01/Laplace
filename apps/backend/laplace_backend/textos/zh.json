@@ -356,6 +356,8 @@
   "error.modelo_sin_tarifa_propia": "该模型没有自定义费率",
   "error.demo_solo_local": "示例数据仅在本地模式下提供",
   "error.confirmar_proyecto": "confirm 必须与项目名一致",
+  "error.sujeto_uno": "请指定一个人（user_id）或一个客户（customer_id），不能同时指定",
+  "error.confirmar_sujeto": "confirm 必须与该人或客户的 id 一致",
   "error.borrado_a_medias": "设置、提示词、案例集和密钥已删除，但追踪尚未删除。请再次执行删除以完成。",
   "error.sin_cuentas": "此安装没有账户数据库",
   "error.solo_personas": "此功能仅供已登录的用户使用",

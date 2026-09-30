@@ -35,7 +35,7 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
   verde (`git merge --no-ff`); si no dice otra cosa, se sigue así.
 - **Nada entra sin su prueba.** Primero la prueba en rojo, después el arreglo.
 - **Hay que comprobar que la prueba muerde:** romper el código a propósito y verla fallar.
-- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-172**.
+- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-174**.
 - **Todo en español:** código, comentarios, commits y textos. Los textos de la interfaz y
   del backend, en los cinco idiomas a la vez (`apps/web/lib/mensajes/*.ts`,
   `apps/backend/laplace_backend/textos/*.json`); las pruebas exigen las mismas claves.
@@ -110,13 +110,6 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
   - SSO/SAML, SCIM y verificación de correo.
 
 ## 4. Deuda y detalles sueltos
-- **Guardia estructural para reglas nuevas.** `test_catalogo_hallazgos` exige ficha y
-  trazas a cada tipo, pero nada exige que una regla nueva desambigüe su título (D-115) ni
-  que entre en el descuento del doble conteo (D-117). La de Prompts (D-157) se hizo
-  mirándolo a mano.
-- **Retención por proyecto** (D-009): hoy `LAPLACE_RETENTION_DAYS` vale para toda la
-  instalación. Y no hay forma de borrar los datos de un usuario final (`user_id`) o de un
-  cliente (`customer_id`) concreto, que es lo que pediría un cliente de un cliente.
 - **Lo que la auditoría del rediseño no revisó** (`docs/auditoria-rediseno.md`): las
   pantallas con sesión de la versión Docker (organización, invitaciones, claves), los
   flujos de escritura de punta a punta y los navegadores que no son Chromium (Safari
@@ -132,7 +125,6 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
 - `globals.css` pasa de 4.100 líneas en un solo fichero: partirlo.
 - `DECISIONS.md` pasa de 220 KB: hace falta un índice por tema y documentación de cara al usuario aparte (Mintlify, Docusaurus o Starlight).
 - `STATUS.md` se puso al día al cerrar las fases 5 y 6: mantenerlo así al cerrar cada fase.
-- `test_pantallas.py`: un fallo antiguo en la pantalla de Prompts (no cargó en 15 s en una pasada completa) no se ha vuelto a ver ni se ha explicado.
 - Tras la caída de Docker del 26 de septiembre quedaron apartadas `%LOCALAPPDATA%\Docker\run.viejo-*` y `docker-secrets-engine.viejo-*` con sockets bloqueados; se pueden borrar tras reiniciar Windows.
 
 ## 5. Lo que sólo puede hacer el usuario

@@ -3637,3 +3637,55 @@ y se corrigió.
   pantalla cuenta las peticiones.
 
 Cada prueba falla sin su arreglo.
+
+### D-172 — La guardia de las reglas nuevas
+`test_catalogo_hallazgos` exigía ficha y trazas a cada tipo de hallazgo, pero nada
+exigía que una regla nueva desambiguara su título (D-115) ni que entrara en el
+descuento del doble conteo (D-117); la de Prompts (D-157) se hizo mirándolo a mano.
+
+* **Estructural:** `GARANTIAS`, junto a la tabla de fichas, dice para cada `FindingKind`
+  cómo se distingue su título y cómo evita reclamar dinero que ya reclama otra regla. La
+  prueba exige una entrada por tipo: una regla nueva sin ella pone la suite en rojo el
+  mismo día, como una sin ficha (D-113).
+* **De comportamiento, sobre un mes de la demo**, con todas las patologías a la vez:
+  - ningún par de hallazgos se titula igual;
+  - lo que las reglas reclaman en un paso no pasa de lo que costó;
+  - lo que las demás reclaman sobre las llamadas de la versión cara de un prompt, más
+    lo que reclama la regla de prompts, no pasa de lo que costaron esas llamadas.
+
+  Quitar el descuento de las reglas sobre trazas, o el de la de prompts, pone la suite en
+  rojo. El título se desambigua en su prueba propia, con dos llamantes del mismo nombre,
+  porque la demo no los tiene.
+
+### D-173 — Retención por proyecto, y borrar lo de una persona o un cliente
+`LAPLACE_RETENTION_DAYS` valía para toda la instalación (D-009 pedía por proyecto), y no
+había forma de borrar los datos de un usuario final o de un cliente concreto, que es lo
+que pide el cliente de un cliente.
+
+* **Retención de un proyecto** (`GET` y `PUT /api/retention`, y en Ajustes): sus días se
+  guardan en los ajustes del proyecto. La aplica el bucle de fondo, que ya tiene turno
+  entre procesos, una vez al día, como la traída de Stripe (D-163). Manda la más corta
+  entre la del proyecto y la de la instalación: un proyecto no puede guardar más de lo
+  que la instalación permite. En ClickHouse, con la clave por día (D-168), el borrado
+  sólo toca las partes con días viejos.
+* **Borrar una persona o un cliente** (`DELETE /api/subjects`, y en Ajustes, repitiendo el
+  id para confirmar): se lleva las trazas **enteras** en las que aparece, no sólo los
+  spans que llevan el id. El id lo lleva la raíz, y dejar las llamadas hijas sería dejar
+  justo su contenido. Queda anotado en la auditoría de la organización cuando hay
+  cuentas.
+
+Pruebas en `test_retencion.py`, en los dos almacenes:
+- se borran las trazas enteras;
+- la retención de un proyecto no toca otro;
+- manda la más corta;
+- el bucle de fondo la aplica una vez al día y no antes;
+- la API pide confirmar.
+
+Cada garantía se ha roto a propósito y alguna prueba falla. También una prueba de
+pantalla en Ajustes.
+
+**El fallo antiguo de la pantalla de Prompts** (`test_pantallas.py`, «no cargó en 15 s»),
+explicado: no era lentitud, porque el Diagnóstico de la demo tarda 0,5 s en local. Si el
+problema del prompt aparecía o no en la demo dependía de la hora de la carga (D-171), y
+sin él el aviso de Prompts no sale nunca. Con la demo estable, `test_demo_estable` exige
+que aparezca a cuatro horas distintas.

@@ -62,6 +62,7 @@ from .base import (
     Window,
     WindowFacts,
     WindowSummary,
+    _sujeto,
     densify,
     densify_steps,
     disambiguate,
@@ -1480,6 +1481,35 @@ class SQLiteStore:
         cur = self._conn.execute("DELETE FROM spans WHERE start_time < :c", {"c": _iso(cutoff)})
         self._conn.commit()
         return cur.rowcount
+
+    def delete_project_before(self, project_id: str, cutoff: datetime) -> None:
+        self._conn.execute(
+            "DELETE FROM spans WHERE project_id = :p AND start_time < :c",
+            {"p": project_id, "c": _iso(cutoff)},
+        )
+        self._conn.commit()
+
+    def delete_subject(
+        self, project_id: str, *, user_id: str | None = None, customer_id: str | None = None
+    ) -> int:
+        columna, valor = _sujeto(user_id, customer_id)
+        trazas = [
+            r["trace_id"]
+            for r in self._query(
+                f"SELECT DISTINCT trace_id FROM spans WHERE project_id = :p AND {columna} = :v",
+                {"p": project_id, "v": valor},
+            )
+        ]
+        for inicio in range(0, len(trazas), 500):
+            lote = trazas[inicio : inicio + 500]
+            marcas = ", ".join(f":t{i}" for i in range(len(lote)))
+            params: dict[str, Any] = {f"t{i}": t for i, t in enumerate(lote)}
+            params["p"] = project_id
+            self._conn.execute(
+                f"DELETE FROM spans WHERE project_id = :p AND trace_id IN ({marcas})", params
+            )
+        self._conn.commit()
+        return len(trazas)
 
     def health(self) -> bool:
         try:

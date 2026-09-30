@@ -775,3 +775,24 @@ def test_al_cargar_no_se_pide_dos_veces_lo_mismo(servidor, navegador):
             assert pedidas.count(ruta) <= 1, (ruta, pedidas.count(ruta))
     finally:
         pagina.close()
+
+
+def test_ajustes_guarda_la_retencion_del_proyecto(servidor, navegador):
+    """D-173: cada proyecto guarda sus días, y se puede borrar lo de una persona."""
+    pagina, errores = _abrir(navegador, servidor + "/ajustes/?project=demo", "escritorio")
+    try:
+        campo = pagina.get_by_label("Días que guarda este proyecto")
+        campo.wait_for(timeout=15_000)
+        campo.fill("7")
+        campo.locator("xpath=ancestor::div[contains(@class,'ab')]").get_by_role(
+            "button", name="Guardar"
+        ).click()
+        pagina.wait_for_function(
+            "() => document.querySelector('main').innerText.includes('guarda 7 días')",
+            timeout=15_000,
+        )
+        boton = pagina.get_by_role("button", name="Borrar sus trazas")
+        assert boton.is_disabled(), "sin repetir el id no se borra nada"
+        assert errores == [], errores
+    finally:
+        pagina.close()

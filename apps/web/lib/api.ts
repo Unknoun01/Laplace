@@ -588,6 +588,33 @@ export function deleteProject(projectId: string): Promise<{ deleted: boolean }> 
   return send(`/api/projects?${q}`, "DELETE");
 }
 
+/** La retención propia de un proyecto y la de la instalación (D-173). */
+export interface Retencion {
+  project_id: string;
+  days: number;
+  installation_days: number;
+  effective_days: number;
+  last_run: string | null;
+}
+
+export function getRetention(projectId: string, senal?: AbortSignal): Promise<Retencion> {
+  return get<Retencion>("/api/retention", { project_id: projectId }, senal);
+}
+
+export function setRetention(projectId: string, days: number): Promise<Retencion> {
+  return send<Retencion>("/api/retention", "PUT", { project_id: projectId, days });
+}
+
+/** Borra las trazas enteras de una persona o de un cliente del proyecto (D-173). */
+export function deleteSubject(
+  projectId: string,
+  quien: "user_id" | "customer_id",
+  id: string,
+): Promise<{ deleted_traces: number }> {
+  const q = new URLSearchParams({ project_id: projectId, [quien]: id, confirm: id });
+  return send(`/api/subjects?${q}`, "DELETE");
+}
+
 // ---------------------------------------------------------------------------------
 // Cuentas y organización (D-127)
 // ---------------------------------------------------------------------------------
