@@ -1,0 +1,279 @@
+/* ---------- explorador de trazas ---------- */
+.toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 18px 0;
+}
+/* El filtro por paso que llega desde un hallazgo: tiene que verse, o la lista parece
+   incompleta sin motivo. */
+.filtro-paso {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0 0 14px;
+  padding: 8px 12px;
+  border: 1px solid var(--hair);
+  border-left: 2px solid var(--iris);
+  background: var(--panel);
+  font-size: var(--fs-md);
+  color: var(--ink-2);
+}
+.filtro-paso strong {
+  color: var(--ink);
+  font-weight: 500;
+}
+.filtro-paso .btn {
+  margin-left: auto;
+}
+.guardar-conjunto {
+  margin: 0 0 14px;
+  font-size: var(--fs-md);
+  color: var(--ink-2);
+}
+.guardar-conjunto summary {
+  cursor: pointer;
+  color: var(--ink-3);
+}
+.guardar-conjunto summary:hover {
+  color: var(--ink-2);
+}
+.field {
+  font: inherit;
+  font-size: var(--fs-md);
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--hair);
+  border-radius: var(--r);
+  padding: 7px 10px;
+}
+.field::placeholder {
+  color: var(--ink-3);
+}
+.field:hover {
+  border-color: var(--hair-strong);
+}
+.field.grow {
+  flex: 1 1 260px;
+  min-width: 200px;
+}
+
+/* Una tabla no cabe en 375 px por mucho que se escondan columnas: la última siempre
+   acaba empujando fuera y toda la página se desplaza en horizontal, que es la peor
+   forma de perder una columna porque el usuario no sabe que está ahí. La que se
+   desplaza es la tabla, dentro de su marco, y la página se queda quieta. */
+.tbl-scroll {
+  overflow-x: auto;
+  /* El marco pasa aquí para que el borde no se corte al desplazar. */
+  border: 1px solid var(--hair);
+  border-radius: var(--r);
+}
+.tbl-scroll .tbl {
+  border: 0;
+}
+
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid var(--hair);
+  border-radius: var(--r);
+}
+.tbl thead th {
+  text-align: left;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--hair);
+  background: var(--panel);
+  white-space: nowrap;
+}
+.tbl thead th.r {
+  text-align: right;
+}
+.tbl thead a {
+  color: inherit;
+  text-decoration: none;
+}
+.tbl thead a:hover {
+  color: var(--ink);
+}
+.tbl thead a[aria-sort] {
+  color: var(--ink);
+}
+.tbl tbody tr {
+  border-bottom: 1px solid var(--hair-soft);
+}
+.tbl tbody tr:hover {
+  background: var(--panel);
+}
+.tbl td {
+  padding: 9px 12px;
+  font-size: var(--fs-md);
+  vertical-align: middle;
+}
+.tbl td.r {
+  text-align: right;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tbl td.money {
+  color: var(--amber);
+}
+.tbl td a {
+  text-decoration: none;
+  display: block;
+}
+.tbl .dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 9px;
+  vertical-align: 1px;
+}
+.tbl .dot.ok {
+  background: var(--teal);
+}
+.tbl .dot.error {
+  background: var(--rose);
+}
+.tbl .meta {
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+  font-family: var(--mono);
+  margin-top: 2px;
+}
+
+.pager {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 0;
+  font-size: var(--fs-md);
+}
+
+/* ---------- vista de traza ---------- */
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.pane {
+  border: 1px solid var(--hair);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  background: var(--glass);
+}
+.pane > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--hair);
+  background: var(--panel);
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+}
+.pane > header b {
+  color: var(--ink-2);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: var(--fs-xs);
+}
+.scroll {
+  max-height: calc(100vh - 20rem);
+  overflow: auto;
+}
+.msg {
+  border: 1px solid var(--hair);
+  border-radius: var(--r);
+  overflow: hidden;
+  margin-top: 8px;
+}
+.msg header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--hair-soft);
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+}
+.msg pre {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  max-height: 260px;
+  overflow: auto;
+}
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 8px;
+}
+.metrics div {
+  border: 1px solid var(--hair);
+  border-radius: var(--r);
+  padding: 8px 10px;
+  background: var(--panel);
+}
+.metrics div.warn {
+  border-color: var(--amber-line);
+  background: var(--amber-bg);
+}
+.metrics b {
+  display: block;
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.metrics small {
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+}
+.fold {
+  border-top: 1px solid var(--hair-soft);
+  padding: 14px 0 0;
+  margin-top: 14px;
+}
+.fold > summary {
+  cursor: pointer;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+  list-style: none;
+}
+.fold > summary::-webkit-details-marker {
+  display: none;
+}
+.fold > summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 7px;
+  transition: transform 0.12s ease;
+}
+.fold[open] > summary::before {
+  transform: rotate(90deg);
+}
+.fold > summary:hover {
+  color: var(--ink-2);
+}

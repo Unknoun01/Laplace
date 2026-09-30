@@ -1,0 +1,131 @@
+/* ---------- secciones y tarjetas ---------- */
+.sec {
+  padding: 32px 0 0;
+}
+.sec h2 {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  margin: 0 0 4px;
+  letter-spacing: -0.01em;
+}
+.sec p.lead {
+  margin: 0 0 18px;
+  color: var(--ink-3);
+  font-size: var(--fs-md);
+}
+
+.card {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: none;
+  background: var(--panel);
+  border: 1px solid var(--hair);
+  border-left: 2px solid var(--accent-3);
+  border-radius: var(--r-lg);
+  padding: 18px 20px;
+  margin-bottom: 12px;
+}
+.card:hover {
+  background: var(--panel-2);
+  border-color: var(--hair-strong);
+  border-left-color: var(--accent-3);
+}
+.card.low {
+  border-left-color: var(--hair-strong);
+}
+.card-top {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.card h3 {
+  font-size: var(--fs-lg);
+  font-weight: 500;
+  margin: 0;
+  letter-spacing: -0.01em;
+  flex: 1 1 260px;
+  line-height: 1.35;
+}
+.price {
+  font-family: var(--mono);
+  font-size: var(--fs-xl);
+  color: var(--amber);
+  white-space: nowrap;
+}
+.card.low .price {
+  color: var(--ink-2);
+}
+.price small {
+  display: block;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  text-align: right;
+  font-family: var(--sans);
+}
+.card p {
+  margin: 10px 0 0;
+  color: var(--ink-2);
+  font-size: var(--fs-base);
+  max-width: 62ch;
+}
+.card footer {
+  margin-top: 14px;
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.techline {
+  display: flex;
+  margin-top: 12px;
+  padding-top: 11px;
+  border-top: 1px solid var(--hair-soft);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.techline span {
+  white-space: nowrap;
+}
+.techline b {
+  color: var(--ink-2);
+  font-weight: 400;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  padding: 2px 8px;
+  border-radius: var(--r-sm);
+  border: 1px solid;
+}
+.chip.easy {
+  color: var(--teal);
+  border-color: var(--teal-line);
+  background: var(--teal-bg);
+}
+.chip.mid {
+  color: var(--amber);
+  border-color: var(--amber-line);
+  background: var(--amber-bg);
+}
+.chip.hard {
+  color: var(--rose);
+  border-color: var(--rose-line);
+  background: var(--rose-bg);
+}
+.chip.where {
+  color: var(--ink-3);
+  border-color: var(--hair);
+  background: transparent;
+}

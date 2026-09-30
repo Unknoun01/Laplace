@@ -1,0 +1,278 @@
+/* ---------------------------------------------------------------------------
+   El ciclo de un problema (D-156): detectar → probar → arreglar → verificar.
+   Una marca por paso: rellena si está hecho, con borde si está en curso, hueca si
+   está pendiente y rosa si no funcionó. El estado va también en texto, oculto a la
+   vista y no a los lectores de pantalla: el color solo no dice nada a quien no lo ve.
+   --------------------------------------------------------------------------- */
+.sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.ciclo-pasos {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.ciclo-paso {
+  position: relative;
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: var(--sp-3);
+  padding-bottom: var(--sp-3);
+}
+.ciclo-paso:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 20px;
+  bottom: 2px;
+  width: 2px;
+  background: var(--hair-strong);
+}
+.ciclo-paso.hecho:not(:last-child)::before {
+  background: var(--teal-line);
+}
+.ciclo-marca {
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  border-radius: 50%;
+  border: 2px solid var(--hair-strong);
+  background: transparent;
+}
+.ciclo-paso.hecho .ciclo-marca {
+  border-color: var(--teal);
+  background: var(--teal);
+}
+.ciclo-paso.en_curso .ciclo-marca {
+  border-color: var(--amber);
+  background: var(--amber-bg);
+}
+.ciclo-paso.fallo .ciclo-marca {
+  border-color: var(--rose);
+  background: var(--rose-bg);
+}
+.ciclo-paso b {
+  font-size: var(--fs-md);
+}
+.ciclo-paso p {
+  margin: 2px 0 0;
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+}
+.ciclo-paso.pendiente b {
+  color: var(--ink-2);
+}
+
+/* Lo ya ahorrado, en el héroe: la otra mitad de la cifra (D-156). */
+.hero .ahorrado {
+  margin: var(--sp-3) 0 0;
+  color: var(--teal);
+  font-size: var(--fs-md);
+}
+.hero .ahorrado strong {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Arreglos por probar (D-156). */
+.por-probar {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.por-probar li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--sp-2) var(--sp-4);
+  padding: var(--sp-3) 0;
+  border-top: 1px solid var(--hair-soft);
+}
+.por-probar li:first-child {
+  border-top: 0;
+}
+.por-probar .pp-titulo {
+  min-width: 0;
+}
+.por-probar .pp-titulo a {
+  color: var(--ink);
+}
+.por-probar .pp-dinero {
+  text-align: right;
+  color: var(--amber);
+  font-family: var(--mono);
+}
+.por-probar .pp-estado {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+}
+.por-probar pre {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+/* En Prompts, el problema que ese prompt tiene abierto en el Diagnóstico (D-157). */
+.prompt-hallazgo {
+  margin: 0 0 var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--amber-line);
+  background: var(--amber-bg);
+  border-radius: var(--r);
+  font-size: var(--fs-md);
+}
+
+/* El botón de alto contraste, en Ajustes (D-159). Pulsado se pinta como el resto de
+   botones con estado: relleno de acento. */
+.contraste {
+  margin-top: var(--sp-4);
+}
+.contraste .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.contraste .btn[aria-pressed="true"] {
+  background: var(--accent-1);
+  border-color: var(--accent-1);
+  color: var(--on-iris);
+}
+.contraste-icono {
+  font-size: var(--fs-lg);
+  line-height: 1;
+}
+.contraste p {
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-sm);
+}
+
+/* Un envoltorio en el árbol (D-160): «=» en lugar de repetir las cifras de su hijo. */
+.node-cost.igual,
+.node-tok.igual {
+  color: var(--ink-4);
+  text-align: right;
+}
+
+/* ---------------------------------------------------------------------------
+   Margen por cliente (D-161). El aviso va primero y en rosa, que es el color de lo que
+   falla: un cliente que hace perder dinero es un fallo del negocio, no del agente.
+   --------------------------------------------------------------------------- */
+.cl-titular {
+  margin: var(--sp-3) 0 0;
+  font-size: var(--fs-lg);
+  color: var(--ink);
+}
+.cl-aviso {
+  margin: var(--sp-6) 0;
+  padding: var(--sp-4) var(--sp-5);
+  border: 1px solid var(--rose-line);
+  background: var(--rose-bg);
+  border-radius: var(--r-lg);
+}
+.cl-aviso h2 {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-xl);
+  color: var(--rose-ink);
+}
+.cl-aviso ul {
+  margin: 0 0 var(--sp-2);
+  padding-left: var(--sp-5);
+}
+.cl-aviso p {
+  margin: 0;
+  color: var(--ink-2);
+}
+.cl-tabla td,
+.cl-tabla th {
+  vertical-align: middle;
+}
+.cl-tabla .cl-fila td {
+  border-bottom: 0;
+  padding-bottom: 2px;
+}
+.cl-tabla .cl-frase td {
+  padding-top: 0;
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+}
+.cl-tabla .margen.pierde {
+  color: var(--rose-ink);
+  font-weight: 600;
+}
+.cl-tabla .margen.gana {
+  color: var(--teal);
+}
+.cl-tabla .margen.ajustado {
+  color: var(--amber);
+}
+.cl-tabla .margen small {
+  display: block;
+  color: var(--ink-3);
+}
+.cl-ingreso {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  justify-content: flex-end;
+}
+.cl-ingreso .field {
+  width: 96px;
+  text-align: right;
+}
+.cl-anadir summary {
+  cursor: pointer;
+  color: var(--iris);
+}
+.cl-anadir .ab {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp-3);
+  margin-top: var(--sp-3);
+}
+.rail-block.clientes-aviso {
+  border-color: var(--rose-line);
+}
+.rail-block.clientes-aviso p {
+  margin: var(--sp-1) 0 var(--sp-2);
+  color: var(--rose-ink);
+  font-weight: 600;
+}
+.cl-problemas {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink-3);
+}
+.cl-problemas a {
+  color: var(--iris);
+}
+.cl-aviso .cl-problemas {
+  font-size: var(--fs-sm);
+}
+.cl-fuente {
+  margin-right: var(--sp-2);
+  vertical-align: middle;
+}
+.cl-stripe .ab {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp-3);
+}
+.cl-stripe .ab .field {
+  min-width: 280px;
+}
+/* La tabla hace bloque a sus enlaces (toda la fila de una traza es un enlace); aquí son
+   texto corrido, separado por «·». */
+.cl-tabla .cl-problemas a,
+.cl-tabla .cl-problemas span {
+  display: inline;
+}

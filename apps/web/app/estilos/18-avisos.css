@@ -1,0 +1,41 @@
+/* ---------- avisos compactos: una línea, y el porqué plegado (D-124) ---------- */
+.caveats.compactos {
+  background: transparent;
+  border: 0;
+  border-left: 2px solid var(--amber-line);
+  border-radius: 0;
+  padding: 2px 0 2px 14px;
+  gap: 4px;
+}
+details.porque {
+  font-size: var(--fs-md);
+  color: var(--ink-2);
+}
+details.porque > summary {
+  cursor: pointer;
+  list-style: none;
+  line-height: 1.6;
+}
+details.porque > summary::-webkit-details-marker {
+  display: none;
+}
+details.porque > summary::after {
+  content: var(--txt-porque, " ¿por qué?");
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+}
+details.porque[open] > summary::after {
+  content: "";
+}
+.casitodo details.porque > summary::after,
+details.porque.pregunta > summary::after {
+  content: "";
+}
+.casitodo details.porque > summary {
+  color: var(--ink-3);
+}
+details.porque > p {
+  margin: 4px 0 6px;
+  color: var(--ink-3);
+  max-width: 76ch;
+}

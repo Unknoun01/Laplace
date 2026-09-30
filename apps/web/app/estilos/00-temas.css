@@ -1,0 +1,351 @@
+/* Sistema de diseño de Laplace.
+ *
+ * Glassmorphism con dos temas (D-133, D-155, D-158). El oscuro, «Tech Abisal», es la
+ * insignia y va por defecto; el claro es Rose Gold con cristal líquido y se elige en
+ * Ajustes, o se deja seguir al sistema. Los dos tienen además una variante de alto
+ * contraste (D-159), sin transparencias. Las variables base de cada tema son las de
+ * cada bloque; todo lo demás —los tokens de siempre (`--ink`, `--panel`, `--amber`…) y
+ * los tintes de estado— se deriva de ellas, así que las clases no cambian.
+ *
+ * El claro y el claro de alto contraste están escritos dos veces (elegidos a mano, y
+ * «como el sistema» con el sistema en claro): CSS no deja nombrar un bloque de
+ * variables. `test_tema.py` exige que las copias sean idénticas y mide el contraste de
+ * cada tinta de texto en los cuatro casos.
+ *
+ * Siguen valiendo las escalas de D-132 (`--fs-*`, `--sp-*`, `--r-*`): lo nuevo se
+ * escribe con ellas, sin píxeles sueltos.
+ */
+
+/* MODO OSCURO: Tech Abisal. La insignia, y lo que ve quien no ha elegido nada. */
+:root {
+  --bg-gradient-start: #182c55;
+  --bg-gradient-mid: #09111d;
+  --bg-gradient-end: #060a10;
+  --text: #eef4ff;
+  --muted: #91a1b5;
+  --glass: rgba(255, 255, 255, 0.04);
+  --line: rgba(255, 255, 255, 0.09);
+  --accent-1: #8b87ff;        /* Violeta */
+  --accent-2: #5de0cc;        /* Cian */
+  --accent-3: #f4bd61;        /* Ámbar */
+  --glow-color: rgba(118, 111, 255, 0.15); /* Resplandor violeta */
+
+  --glass-strong: rgba(12, 20, 34, 0.92);
+  --line-soft: rgba(255, 255, 255, 0.06);
+  --line-strong: rgba(255, 255, 255, 0.18);
+  --ink-2: color-mix(in srgb, var(--text) 60%, var(--muted));
+  --ink-3: var(--muted);
+  /* Medidos también sobre la esquina iluminada del degradado (`--bg-gradient-start`),
+     donde van el logo y el proyecto: con el violeta puro el enlace daba 4,1:1 y la
+     tinta decorativa 2,1 (D-155). */
+  --ink-4: color-mix(in srgb, var(--muted) 80%, var(--bg-gradient-mid));
+  --iris: color-mix(in srgb, var(--accent-1) 88%, #ffffff);
+  --teal: var(--accent-2);
+  --amber: var(--accent-3);
+  --rose: #ee7d87;
+  --rose-ink: #f0b8bd;
+  --on-iris: #0b1020;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  --flash: rgba(93, 224, 204, 0.16);
+  /* El oscuro se queda como estaba: sin filo de luz ni manchas de color añadidas. */
+  --glass-sheen: 0 0 #0000;
+  --blur: blur(15px);
+  --bg-layers: linear-gradient(transparent, transparent);
+  color-scheme: dark;
+}
+
+/* MODO CLARO: Rose Gold, con cristal líquido (D-158). Vuelve el rose gold de D-133, que
+   D-155 había cambiado por un gris neutro que perdía el efecto del cristal: detrás del
+   cristal tiene que haber color para que el cristal se note. Fondo de rubor y champán
+   con tres manchas de luz (`--bg-layers`), cristal muy transparente con un filo de luz
+   (`--glass-sheen`) y un desenfoque que satura. Como letra, los acentos se oscurecen
+   hasta pasar AA; como relleno se usan tal cual. */
+:root[data-theme="light"] {
+  --bg-gradient-start: #fff3ee;
+  --bg-gradient-mid: #f8e1da;
+  --bg-gradient-end: #f2e4da;
+  --text: #2b1c1c;
+  --muted: #6a504d;
+  --glass: rgba(255, 255, 255, 0.4);
+  --line: rgba(255, 255, 255, 0.78);
+  --accent-1: #c98a82;
+  --accent-2: #eba58c;
+  --accent-3: #d6a756;
+  --glow-color: rgba(233, 143, 126, 0.42);
+
+  --glass-strong: rgba(255, 248, 245, 0.92);
+  --line-soft: rgba(255, 255, 255, 0.5);
+  --line-strong: rgba(158, 94, 88, 0.3);
+  --ink-2: color-mix(in srgb, var(--text) 55%, var(--muted));
+  --ink-3: var(--muted);
+  --ink-4: color-mix(in srgb, var(--muted) 72%, var(--bg-gradient-mid));
+  --iris: color-mix(in srgb, var(--accent-1) 52%, #3a1010);
+  /* El ahorro no puede ser del mismo cobre que el derroche: jade, que es el
+     complementario del rose gold y se distingue del ámbar a simple vista. */
+  --teal: #1d6a58;
+  --teal-line: rgba(29, 106, 88, 0.4);
+  --teal-bg: rgba(29, 106, 88, 0.1);
+  --amber: color-mix(in srgb, var(--accent-3) 42%, #3a2400);
+  --rose: #a8283a;
+  --rose-ink: #92212f;
+  --on-iris: #2b1c1c;
+  --shadow: 0 10px 30px rgba(158, 94, 88, 0.16);
+  --flash: rgba(235, 165, 140, 0.24);
+  /* Cristal líquido: un filo de luz arriba, otro más tenue abajo y una sombra cálida;
+     el desenfoque satura lo que hay detrás para que el color atraviese el cristal. */
+  --glass-sheen: inset 0 1px 0 rgba(255, 255, 255, 0.9), inset 0 -1px 0 rgba(255, 255, 255, 0.3),
+    0 8px 32px rgba(158, 94, 88, 0.12);
+  --blur: blur(18px) saturate(170%);
+  --bg-layers: radial-gradient(38% 34% at 88% 8%, rgba(242, 168, 148, 0.55), transparent 70%),
+    radial-gradient(42% 40% at 6% 62%, rgba(222, 170, 118, 0.38), transparent 70%),
+    radial-gradient(36% 32% at 72% 92%, rgba(226, 146, 162, 0.36), transparent 70%);
+  color-scheme: light;
+}
+/* «Como el sistema» (D-125): el claro sólo si el sistema lo pide. Copia exacta del
+   bloque de arriba; la prueba falla si se separan. */
+@media (prefers-color-scheme: light) {
+  :root[data-theme="system"] {
+    --bg-gradient-start: #fff3ee;
+    --bg-gradient-mid: #f8e1da;
+    --bg-gradient-end: #f2e4da;
+    --text: #2b1c1c;
+    --muted: #6a504d;
+    --glass: rgba(255, 255, 255, 0.4);
+    --line: rgba(255, 255, 255, 0.78);
+    --accent-1: #c98a82;
+    --accent-2: #eba58c;
+    --accent-3: #d6a756;
+    --glow-color: rgba(233, 143, 126, 0.42);
+
+    --glass-strong: rgba(255, 248, 245, 0.92);
+    --line-soft: rgba(255, 255, 255, 0.5);
+    --line-strong: rgba(158, 94, 88, 0.3);
+    --ink-2: color-mix(in srgb, var(--text) 55%, var(--muted));
+    --ink-3: var(--muted);
+    --ink-4: color-mix(in srgb, var(--muted) 72%, var(--bg-gradient-mid));
+    --iris: color-mix(in srgb, var(--accent-1) 52%, #3a1010);
+    /* El ahorro no puede ser del mismo cobre que el derroche: jade, que es el
+       complementario del rose gold y se distingue del ámbar a simple vista. */
+    --teal: #1d6a58;
+    --teal-line: rgba(29, 106, 88, 0.4);
+    --teal-bg: rgba(29, 106, 88, 0.1);
+    --amber: color-mix(in srgb, var(--accent-3) 42%, #3a2400);
+    --rose: #a8283a;
+    --rose-ink: #92212f;
+    --on-iris: #2b1c1c;
+    --shadow: 0 10px 30px rgba(158, 94, 88, 0.16);
+    --flash: rgba(235, 165, 140, 0.24);
+    /* Cristal líquido: un filo de luz arriba, otro más tenue abajo y una sombra cálida;
+       el desenfoque satura lo que hay detrás para que el color atraviese el cristal. */
+    --glass-sheen: inset 0 1px 0 rgba(255, 255, 255, 0.9), inset 0 -1px 0 rgba(255, 255, 255, 0.3),
+      0 8px 32px rgba(158, 94, 88, 0.12);
+    --blur: blur(18px) saturate(170%);
+    --bg-layers: radial-gradient(38% 34% at 88% 8%, rgba(242, 168, 148, 0.55), transparent 70%),
+      radial-gradient(42% 40% at 6% 62%, rgba(222, 170, 118, 0.38), transparent 70%),
+      radial-gradient(36% 32% at 72% 92%, rgba(226, 146, 162, 0.36), transparent 70%);
+    color-scheme: light;
+  }
+}
+
+/* ALTO CONTRASTE (D-159), para los dos temas. Sin transparencias, sin desenfoque, sin
+   resplandores ni tintes de fondo: blanco, negro y los tres colores que significan algo
+   (ámbar lo que se tira, verde lo ahorrado, rosa lo que falla), con letra a 7:1 como
+   mínimo (AAA). Los dos con el mismo estilo, sobrio y cálido: en el claro no queda nada
+   del rose gold y en el oscuro nada del neón; marfil, champán, oro y jade. El
+   oscuro por defecto; el claro, elegido o del sistema, con su propia copia (y la
+   prueba exige que sean iguales). */
+:root[data-contrast="high"] {
+  /* Dark luxury (D-159): negro cálido, marfil y champán en lugar del violeta y el cian
+     del oscuro normal. El mismo estilo que el claro de alto contraste, invertido. */
+  --bg-gradient-start: #0a0908;
+  --bg-gradient-mid: #0a0908;
+  --bg-gradient-end: #0a0908;
+  --text: #faf6ee;
+  --muted: #d8d0c4;
+  --glass: #13110f;
+  --line: #8c8375;
+  --accent-1: #ecdcb8;
+  --accent-2: #9fd8c2;
+  --accent-3: #eec46e;
+  --glow-color: transparent;
+
+  --glass-strong: #13110f;
+  --line-soft: #5f584e;
+  --line-strong: #faf6ee;
+  --ink-2: #efe9df;
+  --ink-3: var(--muted);
+  --ink-4: #aaa196;
+  --iris: var(--accent-1);
+  --teal: var(--accent-2);
+  --amber: var(--accent-3);
+  --rose: #f2a39c;
+  --rose-ink: #f7c9c3;
+  --teal-bg: transparent;
+  --amber-bg: transparent;
+  --iris-bg: transparent;
+  --rose-bg: transparent;
+  --on-iris: #0a0908;
+  --shadow: none;
+  --flash: rgba(250, 246, 238, 0.14);
+  --glass-sheen: 0 0 #0000;
+  --blur: none;
+  --bg-layers: linear-gradient(transparent, transparent);
+  color-scheme: dark;
+}
+:root[data-theme="light"][data-contrast="high"] {
+  --bg-gradient-start: #ffffff;
+  --bg-gradient-mid: #ffffff;
+  --bg-gradient-end: #ffffff;
+  --text: #000000;
+  --muted: #333333;
+  --glass: #ffffff;
+  --line: #4d4d4d;
+  --accent-1: #1a1a1a;
+  --accent-2: #0b4637;
+  --accent-3: #7a5200;
+  --glow-color: transparent;
+
+  --glass-strong: #ffffff;
+  --line-soft: #8c8c8c;
+  --line-strong: #000000;
+  --ink-2: #1a1a1a;
+  --ink-3: var(--muted);
+  --ink-4: #595959;
+  --iris: #6a2219;
+  --teal: #0b4637;
+  --teal-line: #0b4637;
+  --teal-bg: transparent;
+  --amber-bg: transparent;
+  --iris-bg: transparent;
+  --rose-bg: transparent;
+  --amber: #573a00;
+  --rose: #7d0d1d;
+  --rose-ink: #6b0a18;
+  --on-iris: #ffffff;
+  --shadow: none;
+  --flash: rgba(0, 0, 0, 0.12);
+  --glass-sheen: 0 0 #0000;
+  --blur: none;
+  --bg-layers: linear-gradient(transparent, transparent);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: light) {
+  :root[data-theme="system"][data-contrast="high"] {
+    --bg-gradient-start: #ffffff;
+    --bg-gradient-mid: #ffffff;
+    --bg-gradient-end: #ffffff;
+    --text: #000000;
+    --muted: #333333;
+    --glass: #ffffff;
+    --line: #4d4d4d;
+    --accent-1: #1a1a1a;
+    --accent-2: #0b4637;
+    --accent-3: #7a5200;
+    --glow-color: transparent;
+
+    --glass-strong: #ffffff;
+    --line-soft: #8c8c8c;
+    --line-strong: #000000;
+    --ink-2: #1a1a1a;
+    --ink-3: var(--muted);
+    --ink-4: #595959;
+    --iris: #6a2219;
+    --teal: #0b4637;
+    --teal-line: #0b4637;
+    --teal-bg: transparent;
+    --amber-bg: transparent;
+    --iris-bg: transparent;
+    --rose-bg: transparent;
+    --amber: #573a00;
+    --rose: #7d0d1d;
+    --rose-ink: #6b0a18;
+    --on-iris: #ffffff;
+    --shadow: none;
+    --flash: rgba(0, 0, 0, 0.12);
+    --glass-sheen: 0 0 #0000;
+    --blur: none;
+    --bg-layers: linear-gradient(transparent, transparent);
+    color-scheme: light;
+  }
+}
+/* Con alto contraste, los enlaces de texto se subrayan —no las tarjetas ni los botones,
+   que ya tienen su borde— y el foco se ve el doble. Sin resplandores detrás. */
+:root[data-contrast="high"] a:not(.card):not(.btn):not(.mark) {
+  text-decoration: underline;
+}
+:root[data-contrast="high"] .shell::before,
+:root[data-contrast="high"] .shell::after {
+  display: none;
+}
+:root[data-contrast="high"] :focus-visible {
+  outline-width: 3px;
+}
+/* Las casillas y los controles nativos, en el acento del tema y no en el azul del
+   navegador, que en alto contraste era el único color fuera de la paleta. */
+:root[data-contrast="high"] input,
+:root[data-contrast="high"] select {
+  accent-color: var(--accent-1);
+}
+
+/* Los tokens de siempre, ahora como alias de los de arriba: valen para los dos temas y
+   ninguna clase tuvo que cambiar de nombre. */
+:root {
+  --ground: var(--bg-gradient-mid);
+  --panel: var(--glass);
+  --panel-2: color-mix(in srgb, var(--glass), var(--text) 5%);
+  --hair: var(--line);
+  --hair-soft: var(--line-soft);
+  --hair-strong: var(--line-strong);
+  --ink: var(--text);
+  --dim: var(--ink-2);
+  --chain: var(--ink-4);
+  --violet: var(--accent-1);
+  --blue: color-mix(in srgb, var(--accent-1) 50%, var(--accent-2));
+  --iris-hover: color-mix(in srgb, var(--accent-1) 85%, var(--accent-2));
+  /* Tintes de estado: el color sobre el cristal, sin hex por tema. */
+  --amber-line: color-mix(in srgb, var(--accent-3) 45%, transparent);
+  --amber-bg: color-mix(in srgb, var(--accent-3) 12%, transparent);
+  --teal-line: color-mix(in srgb, var(--accent-2) 45%, transparent);
+  --teal-bg: color-mix(in srgb, var(--accent-2) 12%, transparent);
+  --iris-line: color-mix(in srgb, var(--accent-1) 45%, transparent);
+  --iris-bg: color-mix(in srgb, var(--accent-1) 12%, transparent);
+  --violet-line: var(--iris-line);
+  --violet-bg: var(--iris-bg);
+  --rose-line: color-mix(in srgb, var(--rose) 40%, transparent);
+  --rose-bg: color-mix(in srgb, var(--rose) 10%, transparent);
+  --rose-bg-hover: color-mix(in srgb, var(--rose) 16%, transparent);
+  --code-bg: color-mix(in srgb, var(--bg-gradient-end) 70%, transparent);
+  --code-ink: var(--ink-2);
+
+  /* Escalas (D-132). Tipografía en pasos enteros, espaciado sobre 4 px. */
+  --fs-2xs: 11px;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 14px;
+  --fs-base: 15px;
+  --fs-lg: 17px;
+  --fs-xl: 20px;
+  --fs-2xl: 24px;
+  --fs-3xl: 32px;
+  --fs-4xl: 40px;
+  --fs-display: 56px;
+  --fs-hero: 88px;
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+  /* Radios del cristal: 12 para controles y bloques, 18 para tarjetas, 24 para el
+     héroe. `--r-sm` queda para barras y píldoras pequeñas. */
+  --r-sm: 6px;
+  --r: 12px;
+  --r-lg: 18px;
+  --r-xl: 24px;
+  --r-pill: 999px;
+  --mono: var(--font-mono), "IBM Plex Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+  --sans: var(--font-sans), "Inter", system-ui, -apple-system, sans-serif;
+}

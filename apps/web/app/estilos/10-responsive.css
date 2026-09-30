@@ -1,0 +1,93 @@
+/* ---------- responsive ---------- */
+@media (max-width: 900px) {
+  .split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .scroll {
+    max-height: none;
+  }
+}
+@media (max-width: 700px) {
+  .big {
+    font-size: var(--fs-4xl);
+  }
+  .arrow {
+    display: none;
+  }
+  .pair {
+    gap: 18px;
+  }
+  .shell {
+    padding: 0 15px 60px;
+  }
+  .d-head h1 {
+    font-size: var(--fs-xl);
+  }
+  .node {
+    grid-template-columns: 1fr 70px;
+  }
+  .node-bar,
+  .node-tok {
+    display: none;
+  }
+  .kv dt {
+    flex: 0 0 120px;
+  }
+  .mark {
+    font-size: 0;
+    gap: 0;
+  }
+  /* El proyecto cede sitio antes que el rango o el interruptor: un nombre largo se
+     corta con puntos suspensivos en vez de mandar la mitad de la barra a otra fila. */
+  .brand-ctx {
+    flex: 1 1 0;
+  }
+  .ctx.proyecto {
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+  }
+  .pick {
+    gap: 4px;
+  }
+  .pick .ctx {
+    padding: 5px 6px;
+  }
+  .switch {
+    padding: 5px 8px;
+  }
+  /* Las seis pestañas a la vista, en dos filas de tres: desplazables escondían
+     «Prompts» y «Ajustes» detrás del borde, y nadie desplaza una barra que no parece
+     desplazable. */
+  /* Cada columna mide al menos lo que su pestaña más larga y el resto se reparte: con
+     tres tercios exactos, «Tableau de bord» no cabía a 375 px en Linux (D-156). */
+  .nav {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(max-content, 1fr));
+    gap: 2px;
+    overflow: visible;
+  }
+  .nav a,
+  .nav span {
+    padding: 6px 4px;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* Los destinos de fases futuras no compiten por sitio en una pantalla pequeña. */
+  .nav span.soon {
+    display: none;
+  }
+  /* En móvil manda el dinero, el estado y el nombre. */
+  .tbl .hide-sm {
+    display: none;
+  }
+  /* La pregunta va en una línea con puntos suspensivos, y en una celda de tabla eso
+     fija el ancho mínimo de la columna: la tabla medía 479 px en 375 y el coste, que es
+     por lo que se ordena, quedaba fuera (A2). Con ancho máximo cero la columna de la
+     traza se queda con lo que sobre y es ella la que recorta. */
+  .tbl.trazas td:first-child {
+    width: 100%;
+    max-width: 0;
+  }
+}

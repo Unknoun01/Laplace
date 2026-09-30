@@ -1,0 +1,77 @@
+/* ---------- lista del inicio y metadatos de tarjeta (D-125) ---------- */
+.card footer .meta {
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.card footer .meta + .meta::before {
+  content: "·";
+  color: var(--ink-4);
+  margin-right: 3px;
+}
+.card footer .meta.dificultad::after {
+  content: none;
+}
+.card footer .meta.dificultad {
+  color: var(--ink-2);
+}
+.card footer .meta.dificultad::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--teal);
+  margin-right: 0;
+}
+.card footer .meta.dificultad.mid::before {
+  background: var(--amber);
+}
+.card footer .meta.dificultad.hard::before {
+  background: var(--rose);
+}
+.card footer .meta.ver {
+  margin-left: auto;
+  color: var(--iris);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.card footer .meta.ver::before {
+  content: none;
+}
+.card:hover footer .meta.ver,
+.card:focus-visible footer .meta.ver {
+  opacity: 1;
+}
+@media (hover: none) {
+  .card footer .meta.ver {
+    opacity: 1;
+  }
+}
+details.mas {
+  margin-top: 4px;
+}
+details.mas > summary {
+  cursor: pointer;
+  color: var(--ink-3);
+  font-size: var(--fs-md);
+  padding: 12px 0;
+}
+details.mas > summary:hover {
+  color: var(--ink);
+}
+details.mas.tiempo > summary {
+  border-top: 1px solid var(--hair-soft);
+  margin-top: 8px;
+}
+
+.tbl .pregunta {
+  color: var(--ink-2);
+  font-size: var(--fs-md);
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 56ch;
+}

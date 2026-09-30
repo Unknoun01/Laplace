@@ -1,0 +1,116 @@
+/* ---------- ajustes del proyecto (D-123) ---------- */
+.ajustes .sec h3 {
+  font-size: var(--fs-base);
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+.ajustes .sec {
+  border-top: 1px solid var(--hair-soft);
+  margin-top: 28px;
+}
+.ajustes .sec:first-child {
+  border-top: 0;
+  margin-top: 0;
+}
+.vok {
+  color: var(--teal);
+  font-size: var(--fs-sm);
+  margin: 8px 0 0;
+}
+.muted {
+  color: var(--ink-3);
+  font-size: var(--fs-md);
+}
+.eur {
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+.budget-line {
+  margin: 0 0 10px;
+}
+.budget-line.cerca,
+.budget-line.va-a-pasarse {
+  color: var(--amber);
+}
+.budget-line.pasado {
+  color: var(--rose);
+}
+.sbar.budget {
+  max-width: 420px;
+}
+.canales {
+  display: grid;
+  gap: 14px;
+  margin: 14px 0 6px;
+}
+.canal > small {
+  display: block;
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  margin-bottom: 4px;
+}
+.canal .puesto {
+  color: var(--teal);
+}
+.reglas {
+  border: 1px solid var(--hair);
+  border-radius: var(--r);
+  padding: 10px 14px;
+  margin: 14px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+  font-size: var(--fs-md);
+  color: var(--ink-2);
+}
+.reglas legend {
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  padding: 0 4px;
+}
+.chip.as-btn {
+  cursor: pointer;
+  margin: 0 6px 6px 0;
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+.tabla-simple {
+  border-collapse: collapse;
+  margin: 10px 0;
+  font-size: var(--fs-md);
+}
+.tabla-simple th {
+  text-align: left;
+  color: var(--ink-3);
+  font-weight: 500;
+  font-size: var(--fs-xs);
+  padding: 4px 16px 4px 0;
+}
+.tabla-simple td {
+  padding: 6px 16px 6px 0;
+  border-top: 1px solid var(--hair-soft);
+}
+.peligro {
+  border: 1px solid var(--rose-line);
+  background: var(--rose-bg);
+  border-radius: var(--r);
+  padding: 12px 14px;
+  font-size: var(--fs-md);
+}
+.peligro p {
+  margin: 0 0 10px;
+  color: var(--ink-2);
+}
+.btn.danger {
+  color: var(--rose);
+  border-color: var(--rose-line);
+}
+.btn.danger:not(:disabled):hover {
+  background: var(--rose-bg-hover);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

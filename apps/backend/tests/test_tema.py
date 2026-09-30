@@ -5,7 +5,7 @@ cada tinta de texto medido en los cuatro.
 La auditoría del rediseño (docs/auditoria-rediseno.md) midió el contraste a mano y
 encontró dos colores por debajo de AA en el tema claro; los dos se arreglaron y nada
 impedía que el siguiente cambio de paleta los rompiera otra vez. Aquí se leen los
-tokens de `globals.css`, se resuelven sus `var()` y `color-mix()` como lo hace el
+tokens de `app/estilos/00-temas.css`, se resuelven sus `var()` y `color-mix()` como lo hace el
 navegador (en sRGB), se compone el cristal translúcido sobre cada punto del degradado
 de fondo y se exige 4,5:1 a todo lo que es letra (7:1 con alto contraste).
 
@@ -19,9 +19,9 @@ import re
 from pathlib import Path
 
 import pytest
+from helpers import hoja_de_estilos
 
-CSS = Path(__file__).resolve().parents[3] / "apps" / "web" / "app" / "globals.css"
-LAYOUT = CSS.parent / "layout.tsx"
+LAYOUT = Path(__file__).resolve().parents[3] / "apps" / "web" / "app" / "layout.tsx"
 
 #: Las tintas que se usan como letra. `--ink-4` no está: es para separadores y lo
 #: decorativo (D-132), y se le pide 3:1 aparte.
@@ -56,7 +56,7 @@ def _variables(cuerpo: str) -> dict[str, str]:
 
 
 def _tema(nombre: str) -> dict[str, str]:
-    css = CSS.read_text(encoding="utf-8")
+    css = hoja_de_estilos()
     # El primer `:root` es el tema por defecto; el segundo, los alias comunes (que
     # derivan de las variables base y valen para los dos).
     raiz = _variables(_bloque(css, ":root"))
@@ -178,7 +178,7 @@ def _fondos(tema: dict[str, str]) -> dict[str, Color]:
 def test_el_tema_por_defecto_es_el_oscuro():
     """La insignia es el oscuro: quien no ha elegido nada lo ve, tenga el sistema como
     lo tenga. El claro sólo entra por `data-theme`."""
-    css = CSS.read_text(encoding="utf-8")
+    css = hoja_de_estilos()
     raiz = _bloque(css, ":root")
     assert "color-scheme: dark" in raiz
     assert _luminancia(_color(_tema("oscuro")["bg-gradient-mid"], _tema("oscuro"))) < 0.05
@@ -218,7 +218,7 @@ def _copia_del_sistema(css: str, selector: str) -> dict[str, str]:
 def test_las_dos_copias_del_claro_son_iguales(elegido, sistema):
     """Elegido a mano o seguido del sistema, el claro es el mismo, con y sin alto
     contraste: CSS obliga a escribirlo dos veces y esto impide que se separen."""
-    css = CSS.read_text(encoding="utf-8")
+    css = hoja_de_estilos()
     assert _variables(_bloque(css, elegido)) == _copia_del_sistema(css, sistema)
 
 

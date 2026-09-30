@@ -5,6 +5,9 @@ documento de contexto se resuelve con la opción más simple y estándar, y se a
 
 Formato: `YYYY-MM-DD — Decisión — Motivo — Alternativas descartadas`.
 
+**Por tema:** [`docs/decisiones-indice.md`](docs/decisiones-indice.md), generado con
+`python scripts/indice_decisiones.py` (una prueba exige que esté al día).
+
 ---
 
 ## 2026-09-06 — Fase 0 + arranque de Fase 1
@@ -3689,3 +3692,21 @@ explicado: no era lentitud, porque el Diagnóstico de la demo tarda 0,5 s en loc
 problema del prompt aparecía o no en la demo dependía de la hora de la carga (D-171), y
 sin él el aviso de Prompts no sale nunca. Con la demo estable, `test_demo_estable` exige
 que aparezca a cuatro horas distintas.
+
+### D-174 — `globals.css` en 29 hojas, un índice de decisiones y documentación de usuario
+* **`globals.css`** (4.100 líneas) se parte en `apps/web/app/estilos/`, una hoja por
+  pantalla o pieza (`00-temas.css` a `28-ciclo.css`), que `layout.tsx` importa en orden.
+  El orden importa: la cascada de antes se conserva, y el CSS compilado sale igual que
+  el de antes salvo los saltos de línea entre ficheros. La primera regla `.hint`, pisada
+  por la segunda, era código muerto y se quita. Las pruebas que leían `globals.css`
+  (`test_tema.py`, `test_textos_web.py`) leen ahora las hojas en el orden de
+  `layout.tsx`, con `hoja_de_estilos()` de `helpers.py`, así que una hoja nueva que no
+  se importe no se cuela en la cuenta.
+* **Índice por tema de `DECISIONS.md`** (`docs/decisiones-indice.md`): lo genera
+  `scripts/indice_decisiones.py` a partir de las palabras de cada título, y
+  `test_decisiones_indice.py` exige que esté al día. Generado y no escrito a mano,
+  porque uno a mano se desfasa a la primera decisión nueva.
+* **Documentación de usuario** en `docs/usuario/`, en Markdown plano: empezar,
+  instrumentar, diagnóstico, probar, alertas y datos. Sin Mintlify, Docusaurus ni
+  Starlight todavía: GitHub ya la pinta, y montar un sitio pide el dominio (sección 5 de
+  la hoja de ruta). Se pasa a uno de ellos cuando haya dónde publicarlo.

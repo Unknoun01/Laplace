@@ -1,0 +1,124 @@
+/* ---------- estados de hallazgos, presupuesto y problemas en la traza (D-123) ---------- */
+.sec-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.sec-head h2 {
+  margin: 0;
+}
+.sec-head + .lead,
+.sec-head + p {
+  margin-top: 4px;
+}
+.budget-home {
+  margin: 14px 0 0;
+  font-size: var(--fs-md);
+  color: var(--ink-2);
+}
+.budget-home p {
+  margin: 0 0 6px;
+}
+.budget-home.cerca p,
+.budget-home.va-a-pasarse p {
+  color: var(--amber);
+}
+.budget-home.pasado p {
+  color: var(--rose);
+}
+.card .estado {
+  font-size: var(--fs-md);
+  border-left: 2px solid var(--hair);
+  padding-left: 10px;
+  color: var(--ink-2);
+}
+.card .estado.reaparecido {
+  border-left-color: var(--rose);
+}
+.card .estado.arreglado {
+  border-left-color: var(--teal);
+}
+.apartados summary {
+  cursor: pointer;
+  color: var(--ink-3);
+  font-size: var(--fs-md);
+}
+.apartados ul {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+  display: grid;
+  gap: 10px;
+}
+.apartados li small {
+  display: block;
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+  margin-top: 3px;
+}
+.estado-hallazgo {
+  border: 1px solid var(--hair);
+  border-radius: var(--r);
+  padding: 16px 18px;
+  background: var(--panel);
+}
+.estado-hallazgo.arreglado {
+  border-color: var(--teal-line);
+}
+.estado-hallazgo.reaparecido {
+  border-color: var(--rose-line);
+}
+.antes-despues {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  margin: 12px 0 0;
+  flex-wrap: wrap;
+}
+.antes-despues > div:not(.arrow) {
+  display: grid;
+  gap: 2px;
+}
+.antes-despues small {
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+}
+.antes-despues b {
+  font-size: var(--fs-xl);
+  font-weight: 500;
+}
+.antes-despues .arrow {
+  color: var(--ink-3);
+}
+.en-esta-traza {
+  border: 1px solid var(--iris-line);
+  background: var(--iris-bg);
+  border-radius: var(--r);
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  font-size: var(--fs-md);
+}
+.en-esta-traza ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+.explorer-tools {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 10px;
+}
+.tabla-simple.ancha {
+  width: 100%;
+}
+.tabla-simple.ancha td.num,
+.tabla-simple.ancha th:not(:first-child) {
+  text-align: right;
+}
+@media (max-width: 700px) {
+  .tabla-simple.ancha th:nth-child(3),
+  .tabla-simple.ancha td:nth-child(3) {
+    display: none;
+  }
+}

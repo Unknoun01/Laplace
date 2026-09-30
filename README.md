@@ -422,9 +422,11 @@ datos de ejemplo»** en la pantalla vacía, o desde la terminal:
 laplace demo          # trazas simuladas, en un proyecto aparte
 ```
 
-Las trazas se guardan para siempre salvo que se arranque con `LAPLACE_RETENTION_DAYS`, y
-un proyecto entero —trazas, anotaciones, conjuntos, prompts y ajustes— se borra desde
-Ajustes.
+Las trazas se guardan para siempre salvo que se arranque con `LAPLACE_RETENTION_DAYS`;
+cada proyecto puede guardar menos desde Ajustes, donde también se borran los datos de una
+persona o un cliente concretos, o el proyecto entero (D-173).
+
+La documentación de uso está en [`docs/usuario/`](docs/usuario/index.md).
 
 Y para que aparezcan las tuyas, una línea en tu agente:
 
@@ -433,7 +435,7 @@ import laplace
 laplace.init(project="mi-agente", endpoint="http://127.0.0.1:8100")
 ```
 
-Es **el mismo producto** que la versión de nube: la misma ingesta, las mismas tres
+Es **el mismo producto** que la versión de nube: la misma ingesta, las mismas cinco
 reglas de detección, el mismo panel de ahorro y la misma interfaz. Lo único que cambia
 es dónde están las filas (D-015), y hay un test que compara los dos almacenes sobre los
 mismos spans para que no puedan derivar.

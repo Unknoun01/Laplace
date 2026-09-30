@@ -35,3 +35,19 @@ def span_llm():
     spans = [s for s in ingest() if s.type == "llm"]
     assert len(spans) == 1, f"se esperaba un span de LLM y hay {len(spans)}"
     return spans[0]
+
+
+def hoja_de_estilos() -> str:
+    """La hoja de estilos entera de la web, en el orden en que la importa `layout.tsx`.
+
+    Vivía en un solo `globals.css`; desde D-174 está partida en `app/estilos/`. Las
+    pruebas que la leen la leen entera, en el orden de la cascada.
+    """
+    import re
+    from pathlib import Path
+
+    app = Path(__file__).resolve().parents[3] / "apps" / "web" / "app"
+    layout = (app / "layout.tsx").read_text(encoding="utf-8")
+    ficheros = re.findall(r'^import "\./(estilos/[^"]+\.css)";', layout, flags=re.M)
+    assert ficheros, "layout.tsx no importa ninguna hoja de estilos"
+    return "\n".join((app / f).read_text(encoding="utf-8") for f in ficheros)
