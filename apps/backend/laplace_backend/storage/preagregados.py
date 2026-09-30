@@ -71,10 +71,12 @@ COLUMNAS = {
         "project_id, minuto, es_eval, span_type, step_key, name, step_label, step_site, "
         "step_hint, request_model, prompt_name, prompt_version, n, n_con_coste, coste, "
         "tok_in, tok_out, cache_tok, cache_escrito, ahorro_cache, duracion, sin_tarifa, "
-        "asumida, con_tokens, primero, ultimo, traza_min, traza_max, trazas, trazas_error, "
+        "asumida, con_tokens, primero, ultimo, traza_min, traza_max, "
         "min_entrada, mediana_dur, mediana_sal"
     ),
-    "pre_trazas": "project_id, minuto, trace_id, inicio, fin",
+    "pre_trazas": (
+        "project_id, minuto, trace_id, es_eval, fallo, inicio, fin, g_uso, g_cob, g_prompt"
+    ),
     "pre_repes": (
         "project_id, minuto, es_eval, trace_id, dedup_hash, etiqueta, pista, sitio, tipo, "
         "modelo, paso, ultima, n, coste, duracion, tok_in, tok_out, sin_tarifa, asumida, "
@@ -112,8 +114,6 @@ _PARCIAL = {
             max(start_time)                      AS ultimo,
             min(trace_id)                        AS traza_min,
             max(trace_id)                        AS traza_max,
-            uniqExactState(trace_id)             AS trazas,
-            uniqExactIfState(trace_id, status = 'error') AS trazas_error,
             minIfState(input_tokens, status != 'error' AND input_tokens > 0) AS min_entrada,
             quantileExactIfState(0.5)(duration_ms, status != 'error')   AS mediana_dur,
             quantileExactIfState(0.5)(output_tokens, status != 'error') AS mediana_sal
@@ -122,12 +122,17 @@ _PARCIAL = {
         GROUP BY project_id, minuto, es_eval, span_type, step_key, name, step_label,
                  step_site, step_hint, request_model, prompt_name, prompt_version
     """,
-    "pre_trazas": """
+    "pre_trazas": f"""
         SELECT project_id, toStartOfMinute(start_time) AS minuto, trace_id,
-               min(start_time) AS inicio, max(end_time) AS fin
+               {_ES_EVAL}                        AS es_eval,
+               max(status = 'error')             AS fallo,
+               min(start_time) AS inicio, max(end_time) AS fin,
+               groupUniqArrayIf({{g_uso}}, span_type = 'llm' AND request_model != '') AS g_uso,
+               groupUniqArrayIf({{g_cob}}, span_type = 'llm')                         AS g_cob,
+               groupUniqArrayIf({{g_prompt}}, prompt_name != '')                     AS g_prompt
         FROM spans FINAL
-        WHERE project_id = %(project_id)s AND {rango}
-        GROUP BY project_id, minuto, trace_id
+        WHERE project_id = %(project_id)s AND {{rango}}
+        GROUP BY project_id, minuto, trace_id, es_eval
     """,
     "pre_repes": f"""
         SELECT
@@ -189,6 +194,14 @@ _PARCIAL = {
     """,
 }
 
+#: Cómo se nombra cada grupo en `pre_trazas`, a partir de las columnas de un span. Los
+#: lectores calculan el mismo hash a partir de sus claves agregadas, y así cruzan cada
+#: grupo con sus ejecuciones distintas.
+G_USO = "sipHash64(if(step_key != '', step_key, name), toString(request_model))"
+G_COB = "sipHash64(multiIf(step_site != '', step_site, step_label != '', step_label, name))"
+G_PROMPT = "sipHash64(toString(prompt_name), prompt_version)"
+
+
 #: Qué parejas se guardan. Una pareja cuenta en una ventana si tiene dos spans o más
 #: dentro de ella. Si todos sus spans caen en la misma hora (lo normal: una ejecución
 #: dura segundos), no llega a dos en ninguna ventana si no los tiene en la hora entera.
@@ -221,6 +234,8 @@ def _seleccion(tabla: str, rango: str, ambito: str) -> str:
     sql = _PARCIAL[tabla]
     if tabla in ("pre_repes", "pre_bucles"):
         return sql.format(rango=rango, candidatas=_candidatas(tabla, ambito))
+    if tabla == "pre_trazas":
+        return sql.format(rango=rango, g_uso=G_USO, g_cob=G_COB, g_prompt=G_PROMPT)
     return sql.format(rango=rango)
 
 
@@ -272,6 +287,9 @@ def marcar(client: Any, horas: set[tuple[str, datetime]]) -> None:
         "pre_sucias",
         [[proyecto, hora_de(h).replace(tzinfo=None)] for proyecto, h in sorted(horas)],
         column_names=["project_id", "hora"],
+        # Como los spans: una parte por lote de la ingesta ahogaría las fusiones. La marca
+        # la pone el servidor al escribir el lote, que es después de los spans.
+        settings={"async_insert": 1, "wait_for_async_insert": 1},
     )
 
 
@@ -303,7 +321,9 @@ def recalcular(client: Any, project_id: str, hora: datetime) -> None:
     )
 
 
-def pendientes(client: Any, limite: int = POR_VUELTA) -> list[tuple[str, datetime]]:
+def pendientes(
+    client: Any, limite: int = POR_VUELTA, quieta_s: int = 120
+) -> list[tuple[str, datetime]]:
     """Las horas con escrituras posteriores a su último cálculo, las más recientes antes."""
     filas = client.query(
         """
@@ -314,17 +334,20 @@ def pendientes(client: Any, limite: int = POR_VUELTA) -> list[tuple[str, datetim
                    GROUP BY project_id, hora) AS h
           ON s.project_id = h.project_id AND s.hora = h.hora
         WHERE s.m >= h.c
+          -- La hora en curso se ensucia a los pocos segundos mientras llegan datos, y
+          -- se lee en crudo igual: se calcula cuando acaba o cuando lleva un rato quieta.
+          AND (s.hora < toStartOfHour(now()) OR s.m < now64(3) - INTERVAL %(quieta)s SECOND)
         ORDER BY s.hora DESC
         LIMIT %(n)s
         """,
-        parameters={"n": limite},
+        parameters={"n": limite, "quieta": quieta_s},
     ).result_rows
     return [(p, _utc(h)) for p, h in filas]
 
 
-def recalcular_pendientes(client: Any, limite: int = POR_VUELTA) -> int:
+def recalcular_pendientes(client: Any, limite: int = POR_VUELTA, quieta_s: int = 120) -> int:
     hechas = 0
-    for project_id, hora in pendientes(client, limite):
+    for project_id, hora in pendientes(client, limite, quieta_s):
         try:
             recalcular(client, project_id, hora)
             hechas += 1
@@ -500,22 +523,30 @@ def alineada(since: datetime) -> bool:
 
 RESUMEN = """
 SELECT
-    uniqExactMerge(trazas)                         AS traces,
-    sum(n)                                         AS spans,
-    uniqExactIfMerge(trazas_error)                 AS error_traces,
-    sumIf(n, span_type = 'llm')                    AS llm_calls,
-    sumIf(n, span_type = 'tool')                   AS tool_calls,
-    sum(tok_in)                                    AS input_tokens,
-    sum(tok_out)                                   AS output_tokens,
-    sum(coste)                                     AS cost,
-    sum(ahorro_cache)                              AS ahorro_cache,
-    sum(sin_tarifa)                                AS spans_sin_tarifa,
-    sum(asumida)                                   AS tarifa_asumida,
-    arrayDistinct(groupArrayIf(toString(request_model), sin_tarifa > 0 AND request_model != ''))
-                                                   AS modelos_sin_tarifa,
-    min(primero)                                   AS primero,
-    max(ultimo)                                    AS ultimo
-FROM {pre_pasos}
+    t.traces, p.spans, t.error_traces, p.llm_calls, p.tool_calls, p.input_tokens,
+    p.output_tokens, p.cost, p.ahorro_cache, p.spans_sin_tarifa, p.tarifa_asumida,
+    p.modelos_sin_tarifa, p.primero, p.ultimo
+FROM (
+    SELECT
+        sum(n)                                     AS spans,
+        sumIf(n, span_type = 'llm')                AS llm_calls,
+        sumIf(n, span_type = 'tool')               AS tool_calls,
+        sum(tok_in)                                AS input_tokens,
+        sum(tok_out)                               AS output_tokens,
+        sum(coste)                                 AS cost,
+        sum(ahorro_cache)                          AS ahorro_cache,
+        sum(sin_tarifa)                            AS spans_sin_tarifa,
+        sum(asumida)                               AS tarifa_asumida,
+        arrayDistinct(groupArrayIf(toString(request_model),
+                                   sin_tarifa > 0 AND request_model != '')) AS modelos_sin_tarifa,
+        min(primero)                               AS primero,
+        max(ultimo)                                AS ultimo
+    FROM {pre_pasos}
+) AS p
+CROSS JOIN (
+    SELECT uniqExact(trace_id) AS traces, uniqExactIf(trace_id, fallo = 1) AS error_traces
+    FROM {pre_trazas}
+) AS t
 """
 
 P95 = """
@@ -527,36 +558,45 @@ SELECT quantile(0.95)(duracion) FROM (
 """
 
 USO = """
-SELECT
-    if(step_key != '', step_key, name) AS paso_clave,
-    max(if(step_label != '', step_label, name)) AS paso,
-    max(step_hint)           AS pista,
-    max(step_site)           AS sitio,
-    max(toString(prompt_name)) AS prompt,
-    max(prompt_version)      AS version_prompt,
-    request_model,
-    sum(n)                   AS llamadas,
-    uniqExactMerge(trazas)   AS trazas,
-    sum(tok_in)              AS in_tok,
-    sum(tok_out)             AS out_tok,
-    sum(cache_tok)           AS cache_tok,
-    sum(cache_escrito)       AS cache_escrito,
-    sum(ahorro_cache)        AS ahorro_cache,
-    sum(coste)               AS coste,
-    sum(sin_tarifa)          AS sin_tarifa,
-    sum(asumida)             AS tarifa_asumida,
-    sum(tok_out) / sum(n)    AS media_salida,
-    sum(tok_in) / sum(n)     AS media_entrada,
-    minIfMerge(min_entrada)  AS min_entrada,
-    sum(duracion)            AS duracion,
-    quantileExactIfMerge(0.5)(mediana_dur) AS mediana,
-    quantileExactIfMerge(0.5)(mediana_sal) AS mediana_salida,
-    max(ultimo)              AS ultima,
-    min(traza_min)           AS traza_ejemplo
-FROM {pre_pasos}
-WHERE es_eval = 0 AND span_type = 'llm' AND request_model != ''
-GROUP BY if(step_key != '', step_key, name), request_model
-HAVING llamadas >= %(min_calls)s
+SELECT u.* EXCEPT (h), t.trazas AS trazas
+FROM (
+    SELECT
+        if(step_key != '', step_key, name) AS paso_clave,
+        max(if(step_label != '', step_label, name)) AS paso,
+        max(step_hint)           AS pista,
+        max(step_site)           AS sitio,
+        max(toString(prompt_name)) AS prompt,
+        max(prompt_version)      AS version_prompt,
+        request_model,
+        sum(n)                   AS llamadas,
+        sum(tok_in)              AS in_tok,
+        sum(tok_out)             AS out_tok,
+        sum(cache_tok)           AS cache_tok,
+        sum(cache_escrito)       AS cache_escrito,
+        sum(ahorro_cache)        AS ahorro_cache,
+        sum(coste)               AS coste,
+        sum(sin_tarifa)          AS sin_tarifa,
+        sum(asumida)             AS tarifa_asumida,
+        sum(tok_out) / sum(n)    AS media_salida,
+        sum(tok_in) / sum(n)     AS media_entrada,
+        minIfMerge(min_entrada)  AS min_entrada,
+        sum(duracion)            AS duracion,
+        quantileExactIfMerge(0.5)(mediana_dur) AS mediana,
+        quantileExactIfMerge(0.5)(mediana_sal) AS mediana_salida,
+        max(ultimo)              AS ultima,
+        min(traza_min)           AS traza_ejemplo,
+        sipHash64(paso_clave, toString(request_model)) AS h
+    FROM {pre_pasos}
+    WHERE es_eval = 0 AND span_type = 'llm' AND request_model != ''
+    GROUP BY if(step_key != '', step_key, name), request_model
+    HAVING llamadas >= %(min_calls)s
+) AS u
+LEFT JOIN (
+    SELECT g AS h, uniqExact(trace_id) AS trazas
+    FROM {pre_trazas} ARRAY JOIN g_uso AS g
+    WHERE es_eval = 0
+    GROUP BY g
+) AS t ON u.h = t.h
 ORDER BY coste DESC, paso_clave, request_model
 LIMIT %(limit)s
 """
@@ -573,35 +613,52 @@ WHERE span_type = 'llm'
 """
 
 COBERTURA_PASOS = """
-SELECT
-    multiIf(step_site != '', step_site, step_label != '', step_label, name) AS paso,
-    max(if(step_label != '', step_label, name)) AS etiqueta,
-    uniqExact(step_key)     AS identidades,
-    uniqExactMerge(trazas)  AS trazas
-FROM {pre_pasos}
-WHERE span_type = 'llm'
-GROUP BY paso
+SELECT c.* EXCEPT (h), t.trazas AS trazas
+FROM (
+    SELECT
+        multiIf(step_site != '', step_site, step_label != '', step_label, name) AS paso,
+        max(if(step_label != '', step_label, name)) AS etiqueta,
+        uniqExact(step_key)     AS identidades,
+        sipHash64(paso)         AS h
+    FROM {pre_pasos}
+    WHERE span_type = 'llm'
+    GROUP BY paso
+) AS c
+LEFT JOIN (
+    SELECT g AS h, uniqExact(trace_id) AS trazas
+    FROM {pre_trazas} ARRAY JOIN g_cob AS g
+    GROUP BY g
+) AS t ON c.h = t.h
 """
 
 PROMPTS = """
-SELECT
-    toString(prompt_name)          AS nombre,
-    prompt_version                 AS version,
-    uniqExactMerge(trazas)         AS trazas,
-    sum(n)                         AS llamadas,
-    sum(coste)                     AS coste,
-    sum(tok_in)                    AS tok_in,
-    sum(tok_out)                   AS tok_out,
-    sum(duracion)                  AS duracion,
-    sum(sin_tarifa)                AS sin_tarifa,
-    sum(asumida)                   AS asumida,
-    min(primero)                   AS primero,
-    max(ultimo)                    AS ultimo,
-    {pasos}                        AS pasos,
-    {ejemplo}                      AS ejemplo
-FROM {pre_pasos}
-WHERE {reglas} prompt_name != ''
-GROUP BY prompt_name, prompt_version
+SELECT v.* EXCEPT (h), t.trazas AS trazas
+FROM (
+    SELECT
+        toString(prompt_name)          AS nombre,
+        prompt_version                 AS version,
+        sum(n)                         AS llamadas,
+        sum(coste)                     AS coste,
+        sum(tok_in)                    AS tok_in,
+        sum(tok_out)                   AS tok_out,
+        sum(duracion)                  AS duracion,
+        sum(sin_tarifa)                AS sin_tarifa,
+        sum(asumida)                   AS asumida,
+        min(primero)                   AS primero,
+        max(ultimo)                    AS ultimo,
+        {pasos}                        AS pasos,
+        {ejemplo}                      AS ejemplo,
+        sipHash64(nombre, version)     AS h
+    FROM {pre_pasos}
+    WHERE {reglas} prompt_name != ''
+    GROUP BY prompt_name, prompt_version
+) AS v
+LEFT JOIN (
+    SELECT g AS h, uniqExact(trace_id) AS trazas
+    FROM {pre_trazas} ARRAY JOIN g_prompt AS g
+    WHERE {reglas} 1
+    GROUP BY g
+) AS t ON v.h = t.h
 ORDER BY nombre, version DESC
 """
 

@@ -415,9 +415,11 @@ class ClickHouseStore:
         preagregados.marcar(self._client, {(s.project_id, s.start_time) for s in spans})
         return len(spans)
 
-    def recalcular_preagregados(self, limite: int = preagregados.POR_VUELTA) -> int:
+    def recalcular_preagregados(
+        self, limite: int = preagregados.POR_VUELTA, quieta_s: int = 120
+    ) -> int:
         """Recalcula las horas con escrituras posteriores a su último cálculo (D-177)."""
-        return preagregados.recalcular_pendientes(self._client, limite)
+        return preagregados.recalcular_pendientes(self._client, limite, quieta_s)
 
     @property
     def _pre(self) -> bool:

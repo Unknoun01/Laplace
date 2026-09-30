@@ -252,8 +252,6 @@ CREATE TABLE IF NOT EXISTS pre_pasos
     ultimo          DateTime64(6, 'UTC'),
     traza_min       String,
     traza_max       String,
-    trazas          AggregateFunction(uniqExact, String),
-    trazas_error    AggregateFunction(uniqExactIf, String, UInt8),
     min_entrada     AggregateFunction(minIf, UInt32, UInt8),
     mediana_dur     AggregateFunction(quantileExactIf(0.5), Float64, UInt8),
     mediana_sal     AggregateFunction(quantileExactIf(0.5), UInt32, UInt8),
@@ -265,14 +263,24 @@ ORDER BY (project_id, minuto, es_eval, span_type, step_key, name, step_label, st
           step_hint, request_model, prompt_name, prompt_version);
 
 -- Una fila por traza y minuto: la duración de una ejecución es de su primer span a su
--- último, y eso no sale de sumar minutos.
+-- último, y eso no sale de sumar minutos. Y las ejecuciones distintas de cada grupo
+-- tampoco: se cuentan aquí, con los grupos de la traza como hashes. Fusionar estados de
+-- `uniqExact` por minuto costaba más de un segundo por lector.
 CREATE TABLE IF NOT EXISTS pre_trazas
 (
     project_id  String,
     minuto      DateTime('UTC'),
     trace_id    String,
+    es_eval     UInt8,
+    fallo       UInt8,
     inicio      DateTime64(6, 'UTC'),
     fin         DateTime64(6, 'UTC'),
+    -- (paso, modelo) de sus llamadas a modelo, como en `model_usage`.
+    g_uso       Array(UInt64),
+    -- El paso de la cobertura: sitio, etiqueta o nombre.
+    g_cob       Array(UInt64),
+    -- (prompt, versión) de sus llamadas con prompt gestionado.
+    g_prompt    Array(UInt64),
     calculado   DateTime64(3, 'UTC')
 )
 ENGINE = ReplacingMergeTree(calculado)

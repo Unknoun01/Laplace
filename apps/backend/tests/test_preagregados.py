@@ -78,7 +78,7 @@ def _cargar(store, spans: list[Span], proyecto: str) -> None:
 
 def _calcular_todo(store) -> int:
     total = 0
-    while hechas := store.recalcular_preagregados(limite=500):
+    while hechas := store.recalcular_preagregados(limite=500, quieta_s=0):
         total += hechas
     return total
 
@@ -261,3 +261,16 @@ def test_borrar_un_cliente_deja_las_horas_al_dia(almacenes, mes):
     _comparar(pre, crudo, "demo", ventana, "borrado un cliente, sin recalcular")
     _calcular_todo(pre)
     _comparar(pre, crudo, "demo", ventana, "borrado un cliente y recalculado")
+
+
+def test_la_hora_en_curso_no_se_recalcula_mientras_llegan_datos(almacenes):
+    pre, _ = almacenes
+    ahora = datetime.now(timezone.utc)
+    antes = ahora - timedelta(hours=3)
+    pre.insert_spans([_llamada("vivo", uuid.uuid4().hex, antes, "x")])
+    pre.insert_spans([_llamada("vivo", uuid.uuid4().hex, ahora, "y")])
+    pendientes = {h for _, h in clickhouse.preagregados.pendientes(pre._client)}
+    assert clickhouse.preagregados.hora_de(antes) in pendientes, "una hora acabada, sí"
+    assert clickhouse.preagregados.hora_de(ahora) not in pendientes, "la que se está llenando, no"
+    quieta = {h for _, h in clickhouse.preagregados.pendientes(pre._client, quieta_s=0)}
+    assert clickhouse.preagregados.hora_de(ahora) in quieta, "cuando se queda quieta, sí"

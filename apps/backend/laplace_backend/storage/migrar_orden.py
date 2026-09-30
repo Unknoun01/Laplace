@@ -48,6 +48,12 @@ CLAVES_VIEJAS = (CLAVE_VIEJA, CLAVE_DIA)
 NUEVA = "spans_d177"
 ANTES = "spans_antes_d177"
 
+#: Cuántas veces lo que ocupa la tabla hace falta libre. La copia recién escrita ocupa
+#: bastante más que la tabla fusionada hasta que sus partes se fusionan: con 148 millones
+#: de spans, 6 GB por cada 51 millones frente a los 11,8 GB de la tabla entera. Con 1,2
+#: la comprobación dejaba empezar una copia que no cabía (D-177).
+SITIO = 1.6
+
 #: Lo que llegue en los últimos minutos antes de empezar se vuelve a copiar al final,
 #: por si una inserción asíncrona se confirmó con retraso.
 MARGEN = timedelta(minutes=5)
@@ -125,7 +131,7 @@ def plan(client) -> str:
         f"Hace falta sitio para una segunda copia: libres {libre / 1e9:.1f} GB.",
         f"La tabla vieja quedaría como {ANTES}, sin borrar.",
     ]
-    if libre < ocupa * 1.2:
+    if libre < ocupa * SITIO:
         lineas.append("NO HAY SITIO SUFICIENTE: libera disco antes de lanzarla.")
     return "\n".join(lineas)
 
@@ -137,7 +143,7 @@ def migrar(client, retention_days: int = 0, *, avisar=print) -> bool:
             avisar(f"Ya estaba hecha. La tabla vieja sigue en {ANTES}.")
         return False
     ocupa, libre = _bytes(client, "spans"), _libre(client)
-    if libre < ocupa * 1.2:
+    if libre < ocupa * SITIO:
         raise RuntimeError(
             f"no hay sitio para la copia: ocupa {ocupa / 1e9:.1f} GB y hay "
             f"{libre / 1e9:.1f} GB libres"

@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 177 decisiones.
+final. 178 decisiones.
 
 ## Coste, precios y caché
 
@@ -64,6 +64,7 @@ final. 177 decisiones.
 - [D-156](../DECISIONS.md#d-156--el-producto-alrededor-del-ciclo-detectar-probar-arreglar-verificar) — El producto alrededor del ciclo: detectar, probar, arreglar, verificar
 - [D-157](../DECISIONS.md#d-157--prompts-como-fuente-de-hallazgos) — Prompts como fuente de hallazgos
 - [D-172](../DECISIONS.md#d-172--la-guardia-de-las-reglas-nuevas) — La guardia de las reglas nuevas
+- [D-177](../DECISIONS.md#d-177--preagregados-por-minuto-del-diagnóstico-y-clave-por-hora) — Preagregados por minuto del Diagnóstico y clave por hora
 
 ## Probar: evaluaciones, juez y replay
 
@@ -185,6 +186,7 @@ final. 177 decisiones.
 - [D-168](../DECISIONS.md#d-168--la-clave-de-ordenación-por-día-su-migración-y-los-filtros-acotados) — La clave de ordenación por día, su migración y los filtros acotados
 - [D-169](../DECISIONS.md#d-169--health-nombra-el-almacén-que-hay-y-la-limpieza) — `/health` nombra el almacén que hay, y la limpieza
 - [D-175](../DECISIONS.md#d-175--las-pantallas-con-sesión-recorridas-en-un-navegador) — Las pantallas con sesión, recorridas en un navegador
+- [D-177](../DECISIONS.md#d-177--preagregados-por-minuto-del-diagnóstico-y-clave-por-hora) — Preagregados por minuto del Diagnóstico y clave por hora
 
 ## Margen por cliente
 
@@ -560,3 +562,4 @@ final. 177 decisiones.
 - [D-174](../DECISIONS.md#d-174--globalscss-en-29-hojas-un-índice-de-decisiones-y-documentación-de-usuario) — `globals.css` en 29 hojas, un índice de decisiones y documentación de usuario
 - [D-175](../DECISIONS.md#d-175--las-pantallas-con-sesión-recorridas-en-un-navegador) — Las pantallas con sesión, recorridas en un navegador
 - [D-176](../DECISIONS.md#d-176--el-contraste-medido-sobre-cada-pantalla) — El contraste, medido sobre cada pantalla
+- [D-177](../DECISIONS.md#d-177--preagregados-por-minuto-del-diagnóstico-y-clave-por-hora) — Preagregados por minuto del Diagnóstico y clave por hora

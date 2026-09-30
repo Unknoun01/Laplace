@@ -1,6 +1,6 @@
 # Estado de Laplace
 
-Última actualización: 28 de septiembre de 2026.
+Última actualización: 30 de septiembre de 2026.
 
 ## Dónde está el producto
 
@@ -171,6 +171,21 @@ una Stripe falsa y falta probarlo con una clave de pruebas. El paquete fino
 de TypeScript espera el nombre en npm, y el diagnóstico automático con modelo sigue con
 su hueco reservado en el contrato, el esquema y la API.
 
+La deuda de la hoja de ruta quedó casi cerrada el 30 de septiembre:
+
+- ocho detalles con su prueba (D-171);
+- la guardia de las reglas nuevas, para que una sexta no titule dos hallazgos igual ni
+  reclame dinero dos veces (D-172);
+- retención por proyecto y borrado de los datos de una persona o un cliente (D-173);
+- la hoja de estilos partida, un índice de decisiones y documentación de usuario en
+  `docs/usuario/` (D-174);
+- las pantallas con sesión recorridas en un navegador (D-175) y el contraste medido sobre
+  cada pantalla, no sólo sobre los tokens (D-176).
+
+Y la escala llegó al objetivo del día con los preagregados por minuto y la clave por
+hora (D-177). Quedan Safari (en el contenedor sólo hay Chromium) y lo que es del usuario:
+el castellano de la línea de órdenes y las carpetas de Docker en Windows.
+
 ## Con un framework de verdad: LangGraph, y un agente en Node
 
 Probado el 26 de septiembre con `langgraph` 1.2.12, `langchain-openai` 1.6.6 y
@@ -322,11 +337,12 @@ Lo que **no** demuestran, punto por punto:
    esté: es que el modelo de permisos de este producto se ha comprobado **dos veces con
    la misma prueba** —«¿puede una clave leer las trazas de otro proyecto?»— y las dos
    veces se dio por bueno el resto sin mirarlo.
-2. **Volumen: el coste ya sigue a la ventana, pero no llega al objetivo.** Con la tabla
-   ordenada por día (D-168), el Diagnóstico de un día con 14 días guardados tarda 5–6,5 s
-   en un contenedor de 4 núcleos, frente a 15–19 s con la clave de antes. El de 7 días
-   tarda casi un minuto. Bajar de ahí pide preagregados por hora. Las instalaciones que
-   ya existen se migran a mano (`migrar_orden`). La API de la lista de trazas sigue
+2. **Volumen: el día, en el objetivo; la semana, todavía no.** Con la tabla ordenada por
+   hora y los preagregados por minuto (D-177), el Diagnóstico de un día de un proyecto con
+   diez millones de spans al día tarda 1,1 s en un contenedor de 4 núcleos (6,5 s con la
+   clave por día de D-168, 15–19 s con la de antes). El de 7 días, unos 6 s (antes, casi
+   un minuto): ahí pesan los recuentos exactos de ejecuciones distintas. Las
+   instalaciones que ya existen se migran a mano (`migrar_orden`). La API de la lista de trazas sigue
    escaneando sin ventana si no se le pasa una (D-008b); la interfaz siempre la pasa.
 3. **TypeScript, sin SDK propio.** Un agente en Node se ve con OpenInference-js u
    OpenLLMetry-js (con OpenAI o Anthropic), el AI SDK de Vercel 7 o LangChain.js

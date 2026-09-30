@@ -468,12 +468,12 @@ costaría de verdad. Genera a propósito las patologías que el producto tiene q
 enseñar: un bucle de tool calls, un paso trivial resuelto con un modelo caro, un agente
 iterativo de ~30 pasos que se atasca, y una traza que falla.
 
-### Si ya tenías datos: la clave de ordenación por día
+### Si ya tenías datos: la clave de ordenación por hora
 
-Las instalaciones creadas antes de D-168 ordenan la tabla de spans de una forma con la
-que cada pantalla lee todo el histórico del proyecto, aunque mires un solo día. El
-backend lo avisa al arrancar. Migrarla es una copia entera de la tabla, así que no se
-hace sola:
+Las instalaciones creadas antes de D-177 ordenan la tabla de spans de una forma con la
+que las pantallas leen más de lo que necesitan: antes de D-168, todo el histórico del
+proyecto; desde D-168, el día entero aunque haga falta una hora. El backend lo avisa al
+arrancar. Migrarla es una copia entera de la tabla, así que no se hace sola:
 
 ```bash
 docker compose exec backend python -m laplace_backend.storage.migrar_orden            # qué haría
@@ -481,8 +481,12 @@ docker compose exec backend python -m laplace_backend.storage.migrar_orden --hac
 ```
 
 La ingesta sigue funcionando mientras copia, necesita sitio libre para una segunda copia
-de la tabla (lo comprueba antes) y no borra la tabla vieja: queda como
-`spans_antes_d168` hasta que la borres tú.
+de la tabla y un poco más (lo comprueba antes) y no borra la tabla vieja: queda como
+`spans_antes_d177` hasta que la borres tú.
+
+Los preagregados del Diagnóstico (D-177) se calculan solos en segundo plano: una
+instalación con datos de antes los va rellenando de lo más reciente a lo más viejo, y
+mientras tanto lee en crudo lo que falta. Con `LAPLACE_PREAGREGADOS=false` se apagan.
 
 ### Desarrollo sin Docker
 

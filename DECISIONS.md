@@ -3782,3 +3782,84 @@ chips verdes, y pasa a usar `--teal-bg`.
 La prueba descarta lo que no se pinta. En la primera versión, los textos dentro de un
 `<details>` cerrado daban 1,1:1: tienen cajas, pero no se ven. Ahora se filtran con
 `checkVisibility()`.
+
+### D-177 — Preagregados por minuto del Diagnóstico y clave por hora
+El objetivo de la hoja de ruta era un Diagnóstico de 1,5 s para un día de un proyecto con
+diez millones de spans al día. Con la clave por día (D-168) tardaba 6,5 s en el
+contenedor de 4 núcleos. Se midió consulta a consulta antes de cambiar nada:
+
+- Eran diez barridos de la ventana, uno por lector, a 0,5–1,4 s cada uno.
+- **Lanzarlos a la vez no sirve**: 6,5 s en serie y 6,7 s en paralelo, porque ClickHouse
+  ya satura los núcleos con uno solo. Había que leer menos.
+- **La exclusión de las tiradas de evaluación** (`trace_id NOT IN (subconsulta)` en
+  `RULES_WHERE`) comprobaba cada `trace_id` contra un conjunto casi siempre vacío:
+  0,2–0,35 s por consulta. Ahora se buscan antes con un índice `bloom_filter` sobre
+  `tags` y se pasan como lista, o nada si no hay ninguna (`_consulta`), con
+  `test_reglas_evaluaciones.py` para los tres caminos.
+- **Preagregados** (`storage/preagregados.py`, esquema en `clickhouse_schema.sql`). Son
+  parciales por minuto en cuatro tablas:
+  - `pre_pasos`: por paso, modelo y prompt, con sumas y estados para las medianas;
+  - `pre_trazas`: por traza, con sus grupos como hashes, para contar ejecuciones
+    distintas;
+  - `pre_repes` y `pre_bucles`: sólo las parejas que pueden llegar a repetirse, que son
+    las de dos o más en su hora y las de trazas que cruzan la hora.
+
+  Se recalculan **por horas enteras desde `spans FINAL`, sustituyendo** al cálculo
+  anterior. Así un lote reenviado y `recalcular_coste`, que vuelven a insertar spans, no
+  cuentan dos veces: era la trampa escrita en la hoja de ruta.
+
+  Cada escritura apunta sus horas en `pre_sucias`, con la hora del servidor de después
+  de escribir. Una hora con un apunte posterior a su cálculo, o sin calcular, se lee en
+  crudo **con la misma selección de parciales**, así que cada lector es una sola
+  agregación y no hay dos cuentas que mantener.
+
+  Un bucle de fondo recalcula lo pendiente cada 30 s. La hora en curso la deja hasta que
+  acaba o lleva dos minutos quieta: mientras llegan datos se ensucia enseguida, y se lee
+  en crudo igual.
+- **Contar ejecuciones distintas fusionando estados de `uniqExact`** por minuto costaba
+  más de 1 s por lector (18.000 estados pequeños). Se cuentan en `pre_trazas`, con
+  `ARRAY JOIN` de los grupos de cada traza y `uniqExact` sobre filas estrechas: 0,15 s.
+  `groupBitmap` era más lento aún (3,5 s). `uniqCombined64` era rápido, pero aproximado.
+- **La clave por hora** (`ORDER BY (project_id, toStartOfHour(start_time), trace_id,
+  span_id)`). Con la del día, leer en crudo la hora en curso, o los segundos del borde de
+  la ventana, costaba el día entero, y eso es lo que se lee en cada consulta mientras
+  llegan datos. `migrar_orden` migra desde las dos claves anteriores, y ahora pide 1,6
+  veces la tabla libre: con 1,2 dejó empezar una copia de 148 millones de spans que no
+  cabía, porque la copia recién escrita ocupa más que la tabla fusionada.
+- La ventana de la API empieza en minuto entero; el final sigue siendo ahora.
+
+**Medido** con el proyecto grande (10 millones de spans al día, 15 días guardados) en el
+mismo contenedor:
+
+| | Antes (D-168) | Con esto |
+|---|---|---|
+| Diagnóstico, 1 día | 6,5 s | **1,1 s** |
+| Diagnóstico, 7 días | 55–66 s | 6 s |
+| Recalcular una hora | — | 0,4 s |
+
+En 7 días pesan los recuentos exactos de ejecuciones distintas y las medianas.
+
+**Una diferencia con el crudo, dicha.** Una traza cuenta como tirada de evaluación si
+lleva la etiqueta en un span a menos de una hora de la hora que se calcula; antes, si la
+llevaba dentro de la ventana. Sólo cambia con una tirada de más de una hora que cruce el
+borde de la ventana.
+
+**Pruebas** (`test_preagregados.py`, en una base de ClickHouse propia): un mes de la demo
+por la ingesta de verdad, con una de cada quince ejecuciones marcada como tirada de
+evaluación. Se exige que el Diagnóstico entero y cada lector salgan iguales con y sin
+preagregados:
+
+- sin calcular y calculado, en ventanas de 30, 7 y 1 día y en una a destiempo;
+- después de un reenvío y de un cambio de coste, antes y después de recalcular;
+- después de borrar un cliente;
+- con una repetición y un bucle partidos por el borde de una hora;
+- y que la hora en curso no se recalcule mientras llegan datos.
+
+Cada garantía se ha roto a propósito y alguna prueba falla: sin las trazas que cruzan la
+hora, una hora sucia leída como limpia, el cálculo sin `FINAL`, las tiradas sin excluir
+y el crudo sin quitar lo que ya sale de las tablas. La de las tiradas no fallaba al
+principio, porque la demo no trae ninguna; ahora la prueba las pone.
+
+Las cifras son de un ClickHouse con sólo el proyecto grande. La migración del conjunto
+entero (148 millones de spans de seis proyectos) no cabía en el disco del contenedor, y
+con el proyecto delante en la clave los demás no entran en sus lecturas.
