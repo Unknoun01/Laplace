@@ -745,3 +745,22 @@ def test_los_dos_almacenes_de_metadatos_dicen_lo_mismo(tmp_path):
         nube.delete_dataset(conjunto.id)
         for anotacion in (humana, maquina):
             nube.delete_annotation(anotacion.id)
+
+
+def test_una_tirada_es_de_cuando_corrieron_sus_trazas(local):
+    """La demo corre sus tiradas en el pasado y salían fechadas hoy. La fecha de una
+    tirada es la de su primera traza, no la de cuando llegó su parte."""
+    conjunto = local.post(
+        "/api/datasets", json={"project_id": "local", "name": "fecha", "filter": {}, "limit": 2}
+    ).json()
+    casos = local.get(f"/api/datasets/{conjunto['id']}").json()["items"]
+    tirada = local.post(
+        "/api/runs",
+        json={
+            "project_id": "local",
+            "dataset_id": conjunto["id"],
+            "variant": "A",
+            "items": [{"case_id": c["id"], "trace_id": c["trace_id"]} for c in casos],
+        },
+    ).json()
+    assert tirada["created_at"].startswith(AHORA.strftime("%Y-%m-%dT%H:%M"))

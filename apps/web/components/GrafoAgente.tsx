@@ -107,6 +107,29 @@ function costeDe(n: Nodo): string {
   return n.coste > 0 ? money(n.coste) : "";
 }
 
+/**
+ * La segunda línea de la caja: tipo, llamadas y coste. Un coste largo («≥ 0,003072 US$»)
+ * se salía por el borde; cuando no cabe, SVG la estrecha hasta el ancho de la caja
+ * (`textLength`). El texto entero sigue en el `title` de la caja.
+ */
+function Meta({ texto }: { texto: string }) {
+  const cabe = texto.length <= META_MAX;
+  return (
+    <text
+      x={12}
+      y={39}
+      className="meta"
+      textLength={cabe ? undefined : ANCHO - 24}
+      lengthAdjust={cabe ? undefined : "spacingAndGlyphs"}
+    >
+      {texto}
+    </text>
+  );
+}
+
+/** Caracteres de la segunda línea que caben sin estrecharla, con la letra de `.meta`. */
+const META_MAX = 24;
+
 function recortar(texto: string, max = 22): string {
   return texto.length > max ? `${texto.slice(0, max - 1)}…` : texto;
 }
@@ -196,10 +219,12 @@ export function GrafoAgente({
                 <text x={12} y={21} className="nombre">
                   {recortar(n.nombre)}
                 </text>
-                <text x={12} y={39} className="meta">
-                  {`${t(`grafo.tipo.${tipoConocido(n.tipo)}`)} · ×${n.llamadas}` +
-                    (costeDe(n) ? ` · ${costeDe(n)}` : "")}
-                </text>
+                <Meta
+                  texto={
+                    `${t(`grafo.tipo.${tipoConocido(n.tipo)}`)} · ×${n.llamadas}` +
+                    (costeDe(n) ? ` · ${costeDe(n)}` : "")
+                  }
+                />
               </g>
             );
           })}

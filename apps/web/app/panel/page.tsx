@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { BackendDown, Cargando, NeedsKey, NoProject, NoTracesYet, NotYours } from "@/components/states";
 import { getBreakdown, getPanel, listProjects, parseDays } from "@/lib/api";
-import { dayHour, decimal, duration, money, number, porcentaje, spanLabel, tokens } from "@/lib/format";
+import { dayHour, decimal, inicioDeTramo, duration, money, number, porcentaje, spanLabel, tokens } from "@/lib/format";
 import type { Breakdown, Metric, Panel, Spike } from "@/lib/types";
 import { useApi } from "@/lib/useApi";
 import { tr } from "@/lib/i18n";
@@ -303,7 +303,7 @@ function Chart({ panel }: { panel: Panel }) {
                 >
                   <title>
                     {t("panel.grafica.punto", {
-                      fecha: dayHour(b.start),
+                      fecha: inicioDeTramo(b.start, panel.bucket_minutes),
                       coste: money(unitario),
                       n: b.traces,
                     })}
@@ -316,10 +316,10 @@ function Chart({ panel }: { panel: Panel }) {
       </svg>
       <div className="chart-foot">
         <span>
-          {dayHour(tramos[0].start)}
+          {inicioDeTramo(tramos[0].start, panel.bucket_minutes)}
           {recortado && t("panel.grafica.desde")}
         </span>
-        <span>{dayHour(tramos[tramos.length - 1].start)}</span>
+        <span>{inicioDeTramo(tramos[tramos.length - 1].start, panel.bucket_minutes)}</span>
       </div>
       <p className="disclaimer">{t("panel.grafica.nota")}</p>
     </div>

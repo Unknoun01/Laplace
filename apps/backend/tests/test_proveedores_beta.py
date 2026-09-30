@@ -132,12 +132,8 @@ def _comprobar_anthropic(*, streaming: bool):
     assert span.llm.cost.unknown is False
     assert span.llm.cost.total_usd > 0
     assert span.llm.input_messages[0] == {"role": "system", "content": INSTRUCCIONES}
-    # Igual que en `messages`: sin streaming se guardan los bloques tal cual (con
-    # `citations` y el resto), y en streaming el texto acumulado.
-    contenido = span.llm.output_messages[0]["content"]
-    if isinstance(contenido, list):
-        contenido = "".join(b.get("text", "") for b in contenido)
-    assert contenido == "Una maleta de mano."
+    # Con streaming y sin él, el texto: la misma forma para la misma llamada.
+    assert span.llm.output_messages[0]["content"] == "Una maleta de mano."
     assert span.llm.finish_reasons == ["end_turn"]
     assert bool(span.attributes.get("laplace.streaming")) is streaming
     return span

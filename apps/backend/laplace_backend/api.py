@@ -117,6 +117,10 @@ async def ingest_traces(request: Request) -> Response:
 # ---------------------------------------------------------------------------------
 
 
+#: La ventana de la lista de trazas cuando la petición no trae `since`.
+VENTANA_LISTA_DIAS = 30
+
+
 @router.get("/api/traces", response_model=TraceListPage)
 async def list_traces(
     request: Request,
@@ -149,6 +153,11 @@ async def list_traces(
     # pone aquí la identidad.
     project_id = identity_of(request).scope(project_id)
     before, before_trace_id = decode_cursor(cursor)
+    # Sin ventana, la lista recorría todo el histórico del proyecto (D-008b). La interfaz
+    # siempre la pasa; un cliente de la API no tiene por qué saberlo. Por defecto, los
+    # últimos días de `VENTANA_LISTA_DIAS`; quien quiera más atrás lo pide con `since`.
+    if since is None:
+        since = (until or datetime.now(timezone.utc)) - timedelta(days=VENTANA_LISTA_DIAS)
     filters = TraceFilter(
         project_id=project_id,
         limit=limit,

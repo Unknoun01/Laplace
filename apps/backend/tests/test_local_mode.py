@@ -199,3 +199,32 @@ def test_la_salud_en_la_nube_nombra_clickhouse_y_postgres():
     salud = asyncio.run(api.health(peticion))
     assert salud["store"] == "clickhouse" and salud["metadata"] == "postgres"
     assert salud["clickhouse"] is True and salud["postgres"] is True
+
+
+def test_la_lista_de_trazas_sin_ventana_no_recorre_todo_el_historico(app_local, tmp_path):
+    """Sin `since`, la API usa los últimos 30 días (D-008b): antes recorría el histórico
+    entero del proyecto. Lo viejo sigue a mano con `since`."""
+    from datetime import datetime, timedelta, timezone
+
+    from laplace.schema import Span
+
+    from laplace_backend import main
+
+    ahora = datetime.now(timezone.utc)
+    viejo = Span(
+        span_id="a" * 16, trace_id="b" * 32, project_id="ventana", name="viejo", type="agent",
+        status="ok", start_time=ahora - timedelta(days=45),
+        end_time=ahora - timedelta(days=45) + timedelta(seconds=1), duration_ms=1000.0,
+    )
+    nuevo = viejo.model_copy(update={
+        "span_id": "c" * 16, "trace_id": "d" * 32, "name": "nuevo",
+        "start_time": ahora - timedelta(days=1), "end_time": ahora - timedelta(days=1),
+    })
+    main.app.state.store.insert_spans([viejo, nuevo])
+    sin_ventana = app_local.get("/api/traces", params={"project_id": "ventana"}).json()
+    assert [t["root_name"] for t in sin_ventana["traces"]] == ["nuevo"]
+    todo = app_local.get(
+        "/api/traces",
+        params={"project_id": "ventana", "since": (ahora - timedelta(days=60)).isoformat()},
+    ).json()
+    assert {t["root_name"] for t in todo["traces"]} == {"nuevo", "viejo"}

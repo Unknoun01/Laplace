@@ -185,6 +185,19 @@ export function dayHour(iso: string): string {
   });
 }
 
+/** «08 sept». Para tramos de un día o más, donde la hora no significa nada. */
+export function day(iso: string): string {
+  return new Date(iso).toLocaleDateString(ETIQUETAS[idiomaActual()], {
+    day: "2-digit",
+    month: "short",
+  });
+}
+
+/** El instante de un tramo: con hora si el tramo es de menos de un día. */
+export function inicioDeTramo(iso: string, minutos: number): string {
+  return minutos >= 1440 ? day(iso) : dayHour(iso);
+}
+
 export function relative(iso: string): string {
   const seconds = (Date.now() - new Date(iso).getTime()) / 1000;
   if (seconds < 60) return t("relativo.ahora");

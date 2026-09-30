@@ -1,6 +1,6 @@
 "use client";
 
-import { dayHour, money } from "@/lib/format";
+import { inicioDeTramo, money } from "@/lib/format";
 import { t } from "@/lib/textos";
 import type { Grafico } from "@/lib/types";
 
@@ -53,7 +53,7 @@ function GastoEnElTiempo({ grafico, currency }: { grafico: Grafico; currency: st
             <g key={b.start}>
               <title>
                 {t("graf.punto", {
-                  fecha: dayHour(b.start),
+                  fecha: inicioDeTramo(b.start, grafico.bucket_minutes),
                   coste: money(b.cost_usd, currency),
                   evitable: money(b.avoidable_usd, currency),
                 })}
@@ -67,8 +67,8 @@ function GastoEnElTiempo({ grafico, currency }: { grafico: Grafico; currency: st
         })}
       </svg>
       <div className="chart-foot">
-        <span>{dayHour(tramos[0].start)}</span>
-        <span>{dayHour(tramos[tramos.length - 1].start)}</span>
+        <span>{inicioDeTramo(tramos[0].start, grafico.bucket_minutes)}</span>
+        <span>{inicioDeTramo(tramos[tramos.length - 1].start, grafico.bucket_minutes)}</span>
       </div>
       <details className="porque pregunta">
         <summary>{t("graf.reparto")}</summary>

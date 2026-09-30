@@ -160,6 +160,32 @@ async function get<T>(path: string, params?: Params, senal?: AbortSignal): Promi
   return (await response.json()) as T;
 }
 
+/**
+ * Las peticiones iguales que están en curso a la vez se hacen una sola vez.
+ *
+ * Al cargar una pantalla, la barra superior, la página y el guardián de permisos pedían
+ * cada uno `/api/projects` y `/api/auth/me` por su cuenta: dos idas al servidor para la
+ * misma respuesta. No es una caché: en cuanto la respuesta llega se olvida, y la
+ * siguiente vez se vuelve a preguntar. La cancelación es de cada uno: si un llamante
+ * aborta, a él se le rechaza y la petición sigue para los demás.
+ */
+const enCurso = new Map<string, Promise<unknown>>();
+
+export function compartida<T>(clave: string, pedir: () => Promise<T>, senal?: AbortSignal): Promise<T> {
+  let comun = enCurso.get(clave) as Promise<T> | undefined;
+  if (!comun) {
+    comun = pedir().finally(() => enCurso.delete(clave));
+    enCurso.set(clave, comun);
+  }
+  if (!senal) return comun;
+  if (senal.aborted) return Promise.reject(new DOMException("Aborted", "AbortError"));
+  return new Promise<T>((resolver, rechazar) => {
+    const abortar = () => rechazar(new DOMException("Aborted", "AbortError"));
+    senal.addEventListener("abort", abortar, { once: true });
+    comun.then(resolver, rechazar).finally(() => senal.removeEventListener("abort", abortar));
+  });
+}
+
 /** Los rangos que ofrece el selector de la barra superior. */
 export const RANGES = [
   { days: 1, label: "rango.1" },
@@ -250,7 +276,11 @@ export async function getTrace(
 }
 
 export async function listProjects(senal?: AbortSignal): Promise<ProjectStats[]> {
-  const data = await get<{ projects: ProjectStats[] }>("/api/projects", undefined, senal);
+  const data = await compartida(
+    "/api/projects",
+    () => get<{ projects: ProjectStats[] }>("/api/projects"),
+    senal,
+  );
   return data.projects;
 }
 
@@ -596,7 +626,7 @@ export interface Org {
 }
 
 export function getMe(): Promise<Me> {
-  return get<Me>("/api/auth/me");
+  return compartida("/api/auth/me", () => get<Me>("/api/auth/me"));
 }
 
 export function login(email: string, password: string): Promise<{ ok: boolean }> {

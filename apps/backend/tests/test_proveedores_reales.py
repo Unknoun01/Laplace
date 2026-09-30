@@ -589,3 +589,30 @@ def test_vivo_anthropic_streaming():
     assert span.llm.usage.output_tokens > 0
     assert span.llm.usage.estimated is False, "Anthropic manda el uso en el propio flujo"
     assert span.llm.cost.total_usd > 0
+
+
+def test_anthropic_real_sin_streaming_guarda_el_texto_como_en_streaming():
+    """La misma llamada no puede quedar con dos formas según se haga con streaming o sin
+    él: sin streaming se guardaban los bloques (`citations` incluido)."""
+    cliente = _anthropic(_json_anthropic(RESPUESTA_ANTHROPIC))
+    cliente.messages.create(
+        model=MODELO_ANTHROPIC, max_tokens=64, messages=[{"role": "user", "content": "x"}]
+    )
+    assert _span_llm().llm.output_messages == [
+        {"role": "assistant", "content": "Una maleta de mano."}
+    ]
+
+
+def test_anthropic_real_una_llamada_a_herramienta_guarda_los_bloques():
+    cuerpo = json.loads(json.dumps(RESPUESTA_ANTHROPIC))
+    cuerpo["content"] = [
+        {"type": "text", "text": "Busco."},
+        {"type": "tool_use", "id": "tu_1", "name": "buscar", "input": {"q": "maleta"}},
+    ]
+    cliente = _anthropic(_json_anthropic(cuerpo))
+    cliente.messages.create(
+        model=MODELO_ANTHROPIC, max_tokens=64, messages=[{"role": "user", "content": "x"}]
+    )
+    contenido = _span_llm().llm.output_messages[0]["content"]
+    assert [b["type"] for b in contenido] == ["text", "tool_use"]
+    assert contenido[1]["input"] == {"q": "maleta"}

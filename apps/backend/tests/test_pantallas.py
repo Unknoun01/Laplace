@@ -497,6 +497,15 @@ def test_la_traza_ensena_el_grafo_del_agente(servidor, navegador):
         pagina.locator("a[href*='/traza?'], a[href*='/traza/?']").first.click()
         pagina.locator("section.grafo-agente").wait_for(timeout=15_000)
         assert pagina.locator("section.grafo-agente g.arista.varias").count() >= 1
+        # Ningún texto se sale de su caja: un coste largo («0,003072 US$») se salía.
+        sobran = pagina.evaluate(
+            """() => [...document.querySelectorAll('section.grafo-agente g.nodo')]
+                .map(g => [g.querySelector('rect').getBBox().width,
+                           ...[...g.querySelectorAll('text')].map(t => t.getBBox().x
+                              + t.getBBox().width)])
+                .filter(([ancho, ...fines]) => fines.some(f => f > ancho))"""
+        )
+        assert sobran == [], sobran
         assert errores == [], errores
     finally:
         pagina.close()
@@ -750,5 +759,19 @@ def test_el_modelo_caro_se_prueba_con_replay(servidor, navegador):
         assert "run_dataset" not in orden
         assert "tu clave" in _texto_de(pagina, "#probar")
         assert errores == [], errores
+    finally:
+        pagina.close()
+
+
+def test_al_cargar_no_se_pide_dos_veces_lo_mismo(servidor, navegador):
+    """La barra, la página y el guardián de permisos pedían cada uno `/api/projects` y
+    `/api/auth/me`: dos idas al servidor para la misma respuesta."""
+    pagina = navegador.new_page(viewport={"width": 1440, "height": 900}, locale="es-ES")
+    pedidas: list[str] = []
+    pagina.on("request", lambda r: pedidas.append(urllib.parse.urlsplit(r.url).path))
+    try:
+        pagina.goto(servidor + "/?project=demo&days=7", wait_until="networkidle")
+        for ruta in ("/api/projects", "/api/auth/me"):
+            assert pedidas.count(ruta) <= 1, (ruta, pedidas.count(ruta))
     finally:
         pagina.close()

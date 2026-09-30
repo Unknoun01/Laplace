@@ -287,7 +287,11 @@ def responder(pregunta: str, escenario: Escenario | None = None) -> str:
         entrada=tokens_sistema + 80,
         segundos=random.uniform(2.4, 5.8) * (2.5 if esc.modelo_respuesta == MODELO_PICO else 1),
         modelo=esc.modelo_respuesta,
-        prompt=(PROMPT, version),
+        # Quien prueba el modelo caro durante el pico lo hace a mano, fuera del prompt
+        # gestionado. Si esas llamadas contaran para la v2, su media dependería de cuánto
+        # tráfico normal de hoy hay al cargar la demo, y la cifra del problema del
+        # prompt cambiaba con la hora.
+        prompt=None if esc.modelo_respuesta == MODELO_PICO else (PROMPT, version),
     )
     return RESPUESTA
 
@@ -329,15 +333,19 @@ def _ejecuciones_del_dia(dias_atras: int, rng: random.Random) -> int:
 
 
 def _escenario(momento: datetime, ahora: datetime, rng: random.Random) -> Escenario:
-    dias = (ahora - momento).total_seconds() / 86_400
+    # Días de calendario, no periodos de 24 horas desde ahora: con estos, el cambio de
+    # versión del prompt caía a la hora de la carga, cada versión se quedaba con una
+    # mezcla distinta de horas del día, y la demo decía «un 69 % más» de madrugada y
+    # «un 61 %» por la tarde.
+    dias = (ahora.astimezone(timezone.utc).date() - momento.astimezone(timezone.utc).date()).days
     pico = (
-        DIA_PICO - 1 < dias <= DIA_PICO
+        dias == DIA_PICO
         and HORAS_PICO[0] <= momento.astimezone(timezone.utc).hour < HORAS_PICO[1]
     )
     return Escenario(
-        version_prompt=2 if dias <= DIA_PROMPT_V2 else 1,
+        version_prompt=2 if dias < DIA_PROMPT_V2 else 1,
         modelo_respuesta=MODELO_PICO if pico else MODELO_CARO,
-        repeticion=dias > DIA_ARREGLO_REPETICION,
+        repeticion=dias >= DIA_ARREGLO_REPETICION,
         bucle=rng.random() < 0.22,
         falla=rng.random() < 0.03,
     )
@@ -382,16 +390,27 @@ def generar_mes(
         # Hasta hoy incluido, sin pasar de ahora (el `continue` de abajo). Terminar en
         # ayer a medianoche dejaba un hueco que, por la tarde, pasaba del día que el
         # Diagnóstico espera antes de dar algo por resuelto (D-135, D-146).
-        for dias_atras in range(dias, -1, -1):
+        # Desde hace `dias - 1` días a medianoche: días enteros, todos dentro de una
+        # ventana de `dias` días. Empezar en `dias` dejaba el primero cortado a la hora
+        # de la carga, y la cifra del problema del prompt cambiaba con esa hora.
+        for dias_atras in range(dias - 1, -1, -1):
             dia = (fin - timedelta(days=dias_atras)).replace(
                 hour=0, minute=0, second=0, microsecond=0
             )
             total = _ejecuciones_del_dia(dias_atras, rng)
             horas = rng.choices(range(24), weights=_PESO_HORA, k=total)
-            for hora in sorted(horas):
-                momento = dia + timedelta(hours=hora, seconds=rng.uniform(0, 3_540))
-                if momento >= fin:
-                    continue
+            momentos = [
+                dia + timedelta(hours=hora, seconds=rng.uniform(0, 3_540))
+                for hora in sorted(horas)
+            ]
+            momentos = [m for m in momentos if m < fin]
+            if dias_atras == 0 and (not momentos or momentos[-1] < fin - timedelta(hours=2)):
+                # Siempre algo en las dos últimas horas: de madrugada, el reparto por
+                # horas podía dejar la última ejecución de ayer por la noche, y lo que no
+                # se ve en el último día sale como «ya no ocurre» (D-146). Antes lo
+                # garantizaba la suerte de la semilla.
+                momentos.append(fin - timedelta(minutes=rng.uniform(5, 90)))
+            for momento in momentos:
                 reloj.ir_a(momento)
                 esc = _escenario(momento, fin, rng)
                 usuario = rng.choices(usuarios, weights=pesos)[0]

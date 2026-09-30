@@ -35,7 +35,7 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
   verde (`git merge --no-ff`); si no dice otra cosa, se sigue así.
 - **Nada entra sin su prueba.** Primero la prueba en rojo, después el arreglo.
 - **Hay que comprobar que la prueba muerde:** romper el código a propósito y verla fallar.
-- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-171**.
+- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-172**.
 - **Todo en español:** código, comentarios, commits y textos. Los textos de la interfaz y
   del backend, en los cinco idiomas a la vez (`apps/web/lib/mensajes/*.ts`,
   `apps/backend/laplace_backend/textos/*.json`); las pruebas exigen las mismas claves.
@@ -117,8 +117,6 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
 - **Retención por proyecto** (D-009): hoy `LAPLACE_RETENTION_DAYS` vale para toda la
   instalación. Y no hay forma de borrar los datos de un usuario final (`user_id`) o de un
   cliente (`customer_id`) concreto, que es lo que pediría un cliente de un cliente.
-- **La API de la lista de trazas escanea sin ventana** si no se le pasa una (D-008b). La
-  interfaz siempre la pasa; un cliente de la API, no tiene por qué.
 - **Lo que la auditoría del rediseño no revisó** (`docs/auditoria-rediseno.md`): las
   pantallas con sesión de la versión Docker (organización, invitaciones, claves), los
   flujos de escritura de punta a punta y los navegadores que no son Chromium (Safari
@@ -132,20 +130,10 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
 - **La barra con siete pestañas** ocupa tres filas en móvil (3 + 3 + 1). Cabe y se prueba,
   pero pide otra forma (agrupar Prompts y Ajustes, o un menú) si se añade alguna más.
 - `globals.css` pasa de 4.100 líneas en un solo fichero: partirlo.
-- Al cargar se piden dos veces `/api/projects` y `/api/auth/me` (y el Diagnóstico pide
-  además el margen por cliente para su aviso).
-- `laplace demo` escribe caracteres rotos en la consola de Windows (la salida no va en UTF-8).
 - `DECISIONS.md` pasa de 220 KB: hace falta un índice por tema y documentación de cara al usuario aparte (Mintlify, Docusaurus o Starlight).
 - `STATUS.md` se puso al día al cerrar las fases 5 y 6: mantenerlo así al cerrar cada fase.
 - `test_pantallas.py`: un fallo antiguo en la pantalla de Prompts (no cargó en 15 s en una pasada completa) no se ha vuelto a ver ni se ha explicado.
 - Tras la caída de Docker del 26 de septiembre quedaron apartadas `%LOCALAPPDATA%\Docker\run.viejo-*` y `docker-secrets-engine.viejo-*` con sockets bloqueados; se pueden borrar tras reiniciar Windows.
-- Sin streaming, la salida de Anthropic se guarda como la lista de bloques (con `citations` y el resto) y en streaming como el texto acumulado: la misma llamada queda con dos formas según cómo se haga (D-164). Con OpenAI y con las convenciones GenAI (D-165) se guarda el texto.
-- Las tiradas de evaluación se registran con la fecha de ahora aunque sus trazas sean de ayer (en la demo).
-- El pie del gráfico de gasto por día (D-152) usa `dayHour` y enseña la hora aunque el tramo sea un día.
-- En el grafo del agente (D-153), un coste largo («0,003072 US$») se sale del borde de su caja.
-- En la demo, el problema de la versión del prompt sale entre un 53 % y un 70 % más caro
-  según la hora a la que se carga: es real (depende del reparto de tráfico por horas),
-  pero una demo que cambia de cifra entre dos cargas desconcierta al enseñarla.
 
 ## 5. Lo que sólo puede hacer el usuario
 - Reservar `laplace-trace` y `laplace-backend` en PyPI y registrar este repositorio como «trusted publisher» con el entorno `pypi`.

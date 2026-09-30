@@ -3596,3 +3596,44 @@ Pruebas: 5 nuevas en `test_convenciones.py`, con los atributos copiados de la tr
 verdad. Cada arreglo se ha roto a propósito y alguna prueba falla. La que exige no pisar
 los mensajes propios no mordía, porque su span no estaba marcado como `model_inference`,
 y se corrigió.
+
+## 2026-09-30 — Deuda: los detalles sueltos
+
+### D-171 — Ocho detalles de la lista de deuda, cerrados con su prueba
+* **`laplace demo` en la consola de Windows.** La consola escribe en cp1252 y los textos
+  llevan tildes y «comillas»: salían rotos. La línea de órdenes pide UTF-8 a su salida
+  antes de escribir nada (`test_cli.py`).
+* **El pie del gráfico de gasto por día** enseñaba la hora aunque el tramo fuera un día
+  entero. `inicioDeTramo` sólo pone la hora a los tramos de menos de un día, en el
+  Diagnóstico y en el Panel (`test_idioma.py`, con Node).
+* **Un coste largo se salía de su caja en el grafo del agente.** La segunda línea de la
+  caja se estrecha hasta el ancho con `textLength` cuando no cabe; el texto entero sigue
+  en el `title`. La prueba de pantalla mide cada texto contra su caja.
+* **La salida de Anthropic tenía dos formas.** Sin streaming se guardaban los bloques
+  (con `citations`), y con él el texto. Ahora es el texto si todos los bloques son de
+  texto, como con OpenAI; con una llamada a herramienta se guardan los bloques enteros.
+* **Las tiradas de la demo salían fechadas hoy** aunque sus trazas fueran de ayer. Una
+  tirada es de cuando corrió: la fecha del comienzo de su primera traza, nunca en el
+  futuro (`test_evals.py`).
+* **La cifra del problema del prompt de la demo cambiaba con la hora de la carga**, del
+  53 % al 82 % según la medida. Tres causas, cada una con su arreglo:
+  - los hitos del guion caían en periodos de 24 horas contados desde ahora; ahora son
+    días de calendario;
+  - el primer día del mes quedaba cortado por la ventana a la hora de la carga; ahora se
+    generan días enteros dentro de ella;
+  - el pico —alguien probando un modelo caro— contaba para la v2 y el tráfico de hoy lo
+    diluía más o menos; ahora esas llamadas van fuera del prompt gestionado.
+
+  A cualquier hora dice lo mismo: «un 26 % más», que es la diferencia real entre las dos
+  versiones del prompt (`test_demo_estable.py`, a las 1, 9, 17 y 23 h). De paso, la demo
+  garantiza tráfico en las dos últimas horas; antes lo daba la suerte de la semilla, y se
+  acabó al mover el primer día.
+* **La API de la lista de trazas recorría todo el histórico** si no se le pasaba ventana
+  (D-008b). Sin `since`, usa los últimos 30 días; lo de antes se pide con `since`. Buscar
+  una traza por el principio de su id sigue mirando todo, porque abre una concreta.
+* **Al cargar se pedían dos veces `/api/projects` y `/api/auth/me`.** Las peticiones
+  iguales en curso a la vez se hacen una sola vez. No es una caché: al llegar la
+  respuesta se olvida, y la cancelación sigue siendo de cada llamante. La prueba de
+  pantalla cuenta las peticiones.
+
+Cada prueba falla sin su arreglo.
