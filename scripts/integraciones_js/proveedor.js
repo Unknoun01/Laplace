@@ -58,6 +58,9 @@ function responses(req, res, cuerpo) {
   const respuesta = {
     id: "resp_1", object: "response", created_at: 1770000000, status: "completed", model,
     output: [{ type: "message", id: "msg_1", status: "completed", role: "assistant", content: [{ type: "output_text", text: TEXTO.join(""), annotations: [] }] }],
+    // La API real devuelve las instrucciones de la petición en la respuesta, y hay
+    // instrumentaciones (la del Agents SDK) que las leen de ahí.
+    instructions: cuerpo.instructions ?? null,
     parallel_tool_calls: true, tool_choice: "auto", tools: [],
     usage: { input_tokens: 1200, input_tokens_details: { cached_tokens: 1024 }, output_tokens: 12, output_tokens_details: { reasoning_tokens: 0 }, total_tokens: 1212 },
   };

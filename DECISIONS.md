@@ -3556,3 +3556,43 @@ y 2 errores. Ninguno venía de la limpieza:
   tiempo esperando el bloqueo de `spans`, con millones de spans de la prueba de carga en
   la base local. Con ellos la suite tardó más de dos horas en lugar de minutos. Quitados con
   `scripts/carga.py --borrar`, pasan.
+
+## 2026-09-30 — Integraciones de TypeScript: LangGraph.js, el Agents SDK de OpenAI y Mastra
+
+### D-170 — Los tres frameworks que faltaban, probados; y lo que Mastra no manda donde toca
+Probados con agentes de Node contra `laplace ui` y el proveedor falso del banco
+(`scripts/integraciones_js`), como los de D-165. Contra las API reales sigue sin
+probarse: en este entorno no hay clave de proveedor.
+
+* **LangGraph.js** (`@langchain/langgraph` 1.4.18, con la instrumentación de LangChain de
+  OpenInference): llega todo sin tocar nada. Un grafo de dos nodos con el mismo prompt de
+  sistema sale como dos pasos, porque el nodo es el sitio del paso (D-141). El banco lo
+  exige.
+* **El Agents SDK de OpenAI** (`@openai/agents` 0.18.0, con
+  `@arizeai/openinference-instrumentation-openai-agents` 0.2.15): llega todo, con `run` y
+  en streaming. La instrumentación lee las instrucciones del agente de la **respuesta**,
+  que en la API real las devuelve; el proveedor falso no lo hacía y ahora sí. Era un
+  hueco del banco, no de Laplace.
+* **Mastra** (`@mastra/core` 1.72.0 con `@mastra/otel-exporter` 1.4.3): tokens, caché y
+  coste llegaban bien. Tres cosas no:
+  - **Los mensajes de entrada llegaban vacíos.** Mastra no los pone en su span de la
+    llamada al modelo (`model_inference`), sino en el paso que la envuelve
+    (`mastra.model_step.input`) y en la generación de encima. Sin ellos se perdía el
+    prompt de sistema, y con él la identidad del paso: dos agentes con instrucciones
+    distintas caían en uno. La ingesta los toma ahora del padre si está en el mismo lote,
+    que es lo normal, porque el paso termina justo después de la llamada. Primero lee las
+    claves y sólo parsea los spans que las tienen, y nunca pisa los mensajes que el span
+    ya traiga. Si el padre llega en otro lote, la llamada se queda sin mensajes, como
+    antes.
+  - **El motivo de parada llegaba como la cadena `'["stop"]'`** en lugar de un array; se
+    lee como lista.
+  - **El proveedor venía con la API detrás** (`openai.chat`), como en el AI SDK
+    (`openai.responses`, `anthropic.messages`): se queda con lo de antes del punto.
+
+El banco pasa ahora por siete integraciones y 21 llamadas. Contra la ingesta de antes,
+las de Mastra fallan por el prompt de sistema.
+
+Pruebas: 5 nuevas en `test_convenciones.py`, con los atributos copiados de la traza de
+verdad. Cada arreglo se ha roto a propósito y alguna prueba falla. La que exige no pisar
+los mensajes propios no mordía, porque su span no estaba marcado como `model_inference`,
+y se corrigió.

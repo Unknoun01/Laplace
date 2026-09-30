@@ -35,7 +35,7 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
   verde (`git merge --no-ff`); si no dice otra cosa, se sigue así.
 - **Nada entra sin su prueba.** Primero la prueba en rojo, después el arreglo.
 - **Hay que comprobar que la prueba muerde:** romper el código a propósito y verla fallar.
-- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-169**.
+- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-171**.
 - **Todo en español:** código, comentarios, commits y textos. Los textos de la interfaz y
   del backend, en los cinco idiomas a la vez (`apps/web/lib/mensajes/*.ts`,
   `apps/backend/laplace_backend/textos/*.json`); las pruebas exigen las mismas claves.
@@ -80,7 +80,7 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
 - **`laplace replay` contra la API real** (D-167): probado con los clientes reales y el transporte falso; con una clave, pasar un replay de verdad y comprobar que lo gastado cuadra con la factura.
 
 ### Restos de fases cerradas
-- **Integraciones:** hechas `client.beta.*` en Python (D-164) y Anthropic por OpenInference-js y OpenLLMetry-js, el AI SDK de Vercel 7 y LangChain.js (D-165), todas contra un proveedor falso. Faltan: pasar el banco de `scripts/integraciones_js` contra las API reales (con las claves de la sección 5), y probar LangGraph.js, el Agents SDK de OpenAI para TypeScript y Mastra.
+- **Integraciones:** probadas contra un proveedor falso (D-164, D-165 y D-170): `client.beta.*` en Python; Anthropic por OpenInference-js y OpenLLMetry-js; el AI SDK de Vercel 7; LangChain.js; LangGraph.js; el Agents SDK de OpenAI y Mastra. **Falta pasarlas contra las API reales**, que espera una clave de proveedor (sección 5). El banco (`scripts/integraciones_js`) tiene el proveedor y el uso fijos: para una pasada real hace falta apuntar los agentes a la API y un verificador que no espere el uso exacto.
 - **Escala:** la tabla ya se ordena por día y los filtros se acotan a la ventana (D-168). Con 14 días guardados, el Diagnóstico de un día bajó de 15–19 s a 5–6,5 s en el contenedor de 4 núcleos. Sigue lejos del objetivo de 1,5 s, y el de 7 días tarda casi un minuto: ahora el límite es lo que de verdad hay que leer. **Siguiente: los preagregados por hora** (D-143) para el uso por paso, el resumen, la cobertura y la serie del gráfico. Las instalaciones que ya existen se migran a mano con `python -m laplace_backend.storage.migrar_orden`.
 
 ### Siguiente: funciones diferenciales (confirmar el orden con el usuario)
