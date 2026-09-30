@@ -92,46 +92,48 @@ laplace.init(
         </div>
       )}
       {activas.length > 0 && (
-        <table className="tabla-simple ancha">
-          <thead>
-            <tr>
-              <th>{t("cla.proyecto")}</th>
-              <th>{t("cla.col.nombre")}</th>
-              <th>{t("cla.col.ultimo")}</th>
-              <th>{t("cla.caduca")}</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {activas.map((k) => (
-              <tr key={k.id}>
-                <td className="num">{k.project_id}</td>
-                <td>
-                  {k.name}
-                  {k.created_by && <small className="muted"> · {k.created_by}</small>}
-                </td>
-                <td className="num">{k.last_used_at ? timestamp(k.last_used_at) : t("cla.nunca")}</td>
-                <td className={`num${k.expires_at && k.expires_at < ahora ? " verr" : ""}`}>
-                  {k.expires_at ? timestamp(k.expires_at) : t("cla.no_caduca")}
-                </td>
-                <td>
-                  <button
-                    type="button"
-                    className="btn small danger"
-                    onClick={async () => {
-                      if (!window.confirm(t("cla.revocar_confirm", { nombre: k.name })))
-                        return;
-                      if (await intentar(() => revokeKey(org.id, k.id), t("cla.revocada")))
-                        onChange();
-                    }}
-                  >
-                    {t("cla.revocar")}
-                  </button>
-                </td>
+        <div className="tbl-scroll">
+          <table className="tabla-simple ancha">
+            <thead>
+              <tr>
+                <th>{t("cla.proyecto")}</th>
+                <th>{t("cla.col.nombre")}</th>
+                <th>{t("cla.col.ultimo")}</th>
+                <th>{t("cla.caduca")}</th>
+                <th />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {activas.map((k) => (
+                <tr key={k.id}>
+                  <td className="num">{k.project_id}</td>
+                  <td>
+                    {k.name}
+                    {k.created_by && <small className="muted"> · {k.created_by}</small>}
+                  </td>
+                  <td className="num">{k.last_used_at ? timestamp(k.last_used_at) : t("cla.nunca")}</td>
+                  <td className={`num${k.expires_at && k.expires_at < ahora ? " verr" : ""}`}>
+                    {k.expires_at ? timestamp(k.expires_at) : t("cla.no_caduca")}
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className="btn small danger"
+                      onClick={async () => {
+                        if (!window.confirm(t("cla.revocar_confirm", { nombre: k.name })))
+                          return;
+                        if (await intentar(() => revokeKey(org.id, k.id), t("cla.revocada")))
+                          onChange();
+                      }}
+                    >
+                      {t("cla.revocar")}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       <p className="disclaimer">
         {t("cla.rotar")}

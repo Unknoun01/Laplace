@@ -18,9 +18,9 @@
   flex-wrap: wrap;
 }
 .chip.prod {
-  background: color-mix(in srgb, var(--teal) 14%, transparent);
+  background: var(--teal-bg);
   color: var(--teal);
-  border-color: color-mix(in srgb, var(--teal) 34%, transparent);
+  border-color: var(--teal-line);
 }
 .chip.mini {
   font-size: var(--fs-2xs);

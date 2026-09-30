@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 175 decisiones.
+final. 177 decisiones.
 
 ## Coste, precios y caché
 
@@ -164,6 +164,8 @@ final. 175 decisiones.
 - [D-158](../DECISIONS.md#d-158--el-claro-vuelve-a-ser-rose-gold-con-cristal-líquido) — El claro vuelve a ser Rose Gold, con cristal líquido
 - [D-159](../DECISIONS.md#d-159--alto-contraste-para-el-claro-y-para-el-oscuro) — Alto contraste, para el claro y para el oscuro
 - [D-174](../DECISIONS.md#d-174--globalscss-en-29-hojas-un-índice-de-decisiones-y-documentación-de-usuario) — `globals.css` en 29 hojas, un índice de decisiones y documentación de usuario
+- [D-175](../DECISIONS.md#d-175--las-pantallas-con-sesión-recorridas-en-un-navegador) — Las pantallas con sesión, recorridas en un navegador
+- [D-176](../DECISIONS.md#d-176--el-contraste-medido-sobre-cada-pantalla) — El contraste, medido sobre cada pantalla
 
 ## Alertas y presupuesto
 
@@ -182,6 +184,7 @@ final. 175 decisiones.
 - [D-127](../DECISIONS.md#d-127--cuentas-las-personas-entran-los-agentes-escriben-con-clave) — Cuentas: las personas entran, los agentes escriben con clave
 - [D-168](../DECISIONS.md#d-168--la-clave-de-ordenación-por-día-su-migración-y-los-filtros-acotados) — La clave de ordenación por día, su migración y los filtros acotados
 - [D-169](../DECISIONS.md#d-169--health-nombra-el-almacén-que-hay-y-la-limpieza) — `/health` nombra el almacén que hay, y la limpieza
+- [D-175](../DECISIONS.md#d-175--las-pantallas-con-sesión-recorridas-en-un-navegador) — Las pantallas con sesión, recorridas en un navegador
 
 ## Margen por cliente
 
@@ -555,3 +558,5 @@ final. 175 decisiones.
 - [D-172](../DECISIONS.md#d-172--la-guardia-de-las-reglas-nuevas) — La guardia de las reglas nuevas
 - [D-173](../DECISIONS.md#d-173--retención-por-proyecto-y-borrar-lo-de-una-persona-o-un-cliente) — Retención por proyecto, y borrar lo de una persona o un cliente
 - [D-174](../DECISIONS.md#d-174--globalscss-en-29-hojas-un-índice-de-decisiones-y-documentación-de-usuario) — `globals.css` en 29 hojas, un índice de decisiones y documentación de usuario
+- [D-175](../DECISIONS.md#d-175--las-pantallas-con-sesión-recorridas-en-un-navegador) — Las pantallas con sesión, recorridas en un navegador
+- [D-176](../DECISIONS.md#d-176--el-contraste-medido-sobre-cada-pantalla) — El contraste, medido sobre cada pantalla

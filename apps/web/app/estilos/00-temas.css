@@ -22,7 +22,7 @@
   --bg-gradient-mid: #09111d;
   --bg-gradient-end: #060a10;
   --text: #eef4ff;
-  --muted: #91a1b5;
+  --muted: #9eaec2;
   --glass: rgba(255, 255, 255, 0.04);
   --line: rgba(255, 255, 255, 0.09);
   --accent-1: #8b87ff;        /* Violeta */
@@ -65,7 +65,7 @@
   --bg-gradient-mid: #f8e1da;
   --bg-gradient-end: #f2e4da;
   --text: #2b1c1c;
-  --muted: #6a504d;
+  --muted: #604643;
   --glass: rgba(255, 255, 255, 0.4);
   --line: rgba(255, 255, 255, 0.78);
   --accent-1: #c98a82;
@@ -79,14 +79,14 @@
   --ink-2: color-mix(in srgb, var(--text) 55%, var(--muted));
   --ink-3: var(--muted);
   --ink-4: color-mix(in srgb, var(--muted) 72%, var(--bg-gradient-mid));
-  --iris: color-mix(in srgb, var(--accent-1) 52%, #3a1010);
+  --iris: color-mix(in srgb, var(--accent-1) 40%, #3a1010);
   /* El ahorro no puede ser del mismo cobre que el derroche: jade, que es el
      complementario del rose gold y se distingue del ámbar a simple vista. */
-  --teal: #1d6a58;
-  --teal-line: rgba(29, 106, 88, 0.4);
-  --teal-bg: rgba(29, 106, 88, 0.1);
-  --amber: color-mix(in srgb, var(--accent-3) 42%, #3a2400);
-  --rose: #a8283a;
+  --teal: #14513f;
+  --teal-line: rgba(20, 81, 63, 0.4);
+  --teal-bg: rgba(20, 81, 63, 0.1);
+  --amber: color-mix(in srgb, var(--accent-3) 32%, #3a2400);
+  --rose: #962233;
   --rose-ink: #92212f;
   --on-iris: #2b1c1c;
   --shadow: 0 10px 30px rgba(158, 94, 88, 0.16);
@@ -109,7 +109,7 @@
     --bg-gradient-mid: #f8e1da;
     --bg-gradient-end: #f2e4da;
     --text: #2b1c1c;
-    --muted: #6a504d;
+    --muted: #604643;
     --glass: rgba(255, 255, 255, 0.4);
     --line: rgba(255, 255, 255, 0.78);
     --accent-1: #c98a82;
@@ -123,14 +123,14 @@
     --ink-2: color-mix(in srgb, var(--text) 55%, var(--muted));
     --ink-3: var(--muted);
     --ink-4: color-mix(in srgb, var(--muted) 72%, var(--bg-gradient-mid));
-    --iris: color-mix(in srgb, var(--accent-1) 52%, #3a1010);
+    --iris: color-mix(in srgb, var(--accent-1) 40%, #3a1010);
     /* El ahorro no puede ser del mismo cobre que el derroche: jade, que es el
        complementario del rose gold y se distingue del ámbar a simple vista. */
-    --teal: #1d6a58;
-    --teal-line: rgba(29, 106, 88, 0.4);
-    --teal-bg: rgba(29, 106, 88, 0.1);
-    --amber: color-mix(in srgb, var(--accent-3) 42%, #3a2400);
-    --rose: #a8283a;
+    --teal: #14513f;
+    --teal-line: rgba(20, 81, 63, 0.4);
+    --teal-bg: rgba(20, 81, 63, 0.1);
+    --amber: color-mix(in srgb, var(--accent-3) 32%, #3a2400);
+    --rose: #962233;
     --rose-ink: #92212f;
     --on-iris: #2b1c1c;
     --shadow: 0 10px 30px rgba(158, 94, 88, 0.16);

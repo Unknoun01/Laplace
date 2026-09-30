@@ -128,75 +128,77 @@ function Miembros({ org, yo, onChange }: { org: Org; yo: string; onChange: () =>
   return (
     <section className="sec">
       <h3>{t("org.miembros")}</h3>
-      <table className="tabla-simple ancha">
-        <thead>
-          <tr>
-            <th>{t("org.col.persona")}</th>
-            <th>{t("org.col.rol")}</th>
-            <th>{t("org.col.desde")}</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {org.members.map((m) => (
-            <tr key={m.user_id}>
-              <td>
-                {m.name || m.email}
-                {m.name && <small className="muted"> · {m.email}</small>}
-                {m.user_id === yo && <small className="muted">{t("org.tu")}</small>}
-              </td>
-              <td>
-                {admin ? (
-                  <select
-                    className="field"
-                    value={m.role}
-                    aria-label={t("org.rol_de", { email: m.email })}
-                    onChange={async (e) => {
-                      if (
-                        await intentar(
-                          () => setMemberRole(org.id, m.user_id, e.target.value as Rol),
-                          t("org.ahora_es", { email: m.email, rol: rolDe(e.target.value as Rol) }),
-                        )
-                      )
-                        onChange();
-                    }}
-                  >
-                    {ROLES.map((r) => (
-                      <option key={r} value={r}>
-                        {rolDe(r)}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  rolDe(m.role)
-                )}
-              </td>
-              <td className="num">{timestamp(m.since)}</td>
-              <td>
-                {(admin || m.user_id === yo) && (
-                  <button
-                    type="button"
-                    className="btn small"
-                    onClick={async () => {
-                      const texto =
-                        m.user_id === yo
-                          ? t("org.salir_confirm")
-                          : t("org.quitar_confirm", { email: m.email });
-                      if (!window.confirm(texto)) return;
-                      if (await intentar(() => removeMember(org.id, m.user_id), t("org.hecho"))) {
-                        if (m.user_id === yo) window.location.href = "/";
-                        else onChange();
-                      }
-                    }}
-                  >
-                    {m.user_id === yo ? t("org.salir") : t("comun.quitar")}
-                  </button>
-                )}
-              </td>
+      <div className="tbl-scroll">
+        <table className="tabla-simple ancha">
+          <thead>
+            <tr>
+              <th>{t("org.col.persona")}</th>
+              <th>{t("org.col.rol")}</th>
+              <th>{t("org.col.desde")}</th>
+              <th />
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {org.members.map((m) => (
+              <tr key={m.user_id}>
+                <td>
+                  {m.name || m.email}
+                  {m.name && <small className="muted"> · {m.email}</small>}
+                  {m.user_id === yo && <small className="muted">{t("org.tu")}</small>}
+                </td>
+                <td>
+                  {admin ? (
+                    <select
+                      className="field"
+                      value={m.role}
+                      aria-label={t("org.rol_de", { email: m.email })}
+                      onChange={async (e) => {
+                        if (
+                          await intentar(
+                            () => setMemberRole(org.id, m.user_id, e.target.value as Rol),
+                            t("org.ahora_es", { email: m.email, rol: rolDe(e.target.value as Rol) }),
+                          )
+                        )
+                          onChange();
+                      }}
+                    >
+                      {ROLES.map((r) => (
+                        <option key={r} value={r}>
+                          {rolDe(r)}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    rolDe(m.role)
+                  )}
+                </td>
+                <td className="num">{timestamp(m.since)}</td>
+                <td>
+                  {(admin || m.user_id === yo) && (
+                    <button
+                      type="button"
+                      className="btn small"
+                      onClick={async () => {
+                        const texto =
+                          m.user_id === yo
+                            ? t("org.salir_confirm")
+                            : t("org.quitar_confirm", { email: m.email });
+                        if (!window.confirm(texto)) return;
+                        if (await intentar(() => removeMember(org.id, m.user_id), t("org.hecho"))) {
+                          if (m.user_id === yo) window.location.href = "/";
+                          else onChange();
+                        }
+                      }}
+                    >
+                      {m.user_id === yo ? t("org.salir") : t("comun.quitar")}
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       <p className="disclaimer">
         {t("org.roles.nota")}
       </p>
@@ -323,20 +325,22 @@ function Auditoria({ org }: { org: Org }) {
         ) : eventos.length === 0 ? (
           <p className="muted">{t("org.nada")}</p>
         ) : (
-          <table className="tabla-simple ancha">
-            <tbody>
-              {eventos.map((e, i) => (
-                <tr key={`${e.at}-${i}`}>
-                  <td className="num">{timestamp(e.at)}</td>
-                  <td>
-                    {e.email || t("org.alguien")} {accion(e.action)}{" "}
-                    <span className="muted">{e.target}</span>
-                  </td>
-                  <td className="num muted">{e.ip}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="tbl-scroll">
+            <table className="tabla-simple ancha">
+              <tbody>
+                {eventos.map((e, i) => (
+                  <tr key={`${e.at}-${i}`}>
+                    <td className="num">{timestamp(e.at)}</td>
+                    <td>
+                      {e.email || t("org.alguien")} {accion(e.action)}{" "}
+                      <span className="muted">{e.target}</span>
+                    </td>
+                    <td className="num muted">{e.ip}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </details>
     </section>

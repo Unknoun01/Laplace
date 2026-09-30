@@ -268,6 +268,9 @@ def test_una_clave_creada_en_la_interfaz_sirve_para_su_proyecto_y_se_puede_revoc
 
     agente = TestClient(app)
     cab = {"Authorization": f"Bearer {clave}"}
+    # Sin nada mandado todavía, su proyecto sale a cero y el ajeno no sale (D-175).
+    lista = agente.get("/api/projects", headers=cab).json()["projects"]
+    assert [(p["id"], p["span_count"], p["last_seen"]) for p in lista] == [("nuevo", 0, None)]
     assert agente.get("/api/traces", params={"project_id": "nuevo"}, headers=cab).status_code == 200
     usada = app.state.cuentas.claves(["nuevo"])[0]
     assert usada["last_used_at"], "usar la clave tiene que dejar su último uso apuntado"

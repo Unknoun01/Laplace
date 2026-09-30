@@ -186,6 +186,14 @@ export function NoTracesYet({
 }) {
   const ruta = usePathname();
   const params = useSearchParams();
+  // Con cuentas la ingesta pide clave: un `init` sin ella da 401 y parece que no llega
+  // nada (D-175).
+  const [nube, setNube] = useState(false);
+  useEffect(() => {
+    getMe()
+      .then((m) => setNube(m.mode === "nube"))
+      .catch(() => undefined);
+  }, []);
   if (lastSeen && days) {
     const haceDias = (Date.now() - Date.parse(lastSeen)) / 86_400_000;
     // El rango más corto de los que hay que ya la incluye.
@@ -216,7 +224,7 @@ export function NoTracesYet({
       <h2>{t("estado.sin_trazas.titulo", { proyecto: project })}</h2>
       <p>{t("estado.sin_trazas.texto")}</p>
       <pre>
-        {`import laplace\n\nlaplace.init(\n    project=\"${project}\",\n    endpoint=\"${endpointActual()}\",\n)`}
+        {`import laplace\n\nlaplace.init(\n    project=\"${project}\",\n    endpoint=\"${endpointActual()}\",\n${nube ? '    api_key=\"lp_…\",\n' : ""})`}
       </pre>
     </div>
   );

@@ -35,16 +35,31 @@ def _traza(project: str, dias: float, *, user: str = "", customer: str = "") -> 
     return [raiz, hija]
 
 
-def _almacenes(tmp_path):
+@pytest.fixture
+def almacenes(tmp_path):
+    """SQLite y, si escucha, ClickHouse en una base propia que se tira al acabar.
+
+    En la base compartida el borrado ligero reescribe las partes enteras en las que caen
+    las trazas de la prueba, que comparten parte con lo que haya: con una carga de escala
+    delante eran gigas y fallaba por disco, no por el código.
+    """
     from laplace_backend.storage.clickhouse import ClickHouseStore
 
     local = SQLiteStore(tmp_path / "r.db")
     local.migrate()
-    yield "sqlite", local
-    nube = ClickHouseStore(Settings())
-    if nube.health():
+    salida = {"sqlite": local}
+    general = ClickHouseStore(Settings())
+    base = f"prueba_d173_{uuid.uuid4().hex[:8]}"
+    if general.health():
+        general._client.command(f"CREATE DATABASE {base}")
+        nube = ClickHouseStore(Settings(clickhouse_database=base))
         nube.migrate()
-        yield "clickhouse", nube
+        salida["clickhouse"] = nube
+    try:
+        yield salida
+    finally:
+        if "clickhouse" in salida:
+            general._client.command(f"DROP DATABASE IF EXISTS {base} SYNC")
 
 
 def _cuantos(store, project: str) -> int:
@@ -52,9 +67,9 @@ def _cuantos(store, project: str) -> int:
 
 
 @pytest.mark.parametrize("cual", ["sqlite", "clickhouse"])
-def test_borrar_una_persona_se_lleva_sus_trazas_enteras(tmp_path, cual):
+def test_borrar_una_persona_se_lleva_sus_trazas_enteras(almacenes, cual):
     """El id lo lleva la raíz: dejar las llamadas hijas sería dejar justo su contenido."""
-    store = dict(_almacenes(tmp_path)).get(cual)
+    store = almacenes.get(cual)
     if store is None:
         pytest.skip("no hay ClickHouse escuchando")
     project = f"sujeto-{uuid.uuid4().hex[:8]}"
@@ -74,8 +89,8 @@ def test_borrar_una_persona_se_lleva_sus_trazas_enteras(tmp_path, cual):
 
 
 @pytest.mark.parametrize("cual", ["sqlite", "clickhouse"])
-def test_la_retencion_de_un_proyecto_no_toca_otro(tmp_path, cual):
-    store = dict(_almacenes(tmp_path)).get(cual)
+def test_la_retencion_de_un_proyecto_no_toca_otro(almacenes, cual):
+    store = almacenes.get(cual)
     if store is None:
         pytest.skip("no hay ClickHouse escuchando")
     uno, otro = f"ret-{uuid.uuid4().hex[:8]}", f"ret-{uuid.uuid4().hex[:8]}"

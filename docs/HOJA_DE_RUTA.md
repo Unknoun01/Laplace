@@ -35,7 +35,7 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
   verde (`git merge --no-ff`); si no dice otra cosa, se sigue así.
 - **Nada entra sin su prueba.** Primero la prueba en rojo, después el arreglo.
 - **Hay que comprobar que la prueba muerde:** romper el código a propósito y verla fallar.
-- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-175**.
+- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-177**.
 - **Todo en español:** código, comentarios, commits y textos. Los textos de la interfaz y
   del backend, en los cinco idiomas a la vez (`apps/web/lib/mensajes/*.ts`,
   `apps/backend/laplace_backend/textos/*.json`); las pruebas exigen las mismas claves.
@@ -110,14 +110,12 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
   - SSO/SAML, SCIM y verificación de correo.
 
 ## 4. Deuda y detalles sueltos
-- **Lo que la auditoría del rediseño no revisó** (`docs/auditoria-rediseno.md`): las
-  pantallas con sesión de la versión Docker (organización, invitaciones, claves), los
-  flujos de escritura de punta a punta y los navegadores que no son Chromium (Safari
-  trata distinto `backdrop-filter` y `color-mix`, y todo el color sale de `color-mix`;
-  el claro Rose Gold depende del cristal y de `saturate()`).
-- **El contraste se mide sobre los tokens, no sobre cada pantalla** (D-155): los
-  resplandores de detrás del cristal y los degradados de los botones no entran en la
-  cuenta.
+- **Los navegadores que no son Chromium**, que la auditoría del rediseño no revisó
+  (`docs/auditoria-rediseno.md`). Safari trata distinto `backdrop-filter` y `color-mix`,
+  y todo el color sale de `color-mix`; el claro Rose Gold depende del cristal y de
+  `saturate()`. En el contenedor sólo hay Chromium, así que hace falta un Mac o
+  WebKit de Playwright. Las pantallas con sesión y los flujos de escritura ya se
+  recorren en `test_pantallas_cuentas.py` (D-175).
 - **En español a propósito, y por decidir si sigue así** (D-148): la línea de órdenes
   (`laplace ui`, `laplace demo`) y los logs.
 - **La barra con siete pestañas** ocupa tres filas en móvil (3 + 3 + 1). Cabe y se prueba,

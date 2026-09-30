@@ -3710,3 +3710,73 @@ que aparezca a cuatro horas distintas.
   instrumentar, diagnóstico, probar, alertas y datos. Sin Mintlify, Docusaurus ni
   Starlight todavía: GitHub ya la pinta, y montar un sitio pide el dominio (sección 5 de
   la hoja de ruta). Se pasa a uno de ellos cuando haya dónde publicarlo.
+
+### D-175 — Las pantallas con sesión, recorridas en un navegador
+La auditoría del rediseño no llegó a las pantallas que sólo existen con cuentas.
+`test_pantallas_cuentas.py` las recorre como una persona, escribiendo en los formularios,
+sobre `laplace ui` con `LAPLACE_AUTH_REQUIRED=true`:
+
+1. configurar la instalación;
+2. la organización;
+3. crear una clave;
+4. invitar;
+5. aceptar la invitación desde otro navegador;
+6. entrar con la contraseña mala y con la buena;
+7. entrar con la clave.
+
+A cada pantalla se le exige lo mismo que a las demás: sin errores en la consola y sin
+salirse por los lados a 1440 ni a 375 px. Cuando algo se sale, la prueba dice qué
+elemento es. Encontró tres fallos:
+
+* **La organización se salía 12 px en el móvil**: sus tres tablas (miembros, claves y
+  registro) no llevaban el `tbl-scroll` que llevan las de las otras pantallas.
+* **Quien entraba con la clave de un proyecto recién creado leía «Todavía no hay ningún
+  proyecto»**, con un `init` de ejemplo para `project="mi-agente"`: justo el código que
+  no tenía que copiar. `/api/projects` sólo listaba proyectos con datos. Ahora añade, a
+  cero y al final, los que la identidad tiene nombrados (el de su clave, o los de sus
+  organizaciones) y todavía no han mandado nada. Un admin de la instalación, que lo ve
+  todo, no recibe una lista inventada.
+* **Ese `init` de ejemplo no llevaba `api_key`**, y con cuentas la ingesta sin clave da
+  401: parecía que no llegaba nada. En modo nube lleva `api_key="lp_…"`.
+
+Las variantes de ClickHouse de `test_retencion.py` corren ahora en una base propia que
+se tira al acabar, como `test_migrar_orden.py`. En la base compartida, el borrado ligero
+reescribe las partes enteras en las que caen las trazas de la prueba. Con la carga de
+escala delante, esas partes pesaban gigas y la prueba fallaba por falta de disco, no por
+el código.
+
+### D-176 — El contraste, medido sobre cada pantalla
+`test_tema.py` mide cada tinta contra el cristal compuesto sobre el degradado, a partir
+de los tokens (D-155). No ve lo que sólo existe en pantalla: los resplandores de detrás
+del cristal, el fondo teñido de un chip o de una insignia, la opacidad de un
+antepasado. `test_contraste_pantallas.py` mide lo que se pinta de verdad:
+
+1. apunta cada trozo de texto visible, con su color compuesto con la opacidad de sus
+   antepasados;
+2. vuelve el texto transparente y hace una captura;
+3. calcula el contraste contra los píxeles que quedan debajo de cada trozo.
+
+Exige AA al percentil 10: 4,5:1, o 3:1 en letra grande. Se usa el percentil y no el
+mínimo, porque en la caja de un texto caen bordes que no son su fondo. Corre en las
+siete pantallas, en los cuatro temas, a 1440 px. La captura se lee en un `canvas` del
+propio navegador: no hace falta Pillow.
+
+Primera pasada: los dos temas de alto contraste pasaban en todo. Fallaban 45 textos
+entre 3,5 y 4,49:1, casi todos en el claro, y todos de seis tintas:
+
+| Tinta | Antes | Después |
+|---|---|---|
+| `--amber` (claro) | 42 % | 32 % de `--accent-3` hacia `#3a2400` |
+| `--teal` (claro) | `#1d6a58` | `#14513f` (y su línea y su fondo) |
+| `--iris` (claro, enlaces de las tarjetas) | 52 % | 40 % |
+| `--rose` (claro) | `#a8283a` | `#962233` |
+| `--muted` (claro) | `#6a504d` | `#604643` |
+| `--muted` (oscuro, el título «Presupuesto» sobre el resplandor) | `#91a1b5` | `#9eaec2` |
+
+Los tonos se mantienen y sólo se oscurecen (en el oscuro, se aclara). El chip «en
+producción» de Prompts usaba su propia mezcla de fondo, más fuerte que la de los demás
+chips verdes, y pasa a usar `--teal-bg`.
+
+La prueba descarta lo que no se pinta. En la primera versión, los textos dentro de un
+`<details>` cerrado daban 1,1:1: tienen cajas, pero no se ven. Ahora se filtran con
+`checkVisibility()`.
