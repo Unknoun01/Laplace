@@ -3646,7 +3646,9 @@ Cada prueba falla sin su arreglo.
 exigía que una regla nueva desambiguara su título (D-115) ni que entrara en el
 descuento del doble conteo (D-117); la de Prompts (D-157) se hizo mirándolo a mano.
 
-* **Estructural:** `GARANTIAS`, junto a la tabla de fichas, dice para cada `FindingKind`
+* **Estructural:** `GARANTIAS`, en `test_catalogo_hallazgos.py` (no en el motor: es texto
+  para quien añade la regla, y en el motor lo tomaba por frase suelta
+  `test_sin_frases_sueltas`), dice para cada `FindingKind`
   cómo se distingue su título y cómo evita reclamar dinero que ya reclama otra regla. La
   prueba exige una entrada por tipo: una regla nueva sin ella pone la suite en rojo el
   mismo día, como una sin ficha (D-113).

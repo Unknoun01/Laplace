@@ -537,44 +537,6 @@ _DETALLADORES = {
 #: escrita a mano se queda desfasada afirmando que cubre algo que no cubre.
 DETAILED_KINDS = frozenset(_DETALLADORES)
 
-#: Lo que cada regla hace para no confundir al que lee (D-172). Una regla nueva tiene que
-#: decir, antes de entrar, cómo cumple las dos cosas que las de antes aprendieron por las
-#: malas, y `test_catalogo_hallazgos` exige una entrada por cada `FindingKind`:
-#:
-#: * **nombre**: cómo se distingue su título del de otro paso que se llame igual (D-115).
-#:   Dos tarjetas con el mismo título y cifras distintas se leen como un fallo.
-#: * **descuento**: cómo evita reclamar un dinero que ya reclama otra regla (D-117). El
-#:   ahorro total es la suma, y es la cifra que vendemos.
-#:
-#: Es texto a propósito: lo lee quien añade la regla, y la prueba de comportamiento
-#: (`test_ninguna_regla_reclama_mas_de_lo_que_costo_el_paso`) comprueba que se cumple.
-GARANTIAS: dict[str, dict[str, str]] = {
-    "repeticion": {
-        "nombre": "`_nombrar` con la pista del paso si otro paso comparte el nombre; "
-        "`disambiguate` en el almacén",
-        "descuento": "es la primera: reclama las copias sobrantes y las demás las descuentan",
-    },
-    "bucle": {
-        "nombre": "`_nombrar` y `disambiguate`, como la repetición",
-        "descuento": "exige entradas distintas, que la repetición no mira; sus tokens entran "
-        "en `_duplicate_tokens` para que el resto no los cuente otra vez",
-    },
-    "modelo_caro": {
-        "nombre": "`disambiguate` sobre los usos por paso y modelo",
-        "descuento": "evalúa el uso neto de `_without_duplicates`, sin las copias que ya "
-        "reclaman repetición y bucle",
-    },
-    "contexto_fijo": {
-        "nombre": "`disambiguate` sobre los usos por paso y modelo",
-        "descuento": "el mismo uso neto que el modelo caro, y los arreglos se componen (D-157)",
-    },
-    PROMPT_CARO: {
-        "nombre": "el nombre del prompt y sus dos versiones, que son únicos",
-        "descuento": "va la última y resta lo que las demás reclaman sobre sus pasos "
-        "(`_reclamado_por_paso`)",
-    },
-}
-
 
 def detail(store: Any, project_id: str, window: Window, finding_id: str) -> FindingDetail | None:
     """Recompone la ficha de un hallazgo.

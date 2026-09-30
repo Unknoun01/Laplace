@@ -85,7 +85,6 @@ from .modelos import (  # noqa: F401
 from .motor import (  # noqa: F401
     _DETALLADORES,
     DETAILED_KINDS,
-    GARANTIAS,
     _Contexto,
     _detalle_bucle,
     _detalle_modelo,
@@ -110,7 +109,6 @@ __all__ = [
     "CAUTION_SAVINGS_RATIO",
     "DAYS_PER_MONTH",
     "DETAILED_KINDS",
-    "GARANTIAS",
     "Difficulty",
     "Finding",
     "FindingDetail",
