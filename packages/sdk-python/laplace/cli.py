@@ -189,7 +189,22 @@ def comando_replay(args: argparse.Namespace) -> int:
     return 0
 
 
+def _salida_en_utf8() -> None:
+    """La consola de Windows no escribe en UTF-8 por defecto, y los textos llevan tildes,
+    «comillas» y ≥: salían como caracteres rotos. Se pide UTF-8 a la salida; lo que no
+    se pueda escribir se sustituye en vez de reventar."""
+    for flujo in (sys.stdout, sys.stderr):
+        reconfigurar = getattr(flujo, "reconfigure", None)
+        if reconfigurar is None:
+            continue
+        try:
+            reconfigurar(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):  # un flujo ya cerrado o sin codificación propia
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _salida_en_utf8()
     parser = argparse.ArgumentParser(
         prog="laplace",
         description="Observabilidad y optimización de agentes de IA, en local.",

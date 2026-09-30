@@ -156,6 +156,19 @@ def _start_span(kwargs: dict[str, Any]) -> OtelSpan:
     return span
 
 
+def _contenido(bloques: Any) -> Any:
+    """El texto, si todos los bloques son de texto; si no, los bloques enteros.
+
+    Es la forma que ya salía en streaming y con OpenAI: antes, la misma llamada se
+    guardaba como lista de bloques sin streaming y como texto con él, y lo que busca en
+    el contenido (reglas, búsqueda, el juez) veía dos cosas distintas.
+    """
+    lista = list(bloques or [])
+    if lista and all(getattr(b, "type", None) == "text" for b in lista):
+        return "".join(getattr(b, "text", "") or "" for b in lista)
+    return [c.dump_model(b) for b in lista]
+
+
 def _finish(span: OtelSpan, kwargs: dict[str, Any], response: Any) -> None:
     try:
         content = getattr(response, "content", None) or []
@@ -168,7 +181,7 @@ def _finish(span: OtelSpan, kwargs: dict[str, Any], response: Any) -> None:
             messages=[
                 {
                     "role": getattr(response, "role", "assistant"),
-                    "content": [c.dump_model(block) for block in content],
+                    "content": _contenido(content),
                 }
             ],
         )

@@ -278,3 +278,20 @@ def test_los_avisos_salen_en_el_idioma_de_quien_los_configura(cliente, monkeypat
     assert idioma.actual() == "es"
     assert runner.send_test("p") is True
     assert "message de test" in enviados[0]
+
+
+def test_un_tramo_de_un_dia_no_ensena_la_hora():
+    """El pie del gráfico de gasto por día enseñaba «08 sept, 02:00» aunque el tramo fuera
+    el día entero: la hora no significa nada ahí."""
+    web = ejecutar(
+        """
+const f = await web("lib/format.ts");
+const i = await web("lib/idioma.ts");
+i.fijarIdioma("es");
+const iso = "2026-09-08T12:00:00Z";
+salida([f.inicioDeTramo(iso, 1440), f.inicioDeTramo(iso, 60)]);
+"""
+    )
+    dia, hora = web
+    assert ":" not in dia and "08" in dia
+    assert ":" in hora

@@ -449,6 +449,21 @@ class RunIn(BaseModel):
     items: list[EvalRunItem] = Field(default_factory=list, max_length=5000)
 
 
+async def _cuando_corrio(request: Request, body: RunIn) -> datetime:
+    """Una tirada es de cuando corrió, no de cuando llegó su parte: del comienzo de su
+    primera traza. Para quien corre `run_dataset` es casi el mismo instante; la demo, que
+    corre sus tiradas en el pasado, las fechaba hoy aunque sus trazas fueran de ayer.
+    Nunca en el futuro, y si la traza aún no ha llegado, ahora."""
+    ahora = datetime.now(timezone.utc)
+    primera = next((i.trace_id for i in body.items if i.trace_id), None)
+    if primera is None:
+        return ahora
+    spans = await run_in_threadpool(_store(request).get_trace_spans, primera, body.project_id)
+    if not spans:
+        return ahora
+    return min(min(s.start_time for s in spans), ahora)
+
+
 @router.post("/runs", response_model=EvalRun)
 async def create_run(request: Request, body: RunIn) -> EvalRun:
     meta = _meta(request)
@@ -461,7 +476,7 @@ async def create_run(request: Request, body: RunIn) -> EvalRun:
         dataset_id=body.dataset_id,
         variant=body.variant,
         notes=body.notes,
-        created_at=datetime.now(timezone.utc),
+        created_at=await _cuando_corrio(request, body),
         items=body.items,
     )
     return await run_in_threadpool(_guard, meta.create_run, tirada)
