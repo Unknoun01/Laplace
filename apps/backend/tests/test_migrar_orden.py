@@ -1,4 +1,4 @@
-"""La migración a la clave por día (D-168), contra ClickHouse de verdad.
+"""La migración a la clave por hora (D-168, D-177), contra ClickHouse de verdad.
 
 En una base propia de cada ejecución, no en la de desarrollo: se crea la tabla como la
 dejaba la versión anterior, con datos dentro, y se migra por encima. Una migración que
@@ -18,6 +18,7 @@ from laplace_backend.config import Settings
 from laplace_backend.storage.base import TraceFilter, Window
 from laplace_backend.storage.migrar_orden import (
     ANTES,
+    CLAVE_DIA,
     CLAVE_NUEVA,
     CLAVE_VIEJA,
     NUEVA,
@@ -69,7 +70,7 @@ def nube():
         general._client.command(f"DROP DATABASE IF EXISTS {base} SYNC")
 
 
-def _sembrar_con_clave_vieja(store) -> list[Span]:
+def _sembrar_con_clave_vieja(store, vieja: str = CLAVE_VIEJA) -> list[Span]:
     """La tabla con la clave de antes, con datos que llegaron **ayer**: si llevaran el
     `ingested_at` de ahora, la puesta al día del final los recogería todos y taparía
     cualquier fallo de la copia."""
@@ -83,7 +84,7 @@ def _sembrar_con_clave_vieja(store) -> list[Span]:
     store.insert_spans(spans)
     client.command(
         "CREATE TABLE spans_vieja AS spans ENGINE = ReplacingMergeTree(ingested_at) "
-        f"PARTITION BY toYYYYMM(start_time) ORDER BY ({CLAVE_VIEJA})"
+        f"PARTITION BY toYYYYMM(start_time) ORDER BY ({vieja})"
     )
     client.command(
         "INSERT INTO spans_vieja SELECT * REPLACE (now64(3) - INTERVAL 1 DAY AS ingested_at) "
@@ -91,19 +92,20 @@ def _sembrar_con_clave_vieja(store) -> list[Span]:
     )
     client.command("EXCHANGE TABLES spans AND spans_vieja")
     client.command("DROP TABLE spans_vieja SYNC")
-    assert clave(client) == CLAVE_VIEJA
+    assert clave(client) == vieja
     return spans
 
 
-def test_una_instalacion_nueva_nace_con_la_clave_por_dia(nube):
+def test_una_instalacion_nueva_nace_con_la_clave_por_hora(nube):
     nube.migrate()
     assert clave(nube._client) == CLAVE_NUEVA
     assert not necesita(nube._client)
     assert "No hace falta" in plan(nube._client)
 
 
-def test_la_migracion_conserva_todo_y_cambia_la_clave(nube):
-    spans = _sembrar_con_clave_vieja(nube)
+@pytest.mark.parametrize("vieja", [CLAVE_VIEJA, CLAVE_DIA], ids=["original", "por día"])
+def test_la_migracion_conserva_todo_y_cambia_la_clave(nube, vieja):
+    spans = _sembrar_con_clave_vieja(nube, vieja)
     client = nube._client
     ventana = Window(since=AHORA - timedelta(days=60), until=AHORA + timedelta(hours=1), days=60)
     antes = nube.summarize_window(PROYECTO, ventana)
@@ -112,7 +114,7 @@ def test_la_migracion_conserva_todo_y_cambia_la_clave(nube):
     assert migrar(client, retention_days=90, avisar=lambda _: None) is True
 
     assert clave(client) == CLAVE_NUEVA
-    assert clave(client, ANTES) == CLAVE_VIEJA, "la vieja se queda, sin borrar"
+    assert clave(client, ANTES) == vieja, "la vieja se queda, sin borrar"
     assert int(client.query("SELECT count() FROM spans FINAL").result_rows[0][0]) == len(spans)
     despues = nube.summarize_window(PROYECTO, ventana)
     # Sumar en otro orden cambia el último decimal de un float: el dinero, con tolerancia,

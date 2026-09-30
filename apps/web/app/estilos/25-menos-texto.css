@@ -1,0 +1,78 @@
+/* ---------------------------------------------------------------------------
+   Menos texto (D-151): el héroe dice lo que se puede dejar de pagar, y las salvedades
+   van en un distintivo de confianza que se despliega.
+   --------------------------------------------------------------------------- */
+.big.save {
+  color: var(--amber);
+}
+.hero-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+}
+.puedes-lead {
+  margin: var(--sp-5) 0 var(--sp-3);
+  color: var(--ink-2);
+  font-size: var(--fs-lg);
+  font-weight: 500;
+}
+.puedes .hero-sub {
+  margin: var(--sp-3) 0 0;
+}
+details.confianza {
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+  max-width: 100%;
+}
+details.confianza > summary {
+  cursor: pointer;
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 11px;
+  border: 1px solid var(--hair);
+  border-radius: var(--r-pill);
+  white-space: nowrap;
+}
+details.confianza > summary::-webkit-details-marker {
+  display: none;
+}
+details.confianza > summary:hover {
+  border-color: var(--hair-strong);
+  color: var(--ink);
+}
+details.confianza .punto {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--teal);
+}
+details.confianza.media .punto {
+  background: var(--amber);
+}
+details.confianza.baja .punto {
+  background: var(--rose);
+}
+details.confianza .cuantas {
+  color: var(--ink-3);
+}
+.confianza-cuerpo {
+  margin-top: var(--sp-3);
+  padding-left: 14px;
+  border-left: 2px solid var(--hair);
+  display: grid;
+  gap: 4px;
+  max-width: 60ch;
+}
+.confianza-cuerpo .confianza-nivel {
+  margin: 0 0 4px;
+  color: var(--ink-2);
+}
+details.porque-bloque > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--ink);
+}

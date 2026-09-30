@@ -4,13 +4,17 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { BackendDown, Cargando, NeedsKey, NoProject, NotYours } from "@/components/states";
 import {
+  type Retencion,
   deleteProject,
+  deleteSubject,
   getAlertSettings,
   getBudget,
   getCustomPrices,
   getInstance,
+  getRetention,
   listProjects,
   setBudget,
+  setRetention,
 } from "@/lib/api";
 import { Euros } from "@/lib/moneda";
 import type { Budget, Instance } from "@/lib/types";
@@ -38,13 +42,14 @@ function Contenido() {
     const projects = await listProjects(senal);
     if (projects.length === 0) return null;
     const project = projects.find((p) => p.id === pedido)?.id ?? projects[0].id;
-    const [budget, alertas, precios, instancia] = await Promise.all([
+    const [budget, alertas, precios, instancia, retencion] = await Promise.all([
       getBudget(project, senal),
       getAlertSettings(project, senal),
       getCustomPrices(senal),
       getInstance(senal),
+      getRetention(project, senal),
     ]);
-    return { project, budget, alertas, precios, instancia };
+    return { project, budget, alertas, precios, instancia, retencion };
   }, [pedido]);
 
   if (estado.fase === "cargando") return <Cargando />;
@@ -54,7 +59,7 @@ function Contenido() {
   if (estado.fase === "error") return <BackendDown mensaje={estado.error.message} />;
   if (estado.datos === null) return <NoProject />;
 
-  const { project, budget, alertas, precios, instancia } = estado.datos;
+  const { project, budget, alertas, precios, instancia, retencion } = estado.datos;
   return (
     <main className="reading ajustes">
       <section className="sec" style={{ paddingBottom: 0 }}>
@@ -76,7 +81,7 @@ function Contenido() {
       <Apariencia />
       <Moneda />
       <fieldset className="sin-marco" disabled={!permisos.administrar}>
-        <Datos project={project} instancia={instancia} />
+        <Datos project={project} instancia={instancia} retencion={retencion} />
       </fieldset>
     </main>
   );
@@ -143,9 +148,49 @@ function Presupuesto({ project, inicial }: { project: string; inicial: Budget })
 
 // ---------------------------------------------------------------------------------
 
-function Datos({ project, instancia }: { project: string; instancia: Instance }) {
+function Datos({
+  project,
+  instancia,
+  retencion: inicial,
+}: {
+  project: string;
+  instancia: Instance;
+  retencion: Retencion;
+}) {
   const [confirmacion, setConfirmacion] = useState("");
   const [msg, setMsg] = useState({ ok: true, texto: "" });
+  const [retencion, setR] = useState(inicial);
+  const [dias, setDias] = useState(inicial.days ? String(inicial.days) : "");
+  const [quien, setQuien] = useState<"user_id" | "customer_id">("user_id");
+  const [sujeto, setSujeto] = useState("");
+  const [confirmaSujeto, setConfirmaSujeto] = useState("");
+
+  async function guardarDias(n: number) {
+    try {
+      const nueva = await setRetention(project, n);
+      setR(nueva);
+      setDias(n ? String(n) : "");
+      setMsg({
+        ok: true,
+        texto: nueva.effective_days
+          ? t("aj.ret.guardado", { n: nueva.effective_days })
+          : t("aj.ret.quitado"),
+      });
+    } catch (e) {
+      setMsg({ ok: false, texto: e instanceof Error ? e.message : t("seg.error.guardar") });
+    }
+  }
+
+  async function borrarSujeto() {
+    try {
+      const r = await deleteSubject(project, quien, sujeto);
+      setMsg({ ok: true, texto: t("aj.sujeto.borrado", { n: r.deleted_traces, id: sujeto }) });
+      setSujeto("");
+      setConfirmaSujeto("");
+    } catch (e) {
+      setMsg({ ok: false, texto: e instanceof Error ? e.message : t("aj.error.borrar") });
+    }
+  }
 
   async function borrar() {
     try {
@@ -164,6 +209,70 @@ function Datos({ project, instancia }: { project: string; instancia: Instance })
           ? t("aj.datos.retencion", { n: instancia.retention_days })
           : t("aj.datos.siempre")}
       </p>
+      <div className="ab">
+        <label>
+          <small>{t("aj.ret.dias")}</small>
+          <input
+            className="field"
+            inputMode="numeric"
+            value={dias}
+            onChange={(e) => setDias(e.target.value.replace(/\D/g, ""))}
+            placeholder={instancia.retention_days ? String(instancia.retention_days) : "90"}
+            style={{ width: 100 }}
+          />
+        </label>
+        <button type="button" className="btn" disabled={!dias} onClick={() => guardarDias(Number(dias))}>
+          {t("comun.guardar")}
+        </button>
+        {retencion.days > 0 && (
+          <button type="button" className="btn" onClick={() => guardarDias(0)}>
+            {t("comun.quitar")}
+          </button>
+        )}
+      </div>
+      <p className="muted">
+        {retencion.days > 0 && retencion.installation_days > 0 && retencion.days > retencion.installation_days
+          ? t("aj.ret.manda_instalacion", { n: retencion.installation_days })
+          : t("aj.ret.explica")}
+      </p>
+      <div className="peligro">
+        <p>
+          <strong>{t("aj.sujeto.titulo")}</strong> {t("aj.sujeto.texto")}
+        </p>
+        <div className="ab" style={{ margin: 0 }}>
+          <select
+            className="field"
+            value={quien}
+            onChange={(e) => setQuien(e.target.value as "user_id" | "customer_id")}
+            aria-label={t("aj.sujeto.tipo")}
+          >
+            <option value="user_id">{t("aj.sujeto.persona")}</option>
+            <option value="customer_id">{t("aj.sujeto.cliente")}</option>
+          </select>
+          <input
+            className="field"
+            value={sujeto}
+            onChange={(e) => setSujeto(e.target.value)}
+            placeholder={quien === "user_id" ? "u-07" : "acme"}
+            aria-label={t("aj.sujeto.id")}
+          />
+          <input
+            className="field"
+            value={confirmaSujeto}
+            onChange={(e) => setConfirmaSujeto(e.target.value)}
+            placeholder={t("aj.sujeto.repite")}
+            aria-label={t("aj.sujeto.repite")}
+          />
+          <button
+            type="button"
+            className="btn danger"
+            disabled={!sujeto || confirmaSujeto !== sujeto}
+            onClick={borrarSujeto}
+          >
+            {t("aj.sujeto.boton")}
+          </button>
+        </div>
+      </div>
       <div className="peligro">
         <p>
           <strong>{t("aj.borrar.titulo", { proyecto: project })}</strong>{" "}

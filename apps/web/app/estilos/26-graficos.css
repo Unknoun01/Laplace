@@ -1,0 +1,83 @@
+/* ---------------------------------------------------------------------------
+   Dónde se va el dinero (D-152). Los mismos dos colores que la barra del héroe: gris
+   el trabajo real, ámbar lo evitable.
+   --------------------------------------------------------------------------- */
+.chart .legend i.real,
+.pasos-coste i.real {
+  background: var(--hair-strong);
+}
+.chart .legend i.evitable,
+.pasos-coste i.evitable {
+  background: var(--amber);
+}
+.graficos .chart rect.real {
+  fill: var(--hair-strong);
+}
+.graficos .chart rect.evitable {
+  fill: var(--amber);
+}
+.graficos .chart details.porque {
+  margin-top: var(--sp-2);
+  font-size: var(--fs-sm);
+}
+.pasos-coste h3 {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  margin: var(--sp-6) 0 var(--sp-3);
+}
+.pasos-coste ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.pasos-coste li {
+  display: grid;
+  grid-template-columns: minmax(0, 14rem) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: var(--fs-sm);
+}
+.pasos-coste li.otros .nombre {
+  color: var(--ink-3);
+}
+.pasos-coste .nombre {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pasos-coste .barra {
+  height: 10px;
+}
+.pasos-coste .barra i {
+  display: block;
+  height: 100%;
+  border-radius: var(--r-pill);
+  overflow: hidden;
+}
+.pasos-coste .barra i.real {
+  display: flex;
+  justify-content: flex-end;
+}
+.pasos-coste .cifra {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+.pasos-coste .cifra small {
+  display: block;
+  color: var(--amber);
+  font-family: var(--sans);
+  font-size: var(--fs-xs);
+}
+@media (max-width: 700px) {
+  .pasos-coste li {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .pasos-coste .barra {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}

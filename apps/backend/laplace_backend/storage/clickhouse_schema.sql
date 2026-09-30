@@ -121,6 +121,9 @@ CREATE TABLE IF NOT EXISTS spans
     INDEX idx_start_time start_time TYPE minmax GRANULARITY 1,
     INDEX idx_session    session_id TYPE bloom_filter(0.01) GRANULARITY 4,
     INDEX idx_dedup      dedup_hash TYPE bloom_filter(0.01) GRANULARITY 4,
+    -- Las tiradas de evaluación se buscan por su etiqueta en cada lectura de las reglas
+    -- (D-177): sin índice era recorrer la columna de la ventana entera.
+    INDEX idx_tags       tags TYPE bloom_filter(0.01) GRANULARITY 4,
     -- La búsqueda en el contenido (D-144). Bloques de 4 bytes: con 3 casi todos los
     -- gránulos tienen todos los trozos de un id y no se descarta ninguno. La expresión
     -- es `CONTENIDO` de clickhouse.py, letra por letra.
@@ -128,10 +131,12 @@ CREATE TABLE IF NOT EXISTS spans
 )
 ENGINE = ReplacingMergeTree(ingested_at)
 PARTITION BY toYYYYMM(start_time)
--- El día va antes que la traza (D-168): con `(project_id, trace_id, span_id)` los días se
--- mezclaban en cada gránulo, y una ventana de un día leía casi todo el histórico del
--- proyecto. Las tablas de antes se migran con `python -m laplace_backend.storage.migrar_orden`.
-ORDER BY (project_id, toDate(start_time), trace_id, span_id)
+-- La hora va antes que la traza (D-168, D-177): con `(project_id, trace_id, span_id)` los
+-- días se mezclaban en cada gránulo, y una ventana de un día leía casi todo el histórico
+-- del proyecto; con el día, leer una hora costaba el día entero, y los preagregados leen
+-- en crudo la hora en curso en cada consulta. Las tablas de antes se migran con
+-- `python -m laplace_backend.storage.migrar_orden`.
+ORDER BY (project_id, toStartOfHour(start_time), trace_id, span_id)
 SETTINGS index_granularity = 8192;
 
 -- Instalaciones anteriores al índice de trace_id: CREATE TABLE IF NOT EXISTS no toca
@@ -205,3 +210,167 @@ ALTER TABLE spans MODIFY COLUMN attributes String CODEC(ZSTD(3));
 -- funciona igual, recorriéndolas. Para tenerlo ya en todo:
 -- ALTER TABLE spans MATERIALIZE INDEX idx_contenido
 ALTER TABLE spans ADD INDEX IF NOT EXISTS idx_contenido lowerUTF8(concat(input_messages, output_messages, tool_arguments, tool_output, retrieval_query, retrieval_documents, input_payload, output_payload)) TYPE ngrambf_v1(4, 65536, 2, 0) GRANULARITY 1;
+
+-- Instalaciones anteriores al índice de etiquetas (D-177). Como los otros, no se
+-- materializa en el arranque: ALTER TABLE spans MATERIALIZE INDEX idx_tags
+ALTER TABLE spans ADD INDEX IF NOT EXISTS idx_tags tags TYPE bloom_filter(0.01) GRANULARITY 4;
+
+-- Preagregados del Diagnóstico (D-177). Parciales por minuto, recalculados por horas
+-- enteras desde `spans FINAL` por `preagregados.py`, nunca sumados al insertar: un lote
+-- reenviado o `recalcular_coste` vuelven a insertar spans, y una suma al insertar los
+-- contaría dos veces. Cada fila lleva el `calculado` de su hora, y sólo vale la del
+-- último cálculo (`pre_horas`): lo de cálculos anteriores se ignora al leer y se va
+-- solo al fusionar. Lo que no se suma (trazas distintas, medianas, la primera
+-- ocurrencia) va como estado de ClickHouse.
+CREATE TABLE IF NOT EXISTS pre_pasos
+(
+    project_id      String,
+    minuto          DateTime('UTC'),
+    es_eval         UInt8,
+    span_type       LowCardinality(String),
+    step_key        String,
+    name            String,
+    step_label      String,
+    step_site       String,
+    step_hint       String,
+    request_model   LowCardinality(String),
+    prompt_name     LowCardinality(String),
+    prompt_version  UInt32,
+    n               UInt64,
+    n_con_coste     UInt64,
+    coste           Float64,
+    tok_in          UInt64,
+    tok_out         UInt64,
+    cache_tok       UInt64,
+    cache_escrito   UInt64,
+    ahorro_cache    Float64,
+    duracion        Float64,
+    sin_tarifa      UInt64,
+    asumida         UInt64,
+    con_tokens      UInt64,
+    primero         DateTime64(6, 'UTC'),
+    ultimo          DateTime64(6, 'UTC'),
+    traza_min       String,
+    traza_max       String,
+    min_entrada     AggregateFunction(minIf, UInt32, UInt8),
+    mediana_dur     AggregateFunction(quantileExactIf(0.5), Float64, UInt8),
+    mediana_sal     AggregateFunction(quantileExactIf(0.5), UInt32, UInt8),
+    calculado       DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(calculado)
+PARTITION BY toYYYYMM(minuto)
+ORDER BY (project_id, minuto, es_eval, span_type, step_key, name, step_label, step_site,
+          step_hint, request_model, prompt_name, prompt_version);
+
+-- Una fila por traza y minuto: la duración de una ejecución es de su primer span a su
+-- último, y eso no sale de sumar minutos. Y las ejecuciones distintas de cada grupo
+-- tampoco: se cuentan aquí, con los grupos de la traza como hashes. Fusionar estados de
+-- `uniqExact` por minuto costaba más de un segundo por lector.
+CREATE TABLE IF NOT EXISTS pre_trazas
+(
+    project_id  String,
+    minuto      DateTime('UTC'),
+    trace_id    String,
+    es_eval     UInt8,
+    fallo       UInt8,
+    inicio      DateTime64(6, 'UTC'),
+    fin         DateTime64(6, 'UTC'),
+    -- (paso, modelo) de sus llamadas a modelo, como en `model_usage`.
+    g_uso       Array(UInt64),
+    -- El paso de la cobertura: sitio, etiqueta o nombre.
+    g_cob       Array(UInt64),
+    -- (prompt, versión) de sus llamadas con prompt gestionado.
+    g_prompt    Array(UInt64),
+    calculado   DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(calculado)
+PARTITION BY toYYYYMM(minuto)
+ORDER BY (project_id, minuto, trace_id);
+
+-- Las parejas (traza, entrada) que pueden llegar a repetirse: las que se repiten dentro
+-- de su hora y las de trazas que cruzan el borde de la hora. Una pareja con un solo
+-- span en su hora y sin nada fuera no llega a repetición en ninguna ventana.
+CREATE TABLE IF NOT EXISTS pre_repes
+(
+    project_id  String,
+    minuto      DateTime('UTC'),
+    es_eval     UInt8,
+    trace_id    String,
+    dedup_hash  String,
+    etiqueta    String,
+    pista       String,
+    sitio       String,
+    tipo        String,
+    modelo      String,
+    paso        String,
+    ultima      DateTime64(6, 'UTC'),
+    n           UInt64,
+    coste       Float64,
+    duracion    Float64,
+    tok_in      UInt64,
+    tok_out     UInt64,
+    sin_tarifa  UInt64,
+    asumida     UInt64,
+    primera     AggregateFunction(argMin, Tuple(Float64, Float64, UInt32, UInt32, UInt8, UInt8),
+                                  Tuple(DateTime64(6, 'UTC'), String)),
+    calculado   DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(calculado)
+PARTITION BY toYYYYMM(minuto)
+ORDER BY (project_id, minuto, trace_id, dedup_hash);
+
+-- Lo mismo para las vueltas de un bucle, por su entrada sin números.
+CREATE TABLE IF NOT EXISTS pre_bucles
+(
+    project_id  String,
+    minuto      DateTime('UTC'),
+    es_eval     UInt8,
+    trace_id    String,
+    loop_hash   String,
+    etiqueta    String,
+    pista       String,
+    sitio       String,
+    tipo        String,
+    modelo      String,
+    paso        String,
+    ultima      DateTime64(6, 'UTC'),
+    n           UInt64,
+    entradas    AggregateFunction(uniqExact, String),
+    salidas     AggregateFunction(uniqExact, String),
+    coste       Float64,
+    coste_min   Float64,
+    duracion    Float64,
+    duracion_min Float64,
+    tok_in      UInt64,
+    tok_in_min  UInt32,
+    tok_out     UInt64,
+    tok_out_min UInt32,
+    sin_tarifa  UInt64,
+    calculado   DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(calculado)
+PARTITION BY toYYYYMM(minuto)
+ORDER BY (project_id, minuto, trace_id, loop_hash);
+
+-- Cuándo se calculó por última vez cada hora. Se escribe al final del cálculo: hasta
+-- entonces se sigue leyendo el anterior, entero.
+CREATE TABLE IF NOT EXISTS pre_horas
+(
+    project_id  String,
+    hora        DateTime('UTC'),
+    calculado   DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(calculado)
+ORDER BY (project_id, hora);
+
+-- Cada escritura en `spans` apunta aquí sus horas, con la hora del servidor de después
+-- de escribir. Una hora cuyo último apunte es posterior a su cálculo está sucia y se lee
+-- en crudo hasta que se recalcule.
+CREATE TABLE IF NOT EXISTS pre_sucias
+(
+    project_id  String,
+    hora        DateTime('UTC'),
+    marca       DateTime64(3, 'UTC') DEFAULT now64(3)
+)
+ENGINE = ReplacingMergeTree(marca)
+ORDER BY (project_id, hora);

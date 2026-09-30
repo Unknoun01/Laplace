@@ -356,6 +356,8 @@
   "error.modelo_sin_tarifa_propia": "esse modelo não tem tarifa própria",
   "error.demo_solo_local": "os dados de exemplo só existem no modo local",
   "error.confirmar_proyecto": "confirm tem de repetir o projeto",
+  "error.sujeto_uno": "indique uma pessoa (user_id) ou um cliente (customer_id), não os dois",
+  "error.confirmar_sujeto": "confirm tem de repetir o id da pessoa ou do cliente",
   "error.borrado_a_medias": "as configurações, prompts, conjuntos e chaves foram apagados, mas não os traces. Repita a exclusão para terminá-la.",
   "error.sin_cuentas": "esta instalação não tem banco de contas",
   "error.solo_personas": "isto é para pessoas com sessão iniciada",

@@ -1,0 +1,200 @@
+/* ---------- barra superior ---------- */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 54px;
+  border-bottom: 1px solid var(--hair);
+  position: sticky;
+  top: 0;
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  z-index: 20;
+}
+.mark {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+}
+.nav {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  /* Siete pestañas no caben siempre: se desplazan en vez de partir la barra (D-125). */
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+/* Si no caben, se nota: el borde derecho se difumina en vez de cortar una pestaña
+   por la mitad sin avisar. Con sitio de sobra, el difuminado cae en hueco vacío. */
+/* Sólo hacia el lado por el que queda algo: `TopBar` mide y pone `data-desborda`. Antes
+   el difuminado era fijo y, al llegar al final del desplazamiento, la última pestaña
+   seguía difuminada (B1). */
+.nav[data-desborda="derecha"] {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+}
+.nav[data-desborda="izquierda"] {
+  -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
+}
+.nav[data-desborda="ambos"] {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 28px,
+    #000 calc(100% - 28px),
+    transparent
+  );
+  mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+}
+.nav::-webkit-scrollbar {
+  display: none;
+}
+.nav a {
+  white-space: nowrap;
+}
+.brand-ctx {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.brand-ctx .slash {
+  color: var(--ink-4);
+}
+.pick .ctx.proyecto,
+.ctx.proyecto {
+  font: inherit;
+  font-size: var(--fs-md);
+  font-weight: 500;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r);
+  padding: 4px 6px;
+  max-width: 220px;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.ctx.proyecto:hover {
+  border-color: var(--hair);
+}
+.ctx.proyecto option,
+.pick .ctx option {
+  background: var(--ground);
+  color: var(--ink);
+}
+.switch {
+  font: inherit;
+  font-size: var(--fs-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  color: var(--ink-3);
+  border: 1px solid var(--hair);
+  border-radius: var(--r);
+  padding: 5px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.switch i {
+  width: 24px;
+  height: 14px;
+  border-radius: 7px;
+  background: var(--hair);
+  position: relative;
+  transition: background 0.15s;
+}
+.switch i::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--ink-3);
+  transition: transform 0.15s;
+}
+.switch[aria-checked="true"] {
+  color: var(--ink);
+}
+.switch[aria-checked="true"] i {
+  background: var(--iris);
+}
+.switch[aria-checked="true"] i::after {
+  transform: translateX(10px);
+  background: var(--on-iris);
+}
+.nav a,
+.nav span {
+  font-size: var(--fs-md);
+  color: var(--ink-3);
+  text-decoration: none;
+  padding: 5px 10px;
+  border-radius: var(--r);
+}
+.nav a:hover {
+  color: var(--ink);
+  background: var(--panel);
+}
+.nav a[aria-current="page"] {
+  color: var(--ink);
+  background: var(--panel-2);
+}
+.nav span.soon {
+  color: var(--ink-4);
+  cursor: default;
+}
+.pick {
+  margin-left: auto;
+  flex: 0 0 auto;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.pick .ctx {
+  font: inherit;
+  font-size: var(--fs-md);
+  color: var(--ink-2);
+  background: transparent;
+  border: 1px solid var(--hair);
+  border-radius: var(--r);
+  padding: 5px 10px;
+  cursor: pointer;
+}
+.pick .ctx:hover {
+  color: var(--ink);
+  border-color: var(--hair-strong);
+}
+
+.seg {
+  display: flex;
+  border: 1px solid var(--hair);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+.seg button {
+  font: inherit;
+  font-size: var(--fs-sm);
+  background: transparent;
+  color: var(--ink-3);
+  border: 0;
+  padding: 6px 13px;
+  cursor: pointer;
+}
+.seg button[aria-pressed="true"] {
+  background: var(--panel-2);
+  color: var(--ink);
+}
+.seg button + button {
+  border-left: 1px solid var(--hair);
+}

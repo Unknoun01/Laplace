@@ -13,7 +13,7 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTrace
 from starlette.concurrency import run_in_threadpool
 
 from . import idioma
-from .auth import identity_of
+from .auth import ALL_PROJECTS, identity_of
 from .cache_diagnostico import CacheDiagnostico
 from .config import get_settings
 from .ingest.otlp import OTLP_EXPANSION, CuerpoDemasiadoGrande, decode_request, parse_spans
@@ -253,9 +253,16 @@ async def get_trace(
 
 
 def _window(days: int) -> Window:
-    """Ventana de análisis. Todas las pantallas comparten el mismo rango."""
+    """Ventana de análisis. Todas las pantallas comparten el mismo rango.
+
+    El principio, en minuto entero: los preagregados son por minuto, y un principio a
+    mitad de minuto obligaba a leer ese trozo en crudo en cada lector (D-177). Son menos
+    de sesenta segundos más de ventana. El final sigue siendo ahora, para que lo que
+    acaba de llegar se vea.
+    """
     until = datetime.now(timezone.utc)
-    return Window(since=until - timedelta(days=days), until=until, days=days)
+    since = (until - timedelta(days=days)).replace(second=0, microsecond=0)
+    return Window(since=since, until=until, days=days)
 
 
 #: El Diagnóstico recordado un minuto en la nube; lo borra cualquier cambio por la API.
@@ -336,6 +343,11 @@ async def list_projects(request: Request) -> dict[str, Any]:
     proyecto. Sin este filtro, el selector de la barra superior sería un directorio de
     los clientes de la instalación —nombres, volumen y gasto— para cualquiera con una
     clave cualquiera.
+
+    Al final van, a cero, los proyectos que la identidad tiene nombrados y que todavía
+    no han mandado nada (D-175): quien entraba con la clave de un proyecto recién creado
+    leía «todavía no hay ningún proyecto» y un `init` con `project="mi-agente"`, que es
+    justo el código que no tiene que copiar.
     """
     identidad = identity_of(request)
     stats = [
@@ -343,6 +355,8 @@ async def list_projects(request: Request) -> dict[str, Any]:
         for s in await run_in_threadpool(_store(request).list_projects)
         if identidad.allows(s.project_id)
     ]
+    con_datos = {s.project_id for s in stats}
+    vacios = sorted(p for p in identidad.projects if p != ALL_PROJECTS and p not in con_datos)
     return {
         "projects": [
             {
@@ -353,6 +367,11 @@ async def list_projects(request: Request) -> dict[str, Any]:
                 "last_seen": s.last_seen,
             }
             for s in stats
+        ]
+        + [
+            {"id": p, "trace_count": 0, "span_count": 0, "total_cost_usd": 0.0,
+             "last_seen": None}
+            for p in vacios
         ]
     }
 

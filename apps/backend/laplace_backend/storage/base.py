@@ -491,6 +491,13 @@ class CoverageFacts:
     split_steps: list[str] = field(default_factory=list)
 
 
+def _sujeto(user_id: str | None, customer_id: str | None) -> tuple[str, str]:
+    """La columna y el valor de a quién se borra: uno de los dos, y no vacío."""
+    if bool(user_id) == bool(customer_id):
+        raise ValueError("hay que decir una persona (user_id) o un cliente (customer_id)")
+    return ("user_id", str(user_id)) if user_id else ("customer_id", str(customer_id))
+
+
 #: Cuánto se ensanchan por cada lado las subconsultas de los filtros por traza respecto
 #: de la ventana (D-168). Acotarlas es lo que deja a ClickHouse leer sólo los días de la
 #: ventana; el margen es para una traza que empezó un poco antes: la sesión, el usuario y
@@ -817,6 +824,15 @@ class SpanStore(Protocol):
 
     def delete_before(self, cutoff: datetime) -> int:
         """Borra los spans que empezaron antes de `cutoff`. La retención en SQLite."""
+
+    def delete_project_before(self, project_id: str, cutoff: datetime) -> None:
+        """La retención de un proyecto: sus spans anteriores a `cutoff` (D-173)."""
+
+    def delete_subject(
+        self, project_id: str, *, user_id: str | None = None, customer_id: str | None = None
+    ) -> int:
+        """Borra las trazas enteras en las que aparece esa persona o ese cliente (D-173).
+        Devuelve cuántas trazas eran."""
 
     def health(self) -> bool:
         """True si el almacén responde."""

@@ -422,9 +422,11 @@ datos de ejemplo»** en la pantalla vacía, o desde la terminal:
 laplace demo          # trazas simuladas, en un proyecto aparte
 ```
 
-Las trazas se guardan para siempre salvo que se arranque con `LAPLACE_RETENTION_DAYS`, y
-un proyecto entero —trazas, anotaciones, conjuntos, prompts y ajustes— se borra desde
-Ajustes.
+Las trazas se guardan para siempre salvo que se arranque con `LAPLACE_RETENTION_DAYS`;
+cada proyecto puede guardar menos desde Ajustes, donde también se borran los datos de una
+persona o un cliente concretos, o el proyecto entero (D-173).
+
+La documentación de uso está en [`docs/usuario/`](docs/usuario/index.md).
 
 Y para que aparezcan las tuyas, una línea en tu agente:
 
@@ -433,7 +435,7 @@ import laplace
 laplace.init(project="mi-agente", endpoint="http://127.0.0.1:8100")
 ```
 
-Es **el mismo producto** que la versión de nube: la misma ingesta, las mismas tres
+Es **el mismo producto** que la versión de nube: la misma ingesta, las mismas cinco
 reglas de detección, el mismo panel de ahorro y la misma interfaz. Lo único que cambia
 es dónde están las filas (D-015), y hay un test que compara los dos almacenes sobre los
 mismos spans para que no puedan derivar.
@@ -466,12 +468,12 @@ costaría de verdad. Genera a propósito las patologías que el producto tiene q
 enseñar: un bucle de tool calls, un paso trivial resuelto con un modelo caro, un agente
 iterativo de ~30 pasos que se atasca, y una traza que falla.
 
-### Si ya tenías datos: la clave de ordenación por día
+### Si ya tenías datos: la clave de ordenación por hora
 
-Las instalaciones creadas antes de D-168 ordenan la tabla de spans de una forma con la
-que cada pantalla lee todo el histórico del proyecto, aunque mires un solo día. El
-backend lo avisa al arrancar. Migrarla es una copia entera de la tabla, así que no se
-hace sola:
+Las instalaciones creadas antes de D-177 ordenan la tabla de spans de una forma con la
+que las pantallas leen más de lo que necesitan: antes de D-168, todo el histórico del
+proyecto; desde D-168, el día entero aunque haga falta una hora. El backend lo avisa al
+arrancar. Migrarla es una copia entera de la tabla, así que no se hace sola:
 
 ```bash
 docker compose exec backend python -m laplace_backend.storage.migrar_orden            # qué haría
@@ -479,8 +481,12 @@ docker compose exec backend python -m laplace_backend.storage.migrar_orden --hac
 ```
 
 La ingesta sigue funcionando mientras copia, necesita sitio libre para una segunda copia
-de la tabla (lo comprueba antes) y no borra la tabla vieja: queda como
-`spans_antes_d168` hasta que la borres tú.
+de la tabla y un poco más (lo comprueba antes) y no borra la tabla vieja: queda como
+`spans_antes_d177` hasta que la borres tú.
+
+Los preagregados del Diagnóstico (D-177) se calculan solos en segundo plano: una
+instalación con datos de antes los va rellenando de lo más reciente a lo más viejo, y
+mientras tanto lee en crudo lo que falta. Con `LAPLACE_PREAGREGADOS=false` se apagan.
 
 ### Desarrollo sin Docker
 

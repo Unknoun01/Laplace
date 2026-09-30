@@ -1,0 +1,75 @@
+/* ---------- tabla clave-valor ---------- */
+.kv {
+  border: 1px solid var(--hair);
+  border-radius: var(--r);
+  overflow: hidden;
+  margin-top: 6px;
+}
+.kv div {
+  display: flex;
+  gap: 14px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--hair-soft);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+}
+.kv div:first-child {
+  border-top: 0;
+}
+.kv dt {
+  color: var(--ink-3);
+  flex: 0 0 190px;
+  margin: 0;
+}
+.kv dd {
+  margin: 0;
+  color: var(--ink-2);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- botones ---------- */
+.actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 26px 0 0;
+}
+.btn {
+  font: inherit;
+  font-size: var(--fs-md);
+  padding: 9px 16px;
+  border-radius: var(--r);
+  cursor: pointer;
+  border: 1px solid var(--hair);
+  background: transparent;
+  color: var(--ink-2);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.btn:hover {
+  color: var(--ink);
+  border-color: var(--hair-strong);
+}
+.btn.primary {
+  background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+  border-color: transparent;
+  color: var(--on-iris);
+  font-weight: 500;
+}
+.btn.primary:hover {
+  background: linear-gradient(135deg, var(--iris-hover), var(--accent-2));
+  border-color: transparent;
+}
+.btn.small {
+  font-size: var(--fs-sm);
+  padding: 5px 10px;
+}
+.disclaimer {
+  margin-top: 22px;
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+  max-width: 64ch;
+}

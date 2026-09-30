@@ -1,0 +1,177 @@
+/* ---------- cuentas: entrar, organización y menú de usuario (D-127) ---------- */
+.auth {
+  display: grid;
+  place-items: start center;
+  padding: 56px 0;
+}
+.auth-card {
+  width: 100%;
+  max-width: 400px;
+  display: grid;
+  gap: 14px;
+  background: var(--panel);
+  border: 1px solid var(--hair);
+  border-radius: var(--r);
+  padding: 28px 28px 24px;
+}
+.auth-card h1 {
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  margin: 0;
+}
+.auth-card label {
+  display: grid;
+  gap: 5px;
+}
+.auth-card label small {
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+}
+.auth-card .field {
+  width: 100%;
+}
+.auth-card .btn.primary {
+  justify-content: center;
+}
+.auth-card .muted,
+.auth-card .hint {
+  margin: 0;
+  font-size: var(--fs-sm);
+}
+.hint {
+  color: var(--ink-3);
+  margin-top: -6px !important;
+}
+.con-clave > summary::after {
+  content: none !important;
+}
+.con-clave > summary {
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+}
+.una-vez {
+  border: 1px solid var(--amber-line);
+  background: var(--amber-bg);
+  border-radius: var(--r);
+  padding: 12px 14px;
+  margin: 12px 0;
+  font-size: var(--fs-md);
+}
+.una-vez p {
+  margin: 0 0 8px;
+}
+.una-vez pre {
+  margin: 10px 0 0;
+}
+.copiable {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.copiable code {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  background: var(--code-bg);
+  color: var(--code-ink);
+  border: 1px solid var(--hair);
+  border-radius: var(--r);
+  padding: 5px 8px;
+  word-break: break-all;
+  flex: 1 1 260px;
+}
+.lista-simple {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0 0;
+  display: grid;
+  gap: 6px;
+  font-size: var(--fs-md);
+}
+.sec-summary {
+  cursor: pointer;
+  font-size: var(--fs-base);
+  font-weight: 600;
+}
+.usuario {
+  position: relative;
+}
+.usuario > summary {
+  list-style: none;
+  cursor: pointer;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--panel-2);
+  border: 1px solid var(--hair);
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.usuario > summary::-webkit-details-marker {
+  display: none;
+}
+.usuario-menu {
+  position: absolute;
+  right: 0;
+  top: 38px;
+  min-width: 230px;
+  background: var(--glass-strong);
+  border: 1px solid var(--hair);
+  border-radius: var(--r);
+  padding: 10px;
+  display: grid;
+  gap: 4px;
+  z-index: 30;
+  box-shadow: var(--shadow);
+}
+.usuario-menu p {
+  margin: 0 0 6px;
+  display: grid;
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+  padding: 0 6px 8px;
+  border-bottom: 1px solid var(--hair-soft);
+}
+.usuario-menu p strong {
+  color: var(--ink);
+  font-weight: 500;
+}
+.usuario-menu a,
+.usuario-menu button {
+  font: inherit;
+  font-size: var(--fs-md);
+  text-align: left;
+  color: var(--ink-2);
+  background: transparent;
+  border: 0;
+  padding: 6px;
+  border-radius: var(--r);
+  text-decoration: none;
+  cursor: pointer;
+}
+.usuario-menu a:hover,
+.usuario-menu button:hover {
+  background: var(--panel-2);
+  color: var(--ink);
+}
+
+/* Lo que el rol no permite, deshabilitado sin cambiar la maquetación (D-127). */
+fieldset.sin-marco {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+fieldset.sin-marco:disabled {
+  opacity: 0.75;
+}
+.solo-lectura {
+  border-left: 2px solid var(--hair-strong);
+  padding: 6px 12px;
+  color: var(--ink-3);
+  font-size: var(--fs-md);
+  margin: 18px 0 0;
+}

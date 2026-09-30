@@ -1,4 +1,4 @@
-"""Migra la tabla `spans` de ClickHouse a la clave de ordenación por día (D-168).
+"""Migra la tabla `spans` de ClickHouse a la clave de ordenación por hora (D-168, D-177).
 
     python -m laplace_backend.storage.migrar_orden            # dice qué haría
     python -m laplace_backend.storage.migrar_orden --hacerlo  # lo hace
@@ -7,8 +7,11 @@ En Docker: `docker compose exec backend python -m laplace_backend.storage.migrar
 
 Con la clave `(project_id, trace_id, span_id)` los días se mezclan en cada gránulo, y una
 ventana de un día lee casi todo el histórico del proyecto (D-166). Con
-`(project_id, toDate(start_time), trace_id, span_id)` lee su día. Las instalaciones
-nuevas nacen así; las que ya existen se migran con esto, a mano y cuando se quiera,
+`(project_id, toDate(start_time), trace_id, span_id)` lee su día (D-168), pero leer una
+hora sigue costando el día entero, y los preagregados del Diagnóstico leen en crudo la
+hora en curso en cada consulta (D-177). Con `(project_id, toStartOfHour(start_time),
+trace_id, span_id)` lee su hora. Las instalaciones nuevas nacen así; las que tienen
+cualquiera de las dos claves anteriores se migran con esto, a mano y cuando se quiera,
 porque es una copia entera de la tabla y no puede hacerse de paso al arrancar.
 
 Cómo, y por qué es seguro:
@@ -20,7 +23,7 @@ Cómo, y por qué es seguro:
    `ingested_at`, y otra vez justo después del cambio de nombre, que es atómico
    (`EXCHANGE TABLES`). Copiar un span dos veces no duplica nada: la tabla es
    `ReplacingMergeTree` y las lecturas ya se quedan con una versión de cada span.
-3. **La tabla vieja no se borra.** Queda como `spans_antes_d168` con todo dentro, y el
+3. **La tabla vieja no se borra.** Queda como `spans_antes_d177` con todo dentro, y el
    final dice cómo borrarla cuando se haya comprobado que todo cuadra.
 4. **La retención se vuelve a poner**: el TTL no pasa con `CREATE TABLE ... AS`.
 
@@ -37,10 +40,19 @@ from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger("laplace.migrar_orden")
 
-CLAVE_NUEVA = "project_id, toDate(start_time), trace_id, span_id"
+CLAVE_NUEVA = "project_id, toStartOfHour(start_time), trace_id, span_id"
+#: La de antes de D-168 y la de D-168, por día.
 CLAVE_VIEJA = "project_id, trace_id, span_id"
-NUEVA = "spans_d168"
-ANTES = "spans_antes_d168"
+CLAVE_DIA = "project_id, toDate(start_time), trace_id, span_id"
+CLAVES_VIEJAS = (CLAVE_VIEJA, CLAVE_DIA)
+NUEVA = "spans_d177"
+ANTES = "spans_antes_d177"
+
+#: Cuántas veces lo que ocupa la tabla hace falta libre. La copia recién escrita ocupa
+#: bastante más que la tabla fusionada hasta que sus partes se fusionan: con 148 millones
+#: de spans, 6 GB por cada 51 millones frente a los 11,8 GB de la tabla entera. Con 1,2
+#: la comprobación dejaba empezar una copia que no cabía (D-177).
+SITIO = 1.6
 
 #: Lo que llegue en los últimos minutos antes de empezar se vuelve a copiar al final,
 #: por si una inserción asíncrona se confirmó con retraso.
@@ -57,8 +69,8 @@ def clave(client, tabla: str = "spans") -> str:
 
 
 def necesita(client) -> bool:
-    """Si la tabla `spans` tiene todavía la clave de antes."""
-    return clave(client) == CLAVE_VIEJA
+    """Si la tabla `spans` tiene todavía una clave de antes."""
+    return clave(client) in CLAVES_VIEJAS
 
 
 def _existe(client, tabla: str) -> bool:
@@ -109,7 +121,7 @@ def _libre(client) -> int:
 def plan(client) -> str:
     """Lo que se haría, sin hacer nada."""
     actual = clave(client)
-    if actual != CLAVE_VIEJA:
+    if actual not in CLAVES_VIEJAS:
         return f"No hace falta: la tabla spans ya está ordenada por ({actual})."
     ocupa, libre = _bytes(client, "spans"), _libre(client)
     filas = int(client.query("SELECT count() FROM spans").result_rows[0][0])
@@ -119,7 +131,7 @@ def plan(client) -> str:
         f"Hace falta sitio para una segunda copia: libres {libre / 1e9:.1f} GB.",
         f"La tabla vieja quedaría como {ANTES}, sin borrar.",
     ]
-    if libre < ocupa * 1.2:
+    if libre < ocupa * SITIO:
         lineas.append("NO HAY SITIO SUFICIENTE: libera disco antes de lanzarla.")
     return "\n".join(lineas)
 
@@ -131,7 +143,7 @@ def migrar(client, retention_days: int = 0, *, avisar=print) -> bool:
             avisar(f"Ya estaba hecha. La tabla vieja sigue en {ANTES}.")
         return False
     ocupa, libre = _bytes(client, "spans"), _libre(client)
-    if libre < ocupa * 1.2:
+    if libre < ocupa * SITIO:
         raise RuntimeError(
             f"no hay sitio para la copia: ocupa {ocupa / 1e9:.1f} GB y hay "
             f"{libre / 1e9:.1f} GB libres"

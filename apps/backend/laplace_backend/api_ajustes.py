@@ -578,6 +578,84 @@ async def load_demo(request: Request) -> dict[str, Any]:
     return await run_in_threadpool(cargar_demo, origen, _store(request), _meta(request))
 
 
+# ---------------------------------------------------------------------------------
+# Retención por proyecto y borrado de una persona o un cliente (D-173)
+# ---------------------------------------------------------------------------------
+
+
+@router.get("/retention")
+async def get_retention(request: Request, project_id: str) -> dict[str, Any]:
+    from . import retencion
+
+    ajustes = await run_in_threadpool(retencion.leer, _meta(request), project_id)
+    instalacion = request.app.state.settings.retention_days
+    propios = int(ajustes.get("days") or 0)
+    return {
+        "project_id": project_id,
+        "days": propios,
+        "installation_days": instalacion,
+        "effective_days": retencion.dias_efectivos(propios, instalacion),
+        "last_run": ajustes.get("last_run"),
+    }
+
+
+class RetencionIn(BaseModel):
+    project_id: str
+    #: Días que guarda el proyecto. 0 lo quita y manda la de la instalación.
+    days: int = Field(ge=0, le=3650)
+
+
+@router.put("/retention")
+async def put_retention(request: Request, body: RetencionIn) -> dict[str, Any]:
+    from . import retencion
+
+    meta = _meta(request)
+    if body.days:
+        await run_in_threadpool(
+            _guard, meta.set_setting, body.project_id, retencion.CLAVE, {"days": body.days}
+        )
+    else:
+        await run_in_threadpool(_guard, meta.delete_setting, body.project_id, retencion.CLAVE)
+    return await get_retention(request, body.project_id)
+
+
+@router.delete("/subjects")
+async def delete_subject(
+    request: Request,
+    project_id: str,
+    confirm: str,
+    user_id: str | None = None,
+    customer_id: str | None = None,
+) -> dict[str, Any]:
+    """Borra las trazas enteras en las que aparece una persona (`user_id`) o un cliente
+    (`customer_id`) del proyecto: lo que pediría el cliente de un cliente.
+
+    `confirm` repite el id, como al borrar un proyecto: un `DELETE` escrito a mano con el
+    id equivocado no se lleva nada por delante.
+    """
+    quien = user_id or customer_id
+    if bool(user_id) == bool(customer_id):
+        raise HTTPException(status_code=400, detail=t("error.sujeto_uno"))
+    if confirm != quien:
+        raise HTTPException(status_code=400, detail=t("error.confirmar_sujeto"))
+    trazas = await run_in_threadpool(
+        _store(request).delete_subject, project_id, user_id=user_id, customer_id=customer_id
+    )
+    cuentas = getattr(request.app.state, "cuentas", None)
+    if cuentas is not None:
+        org_id = await run_in_threadpool(cuentas.org_del_proyecto, project_id)
+        await run_in_threadpool(
+            cuentas.anotar,
+            org_id or "",
+            identity_of(request).user_id,
+            "borrar_usuario" if user_id else "borrar_cliente",
+            project_id,
+        )
+    logger.warning("datos borrados de %s %s en %s: %d trazas",
+                   "la persona" if user_id else "el cliente", quien, project_id, trazas)
+    return {"project_id": project_id, "deleted_traces": trazas}
+
+
 @router.delete("/projects")
 async def delete_project(request: Request, project_id: str, confirm: str) -> dict[str, Any]:
     """Borra un proyecto entero: trazas, anotaciones, conjuntos, prompts y ajustes.

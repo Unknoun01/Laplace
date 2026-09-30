@@ -1,0 +1,140 @@
+/* ---------------------------------------------------------------------------
+   Cobertura (D-096). Cuando es baja va ARRIBA DEL TODO, antes que el dinero: es
+   la única forma de que nadie lea un ahorro sin saber sobre cuánto está
+   calculado. Cuando es buena se queda en una línea plegable.
+   --------------------------------------------------------------------------- */
+
+.cobertura {
+  border: 1px solid var(--hair-soft);
+  border-left-width: 3px;
+  border-radius: var(--r);
+  background: var(--panel);
+  padding: 16px 18px;
+  margin-bottom: 22px;
+}
+.cobertura.malo {
+  border-left-color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 6%, var(--panel));
+}
+.cobertura.flojo {
+  border-left-color: var(--amber);
+}
+.cobertura h2 {
+  font-size: var(--fs-lg);
+  margin: 0 0 6px;
+}
+.cobertura.malo h2 {
+  color: var(--amber);
+}
+.cobertura p {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+  max-width: 78ch;
+}
+
+.cobertura-linea {
+  margin-top: 14px;
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+}
+.cobertura-linea summary {
+  cursor: pointer;
+  color: var(--ink-2);
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cobertura-linea summary::-webkit-details-marker {
+  display: none;
+}
+.cobertura-linea summary:hover {
+  color: var(--ink);
+}
+.cobertura-linea p {
+  margin: 10px 0 0;
+  max-width: 78ch;
+  color: var(--ink-3);
+}
+.punto {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--teal);
+  flex: none;
+}
+.punto.flojo,
+.punto.malo {
+  background: var(--amber);
+}
+.punto.sin-base {
+  background: var(--ink-3);
+}
+
+.senales {
+  list-style: none;
+  padding: 0;
+  margin: 14px 0 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 14px;
+}
+.senales li {
+  min-width: 0;
+}
+.stop {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--fs-xs);
+  color: var(--ink-2);
+}
+.stop b {
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  color: var(--ink);
+}
+.senales li.malo .stop b,
+.senales li.flojo .stop b {
+  color: var(--amber);
+}
+.senales li.no-aplica .stop b,
+.senales li.sin-base .stop b {
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+}
+.sbar {
+  height: 4px;
+  border-radius: var(--r-sm);
+  background: var(--hair-soft);
+  margin: 6px 0 5px;
+  overflow: hidden;
+}
+.sbar i {
+  display: block;
+  height: 100%;
+  background: var(--accent-2);
+}
+.senales li.malo .sbar i,
+.senales li.flojo .sbar i {
+  background: var(--amber);
+}
+.senales small {
+  display: block;
+  font-size: var(--fs-2xs);
+  color: var(--ink-3);
+}
+.senales small.fix {
+  margin-top: 5px;
+  color: var(--ink-2);
+}
+.state.warn h2 {
+  color: var(--amber);
+}
+.whynot {
+  max-width: 70ch;
+  margin: 12px auto 0;
+  color: var(--ink-2);
+}

@@ -3,7 +3,38 @@ import { IBM_Plex_Mono, Inter } from "next/font/google";
 import { Suspense } from "react";
 import { TopBar } from "@/components/TopBar";
 import { ProveedorIdioma } from "@/lib/i18n";
-import "./globals.css";
+// La hoja de estilos, partida por pantallas (D-174). El orden es la cascada: se
+// importan en el orden en que estaban en el `globals.css` de antes, que pasaba de 4.100
+// líneas. Los temas y los tokens van primero; lo de cada pantalla, después.
+import "./estilos/00-temas.css";
+import "./estilos/01-base.css";
+import "./estilos/02-barra.css";
+import "./estilos/03-heroe.css";
+import "./estilos/04-secciones.css";
+import "./estilos/05-ficha.css";
+import "./estilos/06-arbol.css";
+import "./estilos/07-controles.css";
+import "./estilos/08-trazas.css";
+import "./estilos/09-estados.css";
+import "./estilos/10-responsive.css";
+import "./estilos/11-panel.css";
+import "./estilos/12-en-vivo.css";
+import "./estilos/13-evaluaciones.css";
+import "./estilos/14-prompts.css";
+import "./estilos/15-cobertura.css";
+import "./estilos/16-ajustes.css";
+import "./estilos/17-estados-de-hallazgos.css";
+import "./estilos/18-avisos.css";
+import "./estilos/19-lista-del-inicio.css";
+import "./estilos/20-pasos-de-evaluaciones.css";
+import "./estilos/21-cuentas.css";
+import "./estilos/22-diagnostico.css";
+import "./estilos/23-cristal.css";
+import "./estilos/24-pantallas-anchas.css";
+import "./estilos/25-menos-texto.css";
+import "./estilos/26-graficos.css";
+import "./estilos/27-grafo.css";
+import "./estilos/28-ciclo.css";
 
 /**
  * Las fuentes se descargan al construir y se sirven desde el propio Laplace (D-125).

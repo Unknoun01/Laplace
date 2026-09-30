@@ -4,7 +4,7 @@ Documento de traspaso entre sesiones. Última actualización: 28 de septiembre d
 tras probar las integraciones que faltaban (D-164 y D-165) y con el replay contrafactual
 (D-167). Aquí sólo está **lo que
 queda**: lo hecho vive en `DECISIONS.md` y en la historia de git. Léelo entero antes de tocar nada; después lee `STATUS.md` y las
-últimas entradas de `DECISIONS.md` (D-154 a D-168).
+últimas entradas de `DECISIONS.md` (D-168 a D-177).
 
 ## 1. Qué es y hacia dónde va
 
@@ -35,7 +35,7 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
   verde (`git merge --no-ff`); si no dice otra cosa, se sigue así.
 - **Nada entra sin su prueba.** Primero la prueba en rojo, después el arreglo.
 - **Hay que comprobar que la prueba muerde:** romper el código a propósito y verla fallar.
-- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-172**.
+- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-178**.
 - **Todo en español:** código, comentarios, commits y textos. Los textos de la interfaz y
   del backend, en los cinco idiomas a la vez (`apps/web/lib/mensajes/*.ts`,
   `apps/backend/laplace_backend/textos/*.json`); las pruebas exigen las mismas claves.
@@ -50,7 +50,7 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
   - Las tiradas de evaluación no son tráfico real: ni reglas, ni Prompts, ni margen.
   - Paridad entre SQLite y ClickHouse.
 - **El dinero se formatea sólo en dos sitios:** `cifras.py` (backend) y `lib/format.ts` (web), que son espejo el uno del otro.
-- **El color sale sólo de los tokens** de `globals.css`; `test_tema.py` mide el contraste
+- **El color sale sólo de los tokens** de `app/estilos/00-temas.css`; `test_tema.py` mide el contraste
   de cada tinta en los cuatro temas.
 
 **Entorno (Windows):**
@@ -81,11 +81,7 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
 
 ### Restos de fases cerradas
 - **Integraciones:** probadas contra un proveedor falso (D-164, D-165 y D-170): `client.beta.*` en Python; Anthropic por OpenInference-js y OpenLLMetry-js; el AI SDK de Vercel 7; LangChain.js; LangGraph.js; el Agents SDK de OpenAI y Mastra. **Falta pasarlas contra las API reales**, que espera una clave de proveedor (sección 5). El banco (`scripts/integraciones_js`) tiene el proveedor y el uso fijos: para una pasada real hace falta apuntar los agentes a la API y un verificador que no espere el uso exacto.
-- **Escala (en curso; decidido con el usuario: las dos cosas, en este orden).** La tabla ya se ordena por día y los filtros se acotan a la ventana (D-168): con 14 días guardados, el Diagnóstico de un día tarda 5–6,5 s en el contenedor de 4 núcleos y el de 7 días casi un minuto. El objetivo es 1,5 s.
-  1. **Primero, repeticiones y bucles** (44 % del Diagnóstico). Los preagregados no los tocan, porque miran dentro de cada traza. Recorren la ventana dos veces: una para buscar candidatas, calculando un hash de dos cadenas en cada fila, y otra con `FINAL`. Además, `RULES_WHERE`, que usan casi todas las lecturas, lleva una subconsulta que vuelve a leer la columna `tags` de toda la ventana para excluir las tiradas de evaluación. Antes de cambiar nada se mide cada consulta por separado (filas, bytes y tiempo); las ideas de partida son una columna materializada con ese hash y un índice sobre `tags`.
-  2. **Después, los preagregados por hora** para el resto (uso por paso, resumen, cobertura, serie del gráfico y prompts). **La trampa:** recalcular costes al cambiar una tarifa (`recalcular_coste`) y un lote reenviado vuelven a insertar spans, así que una tabla que sume al insertar contaría dos veces. Hay que recalcular cada hora desde `spans FINAL` y guardar el resultado reemplazando el anterior. Los agregados que no se suman (trazas distintas, trazas de ejemplo, medianas) se guardan como estados de ClickHouse. Hay que controlar qué horas están sucias y leer en crudo las horas del borde de la ventana. La prueba de fuego es que el Diagnóstico con preagregados salga idéntico al calculado en crudo.
-  - La estimación con los números de D-168 es que el día baja a unos 3 s con los preagregados solos; hace falta lo primero para acercarse a 1,5 s. Los datos de carga (14 días, 140 millones de spans) se están regenerando para medir.
-  - Las instalaciones que ya existen se migran a mano con `python -m laplace_backend.storage.migrar_orden`.
+- **Escala: el día, en el objetivo (D-177).** Con la clave por hora y los preagregados por minuto, el Diagnóstico de un día de un proyecto con diez millones de spans al día tarda 1,1 s en el contenedor de 4 núcleos (antes 6,5 s); el de 7 días, 6 s (antes casi un minuto). Si hace falta bajar la semana: los recuentos exactos de ejecuciones distintas y las medianas son lo que pesa; una idea es guardar por hora, además de por minuto, lo de las horas enteras. Las instalaciones que ya existen se migran a mano con `python -m laplace_backend.storage.migrar_orden`.
 
 ### Siguiente: funciones diferenciales (confirmar el orden con el usuario)
 - **Replay contrafactual, más allá** (lo básico está hecho, D-167): llamadas con herramientas (habría que simular sus resultados con los grabados, sin ejecutarlas), imágenes y bloques entre proveedores, y un botón en la versión local que lo lance sin copiar la orden.
@@ -110,29 +106,18 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
   - SSO/SAML, SCIM y verificación de correo.
 
 ## 4. Deuda y detalles sueltos
-- **Guardia estructural para reglas nuevas.** `test_catalogo_hallazgos` exige ficha y
-  trazas a cada tipo, pero nada exige que una regla nueva desambigüe su título (D-115) ni
-  que entre en el descuento del doble conteo (D-117). La de Prompts (D-157) se hizo
-  mirándolo a mano.
-- **Retención por proyecto** (D-009): hoy `LAPLACE_RETENTION_DAYS` vale para toda la
-  instalación. Y no hay forma de borrar los datos de un usuario final (`user_id`) o de un
-  cliente (`customer_id`) concreto, que es lo que pediría un cliente de un cliente.
-- **Lo que la auditoría del rediseño no revisó** (`docs/auditoria-rediseno.md`): las
-  pantallas con sesión de la versión Docker (organización, invitaciones, claves), los
-  flujos de escritura de punta a punta y los navegadores que no son Chromium (Safari
-  trata distinto `backdrop-filter` y `color-mix`, y todo el color sale de `color-mix`;
-  el claro Rose Gold depende del cristal y de `saturate()`).
-- **El contraste se mide sobre los tokens, no sobre cada pantalla** (D-155): los
-  resplandores de detrás del cristal y los degradados de los botones no entran en la
-  cuenta.
+- **Los navegadores que no son Chromium**, que la auditoría del rediseño no revisó
+  (`docs/auditoria-rediseno.md`). Safari trata distinto `backdrop-filter` y `color-mix`,
+  y todo el color sale de `color-mix`; el claro Rose Gold depende del cristal y de
+  `saturate()`. En el contenedor sólo hay Chromium, así que hace falta un Mac o
+  WebKit de Playwright. Las pantallas con sesión y los flujos de escritura ya se
+  recorren en `test_pantallas_cuentas.py` (D-175).
 - **En español a propósito, y por decidir si sigue así** (D-148): la línea de órdenes
   (`laplace ui`, `laplace demo`) y los logs.
 - **La barra con siete pestañas** ocupa tres filas en móvil (3 + 3 + 1). Cabe y se prueba,
   pero pide otra forma (agrupar Prompts y Ajustes, o un menú) si se añade alguna más.
-- `globals.css` pasa de 4.100 líneas en un solo fichero: partirlo.
-- `DECISIONS.md` pasa de 220 KB: hace falta un índice por tema y documentación de cara al usuario aparte (Mintlify, Docusaurus o Starlight).
+- La documentación de usuario (`docs/usuario/`, D-174) es Markdown plano: pasarla a un sitio (Mintlify, Docusaurus o Starlight) cuando haya dominio.
 - `STATUS.md` se puso al día al cerrar las fases 5 y 6: mantenerlo así al cerrar cada fase.
-- `test_pantallas.py`: un fallo antiguo en la pantalla de Prompts (no cargó en 15 s en una pasada completa) no se ha vuelto a ver ni se ha explicado.
 - Tras la caída de Docker del 26 de septiembre quedaron apartadas `%LOCALAPPDATA%\Docker\run.viejo-*` y `docker-secrets-engine.viejo-*` con sockets bloqueados; se pueden borrar tras reiniciar Windows.
 
 ## 5. Lo que sólo puede hacer el usuario

@@ -5,6 +5,9 @@ documento de contexto se resuelve con la opción más simple y estándar, y se a
 
 Formato: `YYYY-MM-DD — Decisión — Motivo — Alternativas descartadas`.
 
+**Por tema:** [`docs/decisiones-indice.md`](docs/decisiones-indice.md), generado con
+`python scripts/indice_decisiones.py` (una prueba exige que esté al día).
+
 ---
 
 ## 2026-09-06 — Fase 0 + arranque de Fase 1
@@ -3637,3 +3640,226 @@ y se corrigió.
   pantalla cuenta las peticiones.
 
 Cada prueba falla sin su arreglo.
+
+### D-172 — La guardia de las reglas nuevas
+`test_catalogo_hallazgos` exigía ficha y trazas a cada tipo de hallazgo, pero nada
+exigía que una regla nueva desambiguara su título (D-115) ni que entrara en el
+descuento del doble conteo (D-117); la de Prompts (D-157) se hizo mirándolo a mano.
+
+* **Estructural:** `GARANTIAS`, en `test_catalogo_hallazgos.py` (no en el motor: es texto
+  para quien añade la regla, y en el motor lo tomaba por frase suelta
+  `test_sin_frases_sueltas`), dice para cada `FindingKind`
+  cómo se distingue su título y cómo evita reclamar dinero que ya reclama otra regla. La
+  prueba exige una entrada por tipo: una regla nueva sin ella pone la suite en rojo el
+  mismo día, como una sin ficha (D-113).
+* **De comportamiento, sobre un mes de la demo**, con todas las patologías a la vez:
+  - ningún par de hallazgos se titula igual;
+  - lo que las reglas reclaman en un paso no pasa de lo que costó;
+  - lo que las demás reclaman sobre las llamadas de la versión cara de un prompt, más
+    lo que reclama la regla de prompts, no pasa de lo que costaron esas llamadas.
+
+  Quitar el descuento de las reglas sobre trazas, o el de la de prompts, pone la suite en
+  rojo. El título se desambigua en su prueba propia, con dos llamantes del mismo nombre,
+  porque la demo no los tiene.
+
+### D-173 — Retención por proyecto, y borrar lo de una persona o un cliente
+`LAPLACE_RETENTION_DAYS` valía para toda la instalación (D-009 pedía por proyecto), y no
+había forma de borrar los datos de un usuario final o de un cliente concreto, que es lo
+que pide el cliente de un cliente.
+
+* **Retención de un proyecto** (`GET` y `PUT /api/retention`, y en Ajustes): sus días se
+  guardan en los ajustes del proyecto. La aplica el bucle de fondo, que ya tiene turno
+  entre procesos, una vez al día, como la traída de Stripe (D-163). Manda la más corta
+  entre la del proyecto y la de la instalación: un proyecto no puede guardar más de lo
+  que la instalación permite. En ClickHouse, con la clave por día (D-168), el borrado
+  sólo toca las partes con días viejos.
+* **Borrar una persona o un cliente** (`DELETE /api/subjects`, y en Ajustes, repitiendo el
+  id para confirmar): se lleva las trazas **enteras** en las que aparece, no sólo los
+  spans que llevan el id. El id lo lleva la raíz, y dejar las llamadas hijas sería dejar
+  justo su contenido. Queda anotado en la auditoría de la organización cuando hay
+  cuentas.
+
+Pruebas en `test_retencion.py`, en los dos almacenes:
+- se borran las trazas enteras;
+- la retención de un proyecto no toca otro;
+- manda la más corta;
+- el bucle de fondo la aplica una vez al día y no antes;
+- la API pide confirmar.
+
+Cada garantía se ha roto a propósito y alguna prueba falla. También una prueba de
+pantalla en Ajustes.
+
+**El fallo antiguo de la pantalla de Prompts** (`test_pantallas.py`, «no cargó en 15 s»),
+explicado: no era lentitud, porque el Diagnóstico de la demo tarda 0,5 s en local. Si el
+problema del prompt aparecía o no en la demo dependía de la hora de la carga (D-171), y
+sin él el aviso de Prompts no sale nunca. Con la demo estable, `test_demo_estable` exige
+que aparezca a cuatro horas distintas.
+
+### D-174 — `globals.css` en 29 hojas, un índice de decisiones y documentación de usuario
+* **`globals.css`** (4.100 líneas) se parte en `apps/web/app/estilos/`, una hoja por
+  pantalla o pieza (`00-temas.css` a `28-ciclo.css`), que `layout.tsx` importa en orden.
+  El orden importa: la cascada de antes se conserva, y el CSS compilado sale igual que
+  el de antes salvo los saltos de línea entre ficheros. La primera regla `.hint`, pisada
+  por la segunda, era código muerto y se quita. Las pruebas que leían `globals.css`
+  (`test_tema.py`, `test_textos_web.py`) leen ahora las hojas en el orden de
+  `layout.tsx`, con `hoja_de_estilos()` de `helpers.py`, así que una hoja nueva que no
+  se importe no se cuela en la cuenta.
+* **Índice por tema de `DECISIONS.md`** (`docs/decisiones-indice.md`): lo genera
+  `scripts/indice_decisiones.py` a partir de las palabras de cada título, y
+  `test_decisiones_indice.py` exige que esté al día. Generado y no escrito a mano,
+  porque uno a mano se desfasa a la primera decisión nueva.
+* **Documentación de usuario** en `docs/usuario/`, en Markdown plano: empezar,
+  instrumentar, diagnóstico, probar, alertas y datos. Sin Mintlify, Docusaurus ni
+  Starlight todavía: GitHub ya la pinta, y montar un sitio pide el dominio (sección 5 de
+  la hoja de ruta). Se pasa a uno de ellos cuando haya dónde publicarlo.
+
+### D-175 — Las pantallas con sesión, recorridas en un navegador
+La auditoría del rediseño no llegó a las pantallas que sólo existen con cuentas.
+`test_pantallas_cuentas.py` las recorre como una persona, escribiendo en los formularios,
+sobre `laplace ui` con `LAPLACE_AUTH_REQUIRED=true`:
+
+1. configurar la instalación;
+2. la organización;
+3. crear una clave;
+4. invitar;
+5. aceptar la invitación desde otro navegador;
+6. entrar con la contraseña mala y con la buena;
+7. entrar con la clave.
+
+A cada pantalla se le exige lo mismo que a las demás: sin errores en la consola y sin
+salirse por los lados a 1440 ni a 375 px. Cuando algo se sale, la prueba dice qué
+elemento es. Encontró tres fallos:
+
+* **La organización se salía 12 px en el móvil**: sus tres tablas (miembros, claves y
+  registro) no llevaban el `tbl-scroll` que llevan las de las otras pantallas.
+* **Quien entraba con la clave de un proyecto recién creado leía «Todavía no hay ningún
+  proyecto»**, con un `init` de ejemplo para `project="mi-agente"`: justo el código que
+  no tenía que copiar. `/api/projects` sólo listaba proyectos con datos. Ahora añade, a
+  cero y al final, los que la identidad tiene nombrados (el de su clave, o los de sus
+  organizaciones) y todavía no han mandado nada. Un admin de la instalación, que lo ve
+  todo, no recibe una lista inventada.
+* **Ese `init` de ejemplo no llevaba `api_key`**, y con cuentas la ingesta sin clave da
+  401: parecía que no llegaba nada. En modo nube lleva `api_key="lp_…"`.
+
+Las variantes de ClickHouse de `test_retencion.py` corren ahora en una base propia que
+se tira al acabar, como `test_migrar_orden.py`. En la base compartida, el borrado ligero
+reescribe las partes enteras en las que caen las trazas de la prueba. Con la carga de
+escala delante, esas partes pesaban gigas y la prueba fallaba por falta de disco, no por
+el código.
+
+### D-176 — El contraste, medido sobre cada pantalla
+`test_tema.py` mide cada tinta contra el cristal compuesto sobre el degradado, a partir
+de los tokens (D-155). No ve lo que sólo existe en pantalla: los resplandores de detrás
+del cristal, el fondo teñido de un chip o de una insignia, la opacidad de un
+antepasado. `test_contraste_pantallas.py` mide lo que se pinta de verdad:
+
+1. apunta cada trozo de texto visible, con su color compuesto con la opacidad de sus
+   antepasados;
+2. vuelve el texto transparente y hace una captura;
+3. calcula el contraste contra los píxeles que quedan debajo de cada trozo.
+
+Exige AA al percentil 10: 4,5:1, o 3:1 en letra grande. Se usa el percentil y no el
+mínimo, porque en la caja de un texto caen bordes que no son su fondo. Corre en las
+siete pantallas, en los cuatro temas, a 1440 px. La captura se lee en un `canvas` del
+propio navegador: no hace falta Pillow.
+
+Primera pasada: los dos temas de alto contraste pasaban en todo. Fallaban 45 textos
+entre 3,5 y 4,49:1, casi todos en el claro, y todos de seis tintas:
+
+| Tinta | Antes | Después |
+|---|---|---|
+| `--amber` (claro) | 42 % | 32 % de `--accent-3` hacia `#3a2400` |
+| `--teal` (claro) | `#1d6a58` | `#14513f` (y su línea y su fondo) |
+| `--iris` (claro, enlaces de las tarjetas) | 52 % | 40 % |
+| `--rose` (claro) | `#a8283a` | `#962233` |
+| `--muted` (claro) | `#6a504d` | `#604643` |
+| `--muted` (oscuro, el título «Presupuesto» sobre el resplandor) | `#91a1b5` | `#9eaec2` |
+
+Los tonos se mantienen y sólo se oscurecen (en el oscuro, se aclara). El chip «en
+producción» de Prompts usaba su propia mezcla de fondo, más fuerte que la de los demás
+chips verdes, y pasa a usar `--teal-bg`.
+
+La prueba descarta lo que no se pinta. En la primera versión, los textos dentro de un
+`<details>` cerrado daban 1,1:1: tienen cajas, pero no se ven. Ahora se filtran con
+`checkVisibility()`.
+
+### D-177 — Preagregados por minuto del Diagnóstico y clave por hora
+El objetivo de la hoja de ruta era un Diagnóstico de 1,5 s para un día de un proyecto con
+diez millones de spans al día. Con la clave por día (D-168) tardaba 6,5 s en el
+contenedor de 4 núcleos. Se midió consulta a consulta antes de cambiar nada:
+
+- Eran diez barridos de la ventana, uno por lector, a 0,5–1,4 s cada uno.
+- **Lanzarlos a la vez no sirve**: 6,5 s en serie y 6,7 s en paralelo, porque ClickHouse
+  ya satura los núcleos con uno solo. Había que leer menos.
+- **La exclusión de las tiradas de evaluación** (`trace_id NOT IN (subconsulta)` en
+  `RULES_WHERE`) comprobaba cada `trace_id` contra un conjunto casi siempre vacío:
+  0,2–0,35 s por consulta. Ahora se buscan antes con un índice `bloom_filter` sobre
+  `tags` y se pasan como lista, o nada si no hay ninguna (`_consulta`), con
+  `test_reglas_evaluaciones.py` para los tres caminos.
+- **Preagregados** (`storage/preagregados.py`, esquema en `clickhouse_schema.sql`). Son
+  parciales por minuto en cuatro tablas:
+  - `pre_pasos`: por paso, modelo y prompt, con sumas y estados para las medianas;
+  - `pre_trazas`: por traza, con sus grupos como hashes, para contar ejecuciones
+    distintas;
+  - `pre_repes` y `pre_bucles`: sólo las parejas que pueden llegar a repetirse, que son
+    las de dos o más en su hora y las de trazas que cruzan la hora.
+
+  Se recalculan **por horas enteras desde `spans FINAL`, sustituyendo** al cálculo
+  anterior. Así un lote reenviado y `recalcular_coste`, que vuelven a insertar spans, no
+  cuentan dos veces: era la trampa escrita en la hoja de ruta.
+
+  Cada escritura apunta sus horas en `pre_sucias`, con la hora del servidor de después
+  de escribir. Una hora con un apunte posterior a su cálculo, o sin calcular, se lee en
+  crudo **con la misma selección de parciales**, así que cada lector es una sola
+  agregación y no hay dos cuentas que mantener.
+
+  Un bucle de fondo recalcula lo pendiente cada 30 s. La hora en curso la deja hasta que
+  acaba o lleva dos minutos quieta: mientras llegan datos se ensucia enseguida, y se lee
+  en crudo igual.
+- **Contar ejecuciones distintas fusionando estados de `uniqExact`** por minuto costaba
+  más de 1 s por lector (18.000 estados pequeños). Se cuentan en `pre_trazas`, con
+  `ARRAY JOIN` de los grupos de cada traza y `uniqExact` sobre filas estrechas: 0,15 s.
+  `groupBitmap` era más lento aún (3,5 s). `uniqCombined64` era rápido, pero aproximado.
+- **La clave por hora** (`ORDER BY (project_id, toStartOfHour(start_time), trace_id,
+  span_id)`). Con la del día, leer en crudo la hora en curso, o los segundos del borde de
+  la ventana, costaba el día entero, y eso es lo que se lee en cada consulta mientras
+  llegan datos. `migrar_orden` migra desde las dos claves anteriores, y ahora pide 1,6
+  veces la tabla libre: con 1,2 dejó empezar una copia de 148 millones de spans que no
+  cabía, porque la copia recién escrita ocupa más que la tabla fusionada.
+- La ventana de la API empieza en minuto entero; el final sigue siendo ahora.
+
+**Medido** con el proyecto grande (10 millones de spans al día, 15 días guardados) en el
+mismo contenedor:
+
+| | Antes (D-168) | Con esto |
+|---|---|---|
+| Diagnóstico, 1 día | 6,5 s | **1,1 s** |
+| Diagnóstico, 7 días | 55–66 s | 6 s |
+| Recalcular una hora | — | 0,4 s |
+
+En 7 días pesan los recuentos exactos de ejecuciones distintas y las medianas.
+
+**Una diferencia con el crudo, dicha.** Una traza cuenta como tirada de evaluación si
+lleva la etiqueta en un span a menos de una hora de la hora que se calcula; antes, si la
+llevaba dentro de la ventana. Sólo cambia con una tirada de más de una hora que cruce el
+borde de la ventana.
+
+**Pruebas** (`test_preagregados.py`, en una base de ClickHouse propia): un mes de la demo
+por la ingesta de verdad, con una de cada quince ejecuciones marcada como tirada de
+evaluación. Se exige que el Diagnóstico entero y cada lector salgan iguales con y sin
+preagregados:
+
+- sin calcular y calculado, en ventanas de 30, 7 y 1 día y en una a destiempo;
+- después de un reenvío y de un cambio de coste, antes y después de recalcular;
+- después de borrar un cliente;
+- con una repetición y un bucle partidos por el borde de una hora;
+- y que la hora en curso no se recalcule mientras llegan datos.
+
+Cada garantía se ha roto a propósito y alguna prueba falla: sin las trazas que cruzan la
+hora, una hora sucia leída como limpia, el cálculo sin `FINAL`, las tiradas sin excluir
+y el crudo sin quitar lo que ya sale de las tablas. La de las tiradas no fallaba al
+principio, porque la demo no trae ninguna; ahora la prueba las pone.
+
+Las cifras son de un ClickHouse con sólo el proyecto grande. La migración del conjunto
+entero (148 millones de spans de seis proyectos) no cabía en el disco del contenedor, y
+con el proyecto delante en la clave los demás no entran en sus lecturas.

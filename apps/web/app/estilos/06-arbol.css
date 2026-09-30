@@ -1,0 +1,154 @@
+/* ---------- árbol de pasos ---------- */
+.ruler {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 0 6px;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+  border-bottom: 1px solid var(--hair-soft);
+}
+.node {
+  display: grid;
+  grid-template-columns: 1fr minmax(140px, 32%) 62px 70px;
+  gap: 12px;
+  align-items: center;
+  padding: 7px 6px 7px 0;
+  border-bottom: 1px solid var(--hair-soft);
+  width: 100%;
+  background: transparent;
+  border-left: 2px solid transparent;
+  border-right: 0;
+  border-top: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.node:hover {
+  background: var(--panel);
+}
+.node.flag {
+  background: var(--amber-bg);
+}
+.node.err .node-name {
+  color: var(--rose);
+}
+.node[aria-selected="true"] {
+  background: var(--panel-2);
+  border-left-color: var(--iris);
+}
+.node-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.indent {
+  flex: 0 0 auto;
+  height: 15px;
+  border-left: 1px solid var(--hair);
+  margin-left: 7px;
+}
+.twist {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-3);
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.twist.leaf {
+  visibility: hidden;
+}
+.twist svg {
+  transition: transform 0.12s ease;
+}
+.twist[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+.kind {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.kind.agent {
+  background: var(--iris);
+}
+.kind.llm {
+  background: var(--teal);
+}
+.kind.tool {
+  background: var(--amber);
+}
+.kind.chain {
+  background: var(--chain);
+}
+.kind.retrieval {
+  background: var(--blue);
+}
+.kind.err {
+  background: var(--rose);
+}
+.node-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--fs-md);
+}
+.node-name small {
+  color: var(--ink-3);
+  margin-left: 7px;
+  font-size: var(--fs-sm);
+  font-family: var(--mono);
+}
+.node-bar {
+  position: relative;
+  height: 15px;
+}
+.node-bar i {
+  position: absolute;
+  top: 5px;
+  height: 6px;
+  border-radius: var(--r-sm);
+  background: var(--hair-strong);
+  display: block;
+}
+.node.flag .node-bar i {
+  background: var(--amber);
+  opacity: 0.9;
+}
+.node.err .node-bar i {
+  background: var(--rose);
+}
+.node-cost,
+.node-tok {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+  text-align: right;
+}
+.node-tok {
+  color: var(--ink-3);
+}
+.badge {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+  padding: 0 5px;
+  border-radius: var(--r-sm);
+  background: var(--amber-bg);
+  color: var(--amber);
+  border: 1px solid var(--amber-line);
+}
+.badge.quiet {
+  background: var(--panel-2);
+  color: var(--ink-3);
+  border-color: var(--hair);
+}

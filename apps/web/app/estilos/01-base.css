@@ -1,0 +1,83 @@
+/* Chino (D-147): Inter y Plex no tienen caracteres CJK. Se nombran las fuentes del
+   sistema de cada plataforma en vez de descargar una: una CJK pesa varios MB y el modo
+   local no puede depender de internet. Las letras latinas siguen saliendo de Inter. */
+:root:lang(zh) {
+  --cjk: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC",
+    "Noto Sans CJK SC", "Source Han Sans SC";
+  --sans: var(--font-sans), "Inter", var(--cjk), system-ui, sans-serif;
+  --mono: var(--font-mono), "IBM Plex Mono", var(--cjk), ui-monospace, Consolas, monospace;
+}
+:lang(zh) body {
+  line-height: 1.65;
+}
+
+
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+body {
+  min-height: 100vh;
+  background: var(--bg-layers),
+    radial-gradient(circle at 20% 0, var(--bg-gradient-start) 0, var(--bg-gradient-mid) 35%, var(--bg-gradient-end) 100%);
+  background-attachment: fixed;
+  background-color: var(--bg-gradient-mid);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: var(--fs-base);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+.num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.shell {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 0 20px 80px;
+}
+/* El explorador y el árbol necesitan más ancho que el texto. Con 1280 y centrada, la
+   cabecera y el contenido comparten bordes: a 1440 px el margen es igual a los dos
+   lados en vez de un tercio de pantalla vacío a la derecha (D-150). */
+.shell.wide {
+  max-width: 1280px;
+}
+/* Las pantallas de lectura vuelven a la medida cómoda del mock. */
+.reading {
+  max-width: 960px;
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--iris);
+  outline-offset: 2px;
+}
+a {
+  color: inherit;
+}
+
+/* La capa técnica.
+ *
+ * Se OCULTA en diagnóstico en vez de mostrarse en avanzado. La diferencia importa: al
+ * primer intento se hacía al revés (`.pro { display:none }` y luego una regla por cada
+ * tipo de caja para volver a enseñarlo), y cualquier componente que fijara su propio
+ * `display` con la misma especificidad ganaba y se colaba en diagnóstico. Pasó con el
+ * botón de exportar, que es material de desarrollador.
+ *
+ * Así el elemento conserva su display natural —botón, celda de tabla, lo que sea— y
+ * ocultarlo no depende del orden de las reglas.
+ */
+body:not([data-mode="pro"]) .pro {
+  display: none !important;
+}
+/* Lo contrario: lo que sólo tiene sentido en diagnóstico. */
+body[data-mode="pro"] .simple-only {
+  display: none !important;
+}

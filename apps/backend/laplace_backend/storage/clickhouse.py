@@ -13,6 +13,7 @@ from laplace.schema import Span
 from laplace.semconv import EVAL_TAG
 
 from ..config import Settings
+from . import preagregados
 from ._rows import (
     COLUMNS,
     coverage_from_rows,
@@ -44,6 +45,7 @@ from .base import (
     Window,
     WindowFacts,
     WindowSummary,
+    _sujeto,
     densify,
     densify_steps,
     disambiguate,
@@ -89,6 +91,10 @@ RULES_WHERE = (
     f"{WINDOW_WHERE} AND trace_id NOT IN (SELECT trace_id FROM spans WHERE {WINDOW_WHERE} "
     f"AND has(tags, '{EVAL_TAG}'))"
 )
+#: Hasta cuántas trazas de evaluación se pasan como lista (D-177). Con más, que sería una
+#: ventana casi toda de tiradas, se deja la subconsulta: una lista enorme en cada
+#: consulta cuesta más que lo que ahorra.
+_MAX_EVALUACIONES = 5000
 
 #: Sobre el determinismo de estas consultas, que ya ha mordido una vez y por eso está
 #: escrito aquí arriba y no en un comentario suelto: **ninguna agregación de esta tabla
@@ -378,14 +384,15 @@ class ClickHouseStore:
         for statement in _statements(_SCHEMA.read_text(encoding="utf-8")):
             self._client.command(statement)
         logger.info("esquema de clickhouse aplicado")
+        preagregados.marcar_todo_si_nuevo(self._client)
         # `CREATE TABLE IF NOT EXISTS` no cambia la clave de una tabla que ya existe, y
         # migrarla es una copia entera: no se hace sola al arrancar, se avisa (D-168).
         from .migrar_orden import necesita
 
         if necesita(self._client):
             logger.warning(
-                "la tabla spans tiene la clave de ordenación de antes de D-168 y cada "
-                "ventana lee todo el histórico del proyecto. Para migrarla: "
+                "la tabla spans tiene una clave de ordenación de antes de D-177 y cada "
+                "consulta lee más de lo que necesita. Para migrarla: "
                 "python -m laplace_backend.storage.migrar_orden"
             )
 
@@ -404,9 +411,54 @@ class ClickHouseStore:
             # 200: que está guardado y el exportador no tiene que reintentar (D-142).
             settings={"async_insert": 1, "wait_for_async_insert": 1},
         )
+        # Después de escribir: la marca tiene que ser posterior a lo que ensucia (D-177).
+        preagregados.marcar(self._client, {(s.project_id, s.start_time) for s in spans})
         return len(spans)
 
+    def recalcular_preagregados(
+        self, limite: int = preagregados.POR_VUELTA, quieta_s: int = 120
+    ) -> int:
+        """Recalcula las horas con escrituras posteriores a su último cálculo (D-177)."""
+        return preagregados.recalcular_pendientes(self._client, limite, quieta_s)
+
+    @property
+    def _pre(self) -> bool:
+        return bool(getattr(self._settings, "preagregados", False))
+
+    def _en_pre(self, project_id: str, window: Window) -> preagregados.Ventana:
+        return preagregados.ventana(self._client, project_id, window.since, window.until)
+
     # -- lectura -------------------------------------------------------------------
+
+    def _consulta(self, sql: str, parameters: dict[str, Any] | None = None) -> Any:
+        """Una lectura de las reglas, con las tiradas de evaluación ya resueltas (D-177).
+
+        `RULES_WHERE` deja fuera las trazas de evaluación con `trace_id NOT IN
+        (subconsulta)`, y ClickHouse comprueba así cada `trace_id` de la ventana contra
+        el conjunto aunque esté vacío, que es lo normal: con cinco millones de spans eran
+        0,2–0,35 s por consulta, en las cinco de las reglas. Se buscan antes, en una
+        lectura que no toca más que `tags`, y se pasan como lista; sin ninguna, el filtro
+        es el de la ventana a secas. La consulta que enseña la ficha no cambia: es la
+        misma cuenta.
+        """
+        params = dict(parameters or {})
+        if RULES_WHERE in sql:
+            evaluaciones = [
+                fila[0]
+                for fila in self._client.query(
+                    f"SELECT DISTINCT trace_id FROM spans WHERE {WINDOW_WHERE} "
+                    f"AND has(tags, '{EVAL_TAG}') LIMIT {_MAX_EVALUACIONES + 1}",
+                    parameters=params,
+                ).result_rows
+            ]
+            if not evaluaciones:
+                sql = sql.replace(RULES_WHERE, WINDOW_WHERE)
+            elif len(evaluaciones) <= _MAX_EVALUACIONES:
+                params["evaluaciones"] = evaluaciones
+                sql = sql.replace(
+                    RULES_WHERE, f"{WINDOW_WHERE} AND trace_id NOT IN %(evaluaciones)s"
+                )
+        return self._client.query(sql, parameters=params or None)
 
     def list_traces(self, filters: TraceFilter) -> TracePage:
         where, params = self._where(filters)
@@ -472,7 +524,7 @@ class ClickHouseStore:
             ORDER BY {orden}
             LIMIT %(limit)s
         """
-        traces = [row_to_summary(r) for r in _named(self._client.query(sql, parameters=params))]
+        traces = [row_to_summary(r) for r in _named(self._consulta(sql, parameters=params))]
         # Sólo hay siguiente página si ésta vino llena y el orden es paginable.
         full_page = len(traces) == params["limit"]
         next_cursor = encode_cursor(traces[-1]) if full_page and por_tiempo else None
@@ -604,7 +656,7 @@ class ClickHouseStore:
             )
             ORDER BY start_time, span_id
         """
-        return [row_to_span(r) for r in _named(self._client.query(sql, parameters=params))]
+        return [row_to_span(r) for r in _named(self._consulta(sql, parameters=params))]
 
     def list_projects(self) -> list[ProjectStats]:
         sql = """
@@ -625,7 +677,7 @@ class ClickHouseStore:
                 total_cost_usd=float(row[3]),
                 last_seen=_utc(row[4]) if row[4] else None,
             )
-            for row in self._client.query(sql).result_rows
+            for row in self._consulta(sql).result_rows
         ]
 
     # -- analítica para el motor de detección (Fase 2) -------------------------------
@@ -639,6 +691,7 @@ class ClickHouseStore:
 
 
     def summarize_window(self, project_id: str, window: Window) -> WindowSummary:
+        p95_sql = ""
         sql = f"""
             SELECT
                 uniqExact(trace_id)                                   AS traces,
@@ -660,13 +713,17 @@ class ClickHouseStore:
             WHERE {WINDOW_WHERE}
         """
         params = self._window_params(project_id, window)
-        row = self._client.query(sql, parameters=params).result_rows
+        if self._pre:
+            v = self._en_pre(project_id, window)
+            sql, params = preagregados.sql(v, preagregados.RESUMEN), v.params
+            p95_sql = preagregados.sql(v, preagregados.P95)
+        row = self._consulta(sql, parameters=params).result_rows
         if not row:
             return WindowSummary()
 
         # La latencia que importa es la de la traza entera, no la de un span suelto:
         # es la que espera el usuario final del agente.
-        p95_sql = f"""
+        p95_sql = p95_sql if self._pre else f"""
             SELECT quantile(0.95)(duracion) FROM (
                 SELECT dateDiff('millisecond', min(start_time), max(end_time)) AS duracion
                 FROM spans FINAL
@@ -674,7 +731,7 @@ class ClickHouseStore:
                 GROUP BY trace_id
             )
         """
-        p95 = self._client.query(p95_sql, parameters=params).result_rows
+        p95 = self._consulta(p95_sql, parameters=params).result_rows
 
         (traces, spans, error_traces, llm_calls, tool_calls, in_tok, out_tok, cost,
          ahorro_cache, sin_tarifa, tarifa_asumida, modelos_sin_tarifa,
@@ -718,9 +775,12 @@ class ClickHouseStore:
         aparecer tres veces en tres trazas distintas es uso normal.
         """
         params = self._window_params(project_id, window)
+        sql = REPEATED_GROUPS_SQL
+        if self._pre:
+            v = self._en_pre(project_id, window)
+            sql, params = preagregados.sql(v, preagregados.REPETICIONES), v.params
         params["min_repeats"] = min_repeats
         params["limit"] = limit
-        sql = REPEATED_GROUPS_SQL
         # Por nombre de columna, no por posición: añadir una columna en medio de la
         # consulta y desplazar el resto en silencio es un error demasiado barato de
         # cometer para una función que decide cuánto dinero se le promete a alguien.
@@ -746,7 +806,7 @@ class ClickHouseStore:
                 sample_trace_id=r["traza_ejemplo"],
                 last_seen=_utc(r["ultima"]) if r["ultima"] else None,
             )
-            for r in _named(self._client.query(sql, parameters=params))
+            for r in _named(self._consulta(sql, parameters=params))
         ]
         # Mismo título para dos pasos distintos es peor que no enseñarlos.
         return disambiguate(grupos)
@@ -757,6 +817,10 @@ class ClickHouseStore:
     ) -> list[LoopGroup]:
         """Gemelo del de sqlite.py: mismos umbrales, mismos alias (D-066, D-109)."""
         params = self._window_params(project_id, window)
+        sql = LOOP_GROUPS_SQL
+        if self._pre:
+            v = self._en_pre(project_id, window)
+            sql, params = preagregados.sql(v, preagregados.BUCLES), v.params
         params.update(min_vueltas=min_vueltas, max_salidas=max_salidas, limit=limit)
         grupos = [
             LoopGroup(
@@ -781,7 +845,7 @@ class ClickHouseStore:
                 sample_trace_id=r["traza_ejemplo"],
                 last_seen=_utc(r["ultima"]) if r["ultima"] else None,
             )
-            for r in _named(self._client.query(LOOP_GROUPS_SQL, parameters=params))
+            for r in _named(self._consulta(sql, parameters=params))
         ]
         # El gemelo de sqlite: los bucles nunca pasaron por el desambiguado, así que dos
         # llamantes del mismo paso daban dos tarjetas con el título idéntico (D-115).
@@ -791,9 +855,12 @@ class ClickHouseStore:
         self, project_id: str, window: Window, *, min_calls: int = 5, limit: int = 50
     ) -> list[ModelUsage]:
         params = self._window_params(project_id, window)
+        sql = MODEL_USAGE_SQL
+        if self._pre:
+            v = self._en_pre(project_id, window)
+            sql, params = preagregados.sql(v, preagregados.USO), v.params
         params["min_calls"] = min_calls
         params["limit"] = limit
-        sql = MODEL_USAGE_SQL
         usos = [
             ModelUsage(
                 key=r["paso_clave"],
@@ -823,7 +890,7 @@ class ClickHouseStore:
                 sample_trace_id=r["traza_ejemplo"],
                 last_seen=_utc(r["ultima"]) if r["ultima"] else None,
             )
-            for r in _named(self._client.query(sql, parameters=params))
+            for r in _named(self._consulta(sql, parameters=params))
         ]
         return disambiguate(usos)
 
@@ -852,7 +919,7 @@ class ClickHouseStore:
                 HAVING n >= %(min_repeats)s
             )
         """
-        return {row[0] for row in self._client.query(sql, parameters=params).result_rows}
+        return {row[0] for row in self._consulta(sql, parameters=params).result_rows}
 
     def sample_repetition(
         self, project_id: str, window: Window, dedup_hash: str, limit: int = 40
@@ -870,7 +937,7 @@ class ClickHouseStore:
             ORDER BY n DESC, trace_id
             LIMIT 1
         """
-        rows = self._client.query(trace_sql, parameters=params).result_rows
+        rows = self._consulta(trace_sql, parameters=params).result_rows
         if not rows:
             return []
         params["trace_id"] = rows[0][0]
@@ -887,7 +954,7 @@ class ClickHouseStore:
             ORDER BY start_time, span_id
             LIMIT %(limit)s
         """
-        return [row_to_span(r) for r in _named(self._client.query(sql, parameters=params))]
+        return [row_to_span(r) for r in _named(self._consulta(sql, parameters=params))]
 
     def sample_loop(
         self, project_id: str, window: Window, loop_hash: str, limit: int = 40
@@ -905,7 +972,7 @@ class ClickHouseStore:
             ORDER BY n DESC, trace_id
             LIMIT 1
         """
-        rows = self._client.query(trace_sql, parameters=params).result_rows
+        rows = self._consulta(trace_sql, parameters=params).result_rows
         if not rows:
             return []
         params["trace_id"] = rows[0][0]
@@ -922,7 +989,7 @@ class ClickHouseStore:
             ORDER BY start_time, span_id
             LIMIT %(limit)s
         """
-        return [row_to_span(r) for r in _named(self._client.query(sql, parameters=params))]
+        return [row_to_span(r) for r in _named(self._consulta(sql, parameters=params))]
 
     # -- panel (Fase 4) ---------------------------------------------------------------
 
@@ -932,7 +999,7 @@ class ClickHouseStore:
         params = self._window_params(project_id, window)
         params["origen"] = _utc(window.since)
         params["ancho_s"] = bucket_minutes * 60
-        filas = _named(self._client.query(TIMESERIES_SQL, parameters=params))
+        filas = _named(self._consulta(TIMESERIES_SQL, parameters=params))
         return densify(
             [
                 (
@@ -962,24 +1029,24 @@ class ClickHouseStore:
         params["origen"] = _utc(window.since)
         params["ancho_s"] = bucket_minutes * 60
         tramo = "intDiv(dateDiff('second', toDateTime64(%(origen)s, 3), start_time), %(ancho_s)s)"
-        total = _named(
-            self._client.query(
-                f"""SELECT {tramo} AS tramo, sum(cost_total_usd) AS coste
-                    FROM spans FINAL WHERE {WINDOW_WHERE} GROUP BY tramo""",
-                parameters=params,
-            )
-        )
-        pasos = _named(
-            self._client.query(
-                f"""SELECT if(step_key != '', step_key, name) AS paso,
+        if self._pre and preagregados.alineada(window.since):
+            # Con la ventana en minutos enteros cada minuto cae entero en su tramo.
+            v = self._en_pre(project_id, window)
+            params = {**v.params, "origen": params["origen"], "ancho_s": params["ancho_s"]}
+            por_minuto = tramo.replace("start_time", "minuto")
+            total_sql = preagregados.sql(v, preagregados.SERIE_TOTAL, tramo=por_minuto)
+            pasos_sql = preagregados.sql(v, preagregados.SERIE_PASOS, tramo=por_minuto)
+        else:
+            total_sql = f"""SELECT {tramo} AS tramo, sum(cost_total_usd) AS coste
+                    FROM spans FINAL WHERE {WINDOW_WHERE} GROUP BY tramo"""
+            pasos_sql = f"""SELECT if(step_key != '', step_key, name) AS paso,
                            max(if(step_label != '', step_label, name)) AS etiqueta,
                            max(step_site) AS sitio, max(step_hint) AS pista,
                            {tramo} AS tramo, sum(cost_total_usd) AS coste
                     FROM spans FINAL WHERE {RULES_WHERE} AND cost_total_usd > 0
-                    GROUP BY paso, tramo""",
-                parameters=params,
-            )
-        )
+                    GROUP BY paso, tramo"""
+        total = _named(self._consulta(total_sql, parameters=params))
+        pasos = _named(self._consulta(pasos_sql, parameters=params))
         return densify_steps(
             [(int(r["tramo"]), float(r["coste"] or 0.0)) for r in total],
             [
@@ -1008,7 +1075,7 @@ class ClickHouseStore:
             )
         """
         r = _named(
-            self._client.query(sql, parameters=self._window_params(project_id, window))
+            self._consulta(sql, parameters=self._window_params(project_id, window))
         )[0]
         n = int(r["n"])
         if not n:
@@ -1017,23 +1084,23 @@ class ClickHouseStore:
 
     def window_facts(self, project_id: str, since: Any, until: Any) -> WindowFacts:
         params = {"project_id": project_id, "since": _utc(since), "until": _utc(until)}
-        cabecera = self._client.query(
+        cabecera = self._consulta(
             f"""SELECT uniqExact(trace_id), sum(cost_total_usd)
                 FROM spans FINAL WHERE {WINDOW_WHERE}""",
             parameters=params,
         ).result_rows
-        modelos = self._client.query(
+        modelos = self._consulta(
             f"""SELECT DISTINCT request_model FROM spans FINAL
                 WHERE {WINDOW_WHERE} AND request_model != ''""",
             parameters=params,
         ).result_rows
-        herramientas = self._client.query(
+        herramientas = self._consulta(
             f"""SELECT DISTINCT if(tool_name != '', tool_name, name) FROM spans FINAL
                 WHERE {WINDOW_WHERE} AND span_type = 'tool'""",
             parameters=params,
         ).result_rows
         # Por sitio de llamada, no por nombre: gemelo del de sqlite.py (D-106).
-        pasos = self._client.query(
+        pasos = self._consulta(
             f"""SELECT multiIf(step_site != '', step_site, step_label != '', step_label,
                                name) AS paso,
                        max(if(step_label != '', step_label, name)) AS etiqueta,
@@ -1042,7 +1109,7 @@ class ClickHouseStore:
                 GROUP BY paso""",
             parameters=params,
         ).result_rows
-        prompts = self._client.query(
+        prompts = self._consulta(
             f"""SELECT DISTINCT concat(prompt_name, '@', toString(prompt_version))
                 FROM spans FINAL WHERE {WINDOW_WHERE} AND prompt_name != ''""",
             parameters=params,
@@ -1070,7 +1137,7 @@ class ClickHouseStore:
             return {}
         params = {"project_id": project_id, "ids": list(trace_ids)}
         filas = _named(
-            self._client.query(
+            self._consulta(
                 """
                 SELECT
                     trace_id,
@@ -1105,8 +1172,16 @@ class ClickHouseStore:
         donde = RULES_WHERE if rules else WINDOW_WHERE
         pasos = "groupUniqArray(step_key)" if rules else "emptyArrayString()"
         ejemplo = "max((step_key, trace_id))" if rules else "('', '')"
+        if self._pre:
+            v = self._en_pre(project_id, window)
+            sql = preagregados.sql(
+                v, preagregados.PROMPTS, pasos=pasos,
+                ejemplo="max((step_key, traza_max))" if rules else ejemplo,
+                reglas="es_eval = 0 AND" if rules else "",
+            )
+            return [row_to_prompt_usage(f) for f in _named(self._consulta(sql, v.params))]
         filas = _named(
-            self._client.query(
+            self._consulta(
                 f"""
                 SELECT
                     prompt_name                    AS nombre,
@@ -1145,7 +1220,7 @@ class ClickHouseStore:
             else ""
         )
         filas = _named(
-            self._client.query(
+            self._consulta(
                 f"""
                 SELECT DISTINCT trace_id, prompt_name AS nombre, prompt_version AS version
                 FROM spans FINAL
@@ -1170,7 +1245,7 @@ class ClickHouseStore:
         """
         donde = RULES_WHERE if rules else WINDOW_WHERE
         filas = _named(
-            self._client.query(
+            self._consulta(
                 f"""
                 SELECT
                     step_key                                        AS clave,
@@ -1201,7 +1276,7 @@ class ClickHouseStore:
     def co_occurring_step_keys(self, project_id: str, window: Window) -> set[str]:
         """Claves que comparten ejecución y camino con otra clave distinta."""
         filas = _named(
-            self._client.query(
+            self._consulta(
                 f"""
                 SELECT DISTINCT arrayJoin(claves) AS clave
                 FROM (
@@ -1225,8 +1300,15 @@ class ClickHouseStore:
         salida, que son el contrato entre los dos almacenes.
         """
         params = self._window_params(project_id, window)
+        if self._pre:
+            v = self._en_pre(project_id, window)
+            filas = _named(self._consulta(preagregados.sql(v, preagregados.COBERTURA), v.params))
+            pasos = _named(
+                self._consulta(preagregados.sql(v, preagregados.COBERTURA_PASOS), v.params)
+            )
+            return coverage_from_rows(filas[0], pasos)
         filas = _named(
-            self._client.query(
+            self._consulta(
                 f"""
                 SELECT
                     count() AS llamadas,
@@ -1242,7 +1324,7 @@ class ClickHouseStore:
             )
         )
         pasos = _named(
-            self._client.query(
+            self._consulta(
                 f"""
                 -- Por sitio de llamada y no por nombre: ver el comentario gemelo en
                 -- sqlite.py. Dos agentes con una función homónima se mezclaban (D-106).
@@ -1271,6 +1353,58 @@ class ClickHouseStore:
             "DELETE FROM spans WHERE project_id = %(project_id)s",
             parameters={"project_id": project_id},
         )
+        for tabla in (*preagregados.TABLAS, "pre_horas", "pre_sucias"):
+            self._client.command(
+                f"DELETE FROM {tabla} WHERE project_id = %(project_id)s",
+                parameters={"project_id": project_id},
+            )
+
+    def delete_project_before(self, project_id: str, cutoff: datetime) -> None:
+        # Con la clave por día (D-168) esto toca sólo las partes con días viejos.
+        self._client.command(
+            "DELETE FROM spans WHERE project_id = %(p)s AND start_time < %(c)s",
+            parameters={"p": project_id, "c": _utc(cutoff)},
+        )
+        self._olvidar_preagregados("project_id = %(p)s AND ", {"p": project_id}, cutoff)
+        preagregados.marcar(self._client, {(project_id, cutoff)})
+
+    def delete_subject(
+        self, project_id: str, *, user_id: str | None = None, customer_id: str | None = None
+    ) -> int:
+        columna, valor = _sujeto(user_id, customer_id)
+        sub = (
+            f"SELECT DISTINCT trace_id FROM spans WHERE project_id = %(p)s AND {columna} = %(v)s"
+        )
+        parametros = {"p": project_id, "v": valor}
+        cuantas = int(
+            self._consulta(f"SELECT count() FROM ({sub})", parameters=parametros)
+            .result_rows[0][0]
+        )
+        if cuantas:
+            horas = self._consulta(
+                f"""SELECT DISTINCT toStartOfHour(start_time) FROM spans
+                    WHERE project_id = %(p)s AND trace_id IN ({sub})""",
+                parameters=parametros,
+            ).result_rows
+            self._client.command(
+                f"DELETE FROM spans WHERE project_id = %(p)s AND trace_id IN ({sub})",
+                parameters=parametros,
+            )
+            preagregados.marcar(self._client, {(project_id, h[0]) for h in horas})
+        return cuantas
+
+    def _olvidar_preagregados(self, filtro: str, params: dict[str, Any], cutoff: datetime) -> None:
+        """Lo anterior a un corte: sus horas dejan de estar calculadas, y la del corte,
+        que queda a medias, se recalcula."""
+        corte = preagregados.hora_de(cutoff)
+        self._client.command(
+            f"DELETE FROM pre_horas WHERE {filtro}hora <= %(h)s", parameters={**params, "h": corte}
+        )
+        for tabla in preagregados.TABLAS:
+            self._client.command(
+                f"DELETE FROM {tabla} WHERE {filtro}minuto < %(h)s",
+                parameters={**params, "h": corte},
+            )
 
     # -- tarifas propias, reparto por usuario y retención (D-123) -------------------
 
@@ -1290,7 +1424,7 @@ class ClickHouseStore:
         if project_ids is not None:
             donde += " AND project_id IN %(proyectos)s"
             params["proyectos"] = list(project_ids)
-        filas = self._client.query(
+        filas = self._consulta(
             f"SELECT DISTINCT request_model FROM spans WHERE {donde}", parameters=params
         ).result_rows
         return sorted(f[0] for f in filas)
@@ -1305,7 +1439,7 @@ class ClickHouseStore:
         """
         return [
             row_to_span(r)
-            for r in _named(self._client.query(sql, parameters={"m": model}))
+            for r in _named(self._consulta(sql, parameters={"m": model}))
         ]
 
     def customer_steps(self, project_id: str, window: Window) -> dict[str, dict[str, int]]:
@@ -1326,7 +1460,7 @@ class ClickHouseStore:
         """
         salida: dict[str, dict[str, int]] = {}
         for r in _named(
-            self._client.query(sql, parameters=self._window_params(project_id, window))
+            self._consulta(sql, parameters=self._window_params(project_id, window))
         ):
             salida.setdefault(r["cliente"], {})[r["paso"]] = int(r["veces"])
         return salida
@@ -1369,7 +1503,7 @@ class ClickHouseStore:
                 tokens=int(r["tokens"] or 0),
                 unknown_cost_spans=int(r["sin_tarifa"] or 0),
             )
-            for r in _named(self._client.query(sql, parameters=params))
+            for r in _named(self._consulta(sql, parameters=params))
         ]
 
     def apply_retention(self, days: int) -> None:
@@ -1382,21 +1516,26 @@ class ClickHouseStore:
         datos no se enciende solo, y tampoco se queda encendido.
         """
         dias = int(days)
-        if dias > 0:
-            self._client.command(
-                f"ALTER TABLE spans MODIFY TTL toDateTime(start_time) + INTERVAL {dias} DAY"
-            )
-            return
-        try:
-            self._client.command("ALTER TABLE spans REMOVE TTL")
-        except Exception:  # noqa: BLE001 - no había TTL que quitar
-            logger.debug("la tabla no tenía TTL", exc_info=True)
+        # Los preagregados caducan con los spans de los que salen (D-177).
+        columnas = {"spans": "toDateTime(start_time)", "pre_horas": "hora", "pre_sucias": "hora"}
+        columnas.update({tabla: "minuto" for tabla in preagregados.TABLAS})
+        for tabla, columna in columnas.items():
+            if dias > 0:
+                self._client.command(
+                    f"ALTER TABLE {tabla} MODIFY TTL {columna} + INTERVAL {dias} DAY"
+                )
+                continue
+            try:
+                self._client.command(f"ALTER TABLE {tabla} REMOVE TTL")
+            except Exception:  # noqa: BLE001 - no había TTL que quitar
+                logger.debug("la tabla %s no tenía TTL", tabla, exc_info=True)
 
     def delete_before(self, cutoff: datetime) -> int:
         """Borra los spans que empezaron antes de `cutoff`. Es la retención."""
         self._client.command(
             "DELETE FROM spans WHERE start_time < %(c)s", parameters={"c": cutoff}
         )
+        self._olvidar_preagregados("", {}, cutoff)
         return -1
 
     def health(self) -> bool:

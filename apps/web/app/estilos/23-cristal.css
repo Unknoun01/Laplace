@@ -1,0 +1,65 @@
+/* ---------------------------------------------------------------------------
+   Cristal (D-133). Todo contenedor lleva el cristal esmerilado: fondo `--glass`, borde
+   `--line` y el desenfoque de lo que tiene detrás. Detrás de la página, dos
+   resplandores ambientales —amanecer coral en claro, violeta en oscuro— que el cristal
+   difumina.
+   --------------------------------------------------------------------------- */
+.hero,
+.card,
+.rail-block,
+.state,
+.pane,
+.verdict,
+.mcard,
+.cobertura,
+.auth-card,
+.diff,
+.fuente,
+.live,
+.caveats,
+.usuario-menu {
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+}
+.hero,
+.card,
+.rail-block,
+.state,
+.pane,
+.mcard,
+.cobertura,
+.auth-card,
+.block.ciclo {
+  box-shadow: var(--glass-sheen);
+}
+body {
+  overflow-x: clip;
+}
+.shell {
+  position: relative;
+  isolation: isolate;
+}
+.shell::before,
+.shell::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: 50%;
+  background: var(--glow-color);
+  filter: blur(55px);
+}
+/* Uno detrás del héroe y otro, menor, detrás del carril de contexto. */
+.shell::before {
+  top: 90px;
+  left: 4%;
+  width: min(520px, 60%);
+  height: 320px;
+}
+.shell::after {
+  top: 140px;
+  right: 6%;
+  width: min(300px, 40%);
+  height: 260px;
+  background: color-mix(in srgb, var(--glow-color), var(--accent-3) 12%);
+}

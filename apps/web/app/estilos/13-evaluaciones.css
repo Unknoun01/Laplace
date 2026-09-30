@@ -1,0 +1,255 @@
+/* ---------------------------------------------------------------------------
+ * Evaluaciones (Fase 5). Mismo lenguaje: sin paleta nueva ni radios nuevos.
+ * ------------------------------------------------------------------------- */
+
+/* Marcar bien/mal. Los dos botones son el mismo control; el juez nunca entra aquí. */
+.verdicts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.vbtns {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.vbtn {
+  border: 1px solid var(--hair);
+  border-radius: var(--r);
+  background: var(--panel);
+  color: var(--ink-2);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.vbtn:hover:not(:disabled) {
+  border-color: var(--chain);
+  color: var(--ink);
+}
+.vbtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.vbtn.pass.on {
+  border-color: var(--teal);
+  color: var(--teal);
+  background: var(--teal-bg);
+}
+.vbtn.fail.on {
+  border-color: var(--rose);
+  color: var(--rose);
+  background: var(--rose-bg);
+}
+.vbtn.ghost {
+  border-color: transparent;
+  color: var(--ink-3);
+}
+.verdicts.compact .vbtn {
+  padding: 2px 7px;
+  font-size: var(--fs-2xs);
+}
+.vcomment textarea {
+  width: 100%;
+  background: var(--panel-2);
+  border: 1px solid var(--hair);
+  border-radius: var(--r);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  padding: 8px 10px;
+  resize: vertical;
+}
+.vcomment small,
+.verr,
+.jcost,
+.jreason {
+  display: block;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  margin-top: 6px;
+}
+.verr {
+  color: var(--rose);
+}
+
+/* El veredicto de máquina va SIEMPRE etiquetado y con su coste al lado. */
+.chip.judge {
+  border-color: var(--violet-line);
+  background: var(--violet-bg);
+  color: var(--ink-2);
+}
+.chip.judge.pass {
+  color: var(--teal);
+}
+.chip.judge.fail {
+  color: var(--rose);
+}
+.chip.judge em {
+  font-style: normal;
+  color: var(--ink-3);
+  margin-left: 5px;
+}
+.jreason .jtag {
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+  color: var(--ink-3);
+  border: 1px solid var(--hair);
+  border-radius: var(--r);
+  padding: 0 5px;
+  margin-right: 6px;
+}
+
+.vdots {
+  display: inline-flex;
+  gap: 3px;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.vdot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--chain);
+}
+.vdot.pass {
+  background: var(--teal);
+}
+.vdot.fail {
+  background: var(--rose);
+}
+/* El del juez va hueco: de un vistazo se distingue quién dijo qué. */
+.vdot.judge {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--chain);
+}
+.vdot.judge.pass {
+  box-shadow: inset 0 0 0 1.5px var(--teal);
+}
+.vdot.judge.fail {
+  box-shadow: inset 0 0 0 1.5px var(--rose);
+}
+
+.anotar {
+  border: 1px solid var(--hair-soft);
+  border-radius: var(--r);
+  background: var(--panel);
+  padding: 12px 16px;
+  margin-bottom: 16px;
+}
+.anotar-top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.alabel {
+  font-size: var(--fs-md);
+  color: var(--ink-2);
+}
+
+/* A vs B */
+.ab {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  margin: 14px 0 6px;
+}
+.ab label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ab label.grow {
+  flex: 1;
+  min-width: 200px;
+}
+.ab label small {
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+}
+.ab-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+
+/* Un bloque por fuente de veredicto. Nunca se funden. */
+.fuente {
+  border: 1px solid var(--hair-soft);
+  border-left-width: 3px;
+  border-radius: var(--r);
+  background: var(--panel);
+  padding: 12px 14px;
+}
+.fuente.human {
+  border-left-color: var(--iris);
+}
+.fuente.llm_judge {
+  border-left-color: var(--violet);
+}
+.fuente header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.ftag {
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+  color: var(--ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.fuente b {
+  font-size: var(--fs-md);
+}
+.fuente.peor b {
+  color: var(--amber);
+}
+.fuente.mejor b {
+  color: var(--teal);
+}
+.fuente p {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+}
+.frates {
+  display: flex;
+  gap: 18px;
+  margin-bottom: 10px;
+}
+.acierto small {
+  display: block;
+  color: var(--ink-3);
+  font-size: var(--fs-2xs);
+}
+.acierto b {
+  display: block;
+  font-size: var(--fs-xl);
+  line-height: 1.2;
+}
+.acierto b.none {
+  color: var(--ink-3);
+  font-size: var(--fs-lg);
+}
+.acierto .why {
+  display: block;
+  font-size: var(--fs-2xs);
+  color: var(--ink-3);
+}
+
+/* Los veredictos de la comparación reutilizan el color del panel; faltaban dos. */
+.verdict.peor {
+  border-left-color: var(--amber);
+}
+.verdict.peor b {
+  color: var(--amber);
+}
+.verdict.empate {
+  border-left-color: var(--chain);
+}

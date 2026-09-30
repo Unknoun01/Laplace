@@ -1,0 +1,55 @@
+/* ---------------------------------------------------------------------------
+   Pantallas anchas (D-150). A 1440 px las pantallas de lectura dejaban un tercio vacío
+   a la derecha. Las que tienen algo que poner al lado lo ponen: el Panel, los picos
+   junto a las métricas; la ficha de un problema, lo que se hace con él junto a lo que
+   se lee. Las de formularios (Ajustes, Evaluaciones) se quedan en la medida cómoda.
+   --------------------------------------------------------------------------- */
+@media (min-width: 1200px) {
+  main.panel {
+    max-width: none;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 380px;
+    grid-template-areas:
+      "hero  picos"
+      "quien quien";
+    column-gap: var(--sp-10);
+    align-items: start;
+  }
+  main.panel > .hero {
+    grid-area: hero;
+  }
+  main.panel > .picos {
+    grid-area: picos;
+    position: sticky;
+    top: 70px;
+  }
+  main.panel > .quien {
+    grid-area: quien;
+  }
+
+  main.problema {
+    max-width: none;
+  }
+  main.problema .d-head h1 {
+    max-width: 40ch;
+  }
+  .prob-cols {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 360px;
+    column-gap: var(--sp-10);
+    align-items: start;
+  }
+  .prob-cuerpo p,
+  .prob-cuerpo ol {
+    max-width: 75ch;
+  }
+  .prob-rail {
+    position: sticky;
+    top: 70px;
+    padding-top: var(--sp-6);
+  }
+  .prob-rail .actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

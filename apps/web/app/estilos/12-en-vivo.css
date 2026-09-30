@@ -1,0 +1,56 @@
+/* ---------------------------------------------------------------------------
+ * Modo en vivo del explorador.
+ * ------------------------------------------------------------------------- */
+
+.live {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--hair);
+  border-radius: var(--r);
+  background: var(--panel);
+  color: var(--ink-2);
+  font-size: var(--fs-xs);
+  padding: 5px 10px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.live:hover {
+  border-color: var(--chain);
+}
+.live i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ink-3);
+}
+.live.on i {
+  background: var(--teal);
+  animation: latido 2s ease-in-out infinite;
+}
+.live.on {
+  color: var(--ink);
+}
+@keyframes latido {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+/* Sin animación para quien la ha desactivado en su sistema. */
+@media (prefers-reduced-motion: reduce) {
+  .live.on i {
+    animation: none;
+  }
+}
+/* Una traza recién llegada se marca un momento para que se vea que ha entrado. */
+tr.nueva td {
+  animation: entra 1.6s ease-out;
+}
+@keyframes entra {
+  from { background: var(--flash); }
+  to { background: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  tr.nueva td {
+    animation: none;
+  }
+}

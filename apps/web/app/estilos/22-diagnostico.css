@@ -1,0 +1,267 @@
+/* ---------------------------------------------------------------------------
+   Diagnóstico (D-132). El inicio en dos columnas: a la izquierda lo que se lee en
+   orden —cuánto cuesta y qué arreglar—; a la derecha, fijo mientras se baja por la
+   lista, el contexto que matiza la cifra: presupuesto, cobertura y métricas.
+   En estrecho el carril cae entre el héroe y la lista, que es donde estaba.
+   --------------------------------------------------------------------------- */
+.diag {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  grid-template-areas:
+    "aviso aviso"
+    "hero  rail"
+    "lista rail";
+  column-gap: var(--sp-10);
+  align-items: start;
+}
+.diag > .cobertura {
+  grid-area: aviso;
+  margin: var(--sp-6) 0 0;
+}
+.diag > .hero {
+  grid-area: hero;
+  margin-top: var(--sp-8);
+  padding: var(--sp-8) var(--sp-8) var(--sp-8);
+}
+.diag > .diag-lista {
+  grid-area: lista;
+  min-width: 0;
+}
+.diag-rail {
+  grid-area: rail;
+  position: sticky;
+  top: 70px;
+  /* Pegado a 70 px, con esto el primer bloque queda a la altura del héroe. */
+  padding-top: var(--sp-4);
+  display: grid;
+  gap: var(--sp-3);
+}
+
+/* Título: es el h1 de la pantalla y ahora lo parece. Antes medía menos que el título
+   de cada tarjeta. */
+.diag .hero h1 {
+  font-size: var(--fs-2xl);
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+  margin: 0;
+}
+.diag .hero-sub {
+  margin: var(--sp-1) 0 var(--sp-6);
+  color: var(--ink-3);
+  font-size: var(--fs-md);
+}
+.diag .pair {
+  gap: var(--sp-8);
+}
+.diag .big {
+  font-size: clamp(var(--fs-4xl), 6.2vw, var(--fs-hero));
+  letter-spacing: -0.04em;
+  line-height: 0.9;
+}
+.diag .pair-lbl {
+  margin-top: var(--sp-3);
+  color: var(--ink-3);
+}
+.diag .gapbar {
+  height: 8px;
+  margin-top: var(--sp-8);
+  border-radius: var(--r-pill);
+  gap: 2px;
+  background: transparent;
+}
+.diag .gapbar i {
+  border-radius: var(--r-pill);
+}
+.diag .gapbar .save {
+  opacity: 1;
+}
+
+/* Carril de contexto: bloques con su nombre, del mismo peso entre sí. */
+.rail-block {
+  background: var(--panel);
+  border: 1px solid var(--hair);
+  border-radius: var(--r-lg);
+  padding: var(--sp-5);
+}
+.rail-block > h2 {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.rail-block .budget-home,
+.rail-block .cobertura-linea {
+  margin: 0;
+  font-size: var(--fs-md);
+}
+.rail-block .sbar.budget {
+  margin-top: var(--sp-2);
+}
+.rail-block .readout {
+  margin: 0;
+  border: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-3) var(--sp-4);
+}
+.rail-block .readout div {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+}
+.rail-block .readout b {
+  font-size: var(--fs-lg);
+}
+.rail-block .readout small {
+  font-size: var(--fs-xs);
+}
+
+/* Lista de problemas. */
+.diag .sec h2 {
+  font-size: var(--fs-xl);
+}
+.diag .sec p.lead {
+  font-size: var(--fs-md);
+  margin-bottom: var(--sp-5);
+}
+.diag .card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  column-gap: var(--sp-4);
+  padding: var(--sp-5) var(--sp-6) var(--sp-5) var(--sp-5);
+  margin-bottom: var(--sp-3);
+  border: 1px solid var(--hair);
+  border-radius: var(--r-lg);
+  transition: border-color 0.15s, background 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+.diag .card > :not(.rank) {
+  grid-column: 2;
+}
+.diag .card:hover {
+  border-color: var(--hair-strong);
+  background: var(--panel-2);
+  box-shadow: var(--glass-sheen), var(--shadow);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .diag .card:hover {
+    transform: translateY(-1px);
+  }
+}
+/* El puesto en la lista. La lista está ordenada por dinero y hasta ahora no lo decía
+   más que el párrafo de arriba. */
+.diag .card .rank {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--amber);
+  background: var(--amber-bg);
+  border: 1px solid var(--amber-line);
+}
+.diag .card.low .rank {
+  color: var(--ink-3);
+  background: transparent;
+  border-color: var(--hair);
+}
+.diag .card h3 {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  line-height: 1.35;
+}
+.diag .card .price {
+  font-size: var(--fs-xl);
+  font-weight: 500;
+  text-align: right;
+}
+.diag .card p {
+  font-size: var(--fs-base);
+  margin-top: var(--sp-2);
+}
+/* Cuánto pesa cada problema frente al mayor: tres importes en ámbar del mismo tamaño
+   no dejaban ver que el primero vale treinta veces el tercero. */
+.diag .card .peso {
+  height: 4px;
+  margin-top: var(--sp-4);
+  border-radius: var(--r-pill);
+  background: var(--hair-soft);
+  overflow: hidden;
+}
+.diag .card .peso i {
+  display: block;
+  height: 100%;
+  min-width: 4px;
+  border-radius: var(--r-pill);
+  background: linear-gradient(90deg, var(--accent-1), var(--accent-3));
+}
+.diag .card footer {
+  margin-top: var(--sp-3);
+}
+/* El «cómo arreglarlo» se ve siempre: sólo con el ratón encima, quien no pasaba el
+   ratón no sabía que la tarjeta llevaba a algún sitio. */
+.diag .card footer .meta.ver {
+  opacity: 1;
+  color: var(--ink-3);
+  font-weight: 500;
+}
+.diag .card:hover footer .meta.ver,
+.diag .card:focus-visible footer .meta.ver {
+  color: var(--iris);
+}
+
+@media (max-width: 1024px) {
+  .diag {
+    grid-template-columns: minmax(0, 1fr);
+    /* Lo que hay que arreglar va justo debajo de la cifra: en estrecho, el carril
+       delante empujaba la lista fuera de la primera pantalla. La cobertura mala no se
+       pierde por esto: va en «aviso», arriba del todo (D-096). */
+    grid-template-areas: "aviso" "hero" "lista" "rail";
+  }
+  .diag > .hero {
+    padding-bottom: var(--sp-6);
+    margin-bottom: var(--sp-4);
+  }
+  .diag-rail {
+    position: static;
+    padding: var(--sp-8) 0 0;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  }
+}
+@media (max-width: 700px) {
+  .diag .hero h1 {
+    font-size: var(--fs-xl);
+  }
+  .diag > .hero {
+    padding: var(--sp-6) var(--sp-5);
+  }
+  .diag .card {
+    grid-template-columns: minmax(0, 1fr);
+    padding: var(--sp-4);
+  }
+  .diag .card > :not(.rank) {
+    grid-column: 1;
+  }
+  .diag .card .rank {
+    grid-row: auto;
+    margin-bottom: var(--sp-2);
+    width: 24px;
+    height: 24px;
+    font-size: var(--fs-xs);
+  }
+  .diag .card .price {
+    text-align: left;
+  }
+  .diag .card .price small {
+    text-align: left;
+  }
+}

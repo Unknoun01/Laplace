@@ -917,6 +917,8 @@ class AlertRunner:
         #: De aquí salen los ajustes puestos en la interfaz, los estados de cada
         #: hallazgo y el presupuesto. Sin ella, lo de siempre: entorno y fichero.
         self._metadata = metadata
+        #: La retención de la instalación: la de un proyecto no puede pasar de ella (D-173).
+        self.retencion_instalacion = 0
         self._webhook = webhook or WebhookNotifier()
         self._email = email
         #: Quién hace esta vuelta cuando hay varios procesos: una función que devuelve un
@@ -1174,6 +1176,12 @@ class AlertRunner:
                 from .stripe_ingresos import sincronizar_si_toca
 
                 sincronizar_si_toca(self._metadata, project_id)
+                # La retención propia del proyecto, también una vez al día (D-173).
+                from .retencion import aplicar_si_toca
+
+                aplicar_si_toca(
+                    self._store, self._metadata, project_id, self.retencion_instalacion
+                )
             try:
                 salida.append(self.evaluate(project_id))
             except Exception:  # noqa: BLE001
