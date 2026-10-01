@@ -86,6 +86,10 @@ class Coverage(BaseModel):
     #: Pasos cuya identidad se parte en casi tantas versiones como ejecuciones. Es la
     #: forma concreta que toma la fragilidad, y se nombran para poder ir a mirarlos.
     split_steps: list[str] = Field(default_factory=list)
+    #: Si el SDK muestrea, qué parte de las cifras de abajo falta y cuánto costaría
+    #: (D-181). Vacío sin muestreo. No sube el nivel: muestrear es una decisión, no un
+    #: fallo, pero el total que se lee debajo es de lo que llegó y se dice.
+    sampling: str = ""
 
 
 # ---------------------------------------------------------------------------------
@@ -183,6 +187,13 @@ def build(facts: CoverageFacts, *, has_managed_prompts: bool = False) -> Coverag
         cobertura.prominent = True
 
     cobertura.headline, cobertura.detail = _reading(cobertura)
+    if facts.sampled_traces:
+        cobertura.sampling = tn(
+            "cobertura.muestreo",
+            facts.sampled_traces,
+            representadas=cifras.miles(round(facts.represented_traces)),
+            no_visto=cifras.dinero(facts.unseen_cost_usd),
+        )
     return cobertura
 
 

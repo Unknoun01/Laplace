@@ -16,6 +16,7 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor
 
 from . import semconv
+from ._filtro import FiltroProcessor, Muestreo, Redactor, clave_de_redaccion
 from .config import LaplaceConfig
 from .version import __version__
 
@@ -40,6 +41,10 @@ def init(
     batch: bool = True,
     headers: dict[str, str] | None = None,
     defer_to_others: bool | None = None,
+    redact: Any = None,
+    sample_rate: float | None = None,
+    sample_keep_tokens: int | None = -1,
+    sample_keep_ms: int | None = -1,
 ) -> LaplaceConfig:
     """Configura Laplace. Llamar una vez, al arrancar el proceso.
 
@@ -48,6 +53,12 @@ def init(
 
     Los argumentos omitidos se leen del entorno (`LAPLACE_*`). Es idempotente:
     llamarla dos veces reconfigura, no duplica exportadores.
+
+    `redact=True` cambia correos, teléfonos, tarjetas, IBAN, IP y claves de API por una
+    marca antes de que salgan del proceso; también acepta una lista de esos detectores,
+    patrones (`re.compile(...)`) o funciones `texto -> texto`. `sample_rate=0.1` guarda
+    una de cada diez trazas normales y todas las que fallan, las de evaluaciones y las
+    que pasan de `sample_keep_tokens` (20 000) o `sample_keep_ms`. Ver D-181.
     """
     global _config, _provider
 
@@ -74,6 +85,18 @@ def init(
         cfg.headers.update(headers)
     if defer_to_others is not None:
         cfg.defer_to_others = defer_to_others
+    if redact is not None:
+        cfg.redact = redact
+    if sample_rate is not None:
+        cfg.sample_rate = sample_rate
+    if sample_keep_tokens != -1:
+        cfg.sample_keep_tokens = sample_keep_tokens
+    if sample_keep_ms != -1:
+        cfg.sample_keep_ms = sample_keep_ms
+    if not 0 < cfg.sample_rate <= 1:
+        raise ValueError(f"sample_rate tiene que estar en (0, 1]: {cfg.sample_rate}")
+    # Un detector que no existe se dice al arrancar, no al primer span.
+    Redactor.of(cfg.redact)
 
     _config = cfg
 
@@ -126,7 +149,22 @@ def _build_processor(cfg: LaplaceConfig, *, batch: bool):
     from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
     exporter = OTLPSpanExporter(endpoint=cfg.traces_url, headers=cfg.export_headers())
-    return BatchSpanProcessor(exporter) if batch else SimpleSpanProcessor(exporter)
+    procesador = BatchSpanProcessor(exporter) if batch else SimpleSpanProcessor(exporter)
+    return filtro(cfg, procesador)
+
+
+def filtro(cfg: LaplaceConfig, procesador):
+    """El procesador que exporta, con la redacción y el muestreo delante si hacen falta.
+
+    Va sólo en el camino de Laplace: si la aplicación tenía su propio proveedor con
+    otros exportadores, lo que mandan ellos no cambia (D-181)."""
+    redactor = Redactor.of(cfg.redact, clave_de_redaccion(cfg.api_key))
+    if redactor is None and cfg.sample_rate >= 1:
+        return procesador
+    muestreo = Muestreo(
+        rate=cfg.sample_rate, keep_tokens=cfg.sample_keep_tokens, keep_ms=cfg.sample_keep_ms
+    )
+    return FiltroProcessor(procesador, redactor=redactor, muestreo=muestreo)
 
 
 def _auto_instrument(cfg: LaplaceConfig) -> None:

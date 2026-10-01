@@ -492,6 +492,12 @@ class CoverageFacts:
     #: con una fecha dentro genera una huella por llamada.
     steps: int = 0
     split_steps: list[str] = field(default_factory=list)
+    #: Trazas de la ventana que el SDK guardó por azar al muestrear (D-181), a cuántas
+    #: representan en total, y lo que costaron las que no llegaron: lo de cada una por
+    #: su `sample_rate` menos uno. Cero sin muestreo.
+    sampled_traces: int = 0
+    represented_traces: float = 0.0
+    unseen_cost_usd: float = 0.0
 
 
 def _sujeto(user_id: str | None, customer_id: str | None) -> tuple[str, str]:

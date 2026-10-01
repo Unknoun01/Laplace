@@ -4000,3 +4000,85 @@ Pruebas (`test_diagnostico_modelo.py`, con un proveedor falso):
 `test_pantallas.py` exige que la ficha enseñe las afirmaciones, las tiradas y el coste,
 y que la cita seleccione su span. Se rompieron a propósito la comprobación de ids, la de
 las citas mezcladas y la selección de la cita, y alguna prueba falla.
+
+### D-181 — Redacción de datos personales y muestreo por cola, en el SDK
+Las dos cosas pasan **en el proceso del usuario, antes de mandar nada**, en un
+procesador (`laplace/_filtro.py`) que va delante del exportador de Laplace y sólo en
+ese camino. Si la aplicación tenía su propio proveedor con otros exportadores, lo que
+mandan ellos no cambia. Sin `redact` y sin `sample_rate`, el procesador no existe.
+
+**Redacción** (`init(redact=True)` o `LAPLACE_REDACT`):
+* Hay detectores para correos, teléfonos, tarjetas, IBAN, IP y claves de API (OpenAI,
+  AWS, GitHub, Slack, JWT, `Bearer`).
+  - Las tarjetas pasan por Luhn y el IBAN por el módulo 97.
+  - Una tarjeta pide al menos 14 cifras y no todas iguales: un instante en
+    milisegundos o un relleno de ceros no lo son.
+  - Una fecha, un recuento de tokens o una versión tampoco son un teléfono.
+  - Son conservadores a propósito. Lo que no pillen se cubre con un patrón o una función
+    propia en la misma lista.
+* **La marca lleva una huella** (`[email:3f2a9c1d]`). Con `[email]` a secas, dos
+  peticiones que sólo se distinguen por el correo serían la misma. Eso daría
+  repeticiones falsas, y pasos partidos o juntados, porque la identidad de paso sale del
+  texto de las instrucciones (D-060).
+  - La huella es un HMAC con `LAPLACE_REDACT_KEY`, o con la API key, así que no se
+    deshace probando correos de un diccionario.
+  - Sin ninguna de las dos, la clave es aleatoria por proceso, y un paso con un dato
+    personal en las instrucciones se partiría entre procesos. Se dice en el README.
+* **Se redacta todo menos la estructura.** Una lista explícita de prefijos se queda como
+  está:
+  - modelos, tokens, nombres de herramienta y de paso, tarifas y prompts gestionados;
+  - los identificadores que pone el usuario (`user_id`, `customer_id`): el margen casa
+    por ellos con Stripe, y quien los pone, los pone a propósito.
+  - También se redactan los eventos de excepción y la descripción del estado de error.
+* **Si redactar falla, el span sale sin el contenido**, con
+  `laplace.redaction.failed`. Mandar un dato que el usuario pidió quitar es peor que
+  perder un prompt. Es la única excepción a «el SDK nunca cambia lo que pasa si falla».
+
+**Muestreo por cola** (`init(sample_rate=0.1)`):
+* **Se decide al acabar la traza.** Al empezar no se sabe si va a fallar ni lo que va a
+  gastar. Los spans se guardan en memoria hasta que acaba la raíz local.
+* **Siempre se queda** con:
+  - las trazas con un error (estado o evento de excepción);
+  - las que pasan de `sample_keep_tokens` (20 000, entrada más salida de toda la
+    traza) o de `sample_keep_ms`;
+  - las de evaluaciones y replays, sin las que Probar no compara.
+* **De lo demás, una de cada `1 / rate`**, elegida por el `trace_id` como
+  `TraceIdRatioBased`. Dos servicios de la misma traza deciden lo mismo.
+* **«Cara» son tokens y no dólares**: el SDK no tiene la tabla de precios, y los tokens
+  son lo que se cobra.
+* **Para que no crezca sin límite**, una traza que lleva 5 minutos sin cerrarse, que
+  pasa de 5 000 spans o que sobra de 2 000 abiertas se manda entera, sin muestrear. Al
+  cerrar el proceso se manda lo pendiente. Ante la duda se guarda, que es lo que había
+  antes. Un span que acaba después de su raíz sigue la suerte de su traza.
+* **Lo que se queda por azar lleva `laplace.sample.rate`** en todos sus spans. La
+  ingesta lo guarda como `sample_rate` en los dos almacenes; un valor que no sea un
+  número ≥ 1 vale 1.
+
+**Lo que se dice**: con trazas muestreadas en la ventana, el Diagnóstico pone una
+línea antes del dinero. Dice cuántas llegaron por azar, a cuántas representan y cuánto
+costaría lo que no llegó (su coste por `rate − 1`). Se calcula en `coverage()`, en los
+dos almacenes. No sube el nivel de la cobertura: muestrear es una decisión, no un fallo.
+
+**Las cifras no se escalan.** Los totales, el ahorro y las reglas siguen siendo los de
+lo que llegó. Escalar por el peso tocaría unas 85 sumas y 60 recuentos en dos almacenes
+y sus preagregados, y la regla del producto es no dar una cifra que no se ha medido.
+Como lo que falla y lo caro llega entero, lo que falta es justo lo barato y lo sano. Por
+eso las cifras de abajo son un suelo, y la línea dice cuánto.
+
+Pruebas (`test_redaccion_muestreo.py`):
+- cada detector, y lo que no tienen que confundir;
+- la marca estable, distinta para otro valor y dependiente de la clave;
+- detectores a elegir y propios;
+- de punta a punta por OTLP: el dato no sale, la estructura y el cliente no cambian, el
+  paso y la repetición se siguen viendo;
+- el fallo de la redacción;
+- el muestreo con normales, fallidas, caras y evaluaciones, determinista y entero;
+- el hijo tardío y el cierre;
+- la validación de `init`;
+- la ingesta;
+- lo que dice el servidor, en los dos almacenes.
+
+Se rompieron a propósito el error como motivo para guardar, la huella, la lista de
+estructura, el vaciado al cerrar, la decisión de los tardíos, el `rate − 1` y el
+relleno de ceros, y alguna prueba falla. La del cliente no mordía con un cliente sin
+datos personales; ahora el cliente de la prueba es un correo.

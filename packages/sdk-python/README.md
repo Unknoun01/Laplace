@@ -112,6 +112,25 @@ esas mismas llamadas, y la del modelo nuevo. Si el juez de Laplace está encendi
 juzga cada respuesta contra la que dio el original. Desde Python:
 `laplace.replay_dataset("ab-3f9c2e1a", model="gpt-5.6-luna", max_usd=1)`.
 
+### Datos personales y muestreo
+
+```python
+laplace.init(project="mi-agente", redact=True, sample_rate=0.1)
+```
+
+- **`redact=True`** cambia correos, teléfonos, tarjetas (con Luhn), IBAN, IP y claves de
+  API por una marca (`[email:3f2a9c1d]`) **antes de que salgan de tu proceso**. La marca
+  es la misma para el mismo valor, así que las repeticiones y los pasos se siguen viendo.
+  Se puede pedir sólo parte (`redact=["email", "phone"]`) o añadir lo tuyo: un patrón
+  (`re.compile(r"EXP-\d+")`) o una función `texto -> texto`. No se tocan los
+  identificadores que pones tú (`user_id`, `customer_id`), los modelos ni los tokens.
+  La marca es un HMAC con `LAPLACE_REDACT_KEY`, o con tu API key; sin ninguna, sólo casa
+  dentro del mismo proceso.
+- **`sample_rate=0.1`** guarda una de cada diez trazas normales y **todas** las que
+  fallan, las caras (desde `sample_keep_tokens`, 20 000 tokens por defecto, o desde
+  `sample_keep_ms` si lo pones) y las de evaluaciones y replays. Se decide al acabar la
+  traza, entera. El Diagnóstico dice que hay muestreo y cuánto costaría lo que no llegó.
+
 ## Configuración
 
 Todo se puede fijar por entorno, para no tener que tocar el código en cada despliegue.
@@ -126,6 +145,11 @@ Todo se puede fijar por entorno, para no tener que tocar el código en cada desp
 | `LAPLACE_DISABLED`         | `false`                 | Apaga la emisión sin tocar el código.           |
 | `LAPLACE_EXIT_FLUSH_MS`    | `2000`                  | Tope de espera al envío final, al salir.        |
 | `LAPLACE_DEBUG`            | `false`                 | Logs internos del SDK.                          |
+| `LAPLACE_REDACT`           | —                       | `true`, o detectores: `email,phone,card,iban,ip,secret`. |
+| `LAPLACE_REDACT_KEY`       | la API key              | Clave de las marcas de la redacción.            |
+| `LAPLACE_SAMPLE_RATE`      | `1`                     | Fracción de trazas normales que se guarda.      |
+| `LAPLACE_SAMPLE_KEEP_TOKENS` | `20000`               | Desde aquí, la traza se guarda siempre.         |
+| `LAPLACE_SAMPLE_KEEP_MS`   | —                       | Ídem por duración.                              |
 
 En scripts cortos, llama a `laplace.flush()` antes de salir (o deja que lo haga el
 `atexit` que registra `init()`).

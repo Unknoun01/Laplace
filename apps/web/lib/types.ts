@@ -364,6 +364,8 @@ export interface Coverage {
   prominent: boolean;
   /** Pasos cuya identidad se parte en casi tantas versiones como ejecuciones. */
   split_steps: string[];
+  /** Si el SDK muestrea, qué falta de las cifras de abajo (D-181). Vacío si no. */
+  sampling?: string;
 }
 
 /** Un tramo del gráfico del Diagnóstico. `avoidable_usd` es un reparto, no una medida. */

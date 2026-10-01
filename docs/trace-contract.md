@@ -51,6 +51,7 @@ en el estándar vive bajo el prefijo `laplace.*`, nunca inventando nombres dentr
 | `laplace.user.id`    | string | Usuario final del agente (no el cliente Laplace). |
 | `laplace.customer.id` | string | Cliente que paga por este trabajo: la clave del margen por cliente (D-161). Basta en un span de la traza, normalmente la raíz. |
 | `laplace.tags`       | string | JSON array de strings.                            |
+| `laplace.sample.rate` | double | A cuántas trazas representa esta, si el SDK muestrea (D-181): `10` si se quedó por azar con una de cada diez. Va en todos los spans de la traza; sin él, `1`. Se guarda como `sample_rate`. |
 | `laplace.metadata`   | string | JSON object libre.                                |
 | `laplace.prompt.name`    | string | Prompt gestionado que produjo la llamada (§9).  |
 | `laplace.prompt.version` | int    | Versión usada. `0` = texto de reserva (§9).     |

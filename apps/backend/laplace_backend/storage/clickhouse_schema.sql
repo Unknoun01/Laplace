@@ -109,6 +109,8 @@ CREATE TABLE IF NOT EXISTS spans
     -- La huella del prefijo, sin el sitio: dos pasos con la misma pueden compartir la
     -- caché del proveedor dentro de una ejecución (D-178).
     prefix_hash         String,
+    -- A cuántas trazas representa, si el SDK muestrea (D-181).
+    sample_rate         Float32 DEFAULT 1,
 
     events              String CODEC(ZSTD(3)),
     attributes          String CODEC(ZSTD(3)),
@@ -194,6 +196,9 @@ ALTER TABLE spans ADD COLUMN IF NOT EXISTS customer_id String DEFAULT '';
 
 -- Instalaciones anteriores a la caché compartida entre pasos (D-178).
 ALTER TABLE spans ADD COLUMN IF NOT EXISTS prefix_hash String DEFAULT '';
+
+-- Instalaciones anteriores al muestreo del SDK (D-181).
+ALTER TABLE spans ADD COLUMN IF NOT EXISTS sample_rate Float32 DEFAULT 1;
 
 -- Instalaciones anteriores a D-142. Los payloads son casi todo el disco, y con ZSTD(3)
 -- ocupan menos de la mitad que con el LZ4 por defecto (medido con la prueba de carga).

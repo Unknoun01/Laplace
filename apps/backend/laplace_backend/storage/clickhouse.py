@@ -1320,13 +1320,14 @@ class ClickHouseStore:
         salida, que son el contrato entre los dos almacenes.
         """
         params = self._window_params(project_id, window)
+        muestreo = self._muestreo(params)
         if self._pre:
             v = self._en_pre(project_id, window)
             filas = _named(self._consulta(preagregados.sql(v, preagregados.COBERTURA), v.params))
             pasos = _named(
                 self._consulta(preagregados.sql(v, preagregados.COBERTURA_PASOS), v.params)
             )
-            return coverage_from_rows(filas[0], pasos)
+            return coverage_from_rows(filas[0], pasos, muestreo)
         filas = _named(
             self._consulta(
                 f"""
@@ -1360,7 +1361,26 @@ class ClickHouseStore:
                 parameters=params,
             )
         )
-        return coverage_from_rows(filas[0], pasos)
+        return coverage_from_rows(filas[0], pasos, muestreo)
+
+    def _muestreo(self, params: dict[str, Any]) -> Any:
+        """Gemelo del de sqlite.py (D-181). Sin preagregado: sólo lee las filas con
+        `sample_rate > 1`, que sin muestreo son ninguna."""
+        return _named(
+            self._consulta(
+                f"""
+                SELECT count() AS trazas, sum(rate) AS representadas,
+                       sum(coste * (rate - 1)) AS no_visto
+                FROM (
+                    SELECT trace_id, max(sample_rate) AS rate, sum(cost_total_usd) AS coste
+                    FROM spans FINAL
+                    WHERE {WINDOW_WHERE} AND sample_rate > 1
+                    GROUP BY trace_id
+                )
+                """,
+                parameters=params,
+            )
+        )[0]
 
     def delete_project(self, project_id: str) -> None:
         """Borra todos los spans de un proyecto.

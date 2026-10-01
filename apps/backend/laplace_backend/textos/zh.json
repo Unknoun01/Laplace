@@ -155,6 +155,8 @@
   "cobertura.pocas_one": "只有 {n} 次模型调用，百分比没有意义；至少需要 {minimo} 次",
   "cobertura.pocas_other": "只有 {n} 次模型调用，百分比没有意义；至少需要 {minimo} 次",
   "cobertura.alguna_suelta": "个别调用",
+  "cobertura.muestreo_one": "此时间窗口内有 {n} 次随机选中的运行到达，代表约 {representadas} 次：SDK 正在采样。失败的和昂贵的运行全部到达。下面的花费只算到达的部分；未到达的约再加 {no_visto}。",
+  "cobertura.muestreo_other": "此时间窗口内有 {n} 次随机选中的运行到达，代表约 {representadas} 次：SDK 正在采样。失败的和昂贵的运行全部到达。下面的花费只算到达的部分；未到达的约再加 {no_visto}。",
   "cobertura.de_cada_diez": "每十次调用中有 {n} 次",
   "cobertura.pasos.label": "可以相互区分的步骤",
   "cobertura.pasos.consecuencia": "无法区分的调用会全部堆在一起，规则就无法比较不同的步骤，只能保持沉默。在这个信号偏低时，“没有需要修复的问题”意味着“我们不知道”，而不是“一切正常”。",

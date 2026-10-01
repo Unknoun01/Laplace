@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 181 decisiones.
+final. 182 decisiones.
 
 ## Coste, precios y caché
 
@@ -120,6 +120,7 @@ final. 181 decisiones.
 - [D-164](../DECISIONS.md#d-164--clientbeta-en-python-las-llamadas-que-no-se-veían) — `client.beta.*` en Python: las llamadas que no se veían
 - [D-165](../DECISIONS.md#d-165--las-integraciones-de-typescript-que-faltaban-probadas-y-lo-que-se-perdía) — Las integraciones de TypeScript que faltaban, probadas: y lo que se perdía
 - [D-170](../DECISIONS.md#d-170--los-tres-frameworks-que-faltaban-probados-y-lo-que-mastra-no-manda-donde-toca) — Los tres frameworks que faltaban, probados; y lo que Mastra no manda donde toca
+- [D-181](../DECISIONS.md#d-181--redacción-de-datos-personales-y-muestreo-por-cola-en-el-sdk) — Redacción de datos personales y muestreo por cola, en el SDK
 
 ## Almacenes y escala
 
@@ -577,3 +578,4 @@ final. 181 decisiones.
 - [D-178](../DECISIONS.md#d-178--el-mismo-prefijo-en-varios-pasos-sin-compartir-la-caché) — El mismo prefijo en varios pasos, sin compartir la caché
 - [D-179](../DECISIONS.md#d-179--margen-por-cliente-lo-evitable-de-cada-uno-otras-monedas-y-su-columna) — Margen por cliente: lo evitable de cada uno, otras monedas y su columna
 - [D-180](../DECISIONS.md#d-180--diagnóstico-con-modelo-que-cita-los-spans-de-los-que-sale) — Diagnóstico con modelo, que cita los spans de los que sale
+- [D-181](../DECISIONS.md#d-181--redacción-de-datos-personales-y-muestreo-por-cola-en-el-sdk) — Redacción de datos personales y muestreo por cola, en el SDK

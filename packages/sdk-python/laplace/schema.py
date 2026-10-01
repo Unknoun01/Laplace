@@ -230,6 +230,10 @@ class Span(_Model):
     #: mandan el mismo prefijo y pueden compartir caché dentro de una ejecución
     #: (D-178). Lo calcula la ingesta; vacío si no se capturan payloads.
     prefix_hash: str = ""
+    #: A cuántas trazas representa la de este span, si el SDK muestrea (D-181): 10 si
+    #: se quedó por azar con una de cada diez. 1 si no se muestrea, o si se quedó porque
+    #: falló o era cara, que llegan todas.
+    sample_rate: float = 1.0
     #: Hash de la llamada **ignorando los números**: dos vueltas de un bucle que sólo
     #: se diferencian en el contador de intentos caen juntas. `dedup_hash` sólo ve
     #: repeticiones exactas, y un bucle de verdad casi nunca lo es (D-109).

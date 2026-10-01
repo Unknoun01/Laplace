@@ -167,6 +167,7 @@ CREATE TABLE IF NOT EXISTS spans (
 
     customer_id           TEXT NOT NULL DEFAULT '',
     prefix_hash           TEXT NOT NULL DEFAULT '',
+    sample_rate           REAL NOT NULL DEFAULT 1,
 
     events                TEXT NOT NULL DEFAULT '',
     attributes            TEXT NOT NULL DEFAULT '',
@@ -197,6 +198,8 @@ COLUMNAS_TARDIAS = (
     ("customer_id", "TEXT NOT NULL DEFAULT ''"),
     # La huella del prefijo, para la caché compartida entre pasos (D-178).
     ("prefix_hash", "TEXT NOT NULL DEFAULT ''"),
+    # A cuántas trazas representa, si el SDK muestrea (D-181).
+    ("sample_rate", "REAL NOT NULL DEFAULT 1"),
 )
 
 #: Índices sobre columnas tardías. Van aquí y **no** en `SCHEMA` por un motivo que costó
@@ -1397,7 +1400,24 @@ class SQLiteStore:
             """,
             params,
         )
-        return coverage_from_rows(fila, pasos)
+        return coverage_from_rows(fila, pasos, self._muestreo(params))
+
+    def _muestreo(self, params: dict[str, Any]) -> Any:
+        """Lo que el SDK dejó fuera al muestrear (D-181). `sample_rate` es igual en todos
+        los spans de una traza; `MAX` por traza para no contarla una vez por span."""
+        return self._query(
+            f"""
+            SELECT COUNT(*) AS trazas, SUM(rate) AS representadas,
+                   SUM(coste * (rate - 1)) AS no_visto
+            FROM (
+                SELECT trace_id, MAX(sample_rate) AS rate, SUM(cost_total_usd) AS coste
+                FROM spans
+                WHERE {WINDOW_WHERE} AND sample_rate > 1
+                GROUP BY trace_id
+            )
+            """,
+            params,
+        )[0]
 
     def delete_project(self, project_id: str) -> None:
         self._conn.execute("DELETE FROM spans WHERE project_id = :p", {"p": project_id})

@@ -82,6 +82,8 @@ function Contenido() {
           ahorro sin saber que está calculado sobre la mitad de las llamadas es peor
           que no leerlo (D-096). */}
       {cobertura?.prominent && <CoberturaBloque cobertura={cobertura} />}
+      {/* Con muestreo, el gasto de abajo es el de lo que llegó: se dice antes (D-181). */}
+      {cobertura?.sampling && <p className="aviso-muestreo">{cobertura.sampling}</p>}
 
       <section className="hero">
         <div className="hero-top">

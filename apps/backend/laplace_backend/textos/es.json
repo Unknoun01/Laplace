@@ -155,6 +155,8 @@
   "cobertura.pocas_one": "con {n} llamada a modelos, un porcentaje no diría nada; hacen falta {minimo}",
   "cobertura.pocas_other": "con {n} llamadas a modelos, un porcentaje no diría nada; hacen falta {minimo}",
   "cobertura.alguna_suelta": "alguna llamada suelta",
+  "cobertura.muestreo_one": "En esta ventana llegan {n} ejecución elegida al azar que representa a unas {representadas}: el SDK está muestreando. Las que fallan y las caras llegan todas. El gasto de abajo es el de lo que llegó; con lo que no llegó serían unos {no_visto} más.",
+  "cobertura.muestreo_other": "En esta ventana llegan {n} ejecuciones elegidas al azar que representan a unas {representadas}: el SDK está muestreando. Las que fallan y las caras llegan todas. El gasto de abajo es el de lo que llegó; con lo que no llegó serían unos {no_visto} más.",
   "cobertura.de_cada_diez": "{n} de cada diez llamadas",
   "cobertura.pasos.label": "Pasos que se distinguen entre sí",
   "cobertura.pasos.consecuencia": "Las llamadas que no se distinguen caen todas en el mismo montón, así que las reglas no pueden comparar un paso con otro y se callan. Un «no hay nada que arreglar» con esta señal baja significa «no lo sabemos», no «está bien».",

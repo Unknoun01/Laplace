@@ -138,3 +138,12 @@
   margin: 12px auto 0;
   color: var(--ink-2);
 }
+/* Con muestreo en el SDK, el gasto que se lee es el de lo que llegó (D-181). */
+.aviso-muestreo {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+}

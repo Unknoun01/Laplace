@@ -25,6 +25,24 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    try:
+        return float(raw) if raw not in (None, "") else default
+    except ValueError:
+        return default
+
+
+def _env_redact() -> object:
+    """`LAPLACE_REDACT=true` (todos los detectores) o `email,phone` (sólo esos)."""
+    raw = (os.getenv("LAPLACE_REDACT") or "").strip()
+    if raw.lower() in {"", "0", "false", "no", "off"}:
+        return None
+    if raw.lower() in {"1", "true", "yes", "on", "all"}:
+        return True
+    return [p.strip() for p in raw.split(",") if p.strip()]
+
+
 def _env_int(name: str, default: int | None) -> int | None:
     raw = os.getenv(name)
     if raw is None:
@@ -71,6 +89,17 @@ class LaplaceConfig:
 
     headers: dict[str, str] = field(default_factory=dict)
 
+    #: Redacción de datos personales antes de mandar nada (D-181): `True`, una lista de
+    #: detectores (`email`, `phone`, `card`, `iban`, `ip`, `secret`), patrones o funciones.
+    redact: object = None
+    #: Muestreo por cola (D-181): la fracción de trazas normales que se guarda. Las que
+    #: fallan, las de evaluaciones y replays y las que pasan de los topes, siempre.
+    sample_rate: float = 1.0
+    #: Tokens (entrada + salida de toda la traza) a partir de los que se guarda siempre.
+    sample_keep_tokens: int | None = 20_000
+    #: Duración en ms a partir de la que se guarda siempre. `None` no la mira.
+    sample_keep_ms: int | None = None
+
     @classmethod
     def from_env(cls) -> LaplaceConfig:
         return cls(
@@ -87,6 +116,10 @@ class LaplaceConfig:
             debug=_env_bool("LAPLACE_DEBUG", False),
             disabled=_env_bool("LAPLACE_DISABLED", False),
             defer_to_others=_env_bool("LAPLACE_DEFER_TO_OTHERS", True),
+            redact=_env_redact(),
+            sample_rate=_env_float("LAPLACE_SAMPLE_RATE", 1.0),
+            sample_keep_tokens=_env_int("LAPLACE_SAMPLE_KEEP_TOKENS", 20_000),
+            sample_keep_ms=_env_int("LAPLACE_SAMPLE_KEEP_MS", None),
         )
 
     @property

@@ -155,6 +155,8 @@
   "cobertura.pocas_one": "avec {n} appel à des modèles, un pourcentage ne voudrait rien dire ; il en faut {minimo}",
   "cobertura.pocas_other": "avec {n} appels à des modèles, un pourcentage ne voudrait rien dire ; il en faut {minimo}",
   "cobertura.alguna_suelta": "quelques appels isolés",
+  "cobertura.muestreo_one": "Dans cette fenêtre, {n} exécution tirée au hasard est arrivée, qui en représente environ {representadas} : le SDK échantillonne. Celles qui échouent et les coûteuses arrivent toutes. La dépense ci-dessous est celle de ce qui est arrivé ; le reste ajouterait environ {no_visto}.",
+  "cobertura.muestreo_other": "Dans cette fenêtre, {n} exécutions tirées au hasard sont arrivées, qui en représentent environ {representadas} : le SDK échantillonne. Celles qui échouent et les coûteuses arrivent toutes. La dépense ci-dessous est celle de ce qui est arrivé ; le reste ajouterait environ {no_visto}.",
   "cobertura.de_cada_diez": "{n} appels sur dix",
   "cobertura.pasos.label": "Étapes qu’on sait distinguer",
   "cobertura.pasos.consecuencia": "Les appels qu’on ne distingue pas tombent tous dans le même tas : les règles ne peuvent pas comparer une étape à une autre et se taisent. Un « rien à corriger » avec ce signal bas veut dire « nous ne savons pas », pas « tout va bien ».",

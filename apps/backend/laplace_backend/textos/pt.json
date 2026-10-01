@@ -155,6 +155,8 @@
   "cobertura.pocas_one": "com {n} chamada a modelos, uma porcentagem não diria nada; são necessárias {minimo}",
   "cobertura.pocas_other": "com {n} chamadas a modelos, uma porcentagem não diria nada; são necessárias {minimo}",
   "cobertura.alguna_suelta": "alguma chamada solta",
+  "cobertura.muestreo_one": "Nesta janela chegou {n} execução escolhida ao acaso que representa cerca de {representadas}: o SDK está amostrando. As que falham e as caras chegam todas. O gasto abaixo é o do que chegou; o que não chegou somaria cerca de {no_visto}.",
+  "cobertura.muestreo_other": "Nesta janela chegaram {n} execuções escolhidas ao acaso que representam cerca de {representadas}: o SDK está amostrando. As que falham e as caras chegam todas. O gasto abaixo é o do que chegou; o que não chegou somaria cerca de {no_visto}.",
   "cobertura.de_cada_diez": "{n} de cada dez chamadas",
   "cobertura.pasos.label": "Etapas que se distinguem entre si",
   "cobertura.pasos.consecuencia": "As chamadas que não se distinguem caem todas no mesmo monte, então as regras não conseguem comparar uma etapa com outra e ficam caladas. Um “não há nada para corrigir” com este sinal baixo significa “não sabemos”, não “está tudo bem”.",

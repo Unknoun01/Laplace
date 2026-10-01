@@ -306,6 +306,16 @@ def _tool_names(raw: Any) -> list[str]:
     return sorted(set(nombres))
 
 
+def _sample_rate(valor: Any) -> float:
+    """A cuántas trazas representa esta (D-181). Algo que no sea un número ≥ 1 es 1: un
+    0,5 diría que la traza vale media, y eso no lo manda ningún SDK."""
+    try:
+        rate = float(valor)
+    except (TypeError, ValueError):
+        return 1.0
+    return rate if 1.0 <= rate <= 1_000_000 else 1.0
+
+
 def prefix_hash(messages: list[dict[str, Any]], tools: Any) -> str:
     """La huella de las instrucciones y las herramientas: lo que va delante de cada
     llamada y la caché del proveedor puede reutilizar. Es la mitad «con las mismas
@@ -555,6 +565,7 @@ def _build_span(
         step_label=step_label,
         step_hint=step_hint,
         prefix_hash=prefijo,
+        sample_rate=_sample_rate(attrs.get("laplace.sample.rate")),
         # El SDK sólo escribe esto cuando ha comprobado que el texto de esa versión iba
         # de verdad en los mensajes. Aquí se copia tal cual: la ingesta no deduce una
         # versión que el emisor no haya afirmado (D-090).

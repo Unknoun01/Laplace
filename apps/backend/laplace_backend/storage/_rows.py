@@ -102,6 +102,8 @@ COLUMNS = (
     "customer_id",
     # La huella del prefijo, para la caché compartida entre pasos (D-178).
     "prefix_hash",
+    # A cuántas trazas representa, si el SDK muestrea (D-181).
+    "sample_rate",
 )
 
 
@@ -219,7 +221,7 @@ def row_to_observed_prompt(f: Any) -> Any:
     )
 
 
-def coverage_from_rows(fila: Any, pasos: Any) -> Any:
+def coverage_from_rows(fila: Any, pasos: Any, muestreo: Any = None) -> Any:
     """Filas a `CoverageFacts`, igual para los dos almacenes (D-066).
 
     Un paso se considera **partido** cuando tiene casi tantas identidades distintas como
@@ -248,6 +250,9 @@ def coverage_from_rows(fila: Any, pasos: Any) -> Any:
         with_prompt_version=int(fila["con_prompt"] or 0),
         steps=len(pasos),
         split_steps=sorted(partidos),
+        sampled_traces=int(muestreo["trazas"] or 0) if muestreo else 0,
+        represented_traces=float(muestreo["representadas"] or 0) if muestreo else 0.0,
+        unseen_cost_usd=float(muestreo["no_visto"] or 0) if muestreo else 0.0,
     )
 
 
@@ -361,6 +366,7 @@ def row_to_span(r: dict[str, Any]) -> Span:
         # interfaz no puede caerse por leer una traza vieja.
         step_site=(r["step_site"] if "step_site" in r.keys() else ""),
         prefix_hash=(r["prefix_hash"] if "prefix_hash" in r.keys() else ""),
+        sample_rate=float(r["sample_rate"] or 1) if "sample_rate" in r.keys() else 1.0,
         prompt_name=r["prompt_name"] or "",
         prompt_version=int(r["prompt_version"] or 0),
         events=events,
@@ -537,4 +543,5 @@ def span_to_row(span: Span) -> list[Any]:
         dumps(span.attributes),
         span.customer_id or "",
         span.prefix_hash,
+        float(span.sample_rate or 1.0),
     ]
