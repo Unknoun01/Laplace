@@ -3863,3 +3863,51 @@ principio, porque la demo no trae ninguna; ahora la prueba las pone.
 Las cifras son de un ClickHouse con sólo el proyecto grande. La migración del conjunto
 entero (148 millones de spans de seis proyectos) no cabía en el disco del contenedor, y
 con el proyecto delante en la clave los demás no entran en sus lecturas.
+
+## 2026-10-01 — Funciones: caché compartida, margen por cliente, diagnóstico con modelo, seguridad
+
+### D-178 — El mismo prefijo en varios pasos, sin compartir la caché
+La regla del contexto fijo mira cada paso por separado y supone, por prudencia, que la
+caché no sobrevive de una ejecución a la siguiente. Un paso que se llama una vez por
+ejecución no tiene nada que reutilizar. Pero un agente llama a menudo a varios pasos
+**con las mismas instrucciones** desde sitios distintos del código, y dentro de una
+ejecución la caché del proveedor les podría servir ese prefijo a todos menos al primero.
+Paso a paso no se veía.
+
+* **La huella del prefijo** (`prefix_hash`, contrato §8): la mitad «con las mismas
+  instrucciones» de la identidad de paso (D-060), sin el sitio. La calcula la ingesta. Se
+  guarda en los dos almacenes, en `ModelUsage` y en los preagregados (D-177). Las tablas
+  de preagregados de antes ganan las columnas, y sus horas calculadas se marcan sucias
+  para recalcularlas.
+* **La regla** (`cache_compartida`) agrupa los usos por (prefijo, modelo) cuando hay dos
+  pasos o más. Las ejecuciones distintas se piden aparte (`prefix_traces`): no son la
+  suma de las de cada paso, porque una ejecución que llama a dos pasos cuenta una vez.
+  - Lecturas que encontrarían la caché caliente: prefijo × (llamadas − ejecuciones).
+  - Se quitan las que el contexto fijo ya reclama dentro de cada paso.
+  - Sólo cuenta la parte del prefijo que no se sirve ya de caché, y si esa parte es
+    menor que el 35 % no dice nada: OpenAI cachea sola los prefijos idénticos.
+  - Se resta una escritura por ejecución.
+  - Si a esos pasos se les recomienda un modelo más barato, se tarifa sobre ése, como
+    el contexto fijo.
+* **Un hallazgo de varios pasos** reparte su dinero entre ellos en proporción a sus
+  llamadas (`Finding.step_shares`). Con eso suman igual lo reclamado por paso
+  (`reparto`), la franja evitable del gráfico y el descuento de la regla de prompts, y
+  la prueba de que ninguna regla reclama más de lo que costó el paso sigue valiendo.
+
+Pruebas en `test_regla_cache_compartida.py`, en los dos almacenes:
+- la huella no depende del sitio y cambia con las instrucciones;
+- el dinero exacto del caso de libro (dos pasos, una vez cada uno por ejecución) y su
+  reparto;
+- el descuento cuando un paso se repite dentro de la ejecución;
+- que no dispare con un solo paso, con prefijos distintos ni cuando el proveedor ya
+  cachea el prefijo;
+- que la ficha diga lo mismo que la tarjeta.
+
+El catálogo siembra el tipo nuevo y le exige ficha y `GARANTIAS`, y la prueba de fuego
+de D-177 compara también `prefix_traces`. Se rompieron a propósito el descuento, el
+filtro de lo ya cacheado y el recuento de ejecuciones distintas, y alguna prueba falla.
+El filtro no mordía al principio, porque la escritura ya se comía el ahorro del caso de
+la prueba; ahora la prueba usa cuatro pasos.
+
+**La demo no lo enseña**: ninguno de sus pasos comparte instrucciones con otro, y
+añadirle esa patología movería cifras que fijan otras pruebas. Queda en la hoja de ruta.

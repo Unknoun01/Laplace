@@ -872,6 +872,7 @@ export const es = {
   "grafo.sin_tarifa": "sin tarifa",
   "grafo.al_menos": "≥ {coste}",
   "aj.regla.prompt_caro": "Prompt más caro",
+  "aj.regla.cache_compartida": "Caché sin compartir",
   "diag.ahorrado_one": "Ya has dejado de pagar {coste} desde que arreglaste un problema.",
   "diag.ahorrado_other": "Ya has dejado de pagar {coste} desde que arreglaste {n} problemas.",
   "diag.ahorrado.suelo": "al menos {coste}",

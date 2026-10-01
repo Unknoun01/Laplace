@@ -460,5 +460,19 @@
   "stripe.clave_invalida": "That doesn't look like a Stripe key: it starts with sk_ or rk_ (live or test).",
   "stripe.sin_clave": "Enter a Stripe key first.",
   "stripe.sincronizado": "Revenue for {clientes} customers brought from Stripe, from {facturas} invoices paid in the last month.",
-  "stripe.otra_moneda": "{n} invoices in another currency weren't counted: they aren't converted with a made-up exchange rate."
+  "stripe.otra_moneda": "{n} invoices in another currency weren't counted: they aren't converted with a made-up exchange rate.",
+  "tec.pasos": "steps",
+  "compartida.titulo": "{pasos} steps send the same {tokens}-token prefix without sharing the cache",
+  "compartida.resumen": "Steps {pasos} start with the same instructions, at least {tokens} tokens, and are called {llamadas} times across {trazas} runs. Within each run, the provider's cache could serve that prefix to all of them but the first.{precio}",
+  "compartida.precio": " Sharing it would save {ahorro} in this window.",
+  "compartida.lead": "Several steps with the same system prompt, each paying for it in full.",
+  "compartida.que_pasa": "Steps {pasos} are called from different places in the code, but they start with the same instructions: the shortest call of all of them already carries {tokens} tokens. In the window they were called {llamadas} times across {trazas} runs, so each run sends that prefix several times.",
+  "compartida.por_que": "Providers' prompt caches know nothing about steps: they reuse any identical prefix they have seen recently. If two steps send exactly the same beginning, the second one can read it from cache at a fraction of the price. Step by step it doesn't show, because each one is called only once per run.",
+  "compartida.deteccion": "Active rule: **two or more `llm` steps with the same instructions-and-tools fingerprint (`prefix_hash`) and the same model, with at least {llamadas} calls between them and a minimum input above {minimo} tokens**. It counts the calls that would hit a warm cache within each run, minus those the per-step fixed-context rule already counts.",
+  "compartida.arreglo.igual.titulo": "Make the prefix byte-for-byte identical",
+  "compartida.arreglo.igual.texto": "The cache only reuses an exactly equal beginning: same instructions, same tools, in the same order. Put what is shared first and what changes from step to step after it.",
+  "compartida.arreglo.marca.titulo": "Mark the end of the shared part",
+  "compartida.arreglo.marca.texto": "On Anthropic, put the `cache_control` at the end of what the steps share, not at the end of each one's own part. OpenAI caches prefixes over 1,024 tokens on its own, if they are identical.",
+  "compartida.ahorro": "{tokens} fixed tokens × ({llamadas} calls − {trazas} runs) = {lecturas} tokens that would hit a warm cache, of which the per-step fixed context already counts {ya}; of the rest, {parte} is not served from cache today and would go from {entrada}/1M to {cacheada}/1M. Minus the first write of each run, {escritura}. Net: {neto} in {ventana}.{proyeccion}",
+  "compartida.nota": "This is a conservative estimate: the shared prefix is at most the shortest call of all the steps, and the cache is assumed not to survive from one run to the next."
 }

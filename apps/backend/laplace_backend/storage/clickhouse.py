@@ -335,7 +335,8 @@ SELECT
     -- `min` y no `any`: es lo que hace SQLite, y una traza de ejemplo que cambia entre
     -- almacenes manda a dos personas a mirar ejecuciones distintas del mismo hallazgo.
     max(start_time)          AS ultima,
-    min(trace_id)            AS traza_ejemplo
+    min(trace_id)            AS traza_ejemplo,
+    max(prefix_hash)         AS prefijo
 FROM spans FINAL
 WHERE {RULES_WHERE} AND span_type = 'llm' AND request_model != ''
 GROUP BY if(step_key != '', step_key, name), request_model
@@ -384,6 +385,7 @@ class ClickHouseStore:
         for statement in _statements(_SCHEMA.read_text(encoding="utf-8")):
             self._client.command(statement)
         logger.info("esquema de clickhouse aplicado")
+        preagregados.actualizar_esquema(self._client)
         preagregados.marcar_todo_si_nuevo(self._client)
         # `CREATE TABLE IF NOT EXISTS` no cambia la clave de una tabla que ya existe, y
         # migrarla es una copia entera: no se hace sola al arrancar, se avisa (D-168).
@@ -887,12 +889,29 @@ class ClickHouseStore:
                 duration_ms=float(r["duracion"] or 0.0),
                 p50_duration_ms=float(r["mediana"] or 0.0),
                 p50_output_tokens=float(r["mediana_salida"] or 0.0),
+                prefix=r["prefijo"] or "",
                 sample_trace_id=r["traza_ejemplo"],
                 last_seen=_utc(r["ultima"]) if r["ultima"] else None,
             )
             for r in _named(self._consulta(sql, parameters=params))
         ]
         return disambiguate(usos)
+
+    def prefix_traces(self, project_id: str, window: Window) -> dict[tuple[str, str], int]:
+        """Gemelo del de sqlite.py (D-178)."""
+        if self._pre:
+            v = self._en_pre(project_id, window)
+            filas = self._consulta(preagregados.sql(v, preagregados.PREFIJOS), v.params)
+        else:
+            filas = self._consulta(
+                f"""SELECT prefix_hash, request_model, uniqExact(trace_id)
+                    FROM spans FINAL
+                    WHERE {RULES_WHERE} AND span_type = 'llm' AND prefix_hash != ''
+                      AND request_model != ''
+                    GROUP BY prefix_hash, request_model""",
+                self._window_params(project_id, window),
+            )
+        return {(f[0], str(f[1])): int(f[2]) for f in filas.result_rows}
 
     def traces_with_repeats(
         self, project_id: str | None, trace_ids: list[str], *, min_repeats: int = 3

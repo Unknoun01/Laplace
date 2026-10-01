@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 178 decisiones.
+final. 179 decisiones.
 
 ## Coste, precios y caché
 
@@ -31,6 +31,7 @@ final. 178 decisiones.
 - [D-141](../DECISIONS.md#d-141--cerrar-la-fase-3-el-doble-conteo-el-nodo-de-langgraph-y-la-tarifa-sin-verificar-en-lo-agregado) — Cerrar la Fase 3: el doble conteo, el nodo de LangGraph y la tarifa sin verificar en lo agregado
 - [D-152](../DECISIONS.md#d-152--dónde-se-va-el-dinero-gasto-por-día-con-la-franja-evitable-y-coste-por-paso) — Dónde se va el dinero: gasto por día con la franja evitable y coste por paso
 - [D-161](../DECISIONS.md#d-161--qué-clientes-te-hacen-perder-dinero) — Qué clientes te hacen perder dinero
+- [D-178](../DECISIONS.md#d-178--el-mismo-prefijo-en-varios-pasos-sin-compartir-la-caché) — El mismo prefijo en varios pasos, sin compartir la caché
 
 ## Detección: reglas y hallazgos
 
@@ -65,6 +66,7 @@ final. 178 decisiones.
 - [D-157](../DECISIONS.md#d-157--prompts-como-fuente-de-hallazgos) — Prompts como fuente de hallazgos
 - [D-172](../DECISIONS.md#d-172--la-guardia-de-las-reglas-nuevas) — La guardia de las reglas nuevas
 - [D-177](../DECISIONS.md#d-177--preagregados-por-minuto-del-diagnóstico-y-clave-por-hora) — Preagregados por minuto del Diagnóstico y clave por hora
+- [D-178](../DECISIONS.md#d-178--el-mismo-prefijo-en-varios-pasos-sin-compartir-la-caché) — El mismo prefijo en varios pasos, sin compartir la caché
 
 ## Probar: evaluaciones, juez y replay
 
@@ -563,3 +565,7 @@ final. 178 decisiones.
 - [D-175](../DECISIONS.md#d-175--las-pantallas-con-sesión-recorridas-en-un-navegador) — Las pantallas con sesión, recorridas en un navegador
 - [D-176](../DECISIONS.md#d-176--el-contraste-medido-sobre-cada-pantalla) — El contraste, medido sobre cada pantalla
 - [D-177](../DECISIONS.md#d-177--preagregados-por-minuto-del-diagnóstico-y-clave-por-hora) — Preagregados por minuto del Diagnóstico y clave por hora
+
+**2026-10-01 — Funciones: caché compartida, margen por cliente, diagnóstico con modelo, seguridad**
+
+- [D-178](../DECISIONS.md#d-178--el-mismo-prefijo-en-varios-pasos-sin-compartir-la-caché) — El mismo prefijo en varios pasos, sin compartir la caché

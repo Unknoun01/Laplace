@@ -260,6 +260,9 @@ class ModelUsage:
     #: Última vez que se vio en la ventana. Lo que dejó de ocurrir no se proyecta como
     #: ahorro futuro: sería prometer dinero por arreglar algo que ya no pasa (D-135).
     last_seen: datetime | None = None
+    #: La huella del prefijo del paso (instrucciones y herramientas, sin el sitio). Dos
+    #: pasos con la misma pueden compartir la caché del proveedor (D-178).
+    prefix: str = ""
 
 
 @dataclass
@@ -699,6 +702,9 @@ class SpanStore(Protocol):
         self, project_id: str, window: Window, *, min_calls: int = 5, limit: int = 50
     ) -> list[ModelUsage]:
         """Uso por (paso, modelo), para las reglas de modelo caro y contexto fijo."""
+
+    def prefix_traces(self, project_id: str, window: Window) -> dict[tuple[str, str], int]:
+        """Ejecuciones distintas por (prefijo, modelo), para la caché compartida (D-178)."""
 
     def traces_with_repeats(
         self, project_id: str | None, trace_ids: list[str], *, min_repeats: int = 3

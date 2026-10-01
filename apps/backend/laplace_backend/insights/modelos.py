@@ -19,7 +19,9 @@ from ..textos import t, tn
 
 logger = logging.getLogger("laplace.insights")
 
-FindingKind = Literal["repeticion", "modelo_caro", "contexto_fijo", "bucle", "prompt_caro"]
+FindingKind = Literal[
+    "repeticion", "modelo_caro", "contexto_fijo", "bucle", "prompt_caro", "cache_compartida"
+]
 Difficulty = Literal["easy", "mid", "hard"]
 
 DAYS_PER_MONTH = 30
@@ -146,6 +148,10 @@ class Finding(BaseModel):
     #: Identidad del paso implicado. Es con lo que la ficha filtra «las trazas
     #: afectadas»: el título no sirve, porque lleva el llamante o una pista del prompt.
     step_key: str = ""
+    #: Cuánto de `window_waste_usd` es de cada paso, cuando el hallazgo abarca varios
+    #: (D-178). Vacío: todo es de `step_key`. Con esto se suma lo que cada paso tiene
+    #: reclamado sin que un hallazgo de varios pasos lo cargue entero en uno.
+    step_shares: dict[str, float] = Field(default_factory=dict)
     #: La última vez que ocurrió en la ventana. Si hace días que no ocurre, no se
     #: promete ahorro por arreglarlo: se aparta como `desaparecido` (D-135).
     last_seen: datetime | None = None
@@ -156,6 +162,14 @@ class Finding(BaseModel):
     state_at: datetime | None = None
     state_note: str = ""
     fix_check: FixCheck | None = None
+
+
+def reparto(finding: Finding) -> dict[str, float]:
+    """El dinero de un hallazgo, por paso: el suyo entero, o su reparto si abarca varios
+    (D-178)."""
+    if finding.step_shares:
+        return dict(finding.step_shares)
+    return {finding.step_key: finding.window_waste_usd} if finding.step_key else {}
 
 
 class FindingDetail(Finding):

@@ -233,5 +233,6 @@ const REGLAS = [
   ["modelo_caro", "aj.regla.modelo_caro"],
   ["contexto_fijo", "aj.regla.contexto_fijo"],
   ["prompt_caro", "aj.regla.prompt_caro"],
+  ["cache_compartida", "aj.regla.cache_compartida"],
   ["cliente_pierde", "aj.regla.cliente_pierde"],
 ] as const;

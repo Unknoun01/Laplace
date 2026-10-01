@@ -300,6 +300,11 @@ Quien no adopte nada de esto no pierde la pestaña: la identidad de paso (§5) y
 la huella del prompt de sistema, así que dos `step_key` bajo la misma etiqueta son dos
 juegos de instrucciones del mismo paso, con sus fechas y su coste (D-093).
 
+Esa misma huella, **sin el sitio**, se guarda aparte en cada llamada como
+`prefix_hash`: es el prefijo (instrucciones y herramientas) que la caché del proveedor
+puede reutilizar. Dos pasos distintos con el mismo `prefix_hash` mandan el mismo prefijo
+y pueden compartir la caché dentro de una ejecución (D-178). La calcula la ingesta.
+
 ---
 
 ## 9. Compatibilidad

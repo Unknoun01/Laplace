@@ -460,5 +460,19 @@
   "stripe.clave_invalida": "Eso no parece una clave de Stripe: empieza por sk_ o rk_ (live o test).",
   "stripe.sin_clave": "Pon antes una clave de Stripe.",
   "stripe.sincronizado": "Traídos de Stripe los ingresos de {clientes} clientes, de {facturas} facturas pagadas en el último mes.",
-  "stripe.otra_moneda": "{n} facturas en otra moneda no se han contado: no se convierten con un tipo de cambio inventado."
+  "stripe.otra_moneda": "{n} facturas en otra moneda no se han contado: no se convierten con un tipo de cambio inventado.",
+  "tec.pasos": "pasos",
+  "compartida.titulo": "{pasos} pasos mandan el mismo prefijo de {tokens} tokens sin compartir la caché",
+  "compartida.resumen": "Los pasos {pasos} empiezan con las mismas instrucciones, al menos {tokens} tokens, y se llaman {llamadas} veces en {trazas} ejecuciones. Dentro de cada ejecución, la caché del proveedor podría servir ese prefijo a todos menos al primero.{precio}",
+  "compartida.precio": " Compartirla ahorraría {ahorro} en esta ventana.",
+  "compartida.lead": "Varios pasos con el mismo prompt de sistema, y cada uno lo paga entero.",
+  "compartida.que_pasa": "Los pasos {pasos} se llaman desde sitios distintos del código, pero empiezan con las mismas instrucciones: la llamada más corta de todos ya lleva {tokens} tokens. En la ventana se llamaron {llamadas} veces en {trazas} ejecuciones, así que cada ejecución manda ese prefijo varias veces.",
+  "compartida.por_que": "La caché de prompt de los proveedores no sabe de pasos: reutiliza cualquier prefijo idéntico que haya visto hace poco. Si dos pasos mandan exactamente el mismo comienzo, el segundo lo puede leer de caché, a una fracción del precio. Paso a paso no se ve, porque cada uno se llama una sola vez por ejecución.",
+  "compartida.deteccion": "Regla activa: **dos o más pasos `llm` con la misma huella de instrucciones y herramientas (`prefix_hash`) y el mismo modelo, con al menos {llamadas} llamadas entre todos y un mínimo de entrada por encima de {minimo} tokens**. Se cuentan las llamadas que encontrarían la caché caliente dentro de cada ejecución, menos las que ya cuenta el contexto fijo de cada paso.",
+  "compartida.arreglo.igual.titulo": "Haz que el prefijo sea idéntico byte a byte",
+  "compartida.arreglo.igual.texto": "La caché sólo reutiliza un comienzo exactamente igual: mismas instrucciones, mismas herramientas y en el mismo orden. Pon delante lo común y detrás lo que cambia de un paso a otro.",
+  "compartida.arreglo.marca.titulo": "Marca el final de la parte común",
+  "compartida.arreglo.marca.texto": "En Anthropic, pon el `cache_control` al final de lo que comparten los pasos, no al final de lo de cada uno. OpenAI cachea solo los prefijos de más de 1.024 tokens, si son idénticos.",
+  "compartida.ahorro": "{tokens} tokens fijos × ({llamadas} llamadas − {trazas} ejecuciones) = {lecturas} tokens que encontrarían la caché caliente, de los que ya cuenta el contexto fijo de cada paso {ya}; de lo que queda, el {parte} no se sirve hoy de caché y pasaría de {entrada}/1M a {cacheada}/1M. Menos la primera escritura de cada ejecución, {escritura}. Neto: {neto} en {ventana}.{proyeccion}",
+  "compartida.nota": "Es una estimación conservadora: el prefijo común es, como mucho, la llamada más corta de todos los pasos, y se supone que la caché no sobrevive de una ejecución a la siguiente."
 }

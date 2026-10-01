@@ -865,6 +865,7 @@ export const en: Mensajes = {
   "grafo.sin_tarifa": "no rate",
   "grafo.al_menos": "≥ {coste}",
   "aj.regla.prompt_caro": "More expensive prompt",
+  "aj.regla.cache_compartida": "Unshared cache",
   "diag.ahorrado_one": "You've already stopped paying {coste} since you fixed one problem.",
   "diag.ahorrado_other": "You've already stopped paying {coste} since you fixed {n} problems.",
   "diag.ahorrado.suelo": "at least {coste}",

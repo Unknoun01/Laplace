@@ -460,5 +460,19 @@
   "stripe.clave_invalida": "Cela ne ressemble pas à une clé Stripe : elle commence par sk_ ou rk_ (live ou test).",
   "stripe.sin_clave": "Indiquez d’abord une clé Stripe.",
   "stripe.sincronizado": "Revenus de {clientes} clients récupérés depuis Stripe, sur {facturas} factures payées le mois dernier.",
-  "stripe.otra_moneda": "{n} factures dans une autre devise n’ont pas été comptées : on ne les convertit pas avec un taux inventé."
+  "stripe.otra_moneda": "{n} factures dans une autre devise n’ont pas été comptées : on ne les convertit pas avec un taux inventé.",
+  "tec.pasos": "étapes",
+  "compartida.titulo": "{pasos} étapes envoient le même préfixe de {tokens} tokens sans partager le cache",
+  "compartida.resumen": "Les étapes {pasos} commencent par les mêmes instructions, au moins {tokens} tokens, et sont appelées {llamadas} fois sur {trazas} exécutions. Dans chaque exécution, le cache du fournisseur pourrait servir ce préfixe à toutes sauf à la première.{precio}",
+  "compartida.precio": " Le partager économiserait {ahorro} sur cette période.",
+  "compartida.lead": "Plusieurs étapes avec le même prompt système, chacune le payant en entier.",
+  "compartida.que_pasa": "Les étapes {pasos} sont appelées depuis des endroits différents du code, mais commencent par les mêmes instructions : l'appel le plus court de toutes porte déjà {tokens} tokens. Sur la période, elles ont été appelées {llamadas} fois sur {trazas} exécutions, donc chaque exécution envoie ce préfixe plusieurs fois.",
+  "compartida.por_que": "Le cache de prompt des fournisseurs ne connaît pas les étapes : il réutilise tout préfixe identique vu récemment. Si deux étapes envoient exactement le même début, la seconde peut le lire depuis le cache, pour une fraction du prix. Étape par étape, cela ne se voit pas, car chacune n'est appelée qu'une fois par exécution.",
+  "compartida.deteccion": "Règle active : **deux étapes `llm` ou plus avec la même empreinte d'instructions et d'outils (`prefix_hash`) et le même modèle, avec au moins {llamadas} appels au total et une entrée minimale supérieure à {minimo} tokens**. On compte les appels qui trouveraient le cache chaud dans chaque exécution, moins ceux que le contexte fixe de chaque étape compte déjà.",
+  "compartida.arreglo.igual.titulo": "Rendez le préfixe identique octet par octet",
+  "compartida.arreglo.igual.texto": "Le cache ne réutilise qu'un début exactement identique : mêmes instructions, mêmes outils, dans le même ordre. Mettez d'abord ce qui est commun, et ensuite ce qui change d'une étape à l'autre.",
+  "compartida.arreglo.marca.titulo": "Marquez la fin de la partie commune",
+  "compartida.arreglo.marca.texto": "Chez Anthropic, placez le `cache_control` à la fin de ce que les étapes partagent, pas à la fin de la partie propre à chacune. OpenAI met seul en cache les préfixes de plus de 1 024 tokens, s'ils sont identiques.",
+  "compartida.ahorro": "{tokens} tokens fixes × ({llamadas} appels − {trazas} exécutions) = {lecturas} tokens qui trouveraient le cache chaud, dont le contexte fixe de chaque étape compte déjà {ya} ; du reste, {parte} n'est pas servi depuis le cache aujourd'hui et passerait de {entrada}/1M à {cacheada}/1M. Moins la première écriture de chaque exécution, {escritura}. Net : {neto} sur {ventana}.{proyeccion}",
+  "compartida.nota": "C'est une estimation prudente : le préfixe commun est au plus l'appel le plus court de toutes les étapes, et on suppose que le cache ne survit pas d'une exécution à la suivante."
 }

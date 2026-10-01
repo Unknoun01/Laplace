@@ -225,6 +225,11 @@ class Span(_Model):
     #: Es la mitad «desde dónde» de la identidad, y se guarda aparte porque agrupar por
     #: el nombre de la función mezcla dos agentes que la llamen igual (D-106).
     step_site: str = ""
+    #: Huella de las instrucciones y herramientas **sin** el sitio: el prefijo que la
+    #: caché del proveedor puede reutilizar. Dos pasos distintos con la misma huella
+    #: mandan el mismo prefijo y pueden compartir caché dentro de una ejecución
+    #: (D-178). Lo calcula la ingesta; vacío si no se capturan payloads.
+    prefix_hash: str = ""
     #: Hash de la llamada **ignorando los números**: dos vueltas de un bucle que sólo
     #: se diferencian en el contador de intentos caen juntas. `dedup_hash` sólo ve
     #: repeticiones exactas, y un bucle de verdad casi nunca lo es (D-109).

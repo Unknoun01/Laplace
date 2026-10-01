@@ -207,6 +207,22 @@ def almacen_con_los_cuatro_tipos(tmp_path):
             span.llm.cost = Cost(total_usd=coste, input_usd=coste / 2, output_usd=coste / 2)
             spans.append(span)
 
+    # Regla 6 — caché compartida (D-178): dos pasos distintos con el mismo prefijo, una
+    # vez cada uno por ejecución. Paso a paso no hay nada que cachear; juntos, sí.
+    for t in range(8):
+        for j, paso in enumerate(("clasificar", "redactar")):
+            span = _span(
+                f"comun-{t}",
+                paso=paso,
+                clave=f"k-{paso}",
+                entrada_tokens=3_000,
+                salida_tokens=200,
+                i=2000 + t * 20 + j,
+                dedup=f"comun-{paso}-{t}",
+            )
+            span.prefix_hash = "prefijo-comun"
+            spans.append(span)
+
     store.insert_spans(spans)
     return store
 
@@ -480,6 +496,13 @@ GARANTIAS: dict[str, dict[str, str]] = {
         "nombre": "`disambiguate` sobre los usos por paso y modelo",
         "descuento": "el mismo uso neto que el modelo caro, y los arreglos se componen (D-157)",
     },
+    "cache_compartida": {
+        "nombre": "el número de pasos y los tokens del prefijo; los nombres de los pasos en el "
+        "resumen",
+        "descuento": "quita las lecturas que el contexto fijo ya reclama dentro de cada paso, "
+        "tarifa sobre el modelo barato si se recomienda y reparte su dinero entre sus pasos "
+        "(`step_shares`)",
+    },
     "prompt_caro": {
         "nombre": "el nombre del prompt y sus dos versiones, que son únicos",
         "descuento": "va la última y resta lo que las demás reclaman sobre sus pasos "
@@ -545,8 +568,8 @@ def test_ninguna_regla_reclama_mas_de_lo_que_costo_el_paso(mes_de_demo):
         coste[uso.key] = coste.get(uso.key, 0.0) + uso.cost_usd
     reclamado: dict[str, float] = {}
     for f in insights.detect(store, "demo", ventana):
-        if f.step_key:
-            reclamado[f.step_key] = reclamado.get(f.step_key, 0.0) + f.window_waste_usd
+        for paso, dinero in insights.reparto(f).items():
+            reclamado[paso] = reclamado.get(paso, 0.0) + dinero
     assert reclamado, "la demo tiene que dar hallazgos con paso"
     for paso, dinero in reclamado.items():
         assert dinero <= coste.get(paso, 0.0) * (1 + 1e-9), (paso, dinero, coste.get(paso))

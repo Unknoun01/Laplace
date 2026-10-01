@@ -14,6 +14,7 @@ from ..dinero import motivo_sin_dinero
 from ..pasos import SEPARADOR as SEPARADOR_DE_CAMINO
 from ..pasos import con_pista
 from ..storage.base import LoopGroup, ModelUsage, RepeatedGroup, Window, WindowSummary
+from . import cache_compartida
 from .bucle import _loop_detail, _loop_finding
 from .contexto_fijo import _fixed_context_detail, _fixed_context_finding
 from .grafico import construir as construir_grafico
@@ -31,6 +32,7 @@ from .modelos import (
     _projection_base,
     _to_monthly,
     observed_days,
+    reparto,
 )
 from .prompt_caro import KIND as PROMPT_CARO
 from .prompt_caro import _prompt_detail, _prompt_finding, pares
@@ -262,8 +264,10 @@ def detect(store: Any, project_id: str, window: Window) -> list[Finding]:
     # Se descuentan los tokens duplicados antes de evaluar el resto de reglas.
     duplicados = _duplicate_tokens(grupos, bucles)
 
+    netos = []
     for uso in usos:
         neto = _without_duplicates(uso, duplicados)
+        netos.append(neto)
         if neto.calls >= MIN_CALLS_FOR_MODEL_RULE and (
             (neto.p50_output_tokens or neto.avg_output_tokens)
             <= MAX_OUTPUT_TOKENS_FOR_CHEAP_TASK
@@ -274,6 +278,13 @@ def detect(store: Any, project_id: str, window: Window) -> list[Finding]:
         contexto = _fixed_context_finding(neto, summary, dias, base)
         if contexto is not None:
             findings.append(_con_fecha(contexto, neto))
+
+    # El mismo prefijo en varios pasos (D-178). Va detrás del contexto fijo, porque
+    # descuenta lo que éste ya reclama dentro de cada paso.
+    for grupo in _grupos_de_prefijo(store, project_id, window, netos):
+        compartida = cache_compartida.hallazgo(grupo, summary, dias, base)
+        if compartida is not None:
+            findings.append(_con_fecha(compartida, grupo.principal))
 
     # Prompts como fuente de hallazgos (D-157). Va la última porque descuenta lo que
     # las demás ya reclaman sobre las llamadas de la versión cara.
@@ -297,9 +308,19 @@ def _reclamado_por_paso(findings: list[Finding]) -> dict[str, float]:
     """El evitable que cada paso ya tiene reclamado por las reglas de trazas."""
     salida: dict[str, float] = {}
     for f in findings:
-        if f.kind != PROMPT_CARO and f.step_key:
-            salida[f.step_key] = salida.get(f.step_key, 0.0) + f.window_waste_usd
+        if f.kind == PROMPT_CARO:
+            continue
+        for paso, dinero in reparto(f).items():
+            salida[paso] = salida.get(paso, 0.0) + dinero
     return salida
+
+
+def _grupos_de_prefijo(
+    store: Any, project_id: str, window: Window, netos: list[ModelUsage]
+) -> list[cache_compartida.GrupoPrefijo]:
+    if not any(u.prefix for u in netos):
+        return []  # sin huellas no hay nada que agrupar: ni se pregunta al almacén
+    return cache_compartida.grupos(netos, store.prefix_traces(project_id, window))
 
 
 def _hallazgos_de_prompts(
@@ -509,6 +530,30 @@ def _detalle_prompt(
     return None
 
 
+def _detalle_compartida(
+    store: Any, project_id: str, window: Window, key: str, ctx: _Contexto
+) -> FindingDetail | None:
+    """Recalcula como `detect()`: el descuento depende de lo que reclaman las demás."""
+    duplicados = _duplicate_tokens(
+        store.repeated_groups(project_id, window, min_repeats=MIN_REPEATS),
+        _sin_envoltorios(
+            store.loop_groups(
+                project_id, window, min_vueltas=MIN_VUELTAS_BUCLE, max_salidas=MAX_SALIDAS_BUCLE
+            )
+        ),
+    )
+    usos = store.model_usage(project_id, window, min_calls=1)
+    netos = [_without_duplicates(u, duplicados) for u in usos]
+    for grupo in _grupos_de_prefijo(store, project_id, window, netos):
+        if f"{grupo.prefix}:{grupo.model}" != key:
+            continue
+        finding = cache_compartida.hallazgo(grupo, ctx.summary, ctx.dias, ctx.base)
+        if finding is None:
+            return None
+        return cache_compartida.detalle(finding, grupo, cache_compartida.CONSULTA)
+    return None
+
+
 @dataclass
 class _Contexto:
     """Lo que toda ficha necesita saber de la ventana, calculado una sola vez."""
@@ -531,6 +576,7 @@ _DETALLADORES = {
     "modelo_caro": _detalle_modelo,
     "contexto_fijo": _detalle_modelo,
     PROMPT_CARO: _detalle_prompt,
+    cache_compartida.KIND: _detalle_compartida,
 }
 
 #: Los tipos que `detail()` sabe reconstruir. Derivado, nunca escrito a mano: una lista

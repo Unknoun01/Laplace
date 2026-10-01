@@ -127,6 +127,7 @@ def _lecturas(store, proyecto: str, ventana: Window) -> dict:
         "serie_dias": store.step_cost_series(proyecto, ventana, 1440),
         "prompts": store.prompt_usage(proyecto, ventana),
         "prompts_reglas": store.prompt_usage(proyecto, ventana, rules=True),
+        "prefijos": sorted(store.prefix_traces(proyecto, ventana).items()),
         "diagnostico": overview(store, proyecto, ventana),
     }
 

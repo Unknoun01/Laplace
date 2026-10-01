@@ -306,6 +306,19 @@ def _tool_names(raw: Any) -> list[str]:
     return sorted(set(nombres))
 
 
+def prefix_hash(messages: list[dict[str, Any]], tools: Any) -> str:
+    """La huella de las instrucciones y las herramientas: lo que va delante de cada
+    llamada y la caché del proveedor puede reutilizar. Es la mitad «con las mismas
+    instrucciones» de la identidad de paso, y sola, sin el sitio, dice qué pasos
+    distintos mandan el mismo prefijo (D-178)."""
+    instrucciones = _system_text(messages)
+    herramientas = _tool_names(tools)
+    if not instrucciones and not herramientas:
+        return ""
+    material = instrucciones + "\x00" + "\x00".join(herramientas)
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()[:12]
+
+
 def step_identity(
     attrs: dict[str, Any], name: str, messages: list[dict[str, Any]], tools: Any
 ) -> tuple[str, str, str, str]:
@@ -336,12 +349,7 @@ def step_identity(
     ).strip()
     padre = str(attrs.get(semconv.LAPLACE_STEP_PARENT) or "").strip()
     instrucciones = _system_text(messages)
-    herramientas = _tool_names(tools)
-
-    huella = ""
-    if instrucciones or herramientas:
-        material = instrucciones + "\x00" + "\x00".join(herramientas)
-        huella = hashlib.sha256(material.encode("utf-8")).hexdigest()[:12]
+    huella = prefix_hash(messages, tools)
 
     if not sitio and not huella:
         # Sin ninguna de las dos señales, el nombre es todo lo que hay.
@@ -490,8 +498,9 @@ def _build_span(
         step_key, step_label, step_hint, step_site = step_identity(
             attrs, name, llm.input_messages, attrs.get("laplace.request.tools")
         )
+        prefijo = prefix_hash(llm.input_messages, attrs.get("laplace.request.tools"))
     else:
-        step_key = step_label = step_hint = step_site = ""
+        step_key = step_label = step_hint = step_site = prefijo = ""
 
     consumed = {
         semconv.LAPLACE_SPAN_TYPE,
@@ -545,6 +554,7 @@ def _build_span(
         step_site=step_site,
         step_label=step_label,
         step_hint=step_hint,
+        prefix_hash=prefijo,
         # El SDK sólo escribe esto cuando ha comprobado que el texto de esa versión iba
         # de verdad en los mensajes. Aquí se copia tal cual: la ingesta no deduce una
         # versión que el emisor no haya afirmado (D-090).

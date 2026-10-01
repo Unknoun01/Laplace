@@ -460,5 +460,19 @@
   "stripe.clave_invalida": "Isso não parece uma chave do Stripe: começa com sk_ ou rk_ (live ou test).",
   "stripe.sin_clave": "Informe antes uma chave do Stripe.",
   "stripe.sincronizado": "Receita de {clientes} clientes trazida do Stripe, de {facturas} faturas pagas no último mês.",
-  "stripe.otra_moneda": "{n} faturas em outra moeda não foram contadas: não são convertidas com um câmbio inventado."
+  "stripe.otra_moneda": "{n} faturas em outra moeda não foram contadas: não são convertidas com um câmbio inventado.",
+  "tec.pasos": "passos",
+  "compartida.titulo": "{pasos} passos enviam o mesmo prefixo de {tokens} tokens sem partilhar o cache",
+  "compartida.resumen": "Os passos {pasos} começam com as mesmas instruções, pelo menos {tokens} tokens, e são chamados {llamadas} vezes em {trazas} execuções. Dentro de cada execução, o cache do fornecedor poderia servir esse prefixo a todos menos ao primeiro.{precio}",
+  "compartida.precio": " Partilhá-lo pouparia {ahorro} nesta janela.",
+  "compartida.lead": "Vários passos com o mesmo prompt de sistema, e cada um paga-o por inteiro.",
+  "compartida.que_pasa": "Os passos {pasos} são chamados de sítios diferentes do código, mas começam com as mesmas instruções: a chamada mais curta de todos já leva {tokens} tokens. Na janela foram chamados {llamadas} vezes em {trazas} execuções, por isso cada execução envia esse prefixo várias vezes.",
+  "compartida.por_que": "O cache de prompt dos fornecedores não sabe de passos: reutiliza qualquer prefixo idêntico que tenha visto há pouco. Se dois passos enviam exatamente o mesmo início, o segundo pode lê-lo do cache, a uma fração do preço. Passo a passo não se vê, porque cada um é chamado uma só vez por execução.",
+  "compartida.deteccion": "Regra ativa: **dois ou mais passos `llm` com a mesma impressão de instruções e ferramentas (`prefix_hash`) e o mesmo modelo, com pelo menos {llamadas} chamadas entre todos e uma entrada mínima acima de {minimo} tokens**. Contam-se as chamadas que encontrariam o cache quente dentro de cada execução, menos as que o contexto fixo de cada passo já conta.",
+  "compartida.arreglo.igual.titulo": "Torne o prefixo idêntico byte a byte",
+  "compartida.arreglo.igual.texto": "O cache só reutiliza um início exatamente igual: mesmas instruções, mesmas ferramentas e pela mesma ordem. Ponha à frente o que é comum e depois o que muda de um passo para outro.",
+  "compartida.arreglo.marca.titulo": "Marque o fim da parte comum",
+  "compartida.arreglo.marca.texto": "Na Anthropic, ponha o `cache_control` no fim do que os passos partilham, não no fim do que é de cada um. A OpenAI guarda em cache sozinha os prefixos com mais de 1.024 tokens, se forem idênticos.",
+  "compartida.ahorro": "{tokens} tokens fixos × ({llamadas} chamadas − {trazas} execuções) = {lecturas} tokens que encontrariam o cache quente, dos quais o contexto fixo de cada passo já conta {ya}; do resto, {parte} não é servido hoje do cache e passaria de {entrada}/1M para {cacheada}/1M. Menos a primeira escrita de cada execução, {escritura}. Líquido: {neto} em {ventana}.{proyeccion}",
+  "compartida.nota": "É uma estimativa conservadora: o prefixo comum é, no máximo, a chamada mais curta de todos os passos, e supõe-se que o cache não sobrevive de uma execução para a seguinte."
 }

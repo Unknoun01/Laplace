@@ -100,6 +100,8 @@ COLUMNS = (
     # Al final y no junto a `user_id`: el orden es el de las filas de `span_to_row`, y
     # las columnas tardías van detrás en los dos almacenes (D-161).
     "customer_id",
+    # La huella del prefijo, para la caché compartida entre pasos (D-178).
+    "prefix_hash",
 )
 
 
@@ -358,6 +360,7 @@ def row_to_span(r: dict[str, Any]) -> Span:
         # `get` y no índice: una base de antes de D-106 no tiene la columna, y la
         # interfaz no puede caerse por leer una traza vieja.
         step_site=(r["step_site"] if "step_site" in r.keys() else ""),
+        prefix_hash=(r["prefix_hash"] if "prefix_hash" in r.keys() else ""),
         prompt_name=r["prompt_name"] or "",
         prompt_version=int(r["prompt_version"] or 0),
         events=events,
@@ -532,4 +535,5 @@ def span_to_row(span: Span) -> list[Any]:
         dumps([event.model_dump(mode="json") for event in span.events]),
         dumps(span.attributes),
         span.customer_id or "",
+        span.prefix_hash,
     ]

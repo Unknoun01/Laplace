@@ -460,5 +460,19 @@
   "stripe.clave_invalida": "这不像 Stripe 密钥：应以 sk_ 或 rk_ 开头（live 或 test）。",
   "stripe.sin_clave": "请先填写 Stripe 密钥。",
   "stripe.sincronizado": "已从 Stripe 获取 {clientes} 个客户的收入，来自上个月已支付的 {facturas} 张发票。",
-  "stripe.otra_moneda": "{n} 张其他货币的发票未计入：不会用臆造的汇率换算。"
+  "stripe.otra_moneda": "{n} 张其他货币的发票未计入：不会用臆造的汇率换算。",
+  "tec.pasos": "步骤",
+  "compartida.titulo": "{pasos} 个步骤发送相同的 {tokens} token 前缀，却没有共享缓存",
+  "compartida.resumen": "步骤 {pasos} 以相同的指令开头，至少 {tokens} 个 token，在 {trazas} 次运行中共调用 {llamadas} 次。在每次运行内，服务商的缓存本可以为除第一个以外的所有步骤提供这个前缀。{precio}",
+  "compartida.precio": "共享缓存可在此时间范围内节省 {ahorro}。",
+  "compartida.lead": "多个步骤使用相同的系统提示词，每个都全价支付。",
+  "compartida.que_pasa": "步骤 {pasos} 从代码的不同位置调用，但以相同的指令开头：所有调用中最短的一次已带有 {tokens} 个 token。在此时间范围内共调用 {llamadas} 次，分布在 {trazas} 次运行中，所以每次运行都会多次发送这个前缀。",
+  "compartida.por_que": "服务商的提示词缓存并不区分步骤：它会复用最近见过的任何相同前缀。如果两个步骤发送完全相同的开头，第二个就能以很低的价格从缓存读取。逐个步骤看是看不出来的，因为每个步骤在一次运行中只调用一次。",
+  "compartida.deteccion": "生效规则：**两个或更多 `llm` 步骤具有相同的指令和工具指纹（`prefix_hash`）和相同的模型，合计至少 {llamadas} 次调用，最小输入超过 {minimo} 个 token**。统计每次运行内会命中热缓存的调用，减去各步骤固定上下文规则已经统计的部分。",
+  "compartida.arreglo.igual.titulo": "让前缀逐字节相同",
+  "compartida.arreglo.igual.texto": "缓存只复用完全相同的开头：相同的指令、相同的工具、相同的顺序。把共同的部分放在前面，把各步骤不同的部分放在后面。",
+  "compartida.arreglo.marca.titulo": "标记共同部分的结尾",
+  "compartida.arreglo.marca.texto": "在 Anthropic 中，把 `cache_control` 放在各步骤共享内容的结尾，而不是每个步骤自己内容的结尾。OpenAI 会自动缓存超过 1,024 个 token 且完全相同的前缀。",
+  "compartida.ahorro": "{tokens} 个固定 token × （{llamadas} 次调用 − {trazas} 次运行）= {lecturas} 个会命中热缓存的 token，其中各步骤的固定上下文已统计 {ya}；其余部分中有 {parte} 目前未从缓存提供，价格将从 {entrada}/1M 降到 {cacheada}/1M。减去每次运行的首次写入 {escritura}。净额：{ventana}内 {neto}。{proyeccion}",
+  "compartida.nota": "这是保守估计：共同前缀至多等于所有步骤中最短的一次调用，并假设缓存不会从一次运行保留到下一次。"
 }

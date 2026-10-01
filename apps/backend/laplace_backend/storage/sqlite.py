@@ -166,6 +166,7 @@ CREATE TABLE IF NOT EXISTS spans (
     prompt_version        INTEGER NOT NULL DEFAULT 0,
 
     customer_id           TEXT NOT NULL DEFAULT '',
+    prefix_hash           TEXT NOT NULL DEFAULT '',
 
     events                TEXT NOT NULL DEFAULT '',
     attributes            TEXT NOT NULL DEFAULT '',
@@ -194,6 +195,8 @@ COLUMNAS_TARDIAS = (
     ("prompt_version", "INTEGER NOT NULL DEFAULT 0"),
     # El cliente que paga, para el margen por cliente (D-161).
     ("customer_id", "TEXT NOT NULL DEFAULT ''"),
+    # La huella del prefijo, para la caché compartida entre pasos (D-178).
+    ("prefix_hash", "TEXT NOT NULL DEFAULT ''"),
 )
 
 #: Índices sobre columnas tardías. Van aquí y **no** en `SCHEMA` por un motivo que costó
@@ -406,7 +409,8 @@ SELECT
                                                     AS min_entrada,
     SUM(duration_ms)                                AS duracion,
     MAX(start_time)                                 AS ultima,
-    MIN(trace_id)                                   AS traza_ejemplo
+    MIN(trace_id)                                   AS traza_ejemplo,
+    MAX(prefix_hash)                                AS prefijo
 FROM spans
 WHERE {RULES_WHERE} AND span_type = 'llm' AND request_model != ''
 GROUP BY paso_clave, request_model
@@ -944,6 +948,7 @@ class SQLiteStore:
                 # de entrada que afirmar, y cero diría otra cosa (D-108).
                 min_input_tokens=int(r["min_entrada"] or 0),
                 duration_ms=float(r["duracion"] or 0.0),
+                prefix=r["prefijo"] or "",
                 sample_trace_id=r["traza_ejemplo"],
                 last_seen=utc(r["ultima"]) if r["ultima"] else None,
             )
@@ -961,6 +966,22 @@ class SQLiteStore:
                 (uso.key, uso.model), (0.0, 0.0)
             )
         return disambiguate(usos)
+
+    def prefix_traces(self, project_id: str, window: Window) -> dict[tuple[str, str], int]:
+        """Ejecuciones distintas por (prefijo, modelo), sin las tiradas de evaluación.
+
+        Es lo que no sale de sumar los usos por paso: una ejecución que llama a dos pasos
+        con el mismo prefijo cuenta una vez aquí y una en cada paso (D-178).
+        """
+        filas = self._conn.execute(
+            f"""SELECT prefix_hash, request_model, COUNT(DISTINCT trace_id)
+                FROM spans
+                WHERE {RULES_WHERE} AND span_type = 'llm' AND prefix_hash != ''
+                  AND request_model != ''
+                GROUP BY prefix_hash, request_model""",
+            self._window_params(project_id, window),
+        ).fetchall()
+        return {(f[0], f[1]): int(f[2]) for f in filas}
 
     def traces_with_repeats(
         self, project_id: str | None, trace_ids: list[str], *, min_repeats: int = 3

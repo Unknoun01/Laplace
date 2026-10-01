@@ -106,6 +106,9 @@ CREATE TABLE IF NOT EXISTS spans
     prompt_version      UInt32,
 
     customer_id         String,
+    -- La huella del prefijo, sin el sitio: dos pasos con la misma pueden compartir la
+    -- caché del proveedor dentro de una ejecución (D-178).
+    prefix_hash         String,
 
     events              String CODEC(ZSTD(3)),
     attributes          String CODEC(ZSTD(3)),
@@ -189,6 +192,9 @@ ALTER TABLE spans ADD COLUMN IF NOT EXISTS prompt_version UInt32 DEFAULT 0;
 -- Instalaciones anteriores al margen por cliente (D-161): quien paga por el trabajo.
 ALTER TABLE spans ADD COLUMN IF NOT EXISTS customer_id String DEFAULT '';
 
+-- Instalaciones anteriores a la caché compartida entre pasos (D-178).
+ALTER TABLE spans ADD COLUMN IF NOT EXISTS prefix_hash String DEFAULT '';
+
 -- Instalaciones anteriores a D-142. Los payloads son casi todo el disco, y con ZSTD(3)
 -- ocupan menos de la mitad que con el LZ4 por defecto (medido con la prueba de carga).
 -- Cambiar el códec no reescribe nada: las partes nuevas nacen con él y las viejas lo
@@ -255,6 +261,7 @@ CREATE TABLE IF NOT EXISTS pre_pasos
     min_entrada     AggregateFunction(minIf, UInt32, UInt8),
     mediana_dur     AggregateFunction(quantileExactIf(0.5), Float64, UInt8),
     mediana_sal     AggregateFunction(quantileExactIf(0.5), UInt32, UInt8),
+    prefix_hash     String,
     calculado       DateTime64(3, 'UTC')
 )
 ENGINE = ReplacingMergeTree(calculado)
@@ -281,6 +288,8 @@ CREATE TABLE IF NOT EXISTS pre_trazas
     g_cob       Array(UInt64),
     -- (prompt, versión) de sus llamadas con prompt gestionado.
     g_prompt    Array(UInt64),
+    -- (prefijo, modelo) de sus llamadas, para la caché compartida entre pasos (D-178).
+    g_prefijo   Array(Tuple(String, String)),
     calculado   DateTime64(3, 'UTC')
 )
 ENGINE = ReplacingMergeTree(calculado)

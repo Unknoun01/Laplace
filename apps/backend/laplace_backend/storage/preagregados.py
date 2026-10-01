@@ -72,10 +72,11 @@ COLUMNAS = {
         "step_hint, request_model, prompt_name, prompt_version, n, n_con_coste, coste, "
         "tok_in, tok_out, cache_tok, cache_escrito, ahorro_cache, duracion, sin_tarifa, "
         "asumida, con_tokens, primero, ultimo, traza_min, traza_max, "
-        "min_entrada, mediana_dur, mediana_sal"
+        "min_entrada, mediana_dur, mediana_sal, prefix_hash"
     ),
     "pre_trazas": (
-        "project_id, minuto, trace_id, es_eval, fallo, inicio, fin, g_uso, g_cob, g_prompt"
+        "project_id, minuto, trace_id, es_eval, fallo, inicio, fin, g_uso, g_cob, g_prompt, "
+        "g_prefijo"
     ),
     "pre_repes": (
         "project_id, minuto, es_eval, trace_id, dedup_hash, etiqueta, pista, sitio, tipo, "
@@ -116,7 +117,9 @@ _PARCIAL = {
             max(trace_id)                        AS traza_max,
             minIfState(input_tokens, status != 'error' AND input_tokens > 0) AS min_entrada,
             quantileExactIfState(0.5)(duration_ms, status != 'error')   AS mediana_dur,
-            quantileExactIfState(0.5)(output_tokens, status != 'error') AS mediana_sal
+            quantileExactIfState(0.5)(output_tokens, status != 'error') AS mediana_sal,
+            -- Lo fija el paso: la misma huella entra en su `step_key` (D-178).
+            max(prefix_hash)                     AS prefix_hash
         FROM spans FINAL
         WHERE project_id = %(project_id)s AND {{rango}}
         GROUP BY project_id, minuto, es_eval, span_type, step_key, name, step_label,
@@ -129,7 +132,10 @@ _PARCIAL = {
                min(start_time) AS inicio, max(end_time) AS fin,
                groupUniqArrayIf({{g_uso}}, span_type = 'llm' AND request_model != '') AS g_uso,
                groupUniqArrayIf({{g_cob}}, span_type = 'llm')                         AS g_cob,
-               groupUniqArrayIf({{g_prompt}}, prompt_name != '')                     AS g_prompt
+               groupUniqArrayIf({{g_prompt}}, prompt_name != '')                     AS g_prompt,
+               groupUniqArrayIf((prefix_hash, toString(request_model)),
+                                span_type = 'llm' AND prefix_hash != '' AND request_model != '')
+                                                                                      AS g_prefijo
         FROM spans FINAL
         WHERE project_id = %(project_id)s AND {{rango}}
         GROUP BY project_id, minuto, trace_id, es_eval
@@ -371,6 +377,37 @@ async def bucle(store: Any, cada_s: int = CADA_S) -> None:
         await asyncio.sleep(cada_s)
 
 
+#: Columnas que los preagregados ganaron después de D-177: (tabla, columna, tipo).
+COLUMNAS_TARDIAS = (
+    ("pre_pasos", "prefix_hash", "String DEFAULT ''"),
+    ("pre_trazas", "g_prefijo", "Array(Tuple(String, String))"),
+)
+
+
+def actualizar_esquema(client: Any) -> None:
+    """Las columnas nuevas, y las horas ya calculadas sin ellas, sucias otra vez.
+
+    `CREATE TABLE IF NOT EXISTS` no toca una tabla que ya existe. Una columna añadida a
+    unos preagregados ya calculados trae su valor por defecto en las filas viejas, que
+    no es el de verdad: hasta recalcularlas, esas horas se leen en crudo (D-178).
+    """
+    faltan = False
+    for tabla, columna, tipo in COLUMNAS_TARDIAS:
+        existe = client.query(
+            "SELECT count() FROM system.columns WHERE database = currentDatabase() "
+            "AND table = %(t)s AND name = %(c)s",
+            parameters={"t": tabla, "c": columna},
+        ).result_rows[0][0]
+        if not existe:
+            client.command(f"ALTER TABLE {tabla} ADD COLUMN IF NOT EXISTS {columna} {tipo}")
+            faltan = True
+    if faltan:
+        client.command(
+            "INSERT INTO pre_sucias (project_id, hora) "
+            "SELECT DISTINCT project_id, hora FROM pre_horas"
+        )
+
+
 def marcar_todo_si_nuevo(client: Any) -> None:
     """Una instalación con datos de antes de los preagregados: todas sus horas, sucias.
 
@@ -585,6 +622,7 @@ FROM (
         quantileExactIfMerge(0.5)(mediana_sal) AS mediana_salida,
         max(ultimo)              AS ultima,
         min(traza_min)           AS traza_ejemplo,
+        max(prefix_hash)         AS prefijo,
         sipHash64(paso_clave, toString(request_model)) AS h
     FROM {pre_pasos}
     WHERE es_eval = 0 AND span_type = 'llm' AND request_model != ''
@@ -760,6 +798,14 @@ FROM (
 GROUP BY paso_clave
 ORDER BY extra_spans DESC, paso_clave
 LIMIT %(limit)s
+"""
+
+
+PREFIJOS = """
+SELECT p.1 AS prefijo, p.2 AS modelo, uniqExact(trace_id) AS trazas
+FROM {pre_trazas} ARRAY JOIN g_prefijo AS p
+WHERE es_eval = 0
+GROUP BY prefijo, modelo
 """
 
 

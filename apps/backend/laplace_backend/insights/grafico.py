@@ -19,7 +19,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from ..storage.base import StepCostSeries, Window, disambiguate
-from .modelos import Finding, GastoPaso, Grafico, TramoGasto
+from .modelos import Finding, GastoPaso, Grafico, TramoGasto, reparto
 
 #: Pasos que se enseñan con nombre; el resto va sumado en una fila.
 MAX_PASOS = 6
@@ -45,16 +45,18 @@ def construir(
     for f in findings:
         if f.window_waste_usd <= 0:
             continue
-        por_paso[f.step_key] = por_paso.get(f.step_key, 0.0) + f.window_waste_usd
-        pesos = serie.pasos.get(f.step_key) or []
-        suma = sum(pesos)
-        if suma <= 0:
-            # El paso no tiene gasto en la serie: no hay con qué repartirlo, y se dice
-            # cuánto es en vez de colocarlo en un día cualquiera.
-            sin_repartir += f.window_waste_usd
-            continue
-        for i, coste in enumerate(pesos):
-            evitable[i] += f.window_waste_usd * coste / suma
+        # Un hallazgo de varios pasos se reparte entre ellos (D-178).
+        for paso, dinero in (reparto(f) or {"": f.window_waste_usd}).items():
+            por_paso[paso] = por_paso.get(paso, 0.0) + dinero
+            pesos = serie.pasos.get(paso) or []
+            suma = sum(pesos)
+            if suma <= 0:
+                # El paso no tiene gasto en la serie: no hay con qué repartirlo, y se
+                # dice cuánto es en vez de colocarlo en un día cualquiera.
+                sin_repartir += dinero
+                continue
+            for i, coste in enumerate(pesos):
+                evitable[i] += dinero * coste / suma
 
     tramos = [
         TramoGasto(

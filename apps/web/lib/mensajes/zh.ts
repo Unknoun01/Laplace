@@ -863,6 +863,7 @@ export const zh: Mensajes = {
   "grafo.sin_tarifa": "无费率",
   "grafo.al_menos": "≥ {coste}",
   "aj.regla.prompt_caro": "更贵的提示词",
+  "aj.regla.cache_compartida": "未共享的缓存",
   "diag.ahorrado_one": "自从你修复了一个问题，已经少付了 {coste}。",
   "diag.ahorrado_other": "自从你修复了 {n} 个问题，已经少付了 {coste}。",
   "diag.ahorrado.suelo": "至少 {coste}",

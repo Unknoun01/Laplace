@@ -79,6 +79,7 @@ from .modelos import (  # noqa: F401
     _to_monthly,
     logger,
     observed_days,
+    reparto,
     span_label,
     window_label,
 )
