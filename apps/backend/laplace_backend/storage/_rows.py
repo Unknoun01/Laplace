@@ -421,6 +421,7 @@ def row_to_summary(r: dict[str, Any]) -> TraceSummary:
         models=sorted(modelos or []),
         session_id=r["trace_session_id"] or None,
         user_id=r["trace_user_id"] or None,
+        customer_id=(r["trace_customer_id"] if "trace_customer_id" in r.keys() else "") or None,
         input_preview=vista_previa(r.get("root_input")),
     )
 

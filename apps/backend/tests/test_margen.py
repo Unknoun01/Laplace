@@ -200,7 +200,7 @@ def test_sin_clientes_en_las_trazas_se_dice(almacen):
 def test_la_prueba_muerde_sin_proyeccion():
     """Si el margen se calculara con el coste de la ventana en vez del mes, un cliente
     que paga 20 al mes y cuesta 10 en diez días saldría ganando."""
-    fila = margen._fila("acme", 10, 10.0, 0, 20.0, 10.0, 10.0)
+    fila = margen._fila("acme", 10, 10.0, 0, margen.Ingreso(20.0), {}, 10.0, 10.0)
     assert fila.status == "pierde"
 
 

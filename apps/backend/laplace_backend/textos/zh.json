@@ -474,5 +474,10 @@
   "compartida.arreglo.marca.titulo": "标记共同部分的结尾",
   "compartida.arreglo.marca.texto": "在 Anthropic 中，把 `cache_control` 放在各步骤共享内容的结尾，而不是每个步骤自己内容的结尾。OpenAI 会自动缓存超过 1,024 个 token 且完全相同的前缀。",
   "compartida.ahorro": "{tokens} 个固定 token × （{llamadas} 次调用 − {trazas} 次运行）= {lecturas} 个会命中热缓存的 token，其中各步骤的固定上下文已统计 {ya}；其余部分中有 {parte} 目前未从缓存提供，价格将从 {entrada}/1M 降到 {cacheada}/1M。减去每次运行的首次写入 {escritura}。净额：{ventana}内 {neto}。{proyeccion}",
-  "compartida.nota": "这是保守估计：共同前缀至多等于所有步骤中最短的一次调用，并假设缓存不会从一次运行保留到下一次。"
+  "compartida.nota": "这是保守估计：共同前缀至多等于所有步骤中最短的一次调用，并假设缓存不会从一次运行保留到下一次。",
+  "margen.fila.sin_cambio": "每月付给你 {importe}，成本为 {coste}：请设置 {moneda} 的汇率以查看利润。",
+  "margen.fila.arreglando_gana": "修复其问题（每月可避免 {evitable}）后，每月将为你留下 {margen}。",
+  "margen.fila.arreglando_pierde": "修复其问题（每月可避免 {evitable}）后，你每月仍会亏损 {margen}。",
+  "error.moneda": "“{moneda}”不是除美元以外的三字母货币代码。",
+  "error.tipo_cambio": "{moneda} 的汇率必须是大于零的数字。"
 }

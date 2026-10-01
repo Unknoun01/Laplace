@@ -11,8 +11,11 @@ Stripe y se convierten en «lo que paga al mes» por cliente, con tres cuidados:
 * **Al mes, de verdad.** Cada línea de factura lleva el periodo que cubre: un plan anual
   de 1.200 $ son 100 $ al mes, no 1.200 el mes en que se cobró. Lo que no tiene periodo
   (un cargo suelto) cuenta entero en el mes en que se pagó.
-* **Sin convertir monedas.** El coste está en dólares; una factura en euros no se pasa a
-  dólares con un tipo inventado. Se cuenta aparte y se dice.
+* **Cada cliente, en su moneda** (D-179). Lo que paga un cliente que factura en euros
+  se guarda en euros, y el margen lo convierte con el tipo de cambio que ponga el
+  usuario. Sólo un cliente con facturas en varias monedas se pasa a dólares al traerlo,
+  con esos mismos tipos; lo que no tenga tipo no se convierte con uno inventado: se
+  cuenta aparte y se dice.
 
 La clave es del proyecto, se guarda con los ajustes y no se devuelve nunca entera, como
 las URLs de webhook. Basta una clave restringida con lectura de facturas y clientes.
@@ -61,10 +64,13 @@ class StripeStatus(BaseModel):
 
 
 class SyncResult(BaseModel):
-    #: Cliente de las trazas → lo que paga al mes, en dólares.
+    #: Cliente de las trazas → lo que paga al mes, en su moneda (`currencies`).
     revenue: dict[str, float] = Field(default_factory=dict)
+    #: La moneda de cada cliente que no paga en dólares (D-179).
+    currencies: dict[str, str] = Field(default_factory=dict)
     invoices: int = 0
-    #: Facturas en otra moneda: no se convierten, se cuentan aquí.
+    #: Facturas que no se han podido contar: de un cliente con varias monedas, en una
+    #: sin tipo de cambio puesto.
     other_currency: int = 0
     synced_at: datetime
 
@@ -111,7 +117,10 @@ def _al_mes(factura: dict[str, Any]) -> float:
 
 
 def sincronizar(
-    clave: str, ahora: datetime | None = None, pedir: Pedir | None = None
+    clave: str,
+    ahora: datetime | None = None,
+    pedir: Pedir | None = None,
+    tipos: dict[str, float] | None = None,
 ) -> SyncResult:
     """Lee las facturas pagadas del último mes y devuelve lo que paga cada cliente."""
     # `_pedir` se busca al llamar, no al definir: es lo que deja cambiarlo en las pruebas.
@@ -125,22 +134,38 @@ def sincronizar(
         "limit": "100",
         "expand[]": "data.customer",
     }
+    # Cliente → moneda → (importe al mes, facturas).
+    por_moneda: dict[str, dict[str, tuple[float, int]]] = {}
     for _ in range(MAX_PAGINAS):
         pagina = pedir(f"{API}/invoices?{urllib.parse.urlencode(parametros)}", clave)
         facturas = pagina.get("data") or []
         for factura in facturas:
             resultado.invoices += 1
-            if (factura.get("currency") or "").lower() != "usd":
-                resultado.other_currency += 1
-                continue
             cliente = _cliente(factura)
             if not cliente:
                 continue
-            resultado.revenue[cliente] = resultado.revenue.get(cliente, 0.0) + _al_mes(factura)
+            moneda = (factura.get("currency") or "usd").upper()
+            importe, n = por_moneda.setdefault(cliente, {}).get(moneda, (0.0, 0))
+            por_moneda[cliente][moneda] = (importe + _al_mes(factura), n + 1)
         if not pagina.get("has_more") or not facturas:
             break
         parametros["starting_after"] = facturas[-1]["id"]
-    resultado.revenue = {k: round(v, 2) for k, v in resultado.revenue.items() if v > 0}
+    tipos = {**(tipos or {}), margen.DOLAR: 1.0}
+    for cliente, monedas in por_moneda.items():
+        if len(monedas) == 1:
+            [(moneda, (importe, _))] = monedas.items()
+        else:
+            # Varias monedas: a dólares con los tipos puestos; lo que no tiene, fuera.
+            moneda, importe = margen.DOLAR, 0.0
+            for otra, (parte, n) in monedas.items():
+                if otra in tipos:
+                    importe += parte * tipos[otra]
+                else:
+                    resultado.other_currency += n
+        if importe > 0:
+            resultado.revenue[cliente] = round(importe, 2)
+            if moneda != margen.DOLAR:
+                resultado.currencies[cliente] = moneda
     return resultado
 
 
@@ -183,7 +208,8 @@ def sincronizar_si_toca(metadata: Any, project_id: str, ahora: datetime | None =
     if ultima and ahora - datetime.fromisoformat(ultima) < CADA:
         return False
     try:
-        aplicar(metadata, project_id, sincronizar(clave, ahora))
+        tipos = margen.leer_tipos(metadata, project_id)
+        aplicar(metadata, project_id, sincronizar(clave, ahora, tipos=tipos))
     except StripeError as exc:
         logger.warning("stripe: no se han traído los ingresos de %s (%s)", project_id, exc)
         return False
@@ -208,11 +234,12 @@ def aplicar(metadata: Any, project_id: str, resultado: SyncResult) -> None:
         if (valor or {}).get("source") == "stripe" and cliente not in resultado.revenue:
             metadata.delete_setting(project_id, clave)
     for cliente, importe in resultado.revenue.items():
-        metadata.set_setting(
-            project_id,
-            margen.clave(cliente),
-            {"monthly": importe, "source": "stripe", "synced_at": resultado.synced_at.isoformat()},
-        )
+        valor = {
+            "monthly": importe, "source": "stripe", "synced_at": resultado.synced_at.isoformat()
+        }
+        if cliente in resultado.currencies:
+            valor["currency"] = resultado.currencies[cliente]
+        metadata.set_setting(project_id, margen.clave(cliente), valor)
     ajustes = leer(metadata, project_id)
     ajustes.update(
         {"last_sync": resultado.synced_at.isoformat(), "customers": len(resultado.revenue)}

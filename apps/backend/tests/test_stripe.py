@@ -103,8 +103,8 @@ def test_aplicar_respeta_lo_puesto_a_mano_para_quien_stripe_no_conoce(tmp_path):
     r = stripe_ingresos.sincronizar(CLAVE, AHORA, pedir=_stripe())
     stripe_ingresos.aplicar(meta, "p", r)
     ingresos = margen.leer_ingresos(meta, "p")
-    assert ingresos["gamma"] == 40.0
-    assert ingresos["acme"] == 100.0
+    assert ingresos["gamma"].importe == 40.0
+    assert ingresos["acme"].importe == 100.0
     assert "viejo" not in ingresos
     fuentes = margen.leer_fuentes(meta, "p")
     assert fuentes["acme"] == "stripe" and fuentes["gamma"] == "manual"
@@ -172,7 +172,7 @@ def test_se_traen_solos_una_vez_al_dia(tmp_path, monkeypatch):
 
     meta.set_setting("p", stripe_ingresos.CLAVE, {"api_key": CLAVE})
     assert stripe_ingresos.sincronizar_si_toca(meta, "p", AHORA)
-    assert margen.leer_ingresos(meta, "p")["acme"] == 100.0
+    assert margen.leer_ingresos(meta, "p")["acme"].importe == 100.0
     assert len(falsa.pedidas) == 2
 
     from datetime import timedelta
@@ -193,7 +193,7 @@ def test_si_stripe_falla_de_fondo_no_se_cae_nada(tmp_path, monkeypatch):
     monkeypatch.setattr(stripe_ingresos, "_pedir", caida)
     assert not stripe_ingresos.sincronizar_si_toca(meta, "p", AHORA)
     # Lo último traído sigue valiendo.
-    assert margen.leer_ingresos(meta, "p")["acme"] == 42.0
+    assert margen.leer_ingresos(meta, "p")["acme"].importe == 42.0
 
 
 def test_el_bucle_de_fondo_trae_los_ingresos(tmp_path, monkeypatch):
@@ -214,4 +214,4 @@ def test_el_bucle_de_fondo_trae_los_ingresos(tmp_path, monkeypatch):
         metadata=meta,
     )
     runner.evaluate_all()
-    assert margen.leer_ingresos(meta, "p")["acme"] == 100.0
+    assert margen.leer_ingresos(meta, "p")["acme"].importe == 100.0

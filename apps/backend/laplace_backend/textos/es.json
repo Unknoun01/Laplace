@@ -474,5 +474,10 @@
   "compartida.arreglo.marca.titulo": "Marca el final de la parte común",
   "compartida.arreglo.marca.texto": "En Anthropic, pon el `cache_control` al final de lo que comparten los pasos, no al final de lo de cada uno. OpenAI cachea solo los prefijos de más de 1.024 tokens, si son idénticos.",
   "compartida.ahorro": "{tokens} tokens fijos × ({llamadas} llamadas − {trazas} ejecuciones) = {lecturas} tokens que encontrarían la caché caliente, de los que ya cuenta el contexto fijo de cada paso {ya}; de lo que queda, el {parte} no se sirve hoy de caché y pasaría de {entrada}/1M a {cacheada}/1M. Menos la primera escritura de cada ejecución, {escritura}. Neto: {neto} en {ventana}.{proyeccion}",
-  "compartida.nota": "Es una estimación conservadora: el prefijo común es, como mucho, la llamada más corta de todos los pasos, y se supone que la caché no sobrevive de una ejecución a la siguiente."
+  "compartida.nota": "Es una estimación conservadora: el prefijo común es, como mucho, la llamada más corta de todos los pasos, y se supone que la caché no sobrevive de una ejecución a la siguiente.",
+  "margen.fila.sin_cambio": "Te paga {importe} al mes y te cuesta {coste}: pon el tipo de cambio del {moneda} para ver su margen.",
+  "margen.fila.arreglando_gana": " Arreglando sus problemas ({evitable} al mes evitables) te dejaría {margen} al mes.",
+  "margen.fila.arreglando_pierde": " Arreglando sus problemas ({evitable} al mes evitables) seguirías perdiendo {margen} al mes.",
+  "error.moneda": "«{moneda}» no es un código de moneda de tres letras distinto del dólar.",
+  "error.tipo_cambio": "El tipo de cambio del {moneda} tiene que ser un número mayor que cero."
 }

@@ -474,5 +474,10 @@
   "compartida.arreglo.marca.titulo": "Marque o fim da parte comum",
   "compartida.arreglo.marca.texto": "Na Anthropic, ponha o `cache_control` no fim do que os passos partilham, não no fim do que é de cada um. A OpenAI guarda em cache sozinha os prefixos com mais de 1.024 tokens, se forem idênticos.",
   "compartida.ahorro": "{tokens} tokens fixos × ({llamadas} chamadas − {trazas} execuções) = {lecturas} tokens que encontrariam o cache quente, dos quais o contexto fixo de cada passo já conta {ya}; do resto, {parte} não é servido hoje do cache e passaria de {entrada}/1M para {cacheada}/1M. Menos a primeira escrita de cada execução, {escritura}. Líquido: {neto} em {ventana}.{proyeccion}",
-  "compartida.nota": "É uma estimativa conservadora: o prefixo comum é, no máximo, a chamada mais curta de todos os passos, e supõe-se que o cache não sobrevive de uma execução para a seguinte."
+  "compartida.nota": "É uma estimativa conservadora: o prefixo comum é, no máximo, a chamada mais curta de todos os passos, e supõe-se que o cache não sobrevive de uma execução para a seguinte.",
+  "margen.fila.sin_cambio": "Paga-lhe {importe} por mês e custa-lhe {coste}: indique a taxa de câmbio do {moneda} para ver a margem.",
+  "margen.fila.arreglando_gana": " Corrigindo os problemas dele ({evitable} por mês evitáveis) deixar-lhe-ia {margen} por mês.",
+  "margen.fila.arreglando_pierde": " Corrigindo os problemas dele ({evitable} por mês evitáveis) continuaria a perder {margen} por mês.",
+  "error.moneda": "«{moneda}» não é um código de moeda de três letras diferente do dólar.",
+  "error.tipo_cambio": "A taxa de câmbio do {moneda} tem de ser um número maior que zero."
 }

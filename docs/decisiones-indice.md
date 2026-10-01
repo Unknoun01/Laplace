@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 179 decisiones.
+final. 180 decisiones.
 
 ## Coste, precios y caché
 
@@ -32,6 +32,7 @@ final. 179 decisiones.
 - [D-152](../DECISIONS.md#d-152--dónde-se-va-el-dinero-gasto-por-día-con-la-franja-evitable-y-coste-por-paso) — Dónde se va el dinero: gasto por día con la franja evitable y coste por paso
 - [D-161](../DECISIONS.md#d-161--qué-clientes-te-hacen-perder-dinero) — Qué clientes te hacen perder dinero
 - [D-178](../DECISIONS.md#d-178--el-mismo-prefijo-en-varios-pasos-sin-compartir-la-caché) — El mismo prefijo en varios pasos, sin compartir la caché
+- [D-179](../DECISIONS.md#d-179--margen-por-cliente-lo-evitable-de-cada-uno-otras-monedas-y-su-columna) — Margen por cliente: lo evitable de cada uno, otras monedas y su columna
 
 ## Detección: reglas y hallazgos
 
@@ -67,6 +68,7 @@ final. 179 decisiones.
 - [D-172](../DECISIONS.md#d-172--la-guardia-de-las-reglas-nuevas) — La guardia de las reglas nuevas
 - [D-177](../DECISIONS.md#d-177--preagregados-por-minuto-del-diagnóstico-y-clave-por-hora) — Preagregados por minuto del Diagnóstico y clave por hora
 - [D-178](../DECISIONS.md#d-178--el-mismo-prefijo-en-varios-pasos-sin-compartir-la-caché) — El mismo prefijo en varios pasos, sin compartir la caché
+- [D-179](../DECISIONS.md#d-179--margen-por-cliente-lo-evitable-de-cada-uno-otras-monedas-y-su-columna) — Margen por cliente: lo evitable de cada uno, otras monedas y su columna
 
 ## Probar: evaluaciones, juez y replay
 
@@ -200,6 +202,7 @@ final. 179 decisiones.
 - [D-162](../DECISIONS.md#d-162--lo-que-quedaba-del-margen-por-cliente-sus-ejecuciones-sus-problemas-la-alerta-y-stripe) — Lo que quedaba del margen por cliente: sus ejecuciones, sus problemas, la alerta y Stripe
 - [D-163](../DECISIONS.md#d-163--stripe-se-trae-solo-cada-día-y-el-cliente-desde-node-sin-sdk) — Stripe se trae solo cada día, y el cliente desde Node sin SDK
 - [D-173](../DECISIONS.md#d-173--retención-por-proyecto-y-borrar-lo-de-una-persona-o-un-cliente) — Retención por proyecto, y borrar lo de una persona o un cliente
+- [D-179](../DECISIONS.md#d-179--margen-por-cliente-lo-evitable-de-cada-uno-otras-monedas-y-su-columna) — Margen por cliente: lo evitable de cada uno, otras monedas y su columna
 
 ## Idiomas y textos
 
@@ -298,6 +301,7 @@ final. 179 decisiones.
 - [D-163](../DECISIONS.md#d-163--stripe-se-trae-solo-cada-día-y-el-cliente-desde-node-sin-sdk) — Stripe se trae solo cada día, y el cliente desde Node sin SDK
 - [D-164](../DECISIONS.md#d-164--clientbeta-en-python-las-llamadas-que-no-se-veían) — `client.beta.*` en Python: las llamadas que no se veían
 - [D-173](../DECISIONS.md#d-173--retención-por-proyecto-y-borrar-lo-de-una-persona-o-un-cliente) — Retención por proyecto, y borrar lo de una persona o un cliente
+- [D-179](../DECISIONS.md#d-179--margen-por-cliente-lo-evitable-de-cada-uno-otras-monedas-y-su-columna) — Margen por cliente: lo evitable de cada uno, otras monedas y su columna
 
 ## Todas, en orden
 
@@ -569,3 +573,4 @@ final. 179 decisiones.
 **2026-10-01 — Funciones: caché compartida, margen por cliente, diagnóstico con modelo, seguridad**
 
 - [D-178](../DECISIONS.md#d-178--el-mismo-prefijo-en-varios-pasos-sin-compartir-la-caché) — El mismo prefijo en varios pasos, sin compartir la caché
+- [D-179](../DECISIONS.md#d-179--margen-por-cliente-lo-evitable-de-cada-uno-otras-monedas-y-su-columna) — Margen por cliente: lo evitable de cada uno, otras monedas y su columna

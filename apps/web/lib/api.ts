@@ -493,17 +493,32 @@ export function getCustomers(
   return get<MarginView>("/api/customers", { project_id: projectId, days }, senal);
 }
 
-/** Lo que paga un cliente al mes; `null` lo quita. */
+/** Lo que paga un cliente al mes, en su moneda; `null` lo quita. */
 export function setCustomerRevenue(
   projectId: string,
   customerId: string,
   monthly: number | null,
-): Promise<{ customer_id: string; monthly: number | null }> {
+  currency = "USD",
+): Promise<{ customer_id: string; monthly: number | null; currency: string }> {
   return send("/api/customers/revenue", "PUT", {
     project_id: projectId,
     customer_id: customerId,
     monthly,
+    currency,
   });
+}
+
+/** Los tipos de cambio del proyecto, en dólares por unidad de cada moneda (D-179). */
+export function getExchangeRates(projectId: string): Promise<{ rates: Record<string, number> }> {
+  return get<{ rates: Record<string, number> }>("/api/exchange-rates", { project_id: projectId });
+}
+
+/** Los sustituye todos: una moneda que no vaya se quita. */
+export function setExchangeRates(
+  projectId: string,
+  rates: Record<string, number>,
+): Promise<{ rates: Record<string, number> }> {
+  return send("/api/exchange-rates", "PUT", { project_id: projectId, rates });
 }
 
 export function getStripe(projectId: string): Promise<StripeStatus> {

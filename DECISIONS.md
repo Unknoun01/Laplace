@@ -3911,3 +3911,46 @@ la prueba; ahora la prueba usa cuatro pasos.
 
 **La demo no lo enseña**: ninguno de sus pasos comparte instrucciones con otro, y
 añadirle esa patología movería cifras que fijan otras pruebas. Queda en la hoja de ruta.
+
+### D-179 — Margen por cliente: lo evitable de cada uno, otras monedas y su columna
+Lo que la Fase 6 (D-161 a D-163) dejó para después.
+
+* **Cuánto de lo evitable es de cada cliente.** Antes se decía qué problemas pasaban en
+  sus ejecuciones, no cuánto dinero suyo tiraban. Ahora cada problema se reparte entre
+  los clientes en proporción a lo que gastó cada uno en el paso del problema (o en sus
+  pasos, si abarca varios: `step_shares`, D-178). Es el mismo criterio de reparto que el
+  gráfico del Diagnóstico (D-152), y la pantalla lo dice. El total de cada paso incluye
+  el trabajo sin cliente, que no se le da a nadie, así que lo de los clientes nunca
+  suma más que el problema (`customer_step_costs`, en los dos almacenes).
+  - Cada cliente lleva lo evitable suyo en la ventana y al mes, y cada problema de su
+    lista, su parte.
+  - Con margen, también el que quedaría arreglándolos: «pierdes 120 $ al mes;
+    arreglando sus problemas (45 $ al mes evitables) seguirías perdiendo 75 $».
+  - Al mes se proyecta sobre la misma base que su coste, o el margen después de
+    arreglar no querría decir nada.
+* **Ingresos en otra moneda.** Lo que paga cada cliente se guarda en su moneda, y el
+  proyecto tiene sus tipos de cambio (`/api/exchange-rates`, dólares por unidad), que
+  pone el usuario. El margen convierte con ellos. Una moneda sin tipo no se convierte
+  con uno inventado: el cliente sale como «falta el tipo de cambio» y la frase dice
+  cuál. Las alertas de clientes que pierden dinero convierten igual.
+  - Stripe guarda a cada cliente en la moneda en que factura, y sólo pasa a dólares,
+    con esos tipos, al que factura en varias. Antes toda factura que no fuera en
+    dólares se descartaba; ahora sólo las de una moneda sin tipo de un cliente con
+    varias, y se dice.
+* **La columna de cliente** en la lista de trazas, con su enlace al filtro por cliente,
+  y en su CSV. Sólo aparece si alguna fila de la página lleva cliente: quien no usa
+  `customer_id` no ve una columna vacía.
+
+Pruebas (`test_margen_mas.py`, en los dos almacenes donde hay almacén):
+- el reparto por cliente, y que lo de los clientes no pase del problema;
+- el reparto de un problema de varios pasos;
+- lo evitable de cada cliente sobre tráfico de verdad, con su margen arreglado;
+- una moneda sin tipo y con tipo;
+- la moneda y los tipos por la API, con sus validaciones;
+- Stripe con monedas;
+- el cliente de cada traza en la lista.
+
+`test_pantallas.py` exige la columna de lo evitable con cifras y la de cliente en la
+lista. Se rompieron a propósito el trabajo sin cliente en el reparto y la conversión
+sin tipo, y alguna prueba falla. Las de Stripe y el margen que esperaban importes sin
+moneda se han adaptado al cambio.

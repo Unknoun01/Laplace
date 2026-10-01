@@ -1024,7 +1024,8 @@ class AlertRunner:
         if not ingresos:
             return "", [], [], []
         vista = margen.calcular(
-            self._store, project_id, _window(ajustes.window_days), ingresos
+            self._store, project_id, _window(ajustes.window_days), ingresos,
+            margen.leer_tipos(self._metadata, project_id),
         )
         previos = self._state.read(project_id)
         pierden = [c for c in vista.customers if c.status == "pierde"]

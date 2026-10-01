@@ -474,5 +474,10 @@
   "compartida.arreglo.marca.titulo": "Marquez la fin de la partie commune",
   "compartida.arreglo.marca.texto": "Chez Anthropic, placez le `cache_control` à la fin de ce que les étapes partagent, pas à la fin de la partie propre à chacune. OpenAI met seul en cache les préfixes de plus de 1 024 tokens, s'ils sont identiques.",
   "compartida.ahorro": "{tokens} tokens fixes × ({llamadas} appels − {trazas} exécutions) = {lecturas} tokens qui trouveraient le cache chaud, dont le contexte fixe de chaque étape compte déjà {ya} ; du reste, {parte} n'est pas servi depuis le cache aujourd'hui et passerait de {entrada}/1M à {cacheada}/1M. Moins la première écriture de chaque exécution, {escritura}. Net : {neto} sur {ventana}.{proyeccion}",
-  "compartida.nota": "C'est une estimation prudente : le préfixe commun est au plus l'appel le plus court de toutes les étapes, et on suppose que le cache ne survit pas d'une exécution à la suivante."
+  "compartida.nota": "C'est une estimation prudente : le préfixe commun est au plus l'appel le plus court de toutes les étapes, et on suppose que le cache ne survit pas d'une exécution à la suivante.",
+  "margen.fila.sin_cambio": "Il vous paie {importe} par mois et vous coûte {coste} : indiquez le taux de change du {moneda} pour voir sa marge.",
+  "margen.fila.arreglando_gana": " En corrigeant ses problèmes ({evitable} par mois évitables), il vous laisserait {margen} par mois.",
+  "margen.fila.arreglando_pierde": " En corrigeant ses problèmes ({evitable} par mois évitables), vous perdriez encore {margen} par mois.",
+  "error.moneda": "« {moneda} » n'est pas un code de devise à trois lettres autre que le dollar.",
+  "error.tipo_cambio": "Le taux de change du {moneda} doit être un nombre supérieur à zéro."
 }

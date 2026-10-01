@@ -796,3 +796,23 @@ def test_ajustes_guarda_la_retencion_del_proyecto(servidor, navegador):
         assert errores == [], errores
     finally:
         pagina.close()
+
+
+def test_clientes_dice_lo_evitable_de_cada_uno_y_la_lista_su_cliente(servidor, navegador):
+    """D-179: la columna de lo evitable de cada cliente lleva cifras, y la lista de
+    trazas, con la demo que sí dice de qué cliente es cada ejecución, su columna."""
+    pagina, errores = _abrir(navegador, servidor + "/clientes/?project=demo&days=30", "escritorio")
+    try:
+        pagina.wait_for_function(
+            "() => document.querySelector('main')?.innerText.includes('iberviajes')",
+            timeout=15_000,
+        )
+        cabeceras = [c.lower() for c in pagina.locator("table.cl-tabla thead th").all_inner_texts()]
+        assert "evitable" in cabeceras, cabeceras
+        evitables = pagina.locator("table.cl-tabla tr.cl-fila td:nth-child(6)").all_inner_texts()
+        assert any(any(c.isdigit() for c in v) for v in evitables), evitables
+        pagina.goto(servidor + "/trazas/?project=demo&days=7", wait_until="networkidle")
+        pagina.locator("table.trazas thead th", has_text="Cliente").first.wait_for(timeout=15_000)
+        assert errores == [], errores
+    finally:
+        pagina.close()

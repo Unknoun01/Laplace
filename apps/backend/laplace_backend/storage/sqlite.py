@@ -496,6 +496,7 @@ _TRACE_AGGREGATE = """
     SUM(cost_rate_assumed = 1)                         AS assumed_rate_spans,
     MAX(session_id)                                    AS trace_session_id,
     MAX(user_id)                                       AS trace_user_id,
+    MAX(customer_id)                                   AS trace_customer_id,
     MAX(CASE WHEN parent_span_id = '' THEN substr(input_payload, 1, 600) END)
                                                        AS root_input,
     GROUP_CONCAT(DISTINCT NULLIF(request_model, ''))   AS modelos
@@ -1475,6 +1476,27 @@ class SQLiteStore:
             )
             for r in self._query(sql, params)
         ]
+
+    def customer_step_costs(
+        self, project_id: str, window: Window
+    ) -> dict[str, dict[str, float]]:
+        """Gemelo del de clickhouse.py (D-179)."""
+        sql = f"""
+            WITH cliente AS (
+                SELECT trace_id, MAX(customer_id) AS c FROM spans
+                WHERE {RULES_WHERE} GROUP BY trace_id
+            )
+            SELECT cliente.c AS cliente,
+                   CASE WHEN step_key != '' THEN step_key ELSE name END AS paso,
+                   SUM(cost_total_usd) AS coste
+            FROM spans JOIN cliente USING (trace_id)
+            WHERE {RULES_WHERE}
+            GROUP BY cliente.c, paso
+        """
+        salida: dict[str, dict[str, float]] = {}
+        for r in self._query(sql, self._window_params(project_id, window)):
+            salida.setdefault(r["cliente"], {})[r["paso"]] = float(r["coste"] or 0.0)
+        return salida
 
     def customer_steps(self, project_id: str, window: Window) -> dict[str, dict[str, int]]:
         sql = f"""

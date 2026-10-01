@@ -819,6 +819,12 @@ class SpanStore(Protocol):
         en una sola (D-161). Sin tiradas de evaluación. El paso es su identidad
         (`step_key`, o el nombre si no la tiene), la misma que llevan los hallazgos."""
 
+    def customer_step_costs(
+        self, project_id: str, window: Window
+    ) -> dict[str, dict[str, float]]:
+        """Por cliente, lo que gasta en cada paso, sin tiradas de evaluación (D-179). La
+        clave `''` es el trabajo sin cliente, que entra en el total de cada paso."""
+
     def unpriced_models(self, project_ids: list[str] | None, window: Window) -> list[str]:
         """Modelos con llamadas sin tarifa en la ventana; `None` son todos los proyectos."""
 

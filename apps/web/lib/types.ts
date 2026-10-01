@@ -162,6 +162,8 @@ export interface TraceSummary {
   cost: Cost;
   session_id: string | null;
   user_id: string | null;
+  /** El cliente que paga por esta ejecución (D-161, D-179). */
+  customer_id?: string | null;
   /** La entrada del span raíz, en una línea (D-125). */
   input_preview?: string;
 }
@@ -784,7 +786,9 @@ export type EstadoMargen =
   | "gana"
   | "sin-ingresos"
   | "sin-proyeccion"
-  | "sin-trafico";
+  | "sin-trafico"
+  /** Paga en una moneda sin tipo de cambio puesto (D-179). */
+  | "sin-cambio";
 
 export interface CustomerMargin {
   customer_id: string;
@@ -792,8 +796,11 @@ export interface CustomerMargin {
   window_cost_usd: number;
   /** `null` sin un día de datos: no se proyecta (D-073). */
   monthly_cost_usd: number | null;
-  /** Lo que paga al mes, puesto por el usuario o traído de Stripe. */
+  /** Lo que paga al mes, ya en dólares; `null` sin ingresos o sin tipo de cambio. */
   monthly_revenue: number | null;
+  /** Lo que paga, tal como se puso, y en qué moneda (D-179). */
+  revenue_amount: number | null;
+  revenue_currency: string;
   /** `manual` o `stripe` (D-162). Vacío sin ingresos. */
   revenue_source: "" | "manual" | "stripe";
   margin_usd: number | null;
@@ -803,8 +810,14 @@ export interface CustomerMargin {
   unknown_cost_spans: number;
   status: EstadoMargen;
   headline: string;
-  /** Problemas abiertos del Diagnóstico que pasan en sus ejecuciones, por dinero. */
-  findings: { id: string; title: string }[];
+  /** Problemas abiertos del Diagnóstico que pasan en sus ejecuciones, por dinero, con
+   * la parte de lo evitable de cada uno que es de este cliente (D-179). */
+  findings: { id: string; title: string; avoidable_usd: number }[];
+  /** Lo evitable de todos sus problemas que es suyo, en la ventana y al mes (D-179). */
+  avoidable_usd: number;
+  avoidable_monthly_usd: number | null;
+  /** El margen al mes si se arreglan sus problemas. */
+  margin_after_fix_usd: number | null;
 }
 
 /** La conexión con Stripe de un proyecto (D-162). La clave nunca viene entera. */

@@ -159,16 +159,23 @@ async def get_customers(
     from .api import get_overview
 
     ingresos = await run_in_threadpool(margen.leer_ingresos, _meta(request), project_id)
+    tipos = await run_in_threadpool(margen.leer_tipos, _meta(request), project_id)
     ventana = _ventana(days)
     vista = await run_in_threadpool(
-        margen.calcular, _store(request), project_id, ventana, ingresos
+        margen.calcular, _store(request), project_id, ventana, ingresos, tipos
     )
     if vista.customers:
         # El mismo Diagnóstico que el inicio, con su caché y los estados de cada problema:
         # lo arreglado o ignorado no se le atribuye a nadie.
         diagnostico = await get_overview(request, project_id, days)
         pasos = await run_in_threadpool(_store(request).customer_steps, project_id, ventana)
-        margen.con_problemas(vista, diagnostico.findings, pasos)
+        costes = await run_in_threadpool(
+            _store(request).customer_step_costs, project_id, ventana
+        )
+        # La misma base que el coste al mes de cada cliente: lo evitable y el coste se
+        # proyectan igual, o el margen después de arreglar no querría decir nada.
+        base = vista.observed_days if vista.projected else None
+        margen.con_problemas(vista, diagnostico.findings, pasos, costes, base)
     fuentes = await run_in_threadpool(margen.leer_fuentes, _meta(request), project_id)
     for cliente in vista.customers:
         if cliente.monthly_revenue is not None:
@@ -184,6 +191,8 @@ class RevenueIn(BaseModel):
     customer_id: str = Field(min_length=1, max_length=200)
     #: Al mes. `None` o 0 lo quita.
     monthly: float | None = Field(default=None, ge=0, le=1e9)
+    #: En qué moneda (D-179). Otra que no sea el dólar necesita su tipo de cambio.
+    currency: str = Field(default="USD", pattern=r"^[A-Za-z]{3}$")
 
 
 @router.put("/customers/revenue")
@@ -192,16 +201,56 @@ async def put_customer_revenue(request: Request, body: RevenueIn) -> dict[str, A
     cliente = body.customer_id.strip()
     if not cliente:
         raise HTTPException(status_code=422, detail=t("error.cliente_vacio"))
+    moneda = body.currency.upper()
     if body.monthly:
+        valor: dict[str, Any] = {"monthly": body.monthly}
+        if moneda != margen.DOLAR:
+            valor["currency"] = moneda
         await run_in_threadpool(
-            _guard, meta.set_setting, body.project_id, margen.clave(cliente),
-            {"monthly": body.monthly},
+            _guard, meta.set_setting, body.project_id, margen.clave(cliente), valor
         )
     else:
         await run_in_threadpool(
             _guard, meta.delete_setting, body.project_id, margen.clave(cliente)
         )
-    return {"customer_id": cliente, "monthly": body.monthly or None}
+    return {"customer_id": cliente, "monthly": body.monthly or None, "currency": moneda}
+
+
+class ExchangeRatesIn(BaseModel):
+    """Los tipos de cambio del proyecto, en dólares por unidad de cada moneda (D-179).
+
+    Los pone el usuario: el producto no tiene fuente de tipos y no se inventa uno. Lo que
+    se manda sustituye a lo que había; una moneda que no venga se quita.
+    """
+
+    project_id: str
+    rates: dict[str, float] = Field(default_factory=dict)
+
+
+@router.get("/exchange-rates")
+async def get_exchange_rates(request: Request, project_id: str) -> dict[str, Any]:
+    tipos = await run_in_threadpool(margen.leer_tipos, _meta(request), project_id)
+    return {"rates": tipos}
+
+
+@router.put("/exchange-rates")
+async def put_exchange_rates(request: Request, body: ExchangeRatesIn) -> dict[str, Any]:
+    tipos: dict[str, float] = {}
+    for moneda, tipo in body.rates.items():
+        codigo = moneda.strip().upper()
+        if len(codigo) != 3 or not codigo.isalpha() or codigo == margen.DOLAR:
+            raise HTTPException(status_code=422, detail=t("error.moneda", moneda=moneda))
+        if not (0 < tipo <= 1e6):
+            raise HTTPException(status_code=422, detail=t("error.tipo_cambio", moneda=codigo))
+        tipos[codigo] = float(tipo)
+    meta = _meta(request)
+    if tipos:
+        await run_in_threadpool(
+            _guard, meta.set_setting, body.project_id, margen.CLAVE_CAMBIO, {"rates": tipos}
+        )
+    else:
+        await run_in_threadpool(_guard, meta.delete_setting, body.project_id, margen.CLAVE_CAMBIO)
+    return {"rates": tipos}
 
 
 # Ingresos desde Stripe (D-162). La clave es un secreto: se guarda y no se devuelve.
@@ -250,7 +299,10 @@ async def sync_stripe(request: Request, body: StripeSyncIn) -> dict[str, Any]:
     if not clave_stripe:
         raise HTTPException(status_code=409, detail=t("stripe.sin_clave"))
     try:
-        resultado = await run_in_threadpool(stripe_ingresos.sincronizar, clave_stripe)
+        tipos = await run_in_threadpool(margen.leer_tipos, _meta(request), body.project_id)
+        resultado = await run_in_threadpool(
+            stripe_ingresos.sincronizar, clave_stripe, None, None, tipos
+        )
     except stripe_ingresos.StripeError as exc:
         raise HTTPException(status_code=502, detail=t(str(exc))) from exc
     await run_in_threadpool(_guard, stripe_ingresos.aplicar, meta, body.project_id, resultado)

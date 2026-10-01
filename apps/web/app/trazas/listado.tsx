@@ -62,6 +62,9 @@ export function Listado({
   // borrarlas al pausar castigaría justo al que ha visto algo y quiere mirarlo con
   // calma. Antes de encender nada, `live.traces` es exactamente la carga inicial.
   const traces = live.traces;
+  // La columna de cliente sólo si alguna fila lo lleva: quien no usa `customer_id` no
+  // tiene por qué ver una columna vacía (D-179).
+  const conCliente = traces.some((tr) => tr.customer_id);
 
   return (
     <>
@@ -93,6 +96,7 @@ export function Listado({
           <thead>
             <tr>
               <th>{t("lista.col.traza")}</th>
+              {conCliente && <th className="hide-sm">{t("lista.col.cliente")}</th>}
               <th className="pro">{t("lista.col.modelos")}</th>
               <th className="r hide-sm">{t("lista.col.pasos")}</th>
               <th className="r hide-sm simple-only">{t("lista.col.tokens")}</th>
@@ -112,6 +116,7 @@ export function Listado({
                 context={context}
                 project={project}
                 looping={repeats.has(trace.trace_id)}
+                conCliente={conCliente}
                 nueva={live.nuevas.has(trace.trace_id)}
                 annotations={anotaciones[trace.trace_id] ?? []}
                 onAnnotated={(nuevas) =>
@@ -161,6 +166,7 @@ function Row({
   context,
   project,
   looping,
+  conCliente,
   nueva,
   annotations,
   onAnnotated,
@@ -169,6 +175,7 @@ function Row({
   context: string;
   project: string;
   looping: boolean;
+  conCliente: boolean;
   nueva?: boolean;
   annotations: Annotation[];
   onAnnotated: (nuevas: Annotation[]) => void;
@@ -204,6 +211,17 @@ function Row({
           </div>
         </Link>
       </td>
+      {conCliente && (
+        <td className="hide-sm">
+          {trace.customer_id ? (
+            <Link href={`/trazas?${conFiltroCliente(context, trace.customer_id)}`}>
+              {trace.customer_id}
+            </Link>
+          ) : (
+            <span className="muted">—</span>
+          )}
+        </td>
+      )}
       <td className="pro" style={{ fontFamily: "var(--mono)", fontSize: 12 }}>
         {trace.models.join(", ") || "—"}
       </td>
@@ -304,4 +322,12 @@ export function GuardarConjunto({
       {error && <p className="verr">{error}</p>}
     </details>
   );
+}
+
+/** El contexto de la lista con el filtro por ese cliente puesto. */
+function conFiltroCliente(context: string, cliente: string): string {
+  const q = new URLSearchParams(context);
+  q.set("customer", cliente);
+  q.delete("cursor");
+  return q.toString();
 }

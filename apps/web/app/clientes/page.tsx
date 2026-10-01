@@ -6,10 +6,12 @@ import { Suspense, useEffect, useState } from "react";
 import { BackendDown, Cargando, NeedsKey, NoProject, NotYours } from "@/components/states";
 import {
   getCustomers,
+  getExchangeRates,
   getStripe,
   listProjects,
   parseDays,
   setCustomerRevenue,
+  setExchangeRates,
   setStripe,
   syncStripe,
 } from "@/lib/api";
@@ -88,6 +90,7 @@ function Contenido() {
                   <th className="num">{t("cl.h.coste")}</th>
                   <th className="num">{t("cl.h.ingresos")}</th>
                   <th className="num">{t("cl.h.margen")}</th>
+                  <th className="num">{t("cl.h.evitable")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -123,6 +126,8 @@ function Contenido() {
 
       {permisos.escribir && <Stripe project={vista.project_id} onChange={recargar} />}
 
+      {permisos.escribir && <TiposDeCambio project={vista.project_id} onChange={recargar} />}
+
       {permisos.escribir && <Anadir project={vista.project_id} onChange={recargar} />}
 
       <section className="sec">
@@ -142,7 +147,38 @@ const CHIP: Record<CustomerMargin["status"], string> = {
   "sin-ingresos": "where",
   "sin-proyeccion": "where",
   "sin-trafico": "where",
+  "sin-cambio": "where",
 };
+
+/** Las monedas que se ofrecen al poner lo que paga un cliente. Otra cualquiera de tres
+ * letras se puede poner desde la API; aquí van las habituales (D-179). */
+const MONEDAS = ["USD", "EUR", "GBP", "MXN", "BRL", "ARS", "COP", "CLP", "CAD", "AUD", "CHF", "JPY"];
+
+function SelectorMoneda({
+  valor,
+  onChange,
+  etiqueta,
+}: {
+  valor: string;
+  onChange: (moneda: string) => void;
+  etiqueta: string;
+}) {
+  const opciones = MONEDAS.includes(valor) ? MONEDAS : [valor, ...MONEDAS];
+  return (
+    <select
+      className="field cl-moneda"
+      value={valor}
+      aria-label={etiqueta}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      {opciones.map((m) => (
+        <option key={m} value={m}>
+          {m}
+        </option>
+      ))}
+    </select>
+  );
+}
 
 function Fila({
   cliente,
@@ -178,10 +214,13 @@ function Fila({
           )}
           {escribir ? (
             <Ingreso cliente={cliente} project={vista.project_id} onChange={onChange} />
-          ) : cliente.monthly_revenue !== null ? (
-            money(cliente.monthly_revenue, vista.currency)
+          ) : cliente.revenue_amount !== null ? (
+            money(cliente.revenue_amount, cliente.revenue_currency)
           ) : (
             "—"
+          )}
+          {cliente.revenue_currency !== vista.currency && cliente.monthly_revenue !== null && (
+            <small>≈ {money(cliente.monthly_revenue, vista.currency)}</small>
           )}
         </td>
         <td className={`num margen ${cliente.status}`}>
@@ -197,9 +236,18 @@ function Fila({
             "—"
           )}
         </td>
+        {/* Lo evitable suyo: el dinero de sus problemas repartido por lo que gastó en
+            cada paso (D-179). Es un reparto, y la frase de abajo lo dice. */}
+        <td className="num">
+          {cliente.avoidable_monthly_usd !== null
+            ? money(cliente.avoidable_monthly_usd, vista.currency)
+            : cliente.avoidable_usd > 0
+              ? money(cliente.avoidable_usd, vista.currency)
+              : "—"}
+        </td>
       </tr>
       <tr className="cl-frase">
-        <td colSpan={5}>
+        <td colSpan={6}>
           {cliente.headline}
           <Problemas cliente={cliente} query={query} />
         </td>
@@ -217,16 +265,19 @@ function Ingreso({
   project: string;
   onChange: () => void;
 }) {
-  const inicial = cliente.monthly_revenue !== null ? String(cliente.monthly_revenue) : "";
+  // Lo que paga tal como se puso, en su moneda: no la conversión a dólares.
+  const inicial = cliente.revenue_amount !== null ? String(cliente.revenue_amount) : "";
   const [valor, setValor] = useState(inicial.replace(".", ","));
+  const [moneda, setMoneda] = useState(cliente.revenue_currency || "USD");
   const [error, setError] = useState("");
-  const cambiado = valor.replace(",", ".") !== inicial;
+  const cambiado =
+    valor.replace(",", ".") !== inicial || moneda !== (cliente.revenue_currency || "USD");
 
   async function guardar() {
     const numero = valor.trim() === "" ? null : Number(valor.replace(",", "."));
     if (numero !== null && (!Number.isFinite(numero) || numero < 0)) return;
     try {
-      await setCustomerRevenue(project, cliente.customer_id, numero || null);
+      await setCustomerRevenue(project, cliente.customer_id, numero || null, moneda);
       setError("");
       onChange();
     } catch (e) {
@@ -244,6 +295,11 @@ function Ingreso({
         aria-label={t("cl.ingresos.aria", { cliente: cliente.customer_id })}
         onChange={(e) => setValor(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && guardar()}
+      />
+      <SelectorMoneda
+        valor={moneda}
+        onChange={setMoneda}
+        etiqueta={t("cl.moneda.aria", { cliente: cliente.customer_id })}
       />
       {cambiado && (
         <button type="button" className="btn small" onClick={guardar}>
@@ -355,6 +411,9 @@ function Problemas({ cliente, query }: { cliente: CustomerMargin; query: string 
             <span key={f.id}>
               {i > 0 && " · "}
               <Link href={`/problema${query}&id=${encodeURIComponent(f.id)}`}>{f.title}</Link>
+              {f.avoidable_usd > 0 && (
+                <span className="muted"> ({t("cl.suyo", { dinero: money(f.avoidable_usd) })})</span>
+              )}
             </span>
           ))}
           {" · "}
@@ -371,13 +430,14 @@ function Problemas({ cliente, query }: { cliente: CustomerMargin; query: string 
 function Anadir({ project, onChange }: { project: string; onChange: () => void }) {
   const [cliente, setCliente] = useState("");
   const [importe, setImporte] = useState("");
+  const [moneda, setMoneda] = useState("USD");
   const [error, setError] = useState("");
 
   async function guardar() {
     const numero = Number(importe.replace(",", "."));
     if (!cliente.trim() || !Number.isFinite(numero) || numero <= 0) return;
     try {
-      await setCustomerRevenue(project, cliente.trim(), numero);
+      await setCustomerRevenue(project, cliente.trim(), numero, moneda);
       setCliente("");
       setImporte("");
       setError("");
@@ -404,11 +464,108 @@ function Anadir({ project, onChange }: { project: string; onChange: () => void }
             onChange={(e) => setImporte(e.target.value)}
           />
         </label>
+        <label>
+          <small>{t("cl.moneda")}</small>
+          <SelectorMoneda valor={moneda} onChange={setMoneda} etiqueta={t("cl.moneda")} />
+        </label>
         <button type="button" className="btn" onClick={guardar}>
           {t("cl.guardar")}
         </button>
       </div>
       {error && <p className="verr">{error}</p>}
+    </details>
+  );
+}
+
+/**
+ * Los tipos de cambio del proyecto (D-179): cuántos dólares vale una unidad de cada
+ * moneda en la que pagan tus clientes. Los pone el usuario; el producto no tiene fuente
+ * de tipos y no se inventa uno.
+ */
+function TiposDeCambio({ project, onChange }: { project: string; onChange: () => void }) {
+  const [filas, setFilas] = useState<{ moneda: string; tipo: string }[] | null>(null);
+  const [mensaje, setMensaje] = useState({ ok: true, texto: "" });
+
+  useEffect(() => {
+    getExchangeRates(project)
+      .then((r) =>
+        setFilas(
+          Object.entries(r.rates).map(([moneda, tipo]) => ({
+            moneda,
+            tipo: String(tipo).replace(".", ","),
+          })),
+        ),
+      )
+      .catch(() => setFilas([]));
+  }, [project]);
+
+  async function guardar() {
+    if (!filas) return;
+    const rates: Record<string, number> = {};
+    for (const f of filas) {
+      if (!f.moneda.trim() || !f.tipo.trim()) continue;
+      rates[f.moneda.trim().toUpperCase()] = Number(f.tipo.replace(",", "."));
+    }
+    try {
+      await setExchangeRates(project, rates);
+      setMensaje({ ok: true, texto: t("cl.cambio.guardado") });
+      onChange();
+    } catch (e) {
+      setMensaje({ ok: false, texto: e instanceof Error ? e.message : t("cl.error.guardar") });
+    }
+  }
+
+  if (!filas) return null;
+  const cambiar = (i: number, campo: "moneda" | "tipo", valor: string) =>
+    setFilas(filas.map((f, j) => (j === i ? { ...f, [campo]: valor } : f)));
+  return (
+    <details className="sec cl-cambio" open={filas.length > 0}>
+      <summary>{t("cl.cambio.titulo")}</summary>
+      <p className="lead">{t("cl.cambio.lead")}</p>
+      {filas.map((f, i) => (
+        <div className="ab" key={i}>
+          <label>
+            <small>{t("cl.moneda")}</small>
+            <input
+              className="field"
+              maxLength={3}
+              value={f.moneda}
+              placeholder="EUR"
+              onChange={(e) => cambiar(i, "moneda", e.target.value)}
+            />
+          </label>
+          <label>
+            <small>{t("cl.cambio.tipo", { moneda: f.moneda.toUpperCase() || "…" })}</small>
+            <input
+              className="field"
+              inputMode="decimal"
+              value={f.tipo}
+              placeholder="1,08"
+              onChange={(e) => cambiar(i, "tipo", e.target.value)}
+            />
+          </label>
+          <button
+            type="button"
+            className="btn small"
+            onClick={() => setFilas(filas.filter((_, j) => j !== i))}
+          >
+            {t("comun.quitar")}
+          </button>
+        </div>
+      ))}
+      <div className="actions" style={{ paddingTop: 0 }}>
+        <button
+          type="button"
+          className="btn"
+          onClick={() => setFilas([...filas, { moneda: "", tipo: "" }])}
+        >
+          {t("cl.cambio.anadir")}
+        </button>
+        <button type="button" className="btn primary" onClick={guardar}>
+          {t("cl.guardar")}
+        </button>
+      </div>
+      {mensaje.texto && <p className={mensaje.ok ? "okline" : "verr"}>{mensaje.texto}</p>}
     </details>
   );
 }

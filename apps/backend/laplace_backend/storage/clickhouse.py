@@ -517,6 +517,7 @@ class ClickHouseStore:
                 countIf(cost_rate_assumed = 1)                         AS assumed_rate_spans,
                 max(session_id)                                        AS trace_session_id,
                 max(user_id)                                           AS trace_user_id,
+                max(customer_id)                                       AS trace_customer_id,
                 substring(maxIf(input_payload, parent_span_id = ''), 1, 600) AS root_input,
                 arrayDistinct(groupArrayIf(request_model, request_model != '')) AS modelos
             FROM spans FINAL
@@ -1460,6 +1461,34 @@ class ClickHouseStore:
             row_to_span(r)
             for r in _named(self._consulta(sql, parameters={"m": model}))
         ]
+
+    def customer_step_costs(
+        self, project_id: str, window: Window
+    ) -> dict[str, dict[str, float]]:
+        """Lo que gasta cada cliente en cada paso, sin tiradas de evaluación (D-179).
+
+        `''` es el trabajo sin cliente: hace falta en el total de cada paso, para repartir
+        lo evitable de un problema entre los clientes sin dárselo todo a los que sí lo
+        llevan.
+        """
+        sql = f"""
+            SELECT c.cliente AS cliente,
+                   if(s.step_key != '', s.step_key, s.name) AS paso,
+                   sum(s.cost_total_usd) AS coste
+            FROM (SELECT trace_id, step_key, name, cost_total_usd FROM spans FINAL
+                  WHERE {RULES_WHERE}) AS s
+            INNER JOIN (
+                SELECT trace_id, max(customer_id) AS cliente FROM spans FINAL
+                WHERE {RULES_WHERE} GROUP BY trace_id
+            ) AS c ON s.trace_id = c.trace_id
+            GROUP BY cliente, paso
+        """
+        salida: dict[str, dict[str, float]] = {}
+        for r in _named(
+            self._consulta(sql, parameters=self._window_params(project_id, window))
+        ):
+            salida.setdefault(r["cliente"], {})[r["paso"]] = float(r["coste"] or 0.0)
+        return salida
 
     def customer_steps(self, project_id: str, window: Window) -> dict[str, dict[str, int]]:
         sql = f"""

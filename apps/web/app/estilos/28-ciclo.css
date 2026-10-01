@@ -227,6 +227,19 @@
   width: 96px;
   text-align: right;
 }
+/* La moneda de lo que paga, al lado del importe (D-179). */
+.cl-ingreso .field.cl-moneda,
+.field.cl-moneda {
+  width: auto;
+  text-align: left;
+}
+.cl-cambio summary {
+  cursor: pointer;
+  color: var(--iris);
+}
+.cl-cambio .ab {
+  align-items: flex-end;
+}
 .cl-anadir summary {
   cursor: pointer;
   color: var(--iris);

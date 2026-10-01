@@ -474,5 +474,10 @@
   "compartida.arreglo.marca.titulo": "Mark the end of the shared part",
   "compartida.arreglo.marca.texto": "On Anthropic, put the `cache_control` at the end of what the steps share, not at the end of each one's own part. OpenAI caches prefixes over 1,024 tokens on its own, if they are identical.",
   "compartida.ahorro": "{tokens} fixed tokens × ({llamadas} calls − {trazas} runs) = {lecturas} tokens that would hit a warm cache, of which the per-step fixed context already counts {ya}; of the rest, {parte} is not served from cache today and would go from {entrada}/1M to {cacheada}/1M. Minus the first write of each run, {escritura}. Net: {neto} in {ventana}.{proyeccion}",
-  "compartida.nota": "This is a conservative estimate: the shared prefix is at most the shortest call of all the steps, and the cache is assumed not to survive from one run to the next."
+  "compartida.nota": "This is a conservative estimate: the shared prefix is at most the shortest call of all the steps, and the cache is assumed not to survive from one run to the next.",
+  "margen.fila.sin_cambio": "Pays you {importe} a month and costs you {coste}: set the {moneda} exchange rate to see its margin.",
+  "margen.fila.arreglando_gana": " Fixing its problems ({evitable} a month avoidable) would leave you {margen} a month.",
+  "margen.fila.arreglando_pierde": " Fixing its problems ({evitable} a month avoidable) you would still lose {margen} a month.",
+  "error.moneda": "“{moneda}” is not a three-letter currency code other than the dollar.",
+  "error.tipo_cambio": "The {moneda} exchange rate has to be a number greater than zero."
 }
