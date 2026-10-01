@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 180 decisiones.
+final. 181 decisiones.
 
 ## Coste, precios y caché
 
@@ -69,6 +69,7 @@ final. 180 decisiones.
 - [D-177](../DECISIONS.md#d-177--preagregados-por-minuto-del-diagnóstico-y-clave-por-hora) — Preagregados por minuto del Diagnóstico y clave por hora
 - [D-178](../DECISIONS.md#d-178--el-mismo-prefijo-en-varios-pasos-sin-compartir-la-caché) — El mismo prefijo en varios pasos, sin compartir la caché
 - [D-179](../DECISIONS.md#d-179--margen-por-cliente-lo-evitable-de-cada-uno-otras-monedas-y-su-columna) — Margen por cliente: lo evitable de cada uno, otras monedas y su columna
+- [D-180](../DECISIONS.md#d-180--diagnóstico-con-modelo-que-cita-los-spans-de-los-que-sale) — Diagnóstico con modelo, que cita los spans de los que sale
 
 ## Probar: evaluaciones, juez y replay
 
@@ -259,6 +260,7 @@ final. 180 decisiones.
 - [D-166](../DECISIONS.md#d-166--con-semanas-de-histórico-una-ventana-de-un-día-lee-el-mes-entero) — Con semanas de histórico, una ventana de un día lee el mes entero
 - [D-173](../DECISIONS.md#d-173--retención-por-proyecto-y-borrar-lo-de-una-persona-o-un-cliente) — Retención por proyecto, y borrar lo de una persona o un cliente
 - [D-174](../DECISIONS.md#d-174--globalscss-en-29-hojas-un-índice-de-decisiones-y-documentación-de-usuario) — `globals.css` en 29 hojas, un índice de decisiones y documentación de usuario
+- [D-180](../DECISIONS.md#d-180--diagnóstico-con-modelo-que-cita-los-spans-de-los-que-sale) — Diagnóstico con modelo, que cita los spans de los que sale
 
 ## Pruebas y método
 
@@ -574,3 +576,4 @@ final. 180 decisiones.
 
 - [D-178](../DECISIONS.md#d-178--el-mismo-prefijo-en-varios-pasos-sin-compartir-la-caché) — El mismo prefijo en varios pasos, sin compartir la caché
 - [D-179](../DECISIONS.md#d-179--margen-por-cliente-lo-evitable-de-cada-uno-otras-monedas-y-su-columna) — Margen por cliente: lo evitable de cada uno, otras monedas y su columna
+- [D-180](../DECISIONS.md#d-180--diagnóstico-con-modelo-que-cita-los-spans-de-los-que-sale) — Diagnóstico con modelo, que cita los spans de los que sale

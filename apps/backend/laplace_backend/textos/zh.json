@@ -479,5 +479,8 @@
   "margen.fila.arreglando_gana": "修复其问题（每月可避免 {evitable}）后，每月将为你留下 {margen}。",
   "margen.fila.arreglando_pierde": "修复其问题（每月可避免 {evitable}）后，你每月仍会亏损 {margen}。",
   "error.moneda": "“{moneda}”不是除美元以外的三字母货币代码。",
-  "error.tipo_cambio": "{moneda} 的汇率必须是大于零的数字。"
+  "error.tipo_cambio": "{moneda} 的汇率必须是大于零的数字。",
+  "diag_modelo.apagado": "模型诊断已关闭：需要 LAPLACE_DIAGNOSIS_ENABLED 以及评审的服务商配置（LAPLACE_EVALS_JUDGE_API_KEY 和 LAPLACE_EVALS_JUDGE_MODEL）。",
+  "diag_modelo.rechazado": "未保存任何诊断：{motivo}。模型没有用该追踪中的 span 支撑的内容不会显示。",
+  "diag_modelo.sin_respuesta": "模型没有响应：{motivo}"
 }

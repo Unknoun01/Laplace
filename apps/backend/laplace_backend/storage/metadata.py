@@ -65,7 +65,9 @@ class MetadataStore(Protocol):
 
     def ensure_project(self, project_id: str) -> None: ...
 
-    def get_diagnosis(self, trace_id: str) -> Diagnosis | None: ...
+    def get_diagnosis(self, trace_id: str, project_id: str | None = None) -> Diagnosis | None: ...
+
+    def save_diagnosis(self, diagnosis: Diagnosis) -> Diagnosis: ...
 
     # -- anotaciones ------------------------------------------------------------------
 
@@ -467,6 +469,15 @@ CREATE TABLE IF NOT EXISTS settings (
     updated_at  TEXT NOT NULL,
     PRIMARY KEY (project_id, key)
 );
+
+-- El diagnóstico con modelo de una traza (D-180), entero en JSON: es lo que se lee.
+CREATE TABLE IF NOT EXISTS trace_diagnoses (
+    project_id  TEXT NOT NULL,
+    trace_id    TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    diagnosis   TEXT NOT NULL,
+    PRIMARY KEY (project_id, trace_id)
+);
 """
 
 
@@ -486,6 +497,7 @@ _BORRAR_PROYECTO_SQLITE = (
     "DELETE FROM prompts WHERE project_id = ?",
     "DELETE FROM settings WHERE project_id = ?",
     "DELETE FROM api_keys WHERE project_id = ?",
+    "DELETE FROM trace_diagnoses WHERE project_id = ?",
 )
 
 
@@ -566,9 +578,33 @@ class SQLiteMetadataStore:
             )
         self._registrados.add(project_id)
 
-    def get_diagnosis(self, trace_id: str) -> Diagnosis | None:
-        """Hueco de la Fase 3. En local todavía no hay diagnóstico automático."""
-        return None
+    def get_diagnosis(self, trace_id: str, project_id: str | None = None) -> Diagnosis | None:
+        """El diagnóstico con modelo de la traza (D-180), acotado a su proyecto: un
+        `trace_id` no es un secreto."""
+        sql = "SELECT diagnosis FROM trace_diagnoses WHERE trace_id = ?"
+        params: tuple[Any, ...] = (trace_id,)
+        if project_id is not None:
+            sql += " AND project_id = ?"
+            params += (project_id,)
+        with self._conn() as conn:
+            fila = conn.execute(sql + " ORDER BY created_at DESC LIMIT 1", params).fetchone()
+        return Diagnosis.model_validate_json(fila[0]) if fila else None
+
+    def save_diagnosis(self, diagnosis: Diagnosis) -> Diagnosis:
+        """Uno por traza: volver a diagnosticar sustituye al anterior."""
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO trace_diagnoses (project_id, trace_id, created_at, diagnosis) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT (project_id, trace_id) DO UPDATE SET "
+                "created_at = excluded.created_at, diagnosis = excluded.diagnosis",
+                (
+                    diagnosis.project_id,
+                    diagnosis.trace_id,
+                    diagnosis.created_at.isoformat(),
+                    diagnosis.model_dump_json(),
+                ),
+            )
+        return diagnosis
 
     # -- anotaciones -------------------------------------------------------------------
 
@@ -1175,8 +1211,11 @@ class NullMetadataStore:
     def ensure_project(self, project_id: str) -> None:
         return None
 
-    def get_diagnosis(self, trace_id: str) -> Diagnosis | None:
+    def get_diagnosis(self, trace_id: str, project_id: str | None = None) -> Diagnosis | None:
         return None
+
+    def save_diagnosis(self, diagnosis: Diagnosis) -> Diagnosis:
+        raise MetadataUnavailable("no hay base de metadatos: el diagnóstico no se ha guardado")
 
     def list_annotations(
         self, trace_id: str, project_id: str | None = None

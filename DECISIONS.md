@@ -3954,3 +3954,49 @@ Pruebas (`test_margen_mas.py`, en los dos almacenes donde hay almacén):
 lista. Se rompieron a propósito el trabajo sin cliente en el reparto y la conversión
 sin tipo, y alguna prueba falla. Las de Stripe y el margen que esperaban importes sin
 moneda se han adaptado al cambio.
+
+### D-180 — Diagnóstico con modelo, que cita los spans de los que sale
+El hueco que el contrato reservaba desde la Fase 0 (`trace_diagnoses`,
+`Trace.diagnosis`) ya se llena. Un modelo lee la traza y dice qué falló o qué sobró, con
+las reglas de siempre:
+
+* **Cada afirmación cita sus spans, y el servidor lo comprueba.** El prompt pone cada
+  span con su id entre corchetes. El modelo devuelve sus afirmaciones con los ids que
+  las sostienen. Una afirmación que cita un id que no está en la traza se tira entera,
+  aunque cite otros buenos: no sabemos qué parte sale de la traza. También se tira la
+  que no cita nada. Se cuentan las tiradas y la pantalla lo dice. Sin ninguna
+  afirmación en pie no se guarda nada (422), y el diagnóstico anterior se queda.
+* **El modelo no pone dinero.** `estimated_savings_usd` queda vacío; lo que se ahorraría
+  lo calculan las reglas con la tabla de precios.
+* **Lo que cuesta, medido** con la misma tabla y guardado en el diagnóstico, como el
+  juez (D-088). La pantalla lo enseña.
+* **Apagado por defecto.** Usa el proveedor del juez, y se enciende aparte con
+  `LAPLACE_DIAGNOSIS_ENABLED`. `/api/judge` dice si está encendido, y la ficha de la
+  traza sólo ofrece el botón entonces.
+* **La traza es dato**, entre etiquetas `<dato>` como en el juez (D-130), y con topes:
+  600 caracteres de entrada y salida por span, 150 spans y 900 tokens de respuesta. Un
+  diagnóstico no puede costar más que el agente que diagnostica.
+* **Acotado al proyecto**: se guarda y se lee por `(project_id, trace_id)` en SQLite y en
+  Postgres. Un trace_id de otro proyecto da 404.
+
+En la ficha de la traza, cada cita es un botón con el nombre del paso. Al pulsarlo, el
+árbol selecciona ese span y abre sus antecesores.
+
+Queda fuera, y se dice:
+- un diagnóstico rechazado también cuesta, y ese coste no queda apuntado en ningún sitio;
+- el borrado de un sujeto (D-118) no borra los diagnósticos, y sus afirmaciones pueden
+  citar contenido. Borrar el proyecto sí los borra.
+
+Pruebas (`test_diagnostico_modelo.py`, con un proveedor falso):
+- se quedan las afirmaciones bien citadas, también con corchetes, y se tiran y cuentan
+  las inventadas, las mezcladas y las vacías;
+- el coste sale de la tabla;
+- sin nada sostenido no hay diagnóstico;
+- un `</dato>` del usuario no se sale de su bloque;
+- se guarda en los dos almacenes, acotado al proyecto;
+- por la API: apagado (503), de otro proyecto (404) y un rechazo que no pisa el
+  anterior (422).
+
+`test_pantallas.py` exige que la ficha enseñe las afirmaciones, las tiradas y el coste,
+y que la cita seleccione su span. Se rompieron a propósito la comprobación de ids, la de
+las citas mezcladas y la selección de la cita, y alguna prueba falla.

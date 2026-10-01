@@ -238,7 +238,10 @@ async def get_trace(
         roots=build_tree(spans),
         # El diagnóstico sigue siendo hueco de la Fase 3; las anotaciones ya no lo
         # son: las llena la pestaña de Evaluaciones, y vienen con su fuente puesta.
-        diagnosis=await run_in_threadpool(metadata.get_diagnosis, trace_id),
+        # Acotado al proyecto, como las anotaciones (D-180).
+        diagnosis=await run_in_threadpool(
+            metadata.get_diagnosis, trace_id, alcance or spans[0].project_id
+        ),
         # Acotadas al proyecto de la traza: un `trace_id` no es un secreto, y sin acotar
         # saldrían aquí las anotaciones que otro proyecto hubiera colgado de ese id.
         annotations=await run_in_threadpool(

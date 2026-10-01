@@ -122,3 +122,14 @@
     display: none;
   }
 }
+/* El diagnóstico con modelo (D-180): cada cita abre su span en el árbol. */
+.diag-modelo li + li {
+  margin-top: 4px;
+}
+.diag-modelo .cita {
+  cursor: pointer;
+  margin-left: 4px;
+}
+.diag-modelo .disclaimer {
+  margin: 8px 0 0;
+}

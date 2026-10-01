@@ -816,3 +816,46 @@ def test_clientes_dice_lo_evitable_de_cada_uno_y_la_lista_su_cliente(servidor, n
         assert errores == [], errores
     finally:
         pagina.close()
+
+
+def test_el_diagnostico_cita_sus_pasos_y_lleva_a_ellos(servidor, navegador):
+    """D-180: el diagnóstico de una traza enseña cada afirmación con los pasos que cita, y
+    pulsar uno lo selecciona en el árbol. El proveedor no está encendido en la demo: el
+    diagnóstico se añade a la respuesta de la traza, que es donde lo pone el servidor."""
+    import json
+    import re
+
+    pagina, errores = _abrir(navegador, servidor + "/trazas/?project=demo&days=30", "escritorio")
+    try:
+        citado: dict = {}
+
+        def con_diagnostico(ruta):
+            respuesta = ruta.fetch()
+            traza = respuesta.json()
+            hoja = traza["roots"][0]
+            while hoja["children"]:
+                hoja = hoja["children"][-1]
+            citado["id"] = hoja["span"]["span_id"]
+            traza["diagnosis"] = {
+                "trace_id": traza["summary"]["trace_id"], "project_id": "demo",
+                "created_at": "2026-10-01T00:00:00Z", "model": "claude-sonnet-5",
+                "cause": "El último paso repite lo que ya tenía.", "suggestion": "Guárdalo.",
+                "categories": ["repeticion"], "confidence": 0.8, "estimated_savings_usd": None,
+                "claims": [{"text": "Lo pide otra vez.", "span_ids": [citado["id"]]}],
+                "discarded_claims": 2, "input_tokens": 900, "output_tokens": 80,
+                "cost_usd": 0.0039, "cost_unknown": False, "prompt_version": "d1",
+            }
+            ruta.fulfill(response=respuesta, body=json.dumps(traza))
+
+        pagina.route(re.compile(r"/api/traces/[0-9a-f]{32}(\?|$)"), con_diagnostico)
+        pagina.locator("a[href*='/traza?'], a[href*='/traza/?']").first.click()
+        caja = pagina.locator("section.diag-modelo")
+        caja.wait_for(timeout=15_000)
+        texto = caja.inner_text()
+        assert "Lo pide otra vez." in texto and "Se descartaron 2" in texto, texto
+        assert "0,0039" in texto, "lo que costó diagnosticar se dice"
+        caja.locator("button.cita").first.click()
+        pagina.locator(f"#span-{citado['id']}[aria-selected='true']").wait_for(timeout=5_000)
+        assert errores == [], errores
+    finally:
+        pagina.close()

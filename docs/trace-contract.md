@@ -194,16 +194,22 @@ El `status` de la traza es `error` si `error_count > 0`, y `ok` en caso contrari
 
 ## 7. Evaluación (Fase 5) y el hueco del diagnóstico (Fase 3)
 
-### `trace_diagnoses` — Norte A, todavía vacío
+### `trace_diagnoses` — el diagnóstico con modelo (D-180)
 
 ```
 trace_id, project_id, created_at, model, cause, explanation, suggestion,
 categories[], confidence, estimated_savings_usd, raw
 ```
 
-Un diagnóstico por traza: causa detectada + sugerencia de arreglo. Existe **ya**, vacío,
-para no migrar el esquema entero más adelante; se expone en `Trace.diagnosis` como
-`null`.
+Un diagnóstico por traza y proyecto: causa, sugerencia y las afirmaciones que la
+sostienen, cada una con los `span_id` que cita (`claims: [{text, span_ids}]`). El
+servidor comprueba las citas antes de guardar: una afirmación que cita un span que no
+está en la traza, o ninguno, se descarta y se cuenta (`discarded_claims`); sin ninguna
+en pie no se guarda nada. Lleva su coste medido con la tabla de precios
+(`input_tokens`, `output_tokens`, `cost_usd`, `cost_unknown`, `prompt_version`).
+`estimated_savings_usd` queda vacío: el dinero lo dicen las reglas. Se pide con
+`POST /api/traces/{id}/diagnosis` y se expone en `Trace.diagnosis`; apagado por defecto
+(`LAPLACE_DIAGNOSIS_ENABLED`, con el proveedor del juez).
 
 ### `annotations` — el veredicto sobre una ejecución
 

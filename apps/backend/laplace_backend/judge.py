@@ -169,16 +169,22 @@ def _post(url: str, payload: dict[str, Any], headers: dict[str, str]) -> dict[st
         raise JudgeUnavailable(f"el proveedor del juez no ha respondido: {exc}") from exc
 
 
-def _call(config: JudgeConfig, prompt: str) -> tuple[str, int, int]:
-    """Devuelve (texto, tokens de entrada, tokens de salida)."""
+def _call(
+    config: JudgeConfig, prompt: str, system: str = SYSTEM_PROMPT, max_tokens: int | None = None
+) -> tuple[str, int, int]:
+    """Devuelve (texto, tokens de entrada, tokens de salida).
+
+    `system` y `max_tokens` los cambia el diagnóstico (D-180), que usa el mismo
+    proveedor que el juez con otras instrucciones."""
+    tope = max_tokens or config.max_output_tokens
     if config.system == "anthropic":
         base = config.base_url or "https://api.anthropic.com"
         datos = _post(
             f"{base}/v1/messages",
             {
                 "model": config.model,
-                "max_tokens": config.max_output_tokens,
-                "system": SYSTEM_PROMPT,
+                "max_tokens": tope,
+                "system": system,
                 "messages": [{"role": "user", "content": prompt}],
             },
             {"x-api-key": config.api_key, "anthropic-version": "2023-06-01"},
@@ -192,9 +198,9 @@ def _call(config: JudgeConfig, prompt: str) -> tuple[str, int, int]:
         f"{base}/v1/chat/completions",
         {
             "model": config.model,
-            "max_completion_tokens": config.max_output_tokens,
+            "max_completion_tokens": tope,
             "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
             ],
         },

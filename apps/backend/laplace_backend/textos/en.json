@@ -479,5 +479,8 @@
   "margen.fila.arreglando_gana": " Fixing its problems ({evitable} a month avoidable) would leave you {margen} a month.",
   "margen.fila.arreglando_pierde": " Fixing its problems ({evitable} a month avoidable) you would still lose {margen} a month.",
   "error.moneda": "“{moneda}” is not a three-letter currency code other than the dollar.",
-  "error.tipo_cambio": "The {moneda} exchange rate has to be a number greater than zero."
+  "error.tipo_cambio": "The {moneda} exchange rate has to be a number greater than zero.",
+  "diag_modelo.apagado": "Model diagnosis is off: it needs LAPLACE_DIAGNOSIS_ENABLED and the judge provider (LAPLACE_EVALS_JUDGE_API_KEY and LAPLACE_EVALS_JUDGE_MODEL).",
+  "diag_modelo.rechazado": "No diagnosis was saved: {motivo}. What the model doesn't back with spans from the trace is not shown.",
+  "diag_modelo.sin_respuesta": "The model didn't respond: {motivo}"
 }

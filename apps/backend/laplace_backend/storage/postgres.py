@@ -162,31 +162,43 @@ class PostgresMetadataStore:
 
     # -- hueco reservado de la Fase 3 ------------------------------------------------
 
-    def get_diagnosis(self, trace_id: str) -> Diagnosis | None:
-        """Diagnóstico de la traza (Fase 3). Hoy siempre `None`."""
+    def get_diagnosis(self, trace_id: str, project_id: str | None = None) -> Diagnosis | None:
+        """El diagnóstico con modelo de la traza (D-180). Entero va en `raw`; las
+        columnas sueltas son las del hueco de la Fase 0, para quien consulte con SQL."""
+        sql = "SELECT raw FROM trace_diagnoses WHERE trace_id = %s"
+        params: tuple[Any, ...] = (trace_id,)
+        if project_id is not None:
+            sql += " AND project_id = %s"
+            params += (project_id,)
         with self._connect() as conn:
-            row = conn.execute(
-                """
-                SELECT trace_id, project_id, created_at, model, cause, explanation,
-                       suggestion, categories, confidence, estimated_savings_usd
-                FROM trace_diagnoses WHERE trace_id = %s
-                """,
-                (trace_id,),
-            ).fetchone()
-        if row is None:
+            row = conn.execute(sql, params).fetchone()
+        if row is None or row[0] is None:
             return None
-        return Diagnosis(
-            trace_id=row[0],
-            project_id=row[1],
-            created_at=row[2],
-            model=row[3],
-            cause=row[4],
-            explanation=row[5] or "",
-            suggestion=row[6] or "",
-            categories=list(row[7] or []),
-            confidence=row[8],
-            estimated_savings_usd=row[9],
-        )
+        crudo = row[0] if isinstance(row[0], str) else json.dumps(row[0])
+        return Diagnosis.model_validate_json(crudo)
+
+    def save_diagnosis(self, diagnosis: Diagnosis) -> Diagnosis:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO trace_diagnoses (trace_id, project_id, created_at, model, cause,
+                    explanation, suggestion, categories, confidence, estimated_savings_usd, raw)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                ON CONFLICT (trace_id) DO UPDATE SET project_id = EXCLUDED.project_id,
+                    created_at = EXCLUDED.created_at, model = EXCLUDED.model,
+                    cause = EXCLUDED.cause, explanation = EXCLUDED.explanation,
+                    suggestion = EXCLUDED.suggestion, categories = EXCLUDED.categories,
+                    confidence = EXCLUDED.confidence,
+                    estimated_savings_usd = EXCLUDED.estimated_savings_usd, raw = EXCLUDED.raw
+                """,
+                (
+                    diagnosis.trace_id, diagnosis.project_id, diagnosis.created_at,
+                    diagnosis.model, diagnosis.cause, diagnosis.explanation,
+                    diagnosis.suggestion, diagnosis.categories, diagnosis.confidence,
+                    diagnosis.estimated_savings_usd, diagnosis.model_dump_json(),
+                ),
+            )
+        return diagnosis
 
     # -- anotaciones -----------------------------------------------------------------
 

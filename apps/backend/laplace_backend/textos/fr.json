@@ -479,5 +479,8 @@
   "margen.fila.arreglando_gana": " En corrigeant ses problèmes ({evitable} par mois évitables), il vous laisserait {margen} par mois.",
   "margen.fila.arreglando_pierde": " En corrigeant ses problèmes ({evitable} par mois évitables), vous perdriez encore {margen} par mois.",
   "error.moneda": "« {moneda} » n'est pas un code de devise à trois lettres autre que le dollar.",
-  "error.tipo_cambio": "Le taux de change du {moneda} doit être un nombre supérieur à zéro."
+  "error.tipo_cambio": "Le taux de change du {moneda} doit être un nombre supérieur à zéro.",
+  "diag_modelo.apagado": "Le diagnostic par modèle est désactivé : il faut LAPLACE_DIAGNOSIS_ENABLED et le fournisseur du juge (LAPLACE_EVALS_JUDGE_API_KEY et LAPLACE_EVALS_JUDGE_MODEL).",
+  "diag_modelo.rechazado": "Aucun diagnostic n'a été enregistré : {motivo}. Ce que le modèle n'appuie pas sur des spans de la trace n'est pas affiché.",
+  "diag_modelo.sin_respuesta": "Le modèle n'a pas répondu : {motivo}"
 }

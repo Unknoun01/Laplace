@@ -13,12 +13,33 @@ import { t } from "@/lib/textos";
  * treinta pasos con bucles sin volverse ilegible: jerarquía plegable, barra de tiempo
  * proporcional, coste por rama y las repeticiones marcadas.
  */
-export function TraceTree({ trace }: { trace: Trace }) {
+export function TraceTree({
+  trace,
+  foco,
+}: {
+  trace: Trace;
+  foco?: { id: string } | null;
+}) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [selectedId, setSelectedId] = useState<string | null>(
     trace.roots[0]?.span.span_id ?? null,
   );
   const listRef = useRef<HTMLDivElement>(null);
+  // Un span pedido desde fuera, como la cita de un diagnóstico (D-180): se selecciona y
+  // se abren sus antecesores. Llega envuelto para que pulsar dos veces la misma cita
+  // vuelva a llevar a ella.
+  useEffect(() => {
+    if (!foco) return;
+    setSelectedId(foco.id);
+    const padres = new Map<string, string | null>();
+    for (const node of allNodes(trace.roots)) padres.set(node.span.span_id, node.span.parent_span_id);
+    setCollapsed((previous) => {
+      const next = new Set(previous);
+      for (let p = padres.get(foco.id); p; p = padres.get(p)) next.delete(p);
+      return next;
+    });
+    document.getElementById(`span-${foco.id}`)?.scrollIntoView({ block: "nearest" });
+  }, [foco, trace.roots]);
 
   const rows = useMemo(() => flatten(trace.roots, collapsed), [trace.roots, collapsed]);
   const index = useMemo(() => {
@@ -129,6 +150,7 @@ export function TraceTree({ trace }: { trace: Trace }) {
             return (
               <div
                 key={span.span_id}
+                id={`span-${span.span_id}`}
                 role="option"
                 aria-selected={span.span_id === selectedId}
                 tabIndex={-1}

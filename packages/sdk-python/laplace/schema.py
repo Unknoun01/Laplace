@@ -495,11 +495,22 @@ class Prompt(_Model):
     version_count: int = 0
 
 
-class Diagnosis(_Model):
-    """Causa probable del fallo de una traza y sugerencia de arreglo (Norte A).
+class DiagnosisClaim(_Model):
+    """Una afirmación del diagnóstico y los spans que la sostienen (D-180).
 
-    Reservado para la Fase 3: lo rellenará un modelo al que se le pasa la traza
-    completa. Un diagnóstico por traza.
+    Sin spans no hay afirmación: el servidor descarta las que no citan ninguno o citan
+    uno que no está en la traza, antes de guardar nada.
+    """
+
+    text: str
+    span_ids: list[str] = Field(default_factory=list)
+
+
+class Diagnosis(_Model):
+    """Causa probable del fallo de una traza y sugerencia de arreglo (Norte A, D-180).
+
+    Lo escribe un modelo al que se le pasa la traza, y **cada afirmación cita los spans
+    concretos de los que sale**, comprobados contra la traza. Un diagnóstico por traza.
     """
 
     trace_id: str
@@ -511,7 +522,18 @@ class Diagnosis(_Model):
     suggestion: str = ""
     categories: list[str] = Field(default_factory=list)
     confidence: float | None = None
+    #: Siempre `None` lo que diga el modelo: el dinero lo dicen las reglas, no él.
     estimated_savings_usd: float | None = None
+    #: Lo que sostiene la causa, cada cosa con sus spans.
+    claims: list[DiagnosisClaim] = Field(default_factory=list)
+    #: Afirmaciones que el modelo hizo sin citar un span de la traza, y se tiraron.
+    discarded_claims: int = 0
+    #: Lo que costó, medido con la tabla de precios, como el del juez (D-088).
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
+    cost_unknown: bool = False
+    prompt_version: str = ""
 
 
 class Trace(_Model):

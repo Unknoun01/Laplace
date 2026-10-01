@@ -9,6 +9,7 @@ import type {
   Comparison,
   CustomPrices,
   Dataset,
+  Diagnosis,
   Diff,
   FindingDetail,
   Instance,
@@ -764,4 +765,10 @@ export interface AuditEvent {
 
 export function getAudit(orgId: string): Promise<{ events: AuditEvent[] }> {
   return get("/api/org/audit", { org_id: orgId });
+}
+
+/** Diagnostica una traza con el modelo y lo guarda (D-180). */
+export function diagnoseTrace(projectId: string, traceId: string): Promise<Diagnosis> {
+  const q = new URLSearchParams({ project_id: projectId });
+  return send<Diagnosis>(`/api/traces/${encodeURIComponent(traceId)}/diagnosis?${q}`, "POST");
 }

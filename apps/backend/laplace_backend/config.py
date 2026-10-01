@@ -115,6 +115,9 @@ class Settings(BaseSettings):
     #: suelto sobre diez mil trazas es una factura sorpresa, y este producto existe
     #: justamente para que no haya facturas sorpresa.
     evals_judge_max_batch: int = 200
+    #: El diagnóstico con modelo de una traza (D-180), con el proveedor del juez. Apagado
+    #: por defecto por lo mismo que el juez: cada diagnóstico es una llamada que se paga.
+    diagnosis_enabled: bool = False
 
     @property
     def auth_enforced(self) -> bool:

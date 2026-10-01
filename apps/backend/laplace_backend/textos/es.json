@@ -479,5 +479,8 @@
   "margen.fila.arreglando_gana": " Arreglando sus problemas ({evitable} al mes evitables) te dejaría {margen} al mes.",
   "margen.fila.arreglando_pierde": " Arreglando sus problemas ({evitable} al mes evitables) seguirías perdiendo {margen} al mes.",
   "error.moneda": "«{moneda}» no es un código de moneda de tres letras distinto del dólar.",
-  "error.tipo_cambio": "El tipo de cambio del {moneda} tiene que ser un número mayor que cero."
+  "error.tipo_cambio": "El tipo de cambio del {moneda} tiene que ser un número mayor que cero.",
+  "diag_modelo.apagado": "El diagnóstico con modelo está apagado: hacen falta LAPLACE_DIAGNOSIS_ENABLED y el proveedor del juez (LAPLACE_EVALS_JUDGE_API_KEY y LAPLACE_EVALS_JUDGE_MODEL).",
+  "diag_modelo.rechazado": "No se ha guardado ningún diagnóstico: {motivo}. Lo que el modelo no sostiene con spans de la traza no se enseña.",
+  "diag_modelo.sin_respuesta": "El modelo no ha respondido: {motivo}"
 }

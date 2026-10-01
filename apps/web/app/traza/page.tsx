@@ -7,10 +7,18 @@ import { Suspense, useEffect, useState } from "react";
 import { TraceTree } from "@/components/TraceTree";
 import { Verdicts } from "@/components/Verdicts";
 import { BackendDown, NeedsKey, NotFound, NotYours, TableSkeleton } from "@/components/states";
-import { getOverview, getTrace, judgePrompt, judgeStatus, parseDays, runJudge } from "@/lib/api";
-import { duration, money, number, timestamp } from "@/lib/format";
+import {
+  diagnoseTrace,
+  getOverview,
+  getTrace,
+  judgePrompt,
+  judgeStatus,
+  parseDays,
+  runJudge,
+} from "@/lib/api";
+import { duration, money, moneyExact, number, timestamp } from "@/lib/format";
 import { allNodes } from "@/lib/tree";
-import type { Annotation, Finding, JudgeStatus, Trace, TraceSummary } from "@/lib/types";
+import type { Annotation, Diagnosis, Finding, JudgeStatus, Trace, TraceSummary } from "@/lib/types";
 import { useTitulo } from "@/lib/titulo";
 import { useApi } from "@/lib/useApi";
 import { t, tn } from "@/lib/textos";
@@ -35,6 +43,8 @@ function Contenido() {
     return { trace, findings: [...(overview?.findings ?? []), ...(overview?.set_aside ?? [])] };
   }, [traceId, proyecto, days]);
   useTitulo(estado.fase === "listo" ? estado.datos.trace?.summary.root_name : null);
+  // El span que se pide ver desde una cita del diagnóstico (D-180).
+  const [foco, setFoco] = useState<{ id: string } | null>(null);
 
   if (estado.fase === "cargando") return <TableSkeleton />;
   if (estado.fase === "sin-backend") return <BackendDown />;
@@ -77,12 +87,7 @@ function Contenido() {
 
       <Anotar project={project} trace={trace} />
 
-      {trace.diagnosis && (
-        <div className="en-esta-traza">
-          <strong>{trace.diagnosis.cause}</strong>
-          {trace.diagnosis.suggestion && <> — {trace.diagnosis.suggestion}</>}
-        </div>
-      )}
+      <DiagnosticoModelo project={project} trace={trace} onCita={(id) => setFoco({ id })} />
 
       {aqui.length > 0 && (
         <div className="en-esta-traza">
@@ -104,12 +109,104 @@ function Contenido() {
 
       <GrafoAgente trace={trace} resaltados={new Set(aqui.map((f) => f.step_key))} />
 
-      <TraceTree trace={trace} />
+      <TraceTree trace={trace} foco={foco} />
 
       <div className="actions">
         <ExportarJSON trace={trace} />
       </div>
     </main>
+  );
+}
+
+/**
+ * El diagnóstico con modelo de la ejecución (D-180). Cada afirmación lleva los spans
+ * que la sostienen: al pulsar uno, el árbol lo abre. Lo que el modelo dijo sin citar
+ * nada de la traza no está aquí, y se dice cuánto fue. El dinero no lo dice el modelo.
+ */
+function DiagnosticoModelo({
+  project,
+  trace,
+  onCita,
+}: {
+  project: string;
+  trace: Trace;
+  onCita: (spanId: string) => void;
+}) {
+  const [diag, setDiag] = useState<Diagnosis | null>(trace.diagnosis);
+  const [puede, setPuede] = useState(false);
+  const [pidiendo, setPidiendo] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    judgeStatus()
+      .then((s) => setPuede(Boolean(s.diagnosis_enabled)))
+      .catch(() => setPuede(false));
+  }, []);
+
+  const nombres = new Map(
+    allNodes(trace.roots).map((n) => [n.span.span_id, n.span.step_label || n.span.name]),
+  );
+
+  async function pedir() {
+    setPidiendo(true);
+    setError("");
+    try {
+      setDiag(await diagnoseTrace(project, trace.summary.trace_id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t("traza.diag.error"));
+    } finally {
+      setPidiendo(false);
+    }
+  }
+
+  if (!diag && !puede) return null;
+  return (
+    <section className="en-esta-traza diag-modelo">
+      {diag ? (
+        <>
+          <strong>{diag.cause}</strong>
+          <ul>
+            {diag.claims.map((c, i) => (
+              <li key={i}>
+                {c.text}{" "}
+                {c.span_ids.map((id) => (
+                  <button
+                    key={id}
+                    type="button"
+                    className="chip where cita"
+                    title={id}
+                    onClick={() => onCita(id)}
+                  >
+                    {nombres.get(id) ?? id.slice(0, 8)}
+                  </button>
+                ))}
+              </li>
+            ))}
+          </ul>
+          {diag.suggestion && (
+            <p>
+              <strong>{t("traza.diag.sugerencia")}</strong> {diag.suggestion}
+            </p>
+          )}
+          <p className="disclaimer">
+            {t("traza.diag.pie", {
+              modelo: diag.model,
+              coste: diag.cost_unknown ? t("traza.diag.coste_desconocido") : moneyExact(diag.cost_usd),
+            })}
+            {diag.discarded_claims > 0 && <> {tn("traza.diag.tiradas", diag.discarded_claims)}</>}
+          </p>
+        </>
+      ) : (
+        <p className="muted">{t("traza.diag.vacio")}</p>
+      )}
+      {puede && (
+        <div className="actions" style={{ paddingTop: 0 }}>
+          <button type="button" className="btn small" onClick={pedir} disabled={pidiendo}>
+            {pidiendo ? t("traza.diag.pidiendo") : diag ? t("traza.diag.otra_vez") : t("traza.diag.pedir")}
+          </button>
+        </div>
+      )}
+      {error && <p className="verr">{error}</p>}
+    </section>
   );
 }
 

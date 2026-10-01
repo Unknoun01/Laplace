@@ -182,8 +182,12 @@ class JudgeIn(BaseModel):
 async def judge_status(request: Request) -> dict[str, Any]:
     """Si el juez está configurado y con qué modelo. **La clave no sale nunca.**"""
     config: JudgeConfig = request.app.state.judge
+    from .diagnostico_modelo import DiagnosisConfig
+
     return {
         "enabled": config.enabled,
+        # El diagnóstico con modelo usa el mismo proveedor y se enciende aparte (D-180).
+        "diagnosis_enabled": DiagnosisConfig.of(request.app.state.settings).enabled,
         "system": config.system,
         "model": config.model if config.enabled else "",
         "max_batch": request.app.state.settings.evals_judge_max_batch,
@@ -572,3 +576,41 @@ async def compare_runs(
         dataset_name=conjunto.name if conjunto else "",
         prompts=prompts,
     )
+
+
+# ---------------------------------------------------------------------------------
+# Diagnóstico con modelo de una traza (D-180)
+# ---------------------------------------------------------------------------------
+
+
+@router.post("/traces/{trace_id}/diagnosis")
+async def run_diagnosis(request: Request, trace_id: str, project_id: str) -> dict[str, Any]:
+    """Diagnostica una traza con el modelo y guarda lo que sostienen sus spans.
+
+    Devuelve además lo que ha costado, como el juez: es dinero que se acaba de gastar.
+    """
+    from .diagnostico_modelo import (
+        DiagnosisConfig,
+        DiagnosisRejected,
+        DiagnosisUnavailable,
+        diagnosticar,
+    )
+
+    config = DiagnosisConfig.of(request.app.state.settings)
+    if not config.enabled:
+        raise HTTPException(status_code=503, detail=t("diag_modelo.apagado"))
+    spans = await run_in_threadpool(_store(request).get_trace_spans, trace_id, project_id)
+    if not spans:
+        raise HTTPException(status_code=404, detail=t("error.traza_no_encontrada"))
+    try:
+        diagnostico = await run_in_threadpool(diagnosticar, config, trace_id, project_id, spans)
+    except DiagnosisRejected as exc:
+        # El modelo respondió y se pagó, pero nada de lo que dijo se sostenía en la traza.
+        detalle = t("diag_modelo.rechazado", motivo=str(exc))
+        raise HTTPException(status_code=422, detail=detalle) from exc
+    except DiagnosisUnavailable as exc:
+        detalle = t("diag_modelo.sin_respuesta", motivo=str(exc))
+        raise HTTPException(status_code=502, detail=detalle) from exc
+    guardado = await run_in_threadpool(_guard, _meta(request).save_diagnosis, diagnostico)
+    return guardado.model_dump(mode="json")
+

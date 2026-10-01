@@ -180,6 +180,15 @@ export interface Diagnosis {
   categories: string[];
   confidence: number | null;
   estimated_savings_usd: number | null;
+  /** Lo que sostiene la causa, cada cosa con los spans que cita (D-180). */
+  claims: { text: string; span_ids: string[] }[];
+  /** Afirmaciones del modelo que no citaban un span de la traza, y se tiraron. */
+  discarded_claims: number;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  cost_unknown: boolean;
+  prompt_version: string;
 }
 
 export type AnnotationSource = "human" | "llm_judge";
@@ -650,6 +659,8 @@ export interface RunSummary {
 
 export interface JudgeStatus {
   enabled: boolean;
+  /** El diagnóstico con modelo de una traza, con el mismo proveedor (D-180). */
+  diagnosis_enabled?: boolean;
   system: string;
   model: string;
   max_batch: number;

@@ -479,5 +479,8 @@
   "margen.fila.arreglando_gana": " Corrigindo os problemas dele ({evitable} por mês evitáveis) deixar-lhe-ia {margen} por mês.",
   "margen.fila.arreglando_pierde": " Corrigindo os problemas dele ({evitable} por mês evitáveis) continuaria a perder {margen} por mês.",
   "error.moneda": "«{moneda}» não é um código de moeda de três letras diferente do dólar.",
-  "error.tipo_cambio": "A taxa de câmbio do {moneda} tem de ser um número maior que zero."
+  "error.tipo_cambio": "A taxa de câmbio do {moneda} tem de ser um número maior que zero.",
+  "diag_modelo.apagado": "O diagnóstico por modelo está desligado: são precisos LAPLACE_DIAGNOSIS_ENABLED e o fornecedor do juiz (LAPLACE_EVALS_JUDGE_API_KEY e LAPLACE_EVALS_JUDGE_MODEL).",
+  "diag_modelo.rechazado": "Não foi guardado nenhum diagnóstico: {motivo}. O que o modelo não sustenta com spans do trace não se mostra.",
+  "diag_modelo.sin_respuesta": "O modelo não respondeu: {motivo}"
 }
