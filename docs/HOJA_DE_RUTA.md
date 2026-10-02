@@ -65,6 +65,7 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
 - **Pantallas:** `test_pantallas.py` usa Playwright con Chromium, ya instalados en `.venv`. Prueban la interfaz construida en `apps/web/out`: tras un pull, `scripts/build_ui.py` antes de pasarlas, o fallan contra la vieja.
 - **Estado:** la última pasada completa (D-162, en Linux con ClickHouse y Postgres) dio 902 pruebas bien y 16 saltadas —las 4 vivas que necesitan clave de proveedor y 12 que necesitan Ollama con un modelo— y una de pantalla que dependía del reloj, arreglada después. Las del espejo con la web necesitan Node 22.6 o posterior.
 - **Fuera de Windows** (contenedor Linux): `.venv/bin/python` en lugar de `.venv/Scripts/python.exe`, y Playwright 1.56 para el Chromium que ya trae la máquina. Docker no arranca solo: `dockerd &` y después `docker start laplace-clickhouse laplace-postgres` (el contenedor de la sesión se reinicia y hay que repetirlo). ClickHouse no arranca con el `ulimits` del compose en un contenedor sin permiso para subirlos: `docker run` sin esa línea. Ojo con `pkill -f "laplace.cli ui"` en la misma orden que lo arranca: se mata a sí misma.
+- **Mapa del código (graphify):** `uv tool install graphifyy`, `graphify install` y `/graphify .` en Claude Code dejan en `graphify-out/` (fuera de git) un grafo navegable del repo con su informe (`GRAPH_REPORT.md`). Con el grafo hecho, `/graphify query "…"` responde sobre la arquitectura sin releer los ficheros, y `/graphify . --update` sólo vuelve a leer lo cambiado. En el contenedor de la nube hay que instalarlo en cada sesión.
 - **Prueba de carga:** `python scripts/carga.py --spans 10000000` genera un día de tráfico en ClickHouse y mide las pantallas con el desglose de cada lectura; `--borrar` lo quita. Con 10 millones hacen falta unos 8 GB para Docker. Quitarlos al acabar: con ellos en la base, la suite tarda horas y los `ALTER` de las pruebas se quedan sin tiempo.
 
 ## 3. Pendiente, por orden
@@ -117,6 +118,11 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
   pero pide otra forma (agrupar Prompts y Ajustes, o un menú) si se añade alguna más.
 - La documentación de usuario (`docs/usuario/`, D-174) es Markdown plano: pasarla a un sitio (Mintlify, Docusaurus o Starlight) cuando haya dominio.
 - `STATUS.md` se puso al día al cerrar las fases 5 y 6: mantenerlo así al cerrar cada fase.
+- **Ciclos de imports en el SDK de Python**, que sacó el grafo de graphify (2 de octubre):
+  `laplace/__init__` → `evals`, `decorators` o `prompts` → `_tracer` → `__init__`, y
+  `integrations/__init__` → `openai` → `_streaming` → `integrations/__init__`. Hoy
+  funcionan porque los imports son tardíos, pero son frágiles: sacar lo que `_tracer`
+  toma de `__init__` a un módulo propio los rompe.
 - Tras la caída de Docker del 26 de septiembre quedaron apartadas `%LOCALAPPDATA%\Docker\run.viejo-*` y `docker-secrets-engine.viejo-*` con sockets bloqueados; se pueden borrar tras reiniciar Windows.
 
 ## 5. Lo que sólo puede hacer el usuario

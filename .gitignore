@@ -33,3 +33,4 @@ Thumbs.db
 # antes de publicar, no se versiona.
 packages/sdk-python/laplace/ui/
 apps/web/out/
+graphify-out/
