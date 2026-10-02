@@ -484,5 +484,17 @@
   "error.tipo_cambio": "A taxa de câmbio do {moneda} tem de ser um número maior que zero.",
   "diag_modelo.apagado": "O diagnóstico por modelo está desligado: são precisos LAPLACE_DIAGNOSIS_ENABLED e o fornecedor do juiz (LAPLACE_EVALS_JUDGE_API_KEY e LAPLACE_EVALS_JUDGE_MODEL).",
   "diag_modelo.rechazado": "Não foi guardado nenhum diagnóstico: {motivo}. O que o modelo não sustenta com spans do trace não se mostra.",
-  "diag_modelo.sin_respuesta": "O modelo não respondeu: {motivo}"
+  "diag_modelo.sin_respuesta": "O modelo não respondeu: {motivo}",
+  "verificar.asunto": "Verifique seu e-mail no Laplace",
+  "verificar.cuerpo": "Abra este link para verificar seu e-mail (expira em 2 dias):\n{enlace}\n\nSe não foi você, ignore esta mensagem.\n",
+  "error.sin_correo": "Esta instalação não tem servidor de e-mail: não é possível enviar o link.",
+  "error.enlace_verificacion": "Esse link de verificação não é válido: já foi usado, expirou ou é de outro e-mail.",
+  "error.sin_sso": "Não há login único para esse e-mail. Entre com sua senha.",
+  "error.sso_proveedor": "O provedor de identidade da sua organização não responde. Tente mais tarde ou avise quem o administra.",
+  "error.sso_emisor": "Não foi possível ler a configuração do provedor: {detalle}",
+  "error.sso_sin_dominios": "Para exigir SSO, a organização precisa de seus domínios de e-mail, definidos por quem administra a instalação.",
+  "error.dominios_solo_instalacion": "Os domínios de uma organização são definidos por quem administra a instalação: dizem de quem são esses e-mails.",
+  "error.token_scim": "Esse token SCIM não existe ou já estava revogado.",
+  "error.sso_obligado": "Sua organização entra com login único: use “Entrar com SSO”.",
+  "org.invitar_sin_verificar": "Não foi enviado por e-mail porque o seu não está verificado: envie o link manualmente ou verifique seu e-mail."
 }

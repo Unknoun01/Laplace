@@ -1,6 +1,6 @@
 # Estado de Laplace
 
-Última actualización: 30 de septiembre de 2026.
+Última actualización: 2 de octubre de 2026.
 
 ## Dónde está el producto
 
@@ -14,7 +14,7 @@ algo pasa del umbral, el panel dice si el gasto sube porque hay más trabajo o p
 trabajo se ha encarecido, la pestaña de Evaluaciones compara dos versiones del agente
 enseñando acierto y coste a la vez, y la de Prompts enseña cada versión con lo que costó
 y lo que acertó sobre el tráfico que la usó. **Las fases 2, 4.a, 5 y 6 quedan cerradas.**
-Lo único que falta del plan es el diagnóstico automático con modelo.
+El diagnóstico con modelo, que cita los spans de los que sale, también está (D-180).
 
 Encima del plan hay tres cosas que no estaban y que hacían falta antes de enseñar esto a
 nadie: **la cobertura** —cuánto del agente entendemos, dicho antes que cualquier cifra de
@@ -168,8 +168,16 @@ grafo del agente (D-150 a D-153), el oscuro como tema por defecto (D-155) y la i
 alrededor del ciclo detectar → probar → arreglar → verificar, con Prompts como fuente de
 hallazgos (D-156, D-157). La Fase 6, margen por cliente, está cerrada (D-161, D-162); Stripe está hecho contra
 una Stripe falsa y falta probarlo con una clave de pruebas. El paquete fino
-de TypeScript espera el nombre en npm, y el diagnóstico automático con modelo sigue con
-su hueco reservado en el contrato, el esquema y la API.
+de TypeScript espera el nombre en npm.
+
+Del 1 al 2 de octubre entró el resto de la lista «siguiente»:
+- la caché compartida entre pasos (D-178);
+- lo evitable de cada cliente, ingresos en otras monedas y la columna de cliente en las
+  trazas (D-179);
+- el diagnóstico con modelo, que cita los spans de los que sale (D-180);
+- la redacción de datos personales y el muestreo por cola en el SDK (D-181);
+- la verificación de correo, el SSO por OpenID Connect y SCIM (D-182). SAML queda fuera
+  a propósito.
 
 La deuda de la hoja de ruta quedó casi cerrada el 30 de septiembre:
 

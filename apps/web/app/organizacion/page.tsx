@@ -16,11 +16,13 @@ import {
   invite,
   logoutAll,
   removeMember,
+  sendVerification,
   setMemberRole,
 } from "@/lib/api";
 import { timestamp } from "@/lib/format";
 import { Aviso, useAviso } from "./aviso";
 import { Claves, Copiable } from "./claves";
+import { Sso } from "./sso";
 import { tr } from "@/lib/i18n";
 import { t } from "@/lib/textos";
 
@@ -96,6 +98,7 @@ function Contenido() {
       {org && <Miembros org={org} yo={me.user.id} onChange={cargar} />}
       {org && ES_ADMIN(org.role) && <Invitaciones org={org} onChange={cargar} />}
       {org && ES_ADMIN(org.role) && <Claves org={org} onChange={cargar} />}
+      {org && ES_ADMIN(org.role) && <Sso org={org} me={me} />}
       {org && ES_ADMIN(org.role) && <Auditoria org={org} />}
       <TuCuenta me={me} />
     </main>
@@ -212,7 +215,11 @@ function Miembros({ org, yo, onChange }: { org: Org; yo: string; onChange: () =>
 function Invitaciones({ org, onChange }: { org: Org; onChange: () => void }) {
   const [email, setEmail] = useState("");
   const [rol, setRol] = useState<Rol>("miembro");
-  const [enlace, setEnlace] = useState<{ link: string; emailed: boolean } | null>(null);
+  const [enlace, setEnlace] = useState<{
+    link: string;
+    emailed: boolean;
+    not_emailed_reason?: string;
+  } | null>(null);
   const { msg, intentar } = useAviso();
 
   return (
@@ -242,7 +249,7 @@ function Invitaciones({ org, onChange }: { org: Org; onChange: () => void }) {
           className="btn primary"
           disabled={!email.includes("@")}
           onClick={async () => {
-            let r: { link: string; emailed: boolean } | null = null;
+            let r: Awaited<ReturnType<typeof invite>> | null = null;
             if (await intentar(async () => (r = await invite(org.id, email.trim(), rol)), "")) {
               setEnlace(r);
               setEmail("");
@@ -258,7 +265,7 @@ function Invitaciones({ org, onChange }: { org: Org; onChange: () => void }) {
           <p>
             {enlace.emailed
               ? t("org.enviado")
-              : t("org.sin_correo")}
+              : enlace.not_emailed_reason || t("org.sin_correo")}
           </p>
           <Copiable texto={enlace.link} />
         </div>
@@ -304,6 +311,17 @@ const ACCIONES = {
   crear_clave: "org.acc.crear_clave",
   revocar_clave: "org.acc.revocar_clave",
   borrar_proyecto: "org.acc.borrar_proyecto",
+  login_sso: "org.acc.login_sso",
+  sso_rechazado: "org.acc.sso_rechazado",
+  configurar_sso: "org.acc.configurar_sso",
+  quitar_sso: "org.acc.quitar_sso",
+  dominios_sso: "org.acc.dominios_sso",
+  crear_token_scim: "org.acc.crear_token_scim",
+  revocar_token_scim: "org.acc.revocar_token_scim",
+  scim_alta: "org.acc.scim_alta",
+  scim_baja: "org.acc.scim_baja",
+  scim_activar: "org.acc.scim_activar",
+  scim_desactivar: "org.acc.scim_desactivar",
 } as const;
 const accion = (clave: string) =>
   clave in ACCIONES ? t(ACCIONES[clave as keyof typeof ACCIONES]) : clave;
@@ -361,6 +379,21 @@ function TuCuenta({ me }: { me: Me }) {
         {me.user?.email}
         {me.user?.is_admin && t("org.admin_instalacion")}
       </p>
+      {/* Verificar el correo (D-182): sin servidor de correo no se puede, y se dice. */}
+      {me.user && !me.user.email_verified && (
+        <p className="muted verificar">
+          {me.user.can_verify ? t("org.sin_verificar") : t("org.sin_verificar_sin_correo")}{" "}
+          {me.user.can_verify && (
+            <button
+              type="button"
+              className="btn small"
+              onClick={() => intentar(() => sendVerification(), t("org.verificacion_enviada"))}
+            >
+              {t("org.verificar")}
+            </button>
+          )}
+        </p>
+      )}
       <div className="ab">
         <label>
           <small>{t("org.pass_actual")}</small>

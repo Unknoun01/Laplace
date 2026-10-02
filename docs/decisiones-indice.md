@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 182 decisiones.
+final. 183 decisiones.
 
 ## Coste, precios y caché
 
@@ -179,6 +179,7 @@ final. 182 decisiones.
 - [D-074](../DECISIONS.md#d-074--una-alerta-por-hallazgo-y-periodo-de-calma-agrupación-y-silencio) — Una alerta por hallazgo y periodo de calma: agrupación *y* silencio
 - [D-075](../DECISIONS.md#d-075--las-alertas-son-el-mismo-código-en-local-y-en-la-nube-el-estado-va-donde-ya-va-lo-mutable) — Las alertas son el mismo código en local y en la nube; el estado va donde ya va lo mutable
 - [D-162](../DECISIONS.md#d-162--lo-que-quedaba-del-margen-por-cliente-sus-ejecuciones-sus-problemas-la-alerta-y-stripe) — Lo que quedaba del margen por cliente: sus ejecuciones, sus problemas, la alerta y Stripe
+- [D-182](../DECISIONS.md#d-182--verificación-de-correo-sso-por-openid-connect-y-scim) — Verificación de correo, SSO por OpenID Connect y SCIM
 
 ## Cuentas, claves y seguridad
 
@@ -579,3 +580,4 @@ final. 182 decisiones.
 - [D-179](../DECISIONS.md#d-179--margen-por-cliente-lo-evitable-de-cada-uno-otras-monedas-y-su-columna) — Margen por cliente: lo evitable de cada uno, otras monedas y su columna
 - [D-180](../DECISIONS.md#d-180--diagnóstico-con-modelo-que-cita-los-spans-de-los-que-sale) — Diagnóstico con modelo, que cita los spans de los que sale
 - [D-181](../DECISIONS.md#d-181--redacción-de-datos-personales-y-muestreo-por-cola-en-el-sdk) — Redacción de datos personales y muestreo por cola, en el SDK
+- [D-182](../DECISIONS.md#d-182--verificación-de-correo-sso-por-openid-connect-y-scim) — Verificación de correo, SSO por OpenID Connect y SCIM

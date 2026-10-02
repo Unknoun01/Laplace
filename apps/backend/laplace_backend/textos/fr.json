@@ -484,5 +484,17 @@
   "error.tipo_cambio": "Le taux de change du {moneda} doit être un nombre supérieur à zéro.",
   "diag_modelo.apagado": "Le diagnostic par modèle est désactivé : il faut LAPLACE_DIAGNOSIS_ENABLED et le fournisseur du juge (LAPLACE_EVALS_JUDGE_API_KEY et LAPLACE_EVALS_JUDGE_MODEL).",
   "diag_modelo.rechazado": "Aucun diagnostic n'a été enregistré : {motivo}. Ce que le modèle n'appuie pas sur des spans de la trace n'est pas affiché.",
-  "diag_modelo.sin_respuesta": "Le modèle n'a pas répondu : {motivo}"
+  "diag_modelo.sin_respuesta": "Le modèle n'a pas répondu : {motivo}",
+  "verificar.asunto": "Vérifiez votre adresse e-mail sur Laplace",
+  "verificar.cuerpo": "Ouvrez ce lien pour vérifier votre adresse (expire dans 2 jours) :\n{enlace}\n\nSi ce n'était pas vous, ignorez ce message.\n",
+  "error.sin_correo": "Cette installation n'a pas de serveur de messagerie : le lien ne peut pas être envoyé.",
+  "error.enlace_verificacion": "Ce lien de vérification n'est pas valable : déjà utilisé, expiré ou pour une autre adresse.",
+  "error.sin_sso": "Pas d'authentification unique pour cette adresse. Connectez-vous avec votre mot de passe.",
+  "error.sso_proveedor": "Le fournisseur d'identité de votre organisation ne répond pas. Réessayez plus tard ou prévenez son administrateur.",
+  "error.sso_emisor": "Impossible de lire la configuration du fournisseur : {detalle}",
+  "error.sso_sin_dominios": "Pour imposer le SSO, l'organisation a besoin de ses domaines de messagerie, définis par l'administrateur de l'installation.",
+  "error.dominios_solo_instalacion": "Les domaines d'une organisation sont définis par l'administrateur de l'installation : ils disent à qui appartiennent ces adresses.",
+  "error.token_scim": "Ce jeton SCIM n'existe pas ou était déjà révoqué.",
+  "error.sso_obligado": "Votre organisation se connecte par authentification unique : utilisez « Se connecter avec SSO ».",
+  "org.invitar_sin_verificar": "Il n'a pas été envoyé par e-mail car votre adresse n'est pas vérifiée : envoyez le lien vous-même ou vérifiez votre adresse."
 }

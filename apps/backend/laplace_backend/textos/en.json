@@ -484,5 +484,17 @@
   "error.tipo_cambio": "The {moneda} exchange rate has to be a number greater than zero.",
   "diag_modelo.apagado": "Model diagnosis is off: it needs LAPLACE_DIAGNOSIS_ENABLED and the judge provider (LAPLACE_EVALS_JUDGE_API_KEY and LAPLACE_EVALS_JUDGE_MODEL).",
   "diag_modelo.rechazado": "No diagnosis was saved: {motivo}. What the model doesn't back with spans from the trace is not shown.",
-  "diag_modelo.sin_respuesta": "The model didn't respond: {motivo}"
+  "diag_modelo.sin_respuesta": "The model didn't respond: {motivo}",
+  "verificar.asunto": "Verify your email on Laplace",
+  "verificar.cuerpo": "Open this link to verify your email (expires in 2 days):\n{enlace}\n\nIf this wasn't you, ignore this message.\n",
+  "error.sin_correo": "This installation has no mail server: the link can't be sent.",
+  "error.enlace_verificacion": "That verification link isn't valid: it was used, expired or is for another email.",
+  "error.sin_sso": "There's no single sign-on for that email. Sign in with your password.",
+  "error.sso_proveedor": "Your organization's identity provider isn't responding. Try again later or tell its administrator.",
+  "error.sso_emisor": "Couldn't read the provider's configuration: {detalle}",
+  "error.sso_sin_dominios": "To require SSO, the organization needs its email domains, which the installation administrator sets.",
+  "error.dominios_solo_instalacion": "An organization's domains are set by the installation administrator: they state who owns those emails.",
+  "error.token_scim": "That SCIM token doesn't exist or was already revoked.",
+  "error.sso_obligado": "Your organization signs in with single sign-on: use “Sign in with SSO”.",
+  "org.invitar_sin_verificar": "It wasn't emailed because your email isn't verified: send the link yourself or verify your email."
 }

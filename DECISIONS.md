@@ -4082,3 +4082,105 @@ Se rompieron a propósito el error como motivo para guardar, la huella, la lista
 estructura, el vaciado al cerrar, la decisión de los tardíos, el `rate − 1` y el
 relleno de ceros, y alguna prueba falla. La del cliente no mordía con un cliente sin
 datos personales; ahora el cliente de la prueba es un correo.
+
+### D-182 — Verificación de correo, SSO por OpenID Connect y SCIM
+Lo que pide una empresa antes de dar de alta a su equipo, sobre las cuentas de D-127.
+
+**Verificar el correo.**
+* Un enlace de un solo uso, que caduca a los 2 días y se guarda como hash. Verifica el
+  correo **al que se mandó**: si el de la cuenta cambia, ya no vale.
+* Aceptar una invitación que llegó por correo también verifica, porque quien abre el
+  enlace lee ese buzón. Una invitación que se pasó a mano, no.
+* **Lo que exige estar verificado** es que Laplace mande correo en tu nombre. Una
+  invitación que dice «fulano te ha invitado» con un fulano sin verificar serviría para
+  suplantar a cualquiera desde nuestro servidor. Sin verificar, el enlace sale igual,
+  para mandarlo a mano, y la respuesta dice por qué.
+* Sin servidor de correo no hay cómo verificar. La interfaz lo dice y no ofrece el
+  botón.
+
+**SSO por OpenID Connect, no SAML.** Okta, Entra ID, Google Workspace, OneLogin, Auth0,
+Keycloak y JumpCloud hablan OIDC, y OIDC se hace bien sin dependencias (`sso.py`, con
+`urllib` como el juez). SAML se queda fuera a propósito: verificar una firma XML a mano
+es justo donde se rompen los inicios de sesión (*signature wrapping*), y hacerlo bien
+pide `xmlsec`, una biblioteca nativa que no queremos en cada instalación. Queda en la
+hoja de ruta para quien lo necesite de verdad.
+* **Flujo de código con secreto de cliente y PKCE.** El navegador nunca ve un token.
+* **La firma del `id_token` no se comprueba, y el estándar lo permite** (OIDC Core
+  3.1.3.7, punto 6). El token llega directamente del endpoint de tokens por TLS, en una
+  petición que el servidor hace con su secreto. Por eso se exige `https` en el emisor y
+  en los dos endpoints. Sí se comprueban:
+  - el emisor, contra el documento de descubrimiento, que a su vez tiene que ser del
+    emisor configurado;
+  - la audiencia, y `azp` si hay varias;
+  - la caducidad y el `iat`, con dos minutos de holgura;
+  - el `nonce`.
+* **`state` de un solo uso y atado al navegador**: en la base y en una cookie
+  `httpOnly` de ese navegador. Sin la cookie, otro sitio podría terminar un inicio de
+  sesión que empezó él y meterte en su cuenta. Un intento con un `state` bueno y otro
+  navegador lo gasta. El `next` sólo puede ser una ruta propia.
+* **Los dominios los pone quien administra la instalación**, no la organización. Un
+  dominio es la afirmación de que esos correos son de esa organización, y no se la
+  puede hacer uno mismo. No se aceptan dominios públicos (gmail.com y compañía), ni uno
+  que ya sea de otra organización. El correo que manda el proveedor tiene que ser de
+  uno de esos dominios, y un `email_verified: false` explícito se rechaza. Entra ID no
+  lo manda: ahí el dominio aprobado es la garantía.
+* **Nadie entra en la cuenta de otra organización.** Quien entra por SSO:
+  - si ya vino antes, se le reconoce por su `sub` y no por el correo, que puede cambiar,
+    y sólo si sigue en la organización: a quien un admin quita, no vuelve a entrar solo;
+  - si tiene cuenta con ese correo, se enlaza **sólo si ya es miembro** de la
+    organización. Si no, el proveedor de una organización entraría en la cuenta de
+    alguien de otra;
+  - si no tiene cuenta, se le crea, sin contraseña, verificado y con el rol por defecto
+    que ponga la organización (nunca propietario).
+* **Obligar a SSO**: los miembros con correo de los dominios de la organización no
+  entran con contraseña. Se comprueba después de la contraseña, así que no dice qué
+  cuentas lo tienen. El administrador de la instalación queda fuera: si el proveedor
+  se cae, es quien puede quitar la obligación. Sin dominios no se puede obligar.
+* **Una cuenta sin contraseña** tarda lo mismo en rechazar una contraseña que una con
+  ella: se compara siempre contra un hash de relleno, y el tiempo no dice cuáles entran
+  sólo por SSO.
+* El secreto del cliente no vuelve nunca por la API. Guardar con el campo vacío lo
+  conserva. El emisor se comprueba contra el proveedor al guardarlo, no el día que
+  alguien intenta entrar.
+
+**SCIM 2.0** (`/scim/v2`, `scim.py`): lo que Okta y Entra ID usan para dar de alta y de
+baja sin que nadie toque Laplace.
+* Hay `Users` (listar con `userName eq` o `externalId eq`, leer, crear, `PUT`, `PATCH`
+  en las dos formas, con `path` y con objeto de valores, y `DELETE`),
+  `ServiceProviderConfig` y `ResourceTypes`. **No hay `Groups`**: el rol es el rol por
+  defecto del SSO, y se cambia en Laplace. Mapear grupos a roles es lo siguiente si
+  alguien lo pide.
+* **Desactivar y borrar quitan la pertenencia, no la cuenta.** La persona puede ser de
+  otras organizaciones, y SCIM no toca nada fuera de la suya. Lo dado de baja se
+  recuerda, porque el proveedor pregunta y espera `active: false`, no un 404.
+* **No se deja a una organización sin propietario**: desactivar al último es un 409.
+* La autenticación es una clave por organización (`lpscim_…`), que se crea en la
+  interfaz, se enseña una vez y se guarda como hash. La ruta está fuera de `/api`, así
+  que el middleware no la mira y la comprueba ella entera. En el modo local no existe.
+* Un alta de un correo que ya tiene cuenta sólo le da la pertenencia: ni su contraseña
+  ni sus otras organizaciones. Se verifica si el correo es de un dominio de la
+  organización.
+
+Todo queda en la auditoría de la organización, también los rechazos de SSO con su
+motivo. Las tablas nuevas van en el mismo esquema en SQLite y en Postgres.
+
+Pruebas (`test_empresa.py`, con un proveedor OIDC y un correo falsos):
+- el enlace de verificación, de un solo uso y del correo al que se mandó;
+- la invitación que no se manda en nombre de alguien sin verificar, y la que verifica
+  al aceptarla;
+- el viaje completo de SSO, con PKCE, alta, rol por defecto y reconocimiento por `sub`;
+- ocho `id_token` que no cuadran;
+- el `state` de otro navegador y el `next` hacia fuera;
+- el proveedor que quiere entrar en una cuenta de otra organización, y quien ya no es
+  miembro;
+- dominios públicos, ajenos o puestos por la propia organización;
+- la obligación de SSO;
+- SCIM entero: alta, duplicado, filtros, las dos formas de `PATCH`, baja, el último
+  propietario, la clave revocada y la clave de otra organización;
+- SCIM en modo local;
+- el recorrido de las tablas en SQLite y en Postgres.
+
+`test_pantallas_cuentas.py` recorre la sección de SSO y SCIM, el botón de entrar con
+SSO, la vuelta con error y la página de verificar. Se rompieron a propósito trece
+comprobaciones, del `nonce` a la del correo del enlace, y alguna prueba falla. La del
+correo del enlace no mordía al principio; ahora hay una prueba que cambia el correo.

@@ -178,6 +178,8 @@ async def me(request: Request) -> dict[str, Any]:
         }
     usuario = await run_in_threadpool(cuentas.usuario, identidad.user_id)
     orgs = await run_in_threadpool(cuentas.orgs_de, identidad.user_id)
+    verificado = await run_in_threadpool(cuentas.verificado, identidad.user_id)
+    alertas = getattr(request.app.state, "alerts", None)
     return {
         "mode": "nube",
         "user": {
@@ -185,6 +187,9 @@ async def me(request: Request) -> dict[str, Any]:
             "email": usuario.email,
             "name": usuario.name,
             "is_admin": usuario.is_admin,
+            # D-182: sin servidor de correo no hay cómo verificar, y se dice.
+            "email_verified": verificado,
+            "can_verify": getattr(alertas, "mailer", None) is not None,
         },
         "orgs": orgs,
         # El rol en cada proyecto, para que la interfaz no enseñe botones que el
@@ -286,10 +291,11 @@ async def login(request: Request, response: Response, body: LoginIn) -> dict[str
     def comprobar() -> Any:
         encontrado = cuentas.usuario_por_email(email)
         # Se compara siempre, exista o no el email: el tiempo de respuesta no puede decir
-        # qué correos tienen cuenta.
-        guardado = encontrado[1] if encontrado else cuentas.hash_de("")
+        # qué correos tienen cuenta. Tampoco cuáles entran sólo por SSO (D-182).
+        con_hash = encontrado is not None and encontrado[1].startswith("scrypt$")
+        guardado = encontrado[1] if con_hash else cuentas.hash_de("")
         valido = comprobar_contrasena(body.password, guardado)
-        return encontrado[0] if encontrado and valido else None
+        return encontrado[0] if encontrado and con_hash and valido else None
 
     usuario = await run_in_threadpool(comprobar)
     if usuario is None:
@@ -298,6 +304,13 @@ async def login(request: Request, response: Response, body: LoginIn) -> dict[str
         raise HTTPException(status_code=401, detail=t("error.credenciales"))
 
     await run_in_threadpool(frenos.limpiar, f"email:{email}")
+    # Una organización que obliga a entrar por SSO no deja usar la contraseña con sus
+    # correos (D-182). El administrador de la instalación sí: si el proveedor se cae, es
+    # quien puede quitar la obligación.
+    if not usuario.is_admin and await run_in_threadpool(
+        cuentas.sso_obligado, usuario.id, usuario.email
+    ):
+        raise HTTPException(status_code=403, detail=t("error.sso_obligado"))
     token = await run_in_threadpool(
         cuentas.abrir_sesion, usuario.id, request.headers.get("user-agent", "")
     )
@@ -458,6 +471,9 @@ async def accept(request: Request, response: Response, body: AcceptIn) -> dict[s
         if not rol_suficiente(actual, info["role"]):
             cuentas.poner_miembro(info["org_id"], usuario.id, info["role"])
         cuentas.anotar(info["org_id"], usuario.id, "aceptar_invitacion", info["role"], _ip(request))
+        # El enlace llegó a ese buzón: quien lo abre, lo lee (D-182).
+        if info.get("emailed"):
+            cuentas.marcar_verificado(usuario.id)
         return cuentas.abrir_sesion(usuario.id, request.headers.get("user-agent", ""))
 
     token = await run_in_threadpool(unir)
@@ -528,7 +544,16 @@ async def invite(request: Request, body: InviteIn) -> dict[str, Any]:
     # Por correo si la instalación tiene servidor; si no, el enlace se enseña para
     # mandarlo a mano. El enlace sólo sale en esta respuesta: se guarda su hash.
     enviado = False
+    motivo = ""
     notificador = request.app.state.alerts.mailer
+    # Un correo que dice «fulano te ha invitado» con un fulano sin verificar sería una
+    # forma de suplantar a cualquiera desde nuestro servidor (D-182). El enlace sale igual
+    # para mandarlo a mano.
+    if notificador is not None and not await run_in_threadpool(
+        cuentas.verificado, usuario.id
+    ):
+        notificador = None
+        motivo = t("org.invitar_sin_verificar")
     if notificador is not None:
         nombre = await run_in_threadpool(cuentas.nombre_org, body.org_id)
         enviado = await run_in_threadpool(
@@ -538,7 +563,9 @@ async def invite(request: Request, body: InviteIn) -> dict[str, Any]:
             f"{usuario.email} te ha invitado a «{nombre}» como {body.role}.\n\n"
             f"Acepta aquí (caduca en 7 días):\n{enlace}\n",
         )
-    return {"link": enlace, "emailed": enviado}
+        if enviado:
+            await run_in_threadpool(cuentas.invitacion_enviada, token)
+    return {"link": enlace, "emailed": enviado, "not_emailed_reason": motivo}
 
 
 @router.delete("/org/invitations")

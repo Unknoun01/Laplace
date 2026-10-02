@@ -35,7 +35,7 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
   verde (`git merge --no-ff`); si no dice otra cosa, se sigue así.
 - **Nada entra sin su prueba.** Primero la prueba en rojo, después el arreglo.
 - **Hay que comprobar que la prueba muerde:** romper el código a propósito y verla fallar.
-- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-178**.
+- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-183**.
 - **Todo en español:** código, comentarios, commits y textos. Los textos de la interfaz y
   del backend, en los cinco idiomas a la vez (`apps/web/lib/mensajes/*.ts`,
   `apps/backend/laplace_backend/textos/*.json`); las pruebas exigen las mismas claves.
@@ -95,15 +95,14 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
   - reintentos por JSON mal formado;
   - historial que crece sin límite;
   - trabajo que podría ir a la Batch API.
-- **Caché compartida entre pasos:** hoy el contexto fijo se mira paso a paso, y la caché de un prefijo común a dos pasos distintos no se ve.
-- **Margen por cliente, más allá:** cuánto de lo evitable de cada problema es de cada
-  cliente (hoy se dice qué problemas pasan en sus ejecuciones, no cuánto dinero suyo
-  tiran); ingresos en otra moneda con el tipo de cambio que ponga el usuario, como el de
-  euros (hoy no se convierten); y la columna de cliente en la lista de trazas y en su CSV.
-- **Diagnóstico con modelo:** cada afirmación cita spans concretos (el hueco está reservado en el contrato, el esquema y la API).
-- **Seguridad y empresa:**
-  - redacción de datos personales en el SDK (`init(redact=...)`) y muestreo que siempre guarde errores y trazas caras;
-  - SSO/SAML, SCIM y verificación de correo.
+- **Lo que dejaron D-178 a D-182, por si alguien lo pide:**
+  - la caché compartida en la demo (hoy no la enseña: moverla cambiaría cifras fijadas);
+  - el coste de los diagnósticos con modelo rechazados, que hoy no queda apuntado, y
+    borrar los diagnósticos al borrar a un sujeto;
+  - escalar las cifras por el muestreo del SDK (hoy son un suelo y la cobertura dice
+    cuánto falta);
+  - SAML, con `xmlsec` como dependencia opcional, y `Groups` en SCIM para mapear grupos
+    a roles.
 
 ## 4. Deuda y detalles sueltos
 - **Los navegadores que no son Chromium**, que la auditoría del rediseño no revisó

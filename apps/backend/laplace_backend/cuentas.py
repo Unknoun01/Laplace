@@ -58,6 +58,23 @@ COOKIE_CLAVE = "laplace_key"
 CABECERA_CSRF = "x-laplace"
 DURACION_SESION = timedelta(days=30)
 DURACION_INVITACION = timedelta(days=7)
+DURACION_VERIFICACION = timedelta(days=2)
+#: El prefijo de las claves de SCIM, como `lp_` en las de API: un escáner de secretos
+#: las encuentra, y nadie confunde una con otra.
+PREFIJO_SCIM = "lpscim_"
+#: El hash de contraseña de quien entra sólo por SSO. No es un hash de scrypt, así que
+#: ninguna contraseña lo cumple.
+SIN_CONTRASENA = "!sso"
+
+#: Columnas que llegaron después de la tabla: (tabla, columna, tipo).
+COLUMNAS_TARDIAS = (
+    ("api_keys", "expires_at", "TEXT"),
+    ("api_keys", "last_used_at", "TEXT"),
+    ("api_keys", "created_by", "TEXT"),
+    # D-182: cuándo se verificó el correo, y si la invitación llegó por correo.
+    ("users", "email_verified_at", "TEXT"),
+    ("invitations", "emailed", "INTEGER NOT NULL DEFAULT 0"),
+)
 MIN_CONTRASENA = 10
 
 #: Parámetros de scrypt: ~16 MiB y unas décimas de segundo por intento. Van dentro del
@@ -292,6 +309,74 @@ CREATE TABLE IF NOT EXISTS login_failures (
     clave  TEXT NOT NULL,
     at     TEXT NOT NULL
 );
+-- Enlaces para verificar el correo (D-182). Se guarda el hash, como las sesiones.
+CREATE TABLE IF NOT EXISTS email_tokens (
+    token_hash  TEXT PRIMARY KEY,
+    user_id     TEXT NOT NULL,
+    email       TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    expires_at  TEXT NOT NULL,
+    used_at     TEXT
+);
+-- SSO por OIDC de una organización (D-182). El secreto no sale nunca por la API.
+CREATE TABLE IF NOT EXISTS sso_configs (
+    org_id         TEXT PRIMARY KEY,
+    issuer         TEXT NOT NULL,
+    client_id      TEXT NOT NULL,
+    client_secret  TEXT NOT NULL DEFAULT '',
+    default_role   TEXT NOT NULL DEFAULT 'miembro',
+    enforce        INTEGER NOT NULL DEFAULT 0,
+    updated_at     TEXT NOT NULL
+);
+-- Los dominios de correo de cada organización. Los pone el administrador de la
+-- instalación, no la organización: un dominio es una afirmación sobre quién es dueño de
+-- esos correos, y no se la puede hacer uno mismo.
+CREATE TABLE IF NOT EXISTS sso_domains (
+    domain      TEXT PRIMARY KEY,
+    org_id      TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    created_by  TEXT NOT NULL DEFAULT ''
+);
+-- Inicios de sesión a medias: de un solo uso y atados al navegador.
+CREATE TABLE IF NOT EXISTS sso_states (
+    state_hash    TEXT PRIMARY KEY,
+    org_id        TEXT NOT NULL,
+    nonce         TEXT NOT NULL,
+    verifier      TEXT NOT NULL,
+    browser_hash  TEXT NOT NULL,
+    next          TEXT NOT NULL DEFAULT '/',
+    expires_at    TEXT NOT NULL
+);
+-- Quién es cada persona para el proveedor de su organización: el `sub` y no el correo,
+-- que puede cambiar.
+CREATE TABLE IF NOT EXISTS sso_identities (
+    org_id      TEXT NOT NULL,
+    subject     TEXT NOT NULL,
+    user_id     TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    PRIMARY KEY (org_id, subject)
+);
+-- Claves de SCIM: con ellas el proveedor de identidad da de alta y de baja (D-182).
+CREATE TABLE IF NOT EXISTS scim_tokens (
+    id            TEXT PRIMARY KEY,
+    token_hash    TEXT NOT NULL UNIQUE,
+    org_id        TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    created_by    TEXT NOT NULL DEFAULT '',
+    revoked_at    TEXT,
+    last_used_at  TEXT
+);
+-- Lo que SCIM dio de alta en cada organización, también desactivado: un proveedor
+-- pregunta por una persona que dio de baja y espera `active: false`, no un 404.
+CREATE TABLE IF NOT EXISTS scim_users (
+    org_id       TEXT NOT NULL,
+    user_id      TEXT NOT NULL,
+    external_id  TEXT NOT NULL DEFAULT '',
+    active       INTEGER NOT NULL DEFAULT 1,
+    role         TEXT NOT NULL DEFAULT 'miembro',
+    created_at   TEXT NOT NULL,
+    PRIMARY KEY (org_id, user_id)
+);
 CREATE INDEX IF NOT EXISTS login_failures_idx ON login_failures (clave, at);
 CREATE INDEX IF NOT EXISTS audit_org_idx ON audit_log (org_id, at);
 CREATE INDEX IF NOT EXISTS sessions_user_idx ON sessions (user_id);
@@ -330,10 +415,11 @@ class CuentasStore:
         self._migrar_claves()
 
     def _migrar_claves(self) -> None:
-        """Las claves ganan caducidad, autor y último uso (D-127)."""
-        for columna in ("expires_at", "last_used_at", "created_by"):
+        """Las claves ganan caducidad, autor y último uso (D-127); los usuarios, la
+        verificación del correo, y las invitaciones, si se mandaron (D-182)."""
+        for tabla, columna, tipo in COLUMNAS_TARDIAS:
             try:
-                self._ejecutar(f"ALTER TABLE api_keys ADD COLUMN {columna} TEXT")
+                self._ejecutar(f"ALTER TABLE {tabla} ADD COLUMN {columna} {tipo}")
             except Exception:  # noqa: BLE001 - ya existe
                 pass
 
@@ -345,8 +431,15 @@ class CuentasStore:
     # -- usuarios ------------------------------------------------------------------
 
     def crear_usuario(
-        self, email: str, nombre: str, contrasena: str, *, is_admin: bool = False
+        self,
+        email: str,
+        nombre: str,
+        contrasena: str | None,
+        *,
+        is_admin: bool = False,
+        verificado: bool = False,
     ) -> Usuario:
+        """`contrasena=None` crea a alguien que sólo entra por SSO (D-182)."""
         usuario = Usuario(
             id=_id("u"),
             email=normalizar_email(email),
@@ -355,15 +448,16 @@ class CuentasStore:
             created_at=_iso(_ahora()),
         )
         self._ejecutar(
-            "INSERT INTO users (id, email, name, password_hash, is_admin, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO users (id, email, name, password_hash, is_admin, created_at, "
+            "email_verified_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 usuario.id,
                 usuario.email,
                 usuario.name,
-                hash_contrasena(contrasena),
+                hash_contrasena(contrasena) if contrasena is not None else SIN_CONTRASENA,
                 1 if is_admin else 0,
                 usuario.created_at,
+                usuario.created_at if verificado else None,
             ),
         )
         return usuario
@@ -544,7 +638,7 @@ class CuentasStore:
 
     def invitacion(self, token: str) -> dict[str, str] | None:
         filas = self._filas(
-            "SELECT i.org_id, o.name, i.email, i.role FROM invitations i "
+            "SELECT i.org_id, o.name, i.email, i.role, i.emailed FROM invitations i "
             "JOIN orgs o ON o.id = i.org_id "
             "WHERE i.token_hash = ? AND i.accepted_at IS NULL AND i.expires_at > ?",
             (hash_token(token), _iso(_ahora())),
@@ -552,7 +646,10 @@ class CuentasStore:
         if not filas:
             return None
         f = filas[0]
-        return {"org_id": f[0], "org_name": f[1], "email": f[2], "role": f[3]}
+        return {
+            "org_id": f[0], "org_name": f[1], "email": f[2], "role": f[3],
+            "emailed": bool(f[4]),
+        }
 
     def aceptar(self, token: str) -> bool:
         """Gasta la invitación. `False` si ya estaba gastada o ha caducado.
@@ -589,7 +686,9 @@ class CuentasStore:
         # Los intentos fallidos sólo cuentan un cuarto de hora; un día de margen sobra.
         viejos = _iso(_ahora() - timedelta(days=1))
         intentos = self._ejecutar("DELETE FROM login_failures WHERE at <= ?", (viejos,))
-        return sesiones + invitaciones + intentos
+        enlaces = self._ejecutar("DELETE FROM email_tokens WHERE expires_at <= ?", (ahora,))
+        estados = self._ejecutar("DELETE FROM sso_states WHERE expires_at <= ?", (ahora,))
+        return sesiones + invitaciones + intentos + enlaces + estados
 
     def invitaciones(self, org_id: str) -> list[dict[str, str]]:
         filas = self._filas(
@@ -699,6 +798,343 @@ class CuentasStore:
             for f in filas
         ]
 
+    # -- verificación del correo (D-182) -------------------------------------------
+
+    def verificado(self, user_id: str) -> bool:
+        filas = self._filas("SELECT email_verified_at FROM users WHERE id = ?", (user_id,))
+        return bool(filas and filas[0][0])
+
+    def marcar_verificado(self, user_id: str) -> None:
+        self._ejecutar(
+            "UPDATE users SET email_verified_at = ? WHERE id = ? AND email_verified_at IS NULL",
+            (_iso(_ahora()), user_id),
+        )
+
+    def token_verificacion(self, user_id: str, email: str) -> str:
+        token = nuevo_token()
+        ahora = _ahora()
+        self._ejecutar(
+            "INSERT INTO email_tokens (token_hash, user_id, email, created_at, expires_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (hash_token(token), user_id, normalizar_email(email), _iso(ahora),
+             _iso(ahora + DURACION_VERIFICACION)),
+        )
+        return token
+
+    def verificar(self, token: str) -> str | None:
+        """Gasta el enlace y marca el correo. Devuelve el usuario, o `None`.
+
+        El enlace verifica el correo **al que se mandó**: si la persona lo cambió
+        después, no verifica el nuevo.
+        """
+        filas = self._filas(
+            "SELECT t.user_id FROM email_tokens t JOIN users u ON u.id = t.user_id "
+            "WHERE t.token_hash = ? AND t.used_at IS NULL AND t.expires_at > ? "
+            "AND u.email = t.email AND u.disabled_at IS NULL",
+            (hash_token(token), _iso(_ahora())),
+        )
+        if not filas:
+            return None
+        gastado = self._ejecutar(
+            "UPDATE email_tokens SET used_at = ? WHERE token_hash = ? AND used_at IS NULL",
+            (_iso(_ahora()), hash_token(token)),
+        )
+        if not gastado:
+            return None
+        self.marcar_verificado(filas[0][0])
+        return filas[0][0]
+
+    def invitacion_enviada(self, token: str) -> None:
+        self._ejecutar(
+            "UPDATE invitations SET emailed = 1 WHERE token_hash = ?", (hash_token(token),)
+        )
+
+    # -- SSO (D-182) ---------------------------------------------------------------
+
+    def config_sso(self, org_id: str) -> Any:
+        from .sso import ConfigSSO
+
+        filas = self._filas(
+            "SELECT issuer, client_id, client_secret, default_role, enforce FROM sso_configs "
+            "WHERE org_id = ?",
+            (org_id,),
+        )
+        if not filas:
+            return None
+        f = filas[0]
+        return ConfigSSO(
+            org_id=org_id, issuer=f[0], client_id=f[1], client_secret=f[2],
+            default_role=f[3], enforce=bool(f[4]), domains=self.dominios(org_id),
+        )
+
+    def guardar_sso(
+        self, org_id: str, issuer: str, client_id: str, secreto: str | None,
+        rol: str, obligar: bool,
+    ) -> None:
+        """`secreto=None` conserva el que había: la interfaz nunca lo recibe de vuelta."""
+        if rol not in ROLES or rol == "propietario":
+            raise ValueError("el rol por defecto es lector, miembro o admin")
+        actual = self.config_sso(org_id)
+        if secreto is None:
+            secreto = actual.client_secret if actual else ""
+        if actual is None:
+            self._ejecutar(
+                "INSERT INTO sso_configs (org_id, issuer, client_id, client_secret, "
+                "default_role, enforce, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (org_id, issuer, client_id, secreto, rol, 1 if obligar else 0, _iso(_ahora())),
+            )
+        else:
+            self._ejecutar(
+                "UPDATE sso_configs SET issuer = ?, client_id = ?, client_secret = ?, "
+                "default_role = ?, enforce = ?, updated_at = ? WHERE org_id = ?",
+                (issuer, client_id, secreto, rol, 1 if obligar else 0, _iso(_ahora()), org_id),
+            )
+
+    def borrar_sso(self, org_id: str) -> None:
+        self._ejecutar("DELETE FROM sso_configs WHERE org_id = ?", (org_id,))
+
+    def dominios(self, org_id: str) -> list[str]:
+        return [
+            f[0]
+            for f in self._filas(
+                "SELECT domain FROM sso_domains WHERE org_id = ? ORDER BY domain", (org_id,)
+            )
+        ]
+
+    def poner_dominios(self, org_id: str, dominios: list[str], por: str) -> None:
+        """Sustituye los dominios. `ValueError` si uno es de otra organización."""
+        from .sso import normalizar_dominio, validar_dominio
+
+        limpios = sorted({normalizar_dominio(d) for d in dominios if d.strip()})
+        for d in limpios:
+            motivo = validar_dominio(d)
+            if motivo:
+                raise ValueError(f"{d}: {motivo}")
+            duena = self.org_por_dominio(d)
+            if duena is not None and duena != org_id:
+                raise ValueError(f"{d}: ya es de otra organización")
+        self._ejecutar("DELETE FROM sso_domains WHERE org_id = ?", (org_id,))
+        for d in limpios:
+            self._ejecutar(
+                "INSERT INTO sso_domains (domain, org_id, created_at, created_by) "
+                "VALUES (?, ?, ?, ?)",
+                (d, org_id, _iso(_ahora()), por),
+            )
+
+    def org_por_dominio(self, dominio: str) -> str | None:
+        filas = self._filas("SELECT org_id FROM sso_domains WHERE domain = ?", (dominio,))
+        return filas[0][0] if filas else None
+
+    def guardar_estado(
+        self, state: str, org_id: str, nonce: str, verifier: str, navegador: str, siguiente: str
+    ) -> None:
+        from .sso import DURACION_ESTADO_S
+
+        caduca = _ahora() + timedelta(seconds=DURACION_ESTADO_S)
+        self._ejecutar(
+            "INSERT INTO sso_states (state_hash, org_id, nonce, verifier, browser_hash, next, "
+            "expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (hash_token(state), org_id, nonce, verifier, hash_token(navegador), siguiente,
+             _iso(caduca)),
+        )
+        self._ejecutar("DELETE FROM sso_states WHERE expires_at <= ?", (_iso(_ahora()),))
+
+    def gastar_estado(self, state: str, navegador: str) -> dict[str, str] | None:
+        """De un solo uso, sin caducar y del mismo navegador que lo empezó."""
+        filas = self._filas(
+            "SELECT org_id, nonce, verifier, browser_hash, next FROM sso_states "
+            "WHERE state_hash = ? AND expires_at > ?",
+            (hash_token(state), _iso(_ahora())),
+        )
+        borrado = self._ejecutar(
+            "DELETE FROM sso_states WHERE state_hash = ?", (hash_token(state),)
+        )
+        if not filas or not borrado:
+            return None
+        f = filas[0]
+        if not navegador or not hmac.compare_digest(f[3], hash_token(navegador)):
+            return None
+        return {"org_id": f[0], "nonce": f[1], "verifier": f[2], "next": f[4]}
+
+    def usuario_sso(self, org_id: str, persona: Any, rol: str) -> tuple[Usuario | None, str]:
+        """La persona que el proveedor de la organización dice que entra.
+
+        * Ya vino antes: la misma, por su `sub`, si sigue en la organización. Si un
+          administrador la quitó, no vuelve a entrar sola.
+        * Hay una cuenta con ese correo: se enlaza **sólo si ya es de la organización**.
+          Si no, el proveedor de una organización podría entrar en la cuenta de alguien
+          que es de otra.
+        * No hay: se crea, con el correo verificado y sin contraseña, con el rol por
+          defecto.
+        """
+        filas = self._filas(
+            "SELECT user_id FROM sso_identities WHERE org_id = ? AND subject = ?",
+            (org_id, persona.subject),
+        )
+        if filas:
+            usuario = self.usuario(filas[0][0])
+            if usuario is None or self.rol_en(org_id, usuario.id) is None:
+                return None, "fuera"
+            return usuario, ""
+        existente = self.usuario_por_email(persona.email)
+        if existente is not None:
+            usuario = existente[0]
+            if self.rol_en(org_id, usuario.id) is None:
+                return None, "sin_invitacion"
+        else:
+            usuario = self.crear_usuario(persona.email, persona.name, None, verificado=True)
+            self.poner_miembro(org_id, usuario.id, rol)
+        self._ejecutar(
+            "INSERT INTO sso_identities (org_id, subject, user_id, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (org_id, persona.subject, usuario.id, _iso(_ahora())),
+        )
+        # El proveedor de la organización y un dominio aprobado: el correo es suyo.
+        self.marcar_verificado(usuario.id)
+        return usuario, ""
+
+    def sso_obligado(self, user_id: str, email: str) -> bool:
+        """Si una organización suya obliga a entrar por SSO con ese correo."""
+        from .sso import dominio_de
+
+        filas = self._filas(
+            "SELECT 1 FROM memberships m JOIN sso_configs c ON c.org_id = m.org_id "
+            "JOIN sso_domains d ON d.org_id = m.org_id "
+            "WHERE m.user_id = ? AND c.enforce = 1 AND d.domain = ? LIMIT 1",
+            (user_id, dominio_de(email)),
+        )
+        return bool(filas)
+
+    # -- SCIM (D-182) --------------------------------------------------------------
+
+    def crear_token_scim(self, org_id: str, por: str) -> tuple[str, str]:
+        token = PREFIJO_SCIM + nuevo_token()
+        token_id = _id("scim")
+        self._ejecutar(
+            "INSERT INTO scim_tokens (id, token_hash, org_id, created_at, created_by) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (token_id, hash_token(token), org_id, _iso(_ahora()), por),
+        )
+        return token_id, token
+
+    def tokens_scim(self, org_id: str) -> list[dict[str, Any]]:
+        filas = self._filas(
+            "SELECT id, created_at, created_by, last_used_at FROM scim_tokens "
+            "WHERE org_id = ? AND revoked_at IS NULL ORDER BY created_at",
+            (org_id,),
+        )
+        return [
+            {"id": f[0], "created_at": f[1], "created_by": f[2], "last_used_at": f[3]}
+            for f in filas
+        ]
+
+    def revocar_token_scim(self, org_id: str, token_id: str) -> bool:
+        return (
+            self._ejecutar(
+                "UPDATE scim_tokens SET revoked_at = ? WHERE id = ? AND org_id = ? "
+                "AND revoked_at IS NULL",
+                (_iso(_ahora()), token_id, org_id),
+            )
+            > 0
+        )
+
+    def org_de_token_scim(self, token: str) -> str | None:
+        if not token.startswith(PREFIJO_SCIM):
+            return None
+        filas = self._filas(
+            "SELECT id, org_id FROM scim_tokens WHERE token_hash = ? AND revoked_at IS NULL",
+            (hash_token(token),),
+        )
+        if not filas:
+            return None
+        self._ejecutar(
+            "UPDATE scim_tokens SET last_used_at = ? WHERE id = ?", (_iso(_ahora()), filas[0][0])
+        )
+        return filas[0][1]
+
+    def scim_usuarios(self, org_id: str) -> list[dict[str, Any]]:
+        """Los miembros de la organización y los que SCIM dio de baja, con su estado."""
+        filas = self._filas(
+            "SELECT u.id, u.email, u.name, u.created_at, m.role, s.external_id, "
+            "CASE WHEN m.user_id IS NULL THEN 0 ELSE 1 END "
+            "FROM users u "
+            "LEFT JOIN memberships m ON m.user_id = u.id AND m.org_id = ? "
+            "LEFT JOIN scim_users s ON s.user_id = u.id AND s.org_id = ? "
+            "WHERE u.disabled_at IS NULL AND (m.user_id IS NOT NULL OR s.user_id IS NOT NULL) "
+            "ORDER BY u.created_at, u.id",
+            (org_id, org_id),
+        )
+        return [
+            {"id": f[0], "email": f[1], "name": f[2], "created_at": f[3], "role": f[4] or "",
+             "external_id": f[5] or "", "active": bool(f[6])}
+            for f in filas
+        ]
+
+    def scim_usuario(self, org_id: str, user_id: str) -> dict[str, Any] | None:
+        return next((u for u in self.scim_usuarios(org_id) if u["id"] == user_id), None)
+
+    def scim_alta(
+        self, org_id: str, email: str, nombre: str, external_id: str, rol: str, activo: bool
+    ) -> tuple[Usuario, bool]:
+        """Da de alta en la organización. Devuelve el usuario y si ya estaba.
+
+        Una cuenta que ya existía con ese correo sólo gana la pertenencia a esta
+        organización: SCIM no toca sus otras organizaciones ni su contraseña.
+        """
+        from .sso import dominio_de
+
+        existente = self.usuario_por_email(email)
+        if existente is not None:
+            usuario = existente[0]
+            if self.scim_usuario(org_id, usuario.id) is not None:
+                return usuario, True
+        else:
+            usuario = self.crear_usuario(email, nombre, None)
+        # Con un dominio aprobado de la organización, el proveedor habla por ese correo.
+        if dominio_de(usuario.email) in self.dominios(org_id):
+            self.marcar_verificado(usuario.id)
+        self._ejecutar(
+            "INSERT INTO scim_users (org_id, user_id, external_id, active, role, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (org_id, user_id) DO UPDATE SET "
+            "external_id = excluded.external_id, active = excluded.active",
+            (org_id, usuario.id, external_id, 1 if activo else 0, rol, _iso(_ahora())),
+        )
+        if activo and self.rol_en(org_id, usuario.id) is None:
+            self.poner_miembro(org_id, usuario.id, rol)
+        return usuario, False
+
+    def scim_activar(self, org_id: str, user_id: str, activo: bool, rol: str) -> bool:
+        """Activar devuelve la pertenencia; desactivar la quita. Falso si quitaría al
+        último propietario: la organización se quedaría sin nadie que la gobierne."""
+        actual = self.rol_en(org_id, user_id)
+        if not activo and actual == "propietario":
+            propietarios = [m for m in self.miembros(org_id) if m["role"] == "propietario"]
+            if len(propietarios) <= 1:
+                return False
+        self._ejecutar(
+            "INSERT INTO scim_users (org_id, user_id, active, role, created_at) "
+            "VALUES (?, ?, ?, ?, ?) ON CONFLICT (org_id, user_id) DO UPDATE SET "
+            "active = excluded.active",
+            (org_id, user_id, 1 if activo else 0, rol, _iso(_ahora())),
+        )
+        if activo and actual is None:
+            self.poner_miembro(org_id, user_id, rol)
+        elif not activo and actual is not None:
+            self.quitar_miembro(org_id, user_id)
+        return True
+
+    def scim_baja(self, org_id: str, user_id: str) -> bool:
+        if not self.scim_activar(org_id, user_id, False, "miembro"):
+            return False
+        self._ejecutar(
+            "DELETE FROM scim_users WHERE org_id = ? AND user_id = ?", (org_id, user_id)
+        )
+        return True
+
+    def renombrar(self, user_id: str, nombre: str) -> None:
+        self._ejecutar("UPDATE users SET name = ? WHERE id = ?", (nombre.strip()[:120], user_id))
+
+
 
 class SQLiteCuentas(CuentasStore):
     """En el mismo fichero que los metadatos. Existe para las pruebas y para que el
@@ -733,8 +1169,8 @@ class PostgresCuentas(CuentasStore):
         return conexion(self._dsn)
 
     def _migrar_claves(self) -> None:
-        for columna in ("expires_at", "last_used_at", "created_by"):
-            self._ejecutar(f"ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS {columna} TEXT")
+        for tabla, columna, tipo in COLUMNAS_TARDIAS:
+            self._ejecutar(f"ALTER TABLE {tabla} ADD COLUMN IF NOT EXISTS {columna} {tipo}")
 
 
 def build(settings: Any) -> CuentasStore | None:

@@ -639,7 +639,15 @@ export type Rol = "lector" | "miembro" | "admin" | "propietario";
 
 export interface Me {
   mode: "local" | "nube";
-  user: { id: string; email: string; name: string; is_admin: boolean } | null;
+  user: {
+    id: string;
+    email: string;
+    name: string;
+    is_admin: boolean;
+    /** D-182: si el correo está verificado, y si la instalación puede verificarlo. */
+    email_verified?: boolean;
+    can_verify?: boolean;
+  } | null;
   orgs?: { id: string; name: string; role: Rol }[];
   needs_setup?: boolean;
   by_key?: boolean;
@@ -723,8 +731,68 @@ export function invite(
   orgId: string,
   email: string,
   role: Rol,
-): Promise<{ link: string; emailed: boolean }> {
+): Promise<{ link: string; emailed: boolean; not_emailed_reason?: string }> {
   return send("/api/org/invitations", "POST", { org_id: orgId, email, role });
+}
+
+// -- Empresa: verificación, SSO y SCIM (D-182) --------------------------------------
+
+export function sendVerification(): Promise<{ sent: boolean; verified: boolean }> {
+  return send("/api/auth/verify/send", "POST");
+}
+
+export function verifyEmail(token: string): Promise<{ ok: boolean }> {
+  return send("/api/auth/verify", "POST", { token });
+}
+
+/** Adónde ir a entrar con el proveedor de la organización de ese correo. */
+export function ssoStart(email: string, next: string): Promise<{ url: string }> {
+  return send("/api/auth/sso/start", "POST", { email, next });
+}
+
+export interface SsoStatus {
+  configured: boolean;
+  issuer: string;
+  client_id: string;
+  has_secret: boolean;
+  default_role: Rol;
+  enforce: boolean;
+  domains: string[];
+  redirect_uri: string;
+  scim_url: string;
+  scim_tokens: { id: string; created_at: string; created_by: string; last_used_at: string | null }[];
+}
+
+export function getSso(orgId: string): Promise<SsoStatus> {
+  return get("/api/org/sso", { org_id: orgId });
+}
+
+export function putSso(input: {
+  org_id: string;
+  issuer: string;
+  client_id: string;
+  /** `null` conserva el que había. */
+  client_secret: string | null;
+  default_role: Rol;
+  enforce: boolean;
+}): Promise<SsoStatus> {
+  return send("/api/org/sso", "PUT", input);
+}
+
+export function deleteSso(orgId: string): Promise<SsoStatus> {
+  return send(`/api/org/sso?${new URLSearchParams({ org_id: orgId })}`, "DELETE");
+}
+
+export function putSsoDomains(orgId: string, domains: string[]): Promise<SsoStatus> {
+  return send("/api/org/sso/domains", "PUT", { org_id: orgId, domains });
+}
+
+export function createScimToken(orgId: string): Promise<{ id: string; token: string }> {
+  return send("/api/org/scim-tokens", "POST", { org_id: orgId });
+}
+
+export function revokeScimToken(orgId: string, id: string): Promise<unknown> {
+  return send(`/api/org/scim-tokens?${new URLSearchParams({ org_id: orgId, id })}`, "DELETE");
 }
 
 export function cancelInvite(orgId: string, email: string): Promise<unknown> {

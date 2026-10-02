@@ -484,5 +484,17 @@
   "error.tipo_cambio": "El tipo de cambio del {moneda} tiene que ser un número mayor que cero.",
   "diag_modelo.apagado": "El diagnóstico con modelo está apagado: hacen falta LAPLACE_DIAGNOSIS_ENABLED y el proveedor del juez (LAPLACE_EVALS_JUDGE_API_KEY y LAPLACE_EVALS_JUDGE_MODEL).",
   "diag_modelo.rechazado": "No se ha guardado ningún diagnóstico: {motivo}. Lo que el modelo no sostiene con spans de la traza no se enseña.",
-  "diag_modelo.sin_respuesta": "El modelo no ha respondido: {motivo}"
+  "diag_modelo.sin_respuesta": "El modelo no ha respondido: {motivo}",
+  "verificar.asunto": "Verifica tu correo en Laplace",
+  "verificar.cuerpo": "Abre este enlace para verificar tu correo (caduca en 2 días):\n{enlace}\n\nSi no has sido tú, ignora este mensaje.\n",
+  "error.sin_correo": "Esta instalación no tiene servidor de correo: no se puede mandar el enlace.",
+  "error.enlace_verificacion": "Ese enlace de verificación no vale: ya se usó, caducó o es de otro correo.",
+  "error.sin_sso": "No hay inicio de sesión único para ese correo. Entra con tu contraseña.",
+  "error.sso_proveedor": "El proveedor de identidad de tu organización no responde. Prueba en un rato o avisa a quien lo administra.",
+  "error.sso_emisor": "No se pudo leer la configuración del proveedor: {detalle}",
+  "error.sso_sin_dominios": "Para obligar a entrar por SSO, la organización necesita sus dominios de correo, y los pone quien administra la instalación.",
+  "error.dominios_solo_instalacion": "Los dominios de una organización los pone quien administra la instalación: dicen de quién son esos correos.",
+  "error.token_scim": "Esa clave de SCIM no existe o ya estaba revocada.",
+  "error.sso_obligado": "Tu organización entra con su inicio de sesión único: usa «Entrar con SSO».",
+  "org.invitar_sin_verificar": "No se ha mandado por correo porque el tuyo no está verificado: manda el enlace a mano o verifica tu correo."
 }

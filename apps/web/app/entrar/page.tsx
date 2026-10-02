@@ -3,7 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { Cargando } from "@/components/states";
-import { entrarConClave, getMe, login } from "@/lib/api";
+import { entrarConClave, getMe, login, ssoStart } from "@/lib/api";
 import { t } from "@/lib/textos";
 
 /**
@@ -18,7 +18,9 @@ function Contenido() {
   const siguiente = seguro(params.get("next"));
   const [email, setEmail] = useState("");
   const [contrasena, setContrasena] = useState("");
-  const [error, setError] = useState("");
+  // La vuelta de un SSO que no salió (D-182) trae el motivo en la URL.
+  const vueltaSso = params.get("sso_error");
+  const [error, setError] = useState(vueltaSso ? t(errorSso(vueltaSso)) : "");
   const [enviando, setEnviando] = useState(false);
   const [listo, setListo] = useState(false);
 
@@ -39,6 +41,18 @@ function Contenido() {
     try {
       await login(email.trim(), contrasena);
       window.location.href = siguiente;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("ent.error"));
+      setEnviando(false);
+    }
+  }
+
+  async function entrarSso() {
+    setEnviando(true);
+    setError("");
+    try {
+      const { url } = await ssoStart(email.trim(), siguiente);
+      window.location.href = url;
     } catch (err) {
       setError(err instanceof Error ? err.message : t("ent.error"));
       setEnviando(false);
@@ -76,6 +90,15 @@ function Contenido() {
         {error && <p className="verr">{error}</p>}
         <button type="submit" className="btn primary" disabled={enviando}>
           {enviando ? t("ent.entrando") : t("ent.entrar")}
+        </button>
+        {/* Con el correo basta: el dominio dice qué proveedor es (D-182). */}
+        <button
+          type="button"
+          className="btn"
+          disabled={enviando || !email.includes("@")}
+          onClick={entrarSso}
+        >
+          {t("ent.sso")}
         </button>
         <p className="muted">
           {t("ent.sin_cuenta")}
@@ -128,6 +151,21 @@ function ConClave({ siguiente }: { siguiente: string }) {
       {fallo && <p className="disclaimer">{fallo}</p>}
     </details>
   );
+}
+
+const ERRORES_SSO = {
+  estado: "ent.sso_error.estado",
+  cancelado: "ent.sso_error.cancelado",
+  token: "ent.sso_error.token",
+  correo: "ent.sso_error.correo",
+  dominio: "ent.sso_error.dominio",
+  proveedor: "ent.sso_error.proveedor",
+  sin_invitacion: "ent.sso_error.sin_invitacion",
+  fuera: "ent.sso_error.fuera",
+} as const;
+
+function errorSso(codigo: string) {
+  return ERRORES_SSO[codigo as keyof typeof ERRORES_SSO] ?? "ent.sso_error.otro";
 }
 
 /** Sólo rutas de este mismo sitio: un `next` hacia fuera sería un redirector abierto. */

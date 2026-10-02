@@ -484,5 +484,17 @@
   "error.tipo_cambio": "{moneda} 的汇率必须是大于零的数字。",
   "diag_modelo.apagado": "模型诊断已关闭：需要 LAPLACE_DIAGNOSIS_ENABLED 以及评审的服务商配置（LAPLACE_EVALS_JUDGE_API_KEY 和 LAPLACE_EVALS_JUDGE_MODEL）。",
   "diag_modelo.rechazado": "未保存任何诊断：{motivo}。模型没有用该追踪中的 span 支撑的内容不会显示。",
-  "diag_modelo.sin_respuesta": "模型没有响应：{motivo}"
+  "diag_modelo.sin_respuesta": "模型没有响应：{motivo}",
+  "verificar.asunto": "在 Laplace 验证你的邮箱",
+  "verificar.cuerpo": "打开此链接验证你的邮箱（2 天后过期）：\n{enlace}\n\n如果不是你本人操作，请忽略此邮件。\n",
+  "error.sin_correo": "此安装未配置邮件服务器：无法发送链接。",
+  "error.enlace_verificacion": "该验证链接无效：已使用、已过期或属于其他邮箱。",
+  "error.sin_sso": "该邮箱没有单点登录。请使用密码登录。",
+  "error.sso_proveedor": "你所在组织的身份提供商没有响应。请稍后再试或联系其管理员。",
+  "error.sso_emisor": "无法读取提供商的配置：{detalle}",
+  "error.sso_sin_dominios": "要强制使用 SSO，组织需要其邮箱域名，由安装管理员设置。",
+  "error.dominios_solo_instalacion": "组织的域名由安装管理员设置：它们表明这些邮箱归谁所有。",
+  "error.token_scim": "该 SCIM 令牌不存在或已被撤销。",
+  "error.sso_obligado": "你的组织使用单点登录：请使用“使用 SSO 登录”。",
+  "org.invitar_sin_verificar": "未通过邮件发送，因为你的邮箱尚未验证：请手动发送链接或验证你的邮箱。"
 }

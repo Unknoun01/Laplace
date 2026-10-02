@@ -17,12 +17,14 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from .api import router
 from .api_ajustes import router as ajustes_router
 from .api_cuentas import router as cuentas_router
+from .api_empresa import router as empresa_router
 from .api_evals import router as evals_router
 from .api_prompts import router as prompts_router
 from .auth import AuthMiddleware
 from .config import Settings, get_settings
 from .idioma import MiddlewareIdioma
 from .limites import CabecerasSeguridad, LimiteCuerpo
+from .scim import router as scim_router
 from .storage.base import SpanStore
 from .textos import t
 
@@ -382,6 +384,8 @@ app.include_router(evals_router)
 app.include_router(prompts_router)
 app.include_router(ajustes_router)
 app.include_router(cuentas_router)
+app.include_router(empresa_router)
+app.include_router(scim_router)
 
 
 def _log_auth(settings: Settings) -> None:

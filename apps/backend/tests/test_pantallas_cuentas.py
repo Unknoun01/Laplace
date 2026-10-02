@@ -144,6 +144,14 @@ def test_de_la_instalacion_vacia_a_un_equipo_con_clave(servidor, navegador):  # 
         enlace = invitar.locator(".una-vez .copiable code").inner_text(timeout=15_000)
         assert "/invitacion?token=" in enlace or "/invitacion/?token=" in enlace, enlace
         invitar.locator("li", has_text="luis@ejemplo.com").wait_for(timeout=15_000)
+        # D-182: el SSO y SCIM de la organización, con su URL de redirección; sin
+        # servidor de correo, el correo sin verificar se dice y no se ofrece el botón.
+        sso = pagina.locator("section.sso")
+        sso.wait_for(timeout=15_000)
+        assert "/api/auth/sso/callback" in sso.inner_text()
+        assert "/scim/v2" in sso.inner_text()
+        assert pagina.locator("p.verificar").count() == 1
+        assert pagina.locator("p.verificar button").count() == 0
         _no_se_sale(pagina, "organización a 1440")
         pagina.set_viewport_size({"width": 375, "height": 812})
         _no_se_sale(pagina, "organización a 375")
@@ -194,6 +202,25 @@ def test_de_la_instalacion_vacia_a_un_equipo_con_clave(servidor, navegador):  # 
         assert [e for e in errores_otra if "401" not in e] == [], errores_otra
     finally:
         otra.close()
+
+    # 6b. SSO (D-182): un correo sin SSO lo dice; la vuelta de un SSO fallido, también; y
+    #     un enlace de verificación que no vale no se queda cargando.
+    sso, errores_sso = _contexto(navegador, "movil")
+    try:
+        pagina = sso.new_page()
+        pagina.goto(servidor + "/entrar?sso_error=estado", wait_until="networkidle")
+        _espera_texto(pagina, "otro navegador")
+        pagina.locator("form.auth-card input[type=email]").fill("x@nadie.com")
+        pagina.locator("form.auth-card button", has_text="SSO").click()
+        _espera_texto(pagina, "contraseña")
+        pagina.locator("form.auth-card .verr", has_text="único").wait_for(timeout=15_000)
+        _no_se_sale(pagina, "entrar con SSO a 375")
+        pagina.goto(servidor + "/verificar?token=no-vale", wait_until="networkidle")
+        _espera_texto(pagina, "No se pudo verificar")
+        # 404 (sin SSO, enlace que no vale) y 401 (anónimo) son las respuestas esperadas.
+        assert [e for e in errores_sso if "404" not in e and "401" not in e] == [], errores_sso
+    finally:
+        sso.close()
 
     # 7. Entrar con la clave del proyecto, sin cuenta: se llega a ese proyecto, que aún
     #    no ha mandado nada. Antes decía «todavía no hay ningún proyecto» (D-175).
