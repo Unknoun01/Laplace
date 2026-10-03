@@ -38,3 +38,19 @@ rama propia, y tú lo revisas y lo fusionas. Para eso el SDK anota desde qué fi
 línea se llama al modelo (`capture_code_location=False` lo apaga). Si el modelo no está
 escrito en el código —sale de una variable o de la configuración—, Laplace no adivina:
 te dice dónde mirar.
+
+Lo mismo con otros dos problemas, en Python:
+
+- **Contexto fijo con Claude:** marca el `system` de la llamada con `cache_control`. Con
+  OpenAI no hace falta, porque cachea solo. Si no se puede saber si el `system` es texto
+  (sale de una función cualquiera), no lo toca y te dice por qué.
+- **Un bucle:** pone `@laplace.guard(max_loop=4)` en la función que arranca la ejecución.
+  Es un freno, no el arreglo de fondo: decide qué hacer cuando salte `GuardExceeded`.
+  Para encontrar esa función, `@observe` anota dónde está definida.
+
+Todo cambio tiene que dejar el fichero compilando, o no se propone.
+
+**Al fusionar el PR, Laplace lo marca como arreglado** y comprueba si el problema baja.
+Para que se entere, en GitHub (Settings → Webhooks) pon la URL y el secreto que salen en
+**Ajustes**, con el evento *Pull requests*; con la GitHub App de tu instalación no hace
+falta. Fusionar no es desplegar: si despliegas más tarde, vuelve a marcarlo entonces.

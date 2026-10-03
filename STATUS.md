@@ -63,6 +63,11 @@ Lo que sostiene esas casillas, en concreto:
 - **El arreglo, propuesto en el código**: desde la ficha del modelo caro, Laplace abre un
   pull request con el cambio de modelo en la línea exacta de la llamada, que anota el
   SDK; si el modelo no está escrito ahí, dice por qué no lo propone (D-185).
+- **Y no sólo el de modelo**: con Claude, `cache_control` en el `system` de una llamada
+  con contexto fijo; en un bucle, `@laplace.guard(max_loop=4)` en la función raíz. Sobre
+  el árbol de sintaxis, sin adivinar, y el fichero tiene que seguir compilando (D-190).
+  **Al fusionarlo**, el webhook de GitHub marca el hallazgo como arreglado y el
+  seguimiento comprueba si baja (D-191, D-192).
 - **La identidad de un paso no es su nombre**, sino desde dónde se llama y con qué
   instrucciones. Sin eso, las reglas mezclaban pasos distintos en cualquier código real.
 - **El modo local es el mismo producto**, no una versión recortada: hay un test que
@@ -151,7 +156,7 @@ Lo que sostiene esas casillas, en concreto:
   Anthropic estaba completo; faltaba leer `prompt_tokens_details.cache_write_tokens`, así
   que esos tokens se cobraban a tarifa de entrada y **nuestro coste de OpenAI salía por
   debajo del real** (D-101).
-- **1215 pruebas, 1211 pasando y 4 saltadas** (3 de octubre, 28 min con la nube y las pantallas) con ClickHouse y Postgres levantados: las 4
+- **1255 pruebas, 1251 pasando y 4 saltadas** (3 de octubre, 26 min con la nube y las pantallas) con ClickHouse y Postgres levantados: las 4
   son las que necesitan una clave de proveedor. El camino de la nube se ejecuta, que es
   lo que faltaba: una tanda que toca SQL de nube y se entrega con esas pruebas saltadas
   está sin terminar (D-112). Con los almacenes en pie la suite tarda dos minutos y medio;
@@ -394,6 +399,15 @@ producto miente en silencio» a «el producto avisa de que no sabe»—, que era
 que había que conseguir antes de enseñarlo.
 
 ## Qué hay que vigilar
+
+**«Arreglado al fusionar» no es «arreglado al desplegar».** El webhook (D-191) pone la
+frontera del seguimiento en la hora de la fusión. Si el despliegue llega horas o días
+después, las primeras ejecuciones «de después» son de antes y el hallazgo puede salir
+como reaparecido: la nota del estado lo dice y pide volver a marcarlo al desplegar.
+
+**El webhook es una ruta pública.** `/api/github/webhook` está en `PUBLIC_PATHS` y la
+cierra sólo la firma HMAC. Si alguien toca esa ruta, la prueba de la firma de otro cuerpo
+y la de sin firma tienen que seguir en rojo con cualquier atajo.
 
 **La parada no alcanza lo que el SDK de Python no ve.** Llamadas instrumentadas por
 OpenInference u OpenLLMetry en vez de por las integraciones de Laplace, agentes en Node

@@ -4501,3 +4501,19 @@ firma; la lista blanca). Se rompieron a propósito diez sitios (cualquier firma 
 firma de otro cuerpo, sin mirar la rama, cerrado como fusionado, pisar lo ignorado, la
 hora de llegada en vez de la de fusión, un secreto nuevo en cada guardado, sin el secreto
 de la App, el repositorio de otro, el webhook detrás de la clave) y en todos falla alguna.
+
+### D-192 — Las pantallas del bot, más allá: el PR de cada arreglo y el webhook en Ajustes
+* **La ficha** ofrece «Proponerlo en el código» cuando el hallazgo tiene `code_fix`, no
+  sólo cuando tiene cambio de modelo, con una frase por arreglo: el cambio de modelo, el
+  `cache_control` o el `laplace.guard(max_loop=4)`. Si al abrirlo el bot no puede hacerlo
+  con seguridad, se ve el motivo, como en D-185.
+* **Ajustes → GitHub**, con el repositorio conectado, dice qué poner en GitHub para el
+  aviso al fusionar: la URL de esta instalación y el secreto del proyecto, que se pueden
+  seleccionar enteros, y el evento *Pull requests*. Con la GitHub App y su secreto en el
+  entorno no hace falta, y lo dice. El token sigue sin volver nunca.
+* De paso, el texto inglés del PR de modelo decía «this step"s call»: una comilla en vez
+  del apóstrofo, de la traducción de D-185.
+
+Prueba de pantalla en `test_pantallas.py`: la ficha de un bucle de la demo ofrece el PR con
+el tope, y Ajustes, con un repositorio conectado, enseña la URL y el secreto que da la API
+y no el token. Falla con el botón limitado al cambio de modelo y sin el bloque del webhook.
