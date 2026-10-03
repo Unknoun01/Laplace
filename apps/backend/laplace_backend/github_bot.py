@@ -22,6 +22,7 @@ Tres cuidados:
 
 from __future__ import annotations
 
+import ast
 import base64
 import hashlib
 import json
@@ -281,6 +282,9 @@ def sitio(evidencia: list[Any], modelo: str) -> tuple[str, int]:
     """El fichero y la línea más repetidos entre las llamadas de ejemplo con ese modelo."""
     vistos: Counter[tuple[str, int]] = Counter()
     for span in evidencia:
+        if getattr(span, "type", "llm") != "llm":
+            # Los pasos de `@observe` anotan dónde está su función (D-190), no la llamada.
+            continue
         attrs = getattr(span, "attributes", None) or {}
         llm = getattr(span, "llm", None)
         pedido = getattr(llm, "request_model", None) if llm else None
@@ -323,20 +327,46 @@ class PullRequest:
     ya_abierto: bool = False
 
 
+#: El cambio de un arreglo: `(fuente, ruta en el repositorio) -> fuente nueva`. Lanza
+#: `SinPropuesta` si no se puede hacer con seguridad.
+Cambio = Callable[[str, str], str]
+
+
+def comprobar_cambio(fuente: str, nueva: str, ruta: str) -> None:
+    """Lo que se exige a cualquier arreglo antes de escribirlo (D-190): que cambie algo
+    y, si es Python, que el fichero siga compilando."""
+    if nueva == fuente:
+        raise SinPropuesta("pr.nada_que_cambiar")
+    if ruta.endswith(".py"):
+        try:
+            ast.parse(nueva)
+        except SyntaxError as exc:
+            raise SinPropuesta("pr.no_compila", ruta=ruta) from exc
+
+
 def abrir(
     ajustes: dict[str, Any],
     finding_id: str,
     *,
-    de: str,
-    a: str,
     ruta_anotada: str,
-    linea: int,
     titulo: str,
     cuerpo: str,
     mensaje: str,
+    cambiar: Cambio | None = None,
+    de: str = "",
+    a: str = "",
+    linea: int = 0,
     pedir: Pedir | None = None,
 ) -> PullRequest:
-    """Rama, commit y pull request. Lo que no se pueda hacer con seguridad, no se hace."""
+    """Rama, commit y pull request. Lo que no se pueda hacer con seguridad, no se hace.
+
+    `cambiar` es el arreglo; sin él, el cambio de modelo de `de` a `a` en `linea`.
+    """
+
+    def _modelo(fuente: str, _ruta: str) -> str:
+        return cambiar_modelo(fuente, linea, de, a)
+
+    cambiar = cambiar or _modelo
     # Se resuelve al llamar, no al definir: así las pruebas cambian `_pedir` del módulo.
     pedir = pedir or _pedir
     repo = ajustes.get("repo") or ""
@@ -370,7 +400,8 @@ def abrir(
         None,
     )
     fuente = base64.b64decode(fichero["content"]).decode("utf-8")
-    nueva = cambiar_modelo(fuente, linea, de, a)
+    nueva = cambiar(fuente, ruta)
+    comprobar_cambio(fuente, nueva, ruta)
 
     try:
         pedir("POST", f"{base}/git/refs", token, {"ref": f"refs/heads/{rama}", "sha": sha_base})

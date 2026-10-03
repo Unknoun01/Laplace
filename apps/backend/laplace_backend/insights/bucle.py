@@ -94,6 +94,7 @@ def _loop_finding(
         ],
         sample_trace_id=group.sample_trace_id,
         step_key=group.step_key,
+        code_fix="tope",
     )
 
 

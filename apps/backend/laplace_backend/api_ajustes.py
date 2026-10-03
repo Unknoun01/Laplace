@@ -20,7 +20,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from . import control, github_bot, idioma, margen, presupuesto, stripe_ingresos
+from . import arreglos_codigo, control, github_bot, idioma, margen, presupuesto, stripe_ingresos
 from .alerts import CLAVE_AJUSTES, webhook_valido
 from .auth import identity_of
 from .ingest.otlp import recalcular_coste
@@ -831,6 +831,76 @@ class PullRequestIn(BaseModel):
     days: int = Field(default=7, ge=1, le=90)
 
 
+def _arreglo(store: Any, project_id: str, hallazgo: Any) -> dict[str, Any]:
+    """Qué cambiar, dónde y con qué textos, según el arreglo del hallazgo (D-185, D-190).
+
+    Lanza `SinPropuesta` con el motivo cuando no se puede proponer con seguridad.
+    """
+    from .insights.modelos import MIN_VUELTAS_BUCLE
+
+    spans = (
+        store.get_trace_spans(hallazgo.sample_trace_id, project_id)
+        if hallazgo.sample_trace_id
+        else []
+    )
+    # Las llamadas de ese paso; si el paso no se reconoce en los spans, todas las de la
+    # traza, y `sitio` se queda con las llamadas al modelo.
+    del_paso = [s for s in spans if s.step_key == hallazgo.step_key] or spans
+    comun = {"titulo": hallazgo.title, "resumen": hallazgo.summary}
+
+    if hallazgo.code_fix == "modelo" and hallazgo.model_change:
+        de, a = hallazgo.model_change["from"], hallazgo.model_change["to"]
+        ruta, linea = github_bot.sitio(del_paso, de)
+        return {
+            "ruta_anotada": ruta,
+            "de": de,
+            "a": a,
+            "linea": linea,
+            "titulo": t("pr.titulo", de=de, a=a),
+            "cuerpo": t("pr.cuerpo", **comun, de=de, a=a, ruta=ruta, linea=linea),
+            "mensaje": t("pr.commit", de=de, a=a),
+        }
+
+    if hallazgo.code_fix == "cache":
+        ruta, linea = github_bot.sitio(del_paso, "")
+
+        def _cache(fuente: str, _ruta: str) -> str:
+            return arreglos_codigo.poner_cache(fuente, linea)
+
+        return {
+            "ruta_anotada": ruta,
+            "cambiar": _cache,
+            "titulo": t("pr.cache.titulo", ruta=ruta),
+            "cuerpo": t("pr.cache.cuerpo", **comun, ruta=ruta, linea=linea),
+            "mensaje": t("pr.cache.commit", ruta=ruta),
+        }
+
+    if hallazgo.code_fix == "tope":
+        # La función raíz de la ejecución de ejemplo: la anota `@observe` (D-190).
+        raiz = next((s for s in spans if not s.parent_span_id), None)
+        attrs = (raiz.attributes if raiz is not None else None) or {}
+        ruta, linea = attrs.get(github_bot.ATTR_RUTA), attrs.get(github_bot.ATTR_LINEA)
+        if not ruta or not linea:
+            raise github_bot.SinPropuesta("pr.sin_raiz")
+        funcion = str(attrs.get("code.function.name") or raiz.name)
+        tope = MIN_VUELTAS_BUCLE
+
+        def _tope(fuente: str, _ruta: str) -> str:
+            return arreglos_codigo.poner_tope(fuente, int(linea), tope)
+
+        return {
+            "ruta_anotada": str(ruta),
+            "cambiar": _tope,
+            "titulo": t("pr.tope.titulo", funcion=funcion, tope=tope),
+            "cuerpo": t(
+                "pr.tope.cuerpo", **comun, funcion=funcion, tope=tope, ruta=ruta, linea=linea
+            ),
+            "mensaje": t("pr.tope.commit", funcion=funcion, tope=tope),
+        }
+
+    raise github_bot.SinPropuesta("pr.sin_cambio")
+
+
 def _abrir_pr(store: Any, meta: Any, project_id: str, body: PullRequestIn) -> dict[str, Any]:
     from .api import _window
     from .insights import detail as finding_detail
@@ -841,39 +911,8 @@ def _abrir_pr(store: Any, meta: Any, project_id: str, body: PullRequestIn) -> di
     hallazgo = finding_detail(store, project_id, _window(body.days), body.finding_id)
     if hallazgo is None:
         raise HTTPException(status_code=404, detail=t("error.problema_no_aparece"))
-    cambio = hallazgo.model_change
-    if not cambio:
-        raise HTTPException(status_code=409, detail=t("pr.sin_cambio"))
-    de, a = cambio["from"], cambio["to"]
-    spans = (
-        store.get_trace_spans(hallazgo.sample_trace_id, project_id)
-        if hallazgo.sample_trace_id
-        else []
-    )
-    # Las llamadas de ese paso; si el paso no se reconoce en los spans, todas las de la
-    # traza, y `sitio` se queda con las del modelo que se cambia.
-    del_paso = [s for s in spans if s.step_key == hallazgo.step_key] or spans
     try:
-        ruta, linea = github_bot.sitio(del_paso, de)
-        pr = github_bot.abrir(
-            ajustes,
-            body.finding_id,
-            de=de,
-            a=a,
-            ruta_anotada=ruta,
-            linea=linea,
-            titulo=t("pr.titulo", de=de, a=a),
-            cuerpo=t(
-                "pr.cuerpo",
-                titulo=hallazgo.title,
-                resumen=hallazgo.summary,
-                de=de,
-                a=a,
-                ruta=ruta,
-                linea=linea,
-            ),
-            mensaje=t("pr.commit", de=de, a=a),
-        )
+        pr = github_bot.abrir(ajustes, body.finding_id, **_arreglo(store, project_id, hallazgo))
     except github_bot.SinPropuesta as exc:
         raise HTTPException(status_code=409, detail=t(exc.clave, **exc.datos)) from exc
     except github_bot.GitHubError as exc:

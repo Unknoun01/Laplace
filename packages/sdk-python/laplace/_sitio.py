@@ -16,6 +16,7 @@ repositorio por sufijo, así que las tres le sirven.
 from __future__ import annotations
 
 import functools
+import inspect
 import os
 import sys
 import sysconfig
@@ -79,6 +80,18 @@ def ruta_relativa(fichero: str) -> str:
         except ValueError:
             continue
     return "/".join(ruta.parts[-TRAMOS_SUELTOS:])
+
+
+def de_funcion(fn: object) -> tuple[str, int, str] | None:
+    """Dónde está definida una función del usuario: (ruta, primera línea, nombre).
+
+    La primera línea es la de `co_firstlineno`, que según la versión de Python es la del
+    `def` o la del primer decorador. Para el tope de vueltas del bot de PR (D-190).
+    """
+    codigo = getattr(inspect.unwrap(fn), "__code__", None)  # type: ignore[arg-type]
+    if codigo is None or _es_ajeno(codigo.co_filename):
+        return None
+    return ruta_relativa(codigo.co_filename), codigo.co_firstlineno, codigo.co_name
 
 
 def sitio_llamada() -> tuple[str, int, str] | None:

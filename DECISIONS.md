@@ -4427,3 +4427,45 @@ Pruebas de pantalla en `test_pantallas.py`: el grafo del Panel con cajas, flecha
 «×» y dinero, y ningún texto fuera de su caja; y en Ajustes, parar, reanudar, un bucle
 de 1 rechazado y los topes guardados de verdad (leídos de la API). Las dos fallan sin
 los componentes en la página.
+
+## 2026-10-03 — El bot de pull requests, más allá
+
+### D-190 — `cache_control` y un tope de vueltas, escritos sobre el árbol de sintaxis
+El bot de PR (D-185) sabía cambiar un literal de modelo en una línea. Ahora propone dos
+arreglos de más de una línea, cada uno donde lo dice su hallazgo (`Finding.code_fix`:
+`modelo`, `cache` o `tope`):
+
+* **Contexto fijo → `cache_control`** en el `system` de la llamada anotada, sólo con
+  modelos de Anthropic (`claude` en el nombre, también Bedrock y Vertex) y sólo cuando la
+  regla propone cachear (no cuando lo que pesa son las lecturas de caché). OpenAI cachea
+  solo: no hay nada que escribir y el hallazgo no ofrece PR. Un `system` de texto (literal,
+  f-string, concatenación, `.render()` de un prompt gestionado, `.format()`, o una variable
+  asignada una vez a uno de ésos) se envuelve en un bloque con `cache_control`; una lista
+  de bloques lo lleva en el último, también si la lista se define aparte. Si no se sabe si
+  es texto —sale de una función cualquiera, de un atributo—, **no se toca**: si fuese ya
+  una lista, envolverla rompería la llamada. Si ya cachea, se dice.
+* **Bucle → `@laplace.guard(max_loop=4)`** en la función que arranca la ejecución (la raíz
+  de la traza de ejemplo), con `import laplace` si falta. Cuatro es `MIN_VUELTAS_BUCLE`: el
+  tope corta justo donde el Diagnóstico señala. No se propone si la función ya tiene un
+  `guard` ni si es un generador (`guard` como decorador cerraría el bloque al devolverlo).
+  El PR dice que es un freno y no el arreglo de fondo, y que hay que decidir qué hacer con
+  `GuardExceeded`. Para saber dónde está la raíz, **`@observe` anota ahora en su span el
+  fichero, la primera línea y el nombre de la función** (`code.*`, como las llamadas), una
+  vez al decorar; `sitio()` del cambio de modelo sólo mira llamadas al modelo, para no
+  quedarse con la línea de una función.
+* **Sobre el árbol de sintaxis de Python, no con búsquedas de texto, y sin un modelo de
+  lenguaje escribiendo el parche** (la hoja de ruta lo dejaba abierto): lo que se puede
+  derivar del código no necesita que nadie lo imagine, y lo que no se puede derivar no
+  debería proponerse sin que alguien lo mire. Se cambia sólo el trozo de la llamada o de
+  la cabecera de la función, carácter a carácter (las columnas de `ast` son bytes UTF-8 y
+  se traducen), y **todo arreglo, también el de modelo, tiene que dejar el fichero
+  compilando** (`comprobar_cambio`); si no cambia nada, tampoco hay PR. Sólo Python: las
+  anotaciones de línea las pone el SDK de Python.
+
+Pruebas en `test_bot_arreglos.py` (28): las dos transformaciones con sus casos (en varias
+líneas, lista definida aparte, prompt gestionado, ya cachea, sin `system`, `system`
+desconocido, tildes antes en la misma línea, el def o el decorador, método con sangría,
+`import` ya puesto, ya tiene `guard`, generador, fuera de una función, no es Python), el
+SDK anotando la función y la ingesta guardándolo, y de la ficha al PR por la API contra
+el GitHub falso (Claude sí, OpenAI no, bucle sin raíz anotada, un cambio que no compila).
+Se rompieron a propósito trece sitios y en todos falla alguna.

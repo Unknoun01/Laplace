@@ -516,5 +516,22 @@
   "pr.modelo_varias_veces": "模型 {modelo} 在文件中远离调用处出现了多次，不会凭猜测选择其中一个。",
   "pr.titulo": "Laplace：将 {de} 换为 {a}",
   "pr.commit": "将 {de} 换为 {a}（由 Laplace 提出）",
-  "pr.cuerpo": "**{titulo}**\n\n{resumen}\n\n本次更改：在 `{ruta}` 第 {linea} 行将 `{de}` 换为 `{a}`。\n\n合并前请确认质量不受影响；在 Laplace 的“测试”页可以用真实调用对比两个模型。合并后，将问题标记为已修复，Laplace 会检查花费是否下降。\n\n_由 Laplace 提出。_"
+  "pr.cuerpo": "**{titulo}**\n\n{resumen}\n\n本次更改：在 `{ruta}` 第 {linea} 行将 `{de}` 换为 `{a}`。\n\n合并前请确认质量不受影响；在 Laplace 的“测试”页可以用真实调用对比两个模型。合并后，将问题标记为已修复，Laplace 会检查花费是否下降。\n\n_由 Laplace 提出。_",
+  "pr.solo_python": "这个修复我只会用 Python 写，而调用所在的文件不是 Python（或无法读取）。",
+  "pr.sin_llamada": "第 {linea} 行没有我能识别的模型调用。记录之后文件是否改过？",
+  "pr.ya_cachea": "该调用的 system 已经带有 cache_control，没有可以添加的。如果固定上下文仍然占比很大，就需要少发送一些。",
+  "pr.sin_system": "该调用没有可缓存的 system。固定上下文在消息或工具里，这些我不会盲目修改。",
+  "pr.system_desconocido": "无法判断该调用的 system 是文本还是已经是块列表（它来自函数或其他地方），盲目包装可能会破坏调用。请手动添加 cache_control。",
+  "pr.sin_funcion": "第 {linea} 行不是任何函数的开头。记录之后文件是否改过？",
+  "pr.ya_tiene_tope": "该函数已经有 laplace.guard：请手动调整它的 max_loop。",
+  "pr.tope_generador": "该函数是生成器，作为装饰器的 laplace.guard 保护不了它。请在函数内部用 with 块设置上限。",
+  "pr.no_compila": "这个改动会让 {ruta} 无法编译，因此不提出。",
+  "pr.nada_que_cambiar": "这个修复没有改动文件中的任何内容。",
+  "pr.sin_raiz": "不知道启动这次运行的函数在哪里：智能体需要使用会记录它的 SDK 版本（含 D-190 的 laplace-trace），并且根节点必须是 @observe。",
+  "pr.cache.titulo": "Laplace：为 {ruta} 中的 system 加上 cache_control",
+  "pr.cache.commit": "在 {ruta} 中为 system 加上 cache_control（由 Laplace 提出）",
+  "pr.cache.cuerpo": "**{titulo}**\n\n{resumen}\n\n这个改动为 `{ruta}` 第 {linea} 行调用的 system 加上 `cache_control: ephemeral`：Anthropic 会保存几分钟，之后的调用从缓存读取，价格只是原价的一小部分。文本本身不变。\n\n缓存只在超过最低 token 数（视模型为 1,024 或 2,048）时生效。合并之后，Laplace 会检查该步骤的花费是否下降。\n\n_由 Laplace 提出。_",
+  "pr.tope.titulo": "Laplace：在 {funcion} 中设置 {tope} 次循环上限",
+  "pr.tope.commit": "为 {funcion} 加上 laplace.guard(max_loop={tope})（由 Laplace 提出）",
+  "pr.tope.cuerpo": "**{titulo}**\n\n{resumen}\n\n这个改动在 `{funcion}`（`{ruta}` 第 {linea} 行）上加上 `@laplace.guard(max_loop={tope})`，这个函数负责启动每次运行。如果某个步骤以相同输入重复 {tope} 次而没有进展，下一次循环就不会执行，并抛出 `laplace.GuardExceeded`：请决定如何处理（用已有结果回答、发出提醒、稍后重试）。\n\n这是一个刹车，而不是根本的修复：根本在于循环的退出条件。合并之后，Laplace 会检查多余的循环是否消失。\n\n_由 Laplace 提出。_"
 }

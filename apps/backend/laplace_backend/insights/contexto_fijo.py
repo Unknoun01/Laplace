@@ -188,6 +188,9 @@ def _fixed_context_finding(
         if usage.cached_input_tokens
         else t("contexto.de_cache.ninguno")
     )
+    # El bot de PR sólo sabe escribir la caché de Anthropic: OpenAI cachea solo, sin
+    # nada que poner en el código (D-190).
+    propone_cachear = parte >= MIN_PARTE_SIN_CACHEAR
     if parte < MIN_PARTE_SIN_CACHEAR:
         # No se propone cachear, así que tampoco se apunta el ahorro de cachear: sería
         # prometer dinero por hacer lo que ya se está haciendo.
@@ -260,7 +263,14 @@ def _fixed_context_finding(
         ],
         sample_trace_id=usage.sample_trace_id,
         step_key=usage.key,
+        code_fix="cache" if propone_cachear and es_de_anthropic(usage.model) else "",
     )
+
+
+def es_de_anthropic(modelo: str) -> bool:
+    """Por el nombre, que es lo que hay en el paso: también `anthropic.claude-…` de
+    Bedrock y `claude-…@fecha` de Vertex, que aceptan el mismo `cache_control`."""
+    return "claude" in modelo.lower()
 
 
 def _fixed_context_detail(

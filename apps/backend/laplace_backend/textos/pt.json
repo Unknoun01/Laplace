@@ -516,5 +516,22 @@
   "pr.modelo_varias_veces": "O modelo {modelo} aparece várias vezes no arquivo, longe da chamada, e não se escolhe uma no chute.",
   "pr.titulo": "Laplace: trocar {de} por {a}",
   "pr.commit": "Troca {de} por {a} (proposto pelo Laplace)",
-  "pr.cuerpo": "**{titulo}**\n\n{resumen}\n\nEsta mudança: `{de}` → `{a}` em `{ruta}`, linha {linea}.\n\nConfira que a qualidade se mantém antes do merge; no Laplace, a aba Testar compara os dois modelos com chamadas reais. Depois do merge, marque o problema como corrigido e o Laplace verificará se o gasto cai.\n\n_Proposto pelo Laplace._"
+  "pr.cuerpo": "**{titulo}**\n\n{resumen}\n\nEsta mudança: `{de}` → `{a}` em `{ruta}`, linha {linea}.\n\nConfira que a qualidade se mantém antes do merge; no Laplace, a aba Testar compara os dois modelos com chamadas reais. Depois do merge, marque o problema como corrigido e o Laplace verificará se o gasto cai.\n\n_Proposto pelo Laplace._",
+  "pr.solo_python": "Só sei escrever esta correção em Python, e o ficheiro da chamada não é Python (ou não se consegue ler).",
+  "pr.sin_llamada": "Na linha {linea} não há nenhuma chamada ao modelo que eu reconheça. O ficheiro mudou desde que foi anotado?",
+  "pr.ya_cachea": "A chamada já marca o system com cache_control: não há nada a acrescentar. Se o contexto fixo continua pesando, é preciso enviar menos.",
+  "pr.sin_system": "A chamada não tem system para pôr em cache. O contexto fixo está nas mensagens ou nas ferramentas, e não os mudo às cegas.",
+  "pr.system_desconocido": "Não sei se o system da chamada é texto ou já uma lista de blocos (vem de uma função ou de outro sítio), e envolvê-lo às cegas poderia quebrar a chamada. Acrescente cache_control à mão.",
+  "pr.sin_funcion": "Na linha {linea} não começa nenhuma função. O ficheiro mudou desde que foi anotado?",
+  "pr.ya_tiene_tope": "A função já tem um laplace.guard: ajuste o seu max_loop à mão.",
+  "pr.tope_generador": "A função é um gerador, e laplace.guard como decorador não o protege. Ponha o limite num bloco with lá dentro.",
+  "pr.no_compila": "A mudança deixaria {ruta} sem compilar, por isso não é proposta.",
+  "pr.nada_que_cambiar": "A correção não muda nada no ficheiro.",
+  "pr.sin_raiz": "Não se sabe onde está a função que inicia a execução: o agente precisa de uma versão do SDK que a anote (laplace-trace com D-190), e a raiz tem que ser um @observe.",
+  "pr.cache.titulo": "Laplace: cache_control no system de {ruta}",
+  "pr.cache.commit": "Marca o system com cache_control em {ruta} (proposto pelo Laplace)",
+  "pr.cache.cuerpo": "**{titulo}**\n\n{resumen}\n\nEsta mudança marca o system da chamada de `{ruta}`, linha {linea}, com `cache_control: ephemeral`: a Anthropic guarda-o uns minutos e as chamadas seguintes leem-no do cache por uma fração do preço. O texto não muda.\n\nO cache só funciona acima de um mínimo de tokens (1.024 ou 2.048 conforme o modelo). Depois de fundir, o Laplace verifica se o gasto do passo baixa.\n\n_Proposto pelo Laplace._",
+  "pr.tope.titulo": "Laplace: limite de {tope} voltas em {funcion}",
+  "pr.tope.commit": "Põe laplace.guard(max_loop={tope}) em {funcion} (proposto pelo Laplace)",
+  "pr.tope.cuerpo": "**{titulo}**\n\n{resumen}\n\nEsta mudança põe `@laplace.guard(max_loop={tope})` em `{funcion}` (`{ruta}`, linha {linea}), a função que inicia cada execução. Se um passo se repete {tope} vezes com a mesma entrada sem avançar, a volta seguinte não acontece e é lançada `laplace.GuardExceeded`: decida como quer tratá-la (responder com o que houver, avisar, tentar mais tarde).\n\nÉ um travão, não a correção de fundo: essa é a condição de saída do ciclo. Depois de fundir, o Laplace verifica se as voltas a mais desaparecem.\n\n_Proposto pelo Laplace._"
 }

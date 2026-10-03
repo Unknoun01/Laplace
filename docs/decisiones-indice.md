@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 190 decisiones.
+final. 191 decisiones.
 
 ## Coste, precios y caché
 
@@ -34,6 +34,7 @@ final. 190 decisiones.
 - [D-178](../DECISIONS.md#d-178--el-mismo-prefijo-en-varios-pasos-sin-compartir-la-caché) — El mismo prefijo en varios pasos, sin compartir la caché
 - [D-179](../DECISIONS.md#d-179--margen-por-cliente-lo-evitable-de-cada-uno-otras-monedas-y-su-columna) — Margen por cliente: lo evitable de cada uno, otras monedas y su columna
 - [D-184](../DECISIONS.md#d-184--un-límite-de-gasto-y-de-bucles-en-el-sdk-con-la-misma-cuenta-que-la-traza) — Un límite de gasto y de bucles en el SDK, con la misma cuenta que la traza
+- [D-190](../DECISIONS.md#d-190--cache_control-y-un-tope-de-vueltas-escritos-sobre-el-árbol-de-sintaxis) — `cache_control` y un tope de vueltas, escritos sobre el árbol de sintaxis
 
 ## Detección: reglas y hallazgos
 
@@ -207,6 +208,7 @@ final. 190 decisiones.
 - [D-183](../DECISIONS.md#d-183--las-medianas-del-uso-por-paso-la-misma-cuenta-en-los-dos-almacenes-y-una-llamada-con-respuesta-y-sin-recuento-ya-no-sale-gratis) — Las medianas del uso por paso, la misma cuenta en los dos almacenes; y una llamada con respuesta y sin recuento ya no sale gratis
 - [D-184](../DECISIONS.md#d-184--un-límite-de-gasto-y-de-bucles-en-el-sdk-con-la-misma-cuenta-que-la-traza) — Un límite de gasto y de bucles en el SDK, con la misma cuenta que la traza
 - [D-189](../DECISIONS.md#d-189--las-pantallas-del-plano-de-control-tope-y-parada-en-ajustes-el-agente-entero-en-el-panel) — Las pantallas del plano de control: Tope y parada en Ajustes, el agente entero en el Panel
+- [D-190](../DECISIONS.md#d-190--cache_control-y-un-tope-de-vueltas-escritos-sobre-el-árbol-de-sintaxis) — `cache_control` y un tope de vueltas, escritos sobre el árbol de sintaxis
 
 ## Margen por cliente
 
@@ -618,3 +620,7 @@ final. 190 decisiones.
 - [D-187](../DECISIONS.md#d-187--tope-bucles-y-parada-desde-laplace-el-sdk-los-pide-cada-30-s-y-manda-el-más-estricto) — Tope, bucles y parada desde Laplace: el SDK los pide cada 30 s y manda el más estricto
 - [D-188](../DECISIONS.md#d-188--el-grafo-del-proyecto-el-agente-entero-sumando-las-trazas) — El grafo del proyecto: el agente entero, sumando las trazas
 - [D-189](../DECISIONS.md#d-189--las-pantallas-del-plano-de-control-tope-y-parada-en-ajustes-el-agente-entero-en-el-panel) — Las pantallas del plano de control: Tope y parada en Ajustes, el agente entero en el Panel
+
+**2026-10-03 — El bot de pull requests, más allá**
+
+- [D-190](../DECISIONS.md#d-190--cache_control-y-un-tope-de-vueltas-escritos-sobre-el-árbol-de-sintaxis) — `cache_control` y un tope de vueltas, escritos sobre el árbol de sintaxis
