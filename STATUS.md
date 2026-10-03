@@ -48,6 +48,10 @@ Lo que sostiene esas casillas, en concreto:
 - **Un modelo sin tarifa no cuesta cero**: cuesta «no lo sabemos», y la interfaz dice que
   el total está incompleto. Lo mismo con los metros que no se pueden determinar: se cobra
   el estándar y la cifra se presenta como un suelo.
+- **Se puede cortar mientras pasa**: `laplace.guard(max_usd_per_run, max_loop)` no deja
+  hacer la llamada siguiente si la ejecución ha gastado de más o da vueltas sin avanzar,
+  con la misma tabla de precios que la traza y la misma definición de bucle que el
+  Diagnóstico (D-184).
 - **La identidad de un paso no es su nombre**, sino desde dónde se llama y con qué
   instrucciones. Sin eso, las reglas mezclaban pasos distintos en cualquier código real.
 - **El modo local es el mismo producto**, no una versión recortada: hay un test que

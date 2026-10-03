@@ -112,6 +112,7 @@ def _tier(kwargs: dict[str, Any], response: Any = None) -> str:
 
 def _start_span(kwargs: dict[str, Any]) -> OtelSpan:
     model = kwargs.get("model")
+    vuelta = c.vigilar(model, kwargs.get("messages"))
     # Antes de abrir el span: después, el activo ya sería éste y no su padre.
     envolvente = c.enclosing_step()
     span = get_tracer().start_span(
@@ -124,6 +125,7 @@ def _start_span(kwargs: dict[str, Any]) -> OtelSpan:
         messages=kwargs.get("messages"),
         kwargs=kwargs,
         enclosing=envolvente,
+        vuelta=vuelta,
     )
     if kwargs.get("tools"):
         c.set_attr(span, "laplace.request.tools", c.payload(kwargs["tools"]) or "")
@@ -326,6 +328,8 @@ def _responses_usage(response: Any) -> dict[str, Any]:
 
 def _responses_start_span(kwargs: dict[str, Any]) -> OtelSpan:
     model = kwargs.get("model")
+    entrada = _responses_input(kwargs)
+    vuelta = c.vigilar(model, entrada)
     envolvente = c.enclosing_step()
     span = get_tracer().start_span(
         c.span_name(semconv.OPERATION_CHAT, model), kind=SpanKind.CLIENT
@@ -334,9 +338,10 @@ def _responses_start_span(kwargs: dict[str, Any]) -> OtelSpan:
         span,
         system=semconv.SYSTEM_OPENAI,
         model=model,
-        messages=_responses_input(kwargs),
+        messages=entrada,
         kwargs=kwargs,
         enclosing=envolvente,
+        vuelta=vuelta,
     )
     if kwargs.get("tools"):
         c.set_attr(span, "laplace.request.tools", c.payload(kwargs["tools"]) or "")

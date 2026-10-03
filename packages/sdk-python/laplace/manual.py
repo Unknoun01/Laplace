@@ -79,6 +79,7 @@ def llm_span(
             llm.record_response(output_messages=[respuesta],
                                 input_tokens=120, output_tokens=45)
     """
+    vuelta = c.vigilar(model, input_messages, operation)
     tracer = get_tracer()
     span_name = name or c.span_name(operation, model)
     # Antes de entrar en el span nuevo: dentro, el activo ya sería él.
@@ -92,6 +93,7 @@ def llm_span(
             kwargs=params,
             operation=operation,
             enclosing=envolvente,
+            vuelta=vuelta,
         )
         recorder = LLMSpanRecorder(span)
         try:

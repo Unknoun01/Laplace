@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 184 decisiones.
+final. 185 decisiones.
 
 ## Coste, precios y caché
 
@@ -33,6 +33,7 @@ final. 184 decisiones.
 - [D-161](../DECISIONS.md#d-161--qué-clientes-te-hacen-perder-dinero) — Qué clientes te hacen perder dinero
 - [D-178](../DECISIONS.md#d-178--el-mismo-prefijo-en-varios-pasos-sin-compartir-la-caché) — El mismo prefijo en varios pasos, sin compartir la caché
 - [D-179](../DECISIONS.md#d-179--margen-por-cliente-lo-evitable-de-cada-uno-otras-monedas-y-su-columna) — Margen por cliente: lo evitable de cada uno, otras monedas y su columna
+- [D-184](../DECISIONS.md#d-184--un-límite-de-gasto-y-de-bucles-en-el-sdk-con-la-misma-cuenta-que-la-traza) — Un límite de gasto y de bucles en el SDK, con la misma cuenta que la traza
 
 ## Detección: reglas y hallazgos
 
@@ -71,6 +72,7 @@ final. 184 decisiones.
 - [D-179](../DECISIONS.md#d-179--margen-por-cliente-lo-evitable-de-cada-uno-otras-monedas-y-su-columna) — Margen por cliente: lo evitable de cada uno, otras monedas y su columna
 - [D-180](../DECISIONS.md#d-180--diagnóstico-con-modelo-que-cita-los-spans-de-los-que-sale) — Diagnóstico con modelo, que cita los spans de los que sale
 - [D-183](../DECISIONS.md#d-183--las-medianas-del-uso-por-paso-la-misma-cuenta-en-los-dos-almacenes-y-una-llamada-con-respuesta-y-sin-recuento-ya-no-sale-gratis) — Las medianas del uso por paso, la misma cuenta en los dos almacenes; y una llamada con respuesta y sin recuento ya no sale gratis
+- [D-184](../DECISIONS.md#d-184--un-límite-de-gasto-y-de-bucles-en-el-sdk-con-la-misma-cuenta-que-la-traza) — Un límite de gasto y de bucles en el SDK, con la misma cuenta que la traza
 
 ## Probar: evaluaciones, juez y replay
 
@@ -122,6 +124,7 @@ final. 184 decisiones.
 - [D-165](../DECISIONS.md#d-165--las-integraciones-de-typescript-que-faltaban-probadas-y-lo-que-se-perdía) — Las integraciones de TypeScript que faltaban, probadas: y lo que se perdía
 - [D-170](../DECISIONS.md#d-170--los-tres-frameworks-que-faltaban-probados-y-lo-que-mastra-no-manda-donde-toca) — Los tres frameworks que faltaban, probados; y lo que Mastra no manda donde toca
 - [D-181](../DECISIONS.md#d-181--redacción-de-datos-personales-y-muestreo-por-cola-en-el-sdk) — Redacción de datos personales y muestreo por cola, en el SDK
+- [D-184](../DECISIONS.md#d-184--un-límite-de-gasto-y-de-bucles-en-el-sdk-con-la-misma-cuenta-que-la-traza) — Un límite de gasto y de bucles en el SDK, con la misma cuenta que la traza
 
 ## Almacenes y escala
 
@@ -197,6 +200,7 @@ final. 184 decisiones.
 - [D-175](../DECISIONS.md#d-175--las-pantallas-con-sesión-recorridas-en-un-navegador) — Las pantallas con sesión, recorridas en un navegador
 - [D-177](../DECISIONS.md#d-177--preagregados-por-minuto-del-diagnóstico-y-clave-por-hora) — Preagregados por minuto del Diagnóstico y clave por hora
 - [D-183](../DECISIONS.md#d-183--las-medianas-del-uso-por-paso-la-misma-cuenta-en-los-dos-almacenes-y-una-llamada-con-respuesta-y-sin-recuento-ya-no-sale-gratis) — Las medianas del uso por paso, la misma cuenta en los dos almacenes; y una llamada con respuesta y sin recuento ya no sale gratis
+- [D-184](../DECISIONS.md#d-184--un-límite-de-gasto-y-de-bucles-en-el-sdk-con-la-misma-cuenta-que-la-traza) — Un límite de gasto y de bucles en el SDK, con la misma cuenta que la traza
 
 ## Margen por cliente
 
@@ -266,6 +270,7 @@ final. 184 decisiones.
 - [D-173](../DECISIONS.md#d-173--retención-por-proyecto-y-borrar-lo-de-una-persona-o-un-cliente) — Retención por proyecto, y borrar lo de una persona o un cliente
 - [D-174](../DECISIONS.md#d-174--globalscss-en-29-hojas-un-índice-de-decisiones-y-documentación-de-usuario) — `globals.css` en 29 hojas, un índice de decisiones y documentación de usuario
 - [D-180](../DECISIONS.md#d-180--diagnóstico-con-modelo-que-cita-los-spans-de-los-que-sale) — Diagnóstico con modelo, que cita los spans de los que sale
+- [D-184](../DECISIONS.md#d-184--un-límite-de-gasto-y-de-bucles-en-el-sdk-con-la-misma-cuenta-que-la-traza) — Un límite de gasto y de bucles en el SDK, con la misma cuenta que la traza
 
 ## Pruebas y método
 
@@ -588,3 +593,7 @@ final. 184 decisiones.
 **2026-10-03 — Dos cosas de una sesión local que no estaban en master**
 
 - [D-183](../DECISIONS.md#d-183--las-medianas-del-uso-por-paso-la-misma-cuenta-en-los-dos-almacenes-y-una-llamada-con-respuesta-y-sin-recuento-ya-no-sale-gratis) — Las medianas del uso por paso, la misma cuenta en los dos almacenes; y una llamada con respuesta y sin recuento ya no sale gratis
+
+**2026-10-03 — `laplace.guard`: cortar la ejecución mientras pasa**
+
+- [D-184](../DECISIONS.md#d-184--un-límite-de-gasto-y-de-bucles-en-el-sdk-con-la-misma-cuenta-que-la-traza) — Un límite de gasto y de bucles en el SDK, con la misma cuenta que la traza

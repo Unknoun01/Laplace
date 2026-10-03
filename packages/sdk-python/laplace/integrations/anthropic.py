@@ -138,6 +138,8 @@ def _usage_tokens(source: Any) -> dict[str, int]:
 
 def _start_span(kwargs: dict[str, Any]) -> OtelSpan:
     model = kwargs.get("model")
+    entrada = _input_messages(kwargs)
+    vuelta = c.vigilar(model, entrada)
     # Antes de abrir el span: después, el activo ya sería éste y no su padre.
     envolvente = c.enclosing_step()
     span = get_tracer().start_span(
@@ -147,9 +149,10 @@ def _start_span(kwargs: dict[str, Any]) -> OtelSpan:
         span,
         system=semconv.SYSTEM_ANTHROPIC,
         model=model,
-        messages=_input_messages(kwargs),
+        messages=entrada,
         kwargs=kwargs,
         enclosing=envolvente,
+        vuelta=vuelta,
     )
     if kwargs.get("tools"):
         c.set_attr(span, "laplace.request.tools", c.payload(kwargs["tools"]) or "")

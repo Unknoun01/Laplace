@@ -4208,3 +4208,49 @@ suyo, esto es lo que master no tenía:
   proveedor sigue siendo un cero medido, y una llamada sin respuesta —un error de
   conexión, que no se cobró— no se estima. Pruebas en `test_convenciones.py` (3); la de
   la llamada sin respuesta vino de `test_modelo_local.py`, que la primera versión rompió.
+
+## 2026-10-03 — `laplace.guard`: cortar la ejecución mientras pasa
+
+### D-184 — Un límite de gasto y de bucles en el SDK, con la misma cuenta que la traza
+El Diagnóstico dice después qué agente se fue de presupuesto o se quedó dando vueltas.
+`laplace.guard(max_usd_per_run=…, max_loop=…)` lo para mientras pasa: es un bloque
+`with` (también `async with`) o un decorador, y antes de cada llamada al modelo y de
+cada paso de `@observe` comprueba los límites. Si se ha pasado alguno, la llamada **no
+se hace** y se lanza `GuardExceeded`, que queda en la traza como el error del paso que
+la recibió.
+
+* **El gasto, con la misma cuenta que la ingesta.** El motor de precios
+  (`laplace_backend/pricing`) se ha movido al SDK (`laplace.pricing`), con sus dos
+  tablas, y el backend lo usa a través del mismo nombre de siempre, que ahora **es** ese
+  módulo (se sustituye en `sys.modules`; así `set_custom_prices` y las pruebas tocan el
+  único estado que hay). La alternativa —pedir la tarifa al backend, como `replay`—
+  hacía depender un tope de dinero de la red. D-005 sigue en pie: el coste de la traza
+  se calcula en la ingesta, con la tabla del backend; la del SDK instalado sólo sirve
+  para el límite local, y puede ir por detrás. El precio que se pone en Ajustes no llega
+  al proceso del usuario; `LAPLACE_PRICES_EXTRA` sí.
+* **Se cobra lo que pone el span.** El coste se lee de los atributos del span de la
+  llamada cuando se cierra (tokens, caché, metro), con `compute`; un stream se cobra al
+  terminar. La llamada que cruza el límite ya está pagada cuando se sabe su coste: se
+  corta la siguiente. Una llamada sin recuento cuenta lo estimado, como en la traza.
+* **Un modelo sin tarifa no cuesta cero**, tampoco aquí: no se suma, no se corta como si
+  costase, y se dice (`unknown_cost_models`, `cost_complete=False` y un aviso en el log,
+  una vez por modelo).
+* **El bucle es el del Diagnóstico (D-109).** El mismo paso con la misma entrada sin los
+  números, y sin avanzar: dos salidas distintas como mucho, y alguna repetida. La huella
+  es gemela de `loop_hash` de la ingesta, y una prueba las compara. Lo de «alguna
+  repetida» es nuevo: con `max_loop=2`, dos vueltas con dos salidas distintas todavía
+  pueden ser avance (resumir el capítulo 1 y el 2), y el Diagnóstico, que mira después,
+  no necesitaba la distinción porque pide cuatro vueltas. Por lo mismo `max_loop` es 2
+  o más: con una sola vuelta no hay con qué comparar.
+* **Cortada una vez, cortada para el resto del bloque.** Un agente que captura la
+  excepción y prueba por otro lado no vuelve a llegar al proveedor.
+* **Lo que no ve:** llamadas hechas por otro instrumentador en lugar de por las
+  integraciones de Laplace, y lo que corra en otro hilo sin copiar el contexto. Los
+  límites viven en el contexto, como la traza.
+
+Pruebas en `test_guard.py` (19), con el cliente real de OpenAI y un transporte que cuenta
+las peticiones: «cortar» es que la petición no sale. Se rompieron a propósito nueve
+sitios (la comprobación del gasto, la de las salidas, tres enganches de las
+integraciones, el `despues` síncrono y el asíncrono, el corte que se queda puesto, el
+atajo sin guard abierto) y en todos falla alguna; el `despues` asíncrono y el corte que se queda puesto no mordían
+al principio, y cada uno tiene ahora su prueba.

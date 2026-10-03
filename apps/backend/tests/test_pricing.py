@@ -12,6 +12,7 @@ import re
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
+import laplace.pricing
 import pytest
 
 from laplace_backend.config import Settings
@@ -19,7 +20,7 @@ from laplace_backend.pricing import PriceTable, get_price_table
 from laplace_backend.storage.base import Window
 from laplace_backend.storage.clickhouse import ClickHouseStore
 
-PRICES_PATH = Path(__file__).parents[1] / "laplace_backend" / "pricing" / "model_prices.json"
+PRICES_PATH = Path(laplace.pricing.__file__).with_name("model_prices.json")
 #: A partir de aquí, la tabla se considera caducada y hay que reverificarla.
 #:
 #: Treinta días, no un trimestre: los proveedores mueven precios mucho más rápido que
