@@ -4254,3 +4254,62 @@ sitios (la comprobación del gasto, la de las salidas, tres enganches de las
 integraciones, el `despues` síncrono y el asíncrono, el corte que se queda puesto, el
 atajo sin guard abierto) y en todos falla alguna; el `despues` asíncrono y el corte que se queda puesto no mordían
 al principio, y cada uno tiene ahora su prueba.
+
+## 2026-10-03 — El bot de pull requests
+
+### D-185 — El arreglo del modelo caro, propuesto como pull request en el repositorio del usuario
+El Diagnóstico dice qué sobra y cuánto; el paso siguiente era abrir el fichero, encontrar
+la llamada y cambiarla. Ahora, desde la ficha del hallazgo, Laplace abre un pull request
+con el cambio hecho, en una rama propia, para que lo revise y lo fusione quien manda en
+el código.
+
+* **Hacía falta saber dónde está la llamada.** `step_site` es el camino de pasos
+  (`atender_ticket > resumir`), no el fichero. El SDK anota ahora en cada llamada al
+  modelo `code.file.path`, `code.line.number` y `code.function.name` (los nombres de las
+  convenciones de OpenTelemetry), del primer marco de la pila que es código del usuario:
+  ni el SDK, ni lo instalado en `site-packages`, ni la biblioteca estándar. La ruta nunca
+  es absoluta —diría el usuario y la máquina—: relativa a la raíz del repositorio git, o
+  al directorio de trabajo si no hay `.git` (un contenedor), o los tres últimos tramos.
+  El bot la busca en el árbol del repositorio por sufijo de tramos enteros, y si casa con
+  dos ficheros no elige uno. Va en `record_request`, por donde pasan todas las
+  integraciones y `llm_span`. La ingesta no cambia: guarda tal cual los atributos que no
+  traduce. Se apaga con `capture_code_location=False`.
+* **Sólo lo mecánico.** Hoy, el cambio de modelo (el hallazgo del modelo caro, en sus dos
+  variantes): el literal del modelo entre comillas, cerca de la línea anotada; si ahí no
+  está pero en el fichero hay uno solo (una constante arriba), ése. Con cero o con varios
+  no hay PR, y se dice por qué (`pr.modelo_no_literal`, `pr.modelo_varias_veces`): un
+  modelo que sale de una variable de entorno no se adivina. Lo demás de la hoja de ruta
+  —`cache_control`, límites de iteraciones— no es un cambio de una línea, y escribirlo
+  con un modelo es otra fase.
+* **El hallazgo dice qué cambia.** `model_change: {"from", "to"}` en el modelo caro; los
+  demás, `null`. La ficha sólo ofrece el botón cuando hay cambio y quien mira puede
+  escribir.
+* **Nunca en la rama principal.** Una rama por hallazgo (`laplace/<hash>`), estable: pedir
+  el PR dos veces devuelve el abierto sin escribir nada. Una rama que quedó de un PR
+  cerrado se vuelve a poner sobre la base de hoy. Si no hay propuesta, no se crea rama.
+* **Dos formas de entrar.** Con la GitHub App de la instalación (`LAPLACE_GITHUB_APP_ID` y
+  `LAPLACE_GITHUB_APP_PRIVATE_KEY`, la clave o la ruta a ella), el proyecto sólo guarda el
+  número de instalación; el JWT es RS256 con `cryptography` (extra `[github]`, y va con
+  `[cloud]`), y el token de la instalación dura una hora y no se guarda. Sin App, un
+  token del usuario con permiso de contenido y pull requests, guardado como la clave de
+  Stripe: no se devuelve nunca entero. Conectar el repositorio es de admin del proyecto
+  (`ADMIN_WRITES`), como las alertas; abrir un PR, de quien puede escribir.
+* **El texto del PR** es el título y el resumen del hallazgo, el cambio con su fichero y
+  su línea, y qué hacer antes y después de fusionarlo (probarlo en Probar, marcarlo como
+  arreglado para que Laplace compruebe si el gasto baja), en el idioma de quien lo pide.
+
+Lo que falta y es del usuario: registrar la GitHub App (permisos de contenido y pull
+requests, sólo en los repositorios que elija) y poner su id y su clave en el despliegue.
+
+Pruebas en `test_github_bot.py` (29) y en la lista de escrituras de admin de `test_auditoria_p1.py`: el cambio en el texto —sólo la llamada anotada, la
+constante única, el modelo que sale de una variable, el que está varias veces, el que es
+prefijo de otro—, la ruta por sufijo, el sitio más repetido, el PR contra un GitHub falso
+en memoria (la rama principal intacta, pedirlo dos veces, la rama reaprovechada, la base
+configurada, sin propuesta no hay rama, el token rechazado, el repositorio mal escrito),
+el JWT verificado con la clave pública, el token de instalación, el SDK anotando la
+línea de verdad y el camino entero por la API. Se rompieron a propósito ocho sitios
+(el enganche que anota la línea, `model_change`, el literal más cercano, la ruta que
+casa una sola vez y por tramos enteros, el PR ya abierto, la regla de `site-packages`,
+el permiso de admin) y en todos falla alguna; la de `site-packages` no mordía, porque
+el entorno virtual ya cae en las rutas de `sysconfig`, y tiene ahora su prueba con un
+paquete instalado fuera.

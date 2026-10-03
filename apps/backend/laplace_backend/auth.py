@@ -68,6 +68,8 @@ ADMIN_WRITES = (
     ("PUT", "/api/budget"),
     ("PUT", "/api/alert-settings"),
     ("POST", "/api/alert-settings/test"),
+    # Un token que escribe en el repositorio del usuario (D-185).
+    ("PUT", "/api/github"),
 )
 
 _ESCRITURAS = ("POST", "PUT", "PATCH", "DELETE")

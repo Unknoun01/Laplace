@@ -20,7 +20,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from . import idioma, margen, presupuesto, stripe_ingresos
+from . import github_bot, idioma, margen, presupuesto, stripe_ingresos
 from .alerts import CLAVE_AJUSTES, webhook_valido
 from .auth import identity_of
 from .ingest.otlp import recalcular_coste
@@ -746,3 +746,119 @@ async def delete_project(request: Request, project_id: str, confirm: str) -> dic
     logger.warning("proyecto borrado entero — %s", project_id)
     return {"project_id": project_id, "deleted": True}
 
+
+# Bot de pull requests (D-185). El token es un secreto: se guarda y no se devuelve.
+
+
+@router.get("/github", response_model=github_bot.GitHubStatus)
+async def get_github(request: Request, project_id: str) -> github_bot.GitHubStatus:
+    return await run_in_threadpool(github_bot.estado, _meta(request), project_id)
+
+
+class GitHubIn(BaseModel):
+    project_id: str
+    #: `dueño/nombre`. Vacío desconecta y borra el token.
+    repo: str = Field(default="", max_length=200)
+    #: Vacía: la rama principal del repositorio.
+    base_branch: str = Field(default="", max_length=200)
+    #: Un token nuevo; vacío deja el que había.
+    token: str | None = Field(default=None, max_length=300)
+    #: Con la GitHub App de la instalación, en lugar de token.
+    installation_id: int | None = Field(default=None, ge=1)
+
+
+@router.put("/github", response_model=github_bot.GitHubStatus)
+async def put_github(request: Request, body: GitHubIn) -> github_bot.GitHubStatus:
+    meta = _meta(request)
+    repo = body.repo.strip()
+    if not repo:
+        await run_in_threadpool(_guard, meta.delete_setting, body.project_id, github_bot.CLAVE)
+        return await run_in_threadpool(github_bot.estado, meta, body.project_id)
+    if not github_bot.repo_valido(repo):
+        raise HTTPException(status_code=422, detail=t("github.repo_invalido"))
+    ajustes = await run_in_threadpool(github_bot.leer, meta, body.project_id)
+    ajustes.update(repo=repo, base_branch=body.base_branch.strip())
+    token = (body.token or "").strip()
+    if body.installation_id:
+        if not github_bot.app_disponible():
+            raise HTTPException(status_code=422, detail=t("github.sin_app"))
+        ajustes["installation_id"] = body.installation_id
+        ajustes.pop("token", None)
+    elif token:
+        ajustes["token"] = token
+        ajustes.pop("installation_id", None)
+    if not ajustes.get("token") and not ajustes.get("installation_id"):
+        raise HTTPException(status_code=422, detail=t("github.sin_credencial"))
+    await run_in_threadpool(_guard, meta.set_setting, body.project_id, github_bot.CLAVE, ajustes)
+    return await run_in_threadpool(github_bot.estado, meta, body.project_id)
+
+
+class PullRequestIn(BaseModel):
+    project_id: str
+    finding_id: str = Field(max_length=500)
+    days: int = Field(default=7, ge=1, le=90)
+
+
+def _abrir_pr(store: Any, meta: Any, project_id: str, body: PullRequestIn) -> dict[str, Any]:
+    from .api import _window
+    from .insights import detail as finding_detail
+
+    ajustes = github_bot.leer(meta, project_id)
+    if not github_bot.estado(meta, project_id).configured:
+        raise HTTPException(status_code=409, detail=t("github.sin_configurar"))
+    hallazgo = finding_detail(store, project_id, _window(body.days), body.finding_id)
+    if hallazgo is None:
+        raise HTTPException(status_code=404, detail=t("error.problema_no_aparece"))
+    cambio = hallazgo.model_change
+    if not cambio:
+        raise HTTPException(status_code=409, detail=t("pr.sin_cambio"))
+    de, a = cambio["from"], cambio["to"]
+    spans = (
+        store.get_trace_spans(hallazgo.sample_trace_id, project_id)
+        if hallazgo.sample_trace_id
+        else []
+    )
+    # Las llamadas de ese paso; si el paso no se reconoce en los spans, todas las de la
+    # traza, y `sitio` se queda con las del modelo que se cambia.
+    del_paso = [s for s in spans if s.step_key == hallazgo.step_key] or spans
+    try:
+        ruta, linea = github_bot.sitio(del_paso, de)
+        pr = github_bot.abrir(
+            ajustes,
+            body.finding_id,
+            de=de,
+            a=a,
+            ruta_anotada=ruta,
+            linea=linea,
+            titulo=t("pr.titulo", de=de, a=a),
+            cuerpo=t(
+                "pr.cuerpo",
+                titulo=hallazgo.title,
+                resumen=hallazgo.summary,
+                de=de,
+                a=a,
+                ruta=ruta,
+                linea=linea,
+            ),
+            mensaje=t("pr.commit", de=de, a=a),
+        )
+    except github_bot.SinPropuesta as exc:
+        raise HTTPException(status_code=409, detail=t(exc.clave, **exc.datos)) from exc
+    except github_bot.GitHubError as exc:
+        raise HTTPException(status_code=502, detail=t(exc.clave, **exc.datos)) from exc
+    _guard(
+        meta.set_setting,
+        project_id,
+        github_bot.PREFIJO_PR + body.finding_id,
+        {"url": pr.url, "number": pr.numero},
+    )
+    return {"url": pr.url, "number": pr.numero, "already_open": pr.ya_abierto}
+
+
+@router.post("/github/pull-request")
+async def open_pull_request(request: Request, body: PullRequestIn) -> dict[str, Any]:
+    """Abre (o encuentra, si ya estaba) el pull request con el arreglo de un hallazgo."""
+    # El proyecto va en el cuerpo, y por él acota el middleware (D-097), como en Stripe.
+    return await run_in_threadpool(
+        _abrir_pr, request.app.state.store, _meta(request), body.project_id, body
+    )

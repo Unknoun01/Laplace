@@ -29,3 +29,12 @@ descuentan. El total de arriba es la suma, y se puede sumar.
 Arriba del todo, la cobertura dice qué parte de tu gasto pasa por llamadas que Laplace
 entiende. Si es baja, lo dice antes que el dinero: una cifra sobre la mitad del tráfico
 no es la de tu agente.
+
+## Que Laplace proponga el arreglo
+
+Si conectas un repositorio de GitHub en **Ajustes**, la ficha del modelo caro ofrece
+**Abrir pull request**: Laplace cambia el modelo en la línea exacta de la llamada, en una
+rama propia, y tú lo revisas y lo fusionas. Para eso el SDK anota desde qué fichero y
+línea se llama al modelo (`capture_code_location=False` lo apaga). Si el modelo no está
+escrito en el código —sale de una variable o de la configuración—, Laplace no adivina:
+te dice dónde mirar.

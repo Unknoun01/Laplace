@@ -162,6 +162,9 @@ class Finding(BaseModel):
     state_at: datetime | None = None
     state_note: str = ""
     fix_check: FixCheck | None = None
+    #: Si el arreglo es cambiar de modelo, de cuál a cuál: `{"from": …, "to": …}`. Es lo
+    #: que el bot de PR cambia en el código (D-185); vacío en los demás hallazgos.
+    model_change: dict[str, str] | None = None
 
 
 def reparto(finding: Finding) -> dict[str, float]:

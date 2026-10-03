@@ -86,7 +86,7 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
 
 ### Siguiente: funciones diferenciales (confirmar el orden con el usuario)
 - **Replay contrafactual, más allá** (lo básico está hecho, D-167): llamadas con herramientas (habría que simular sus resultados con los grabados, sin ejecutarlas), imágenes y bloques entre proveedores, y un botón en la versión local que lo lance sin copiar la orden.
-- **Bot de pull requests** (GitHub App): cambio de modelo, `cache_control`, `max_iterations`. `step_site` dice dónde está el código.
+- **Bot de pull requests, más allá** (lo básico está hecho, D-185: el cambio de modelo, con la línea que anota el SDK): `cache_control`, límites de iteraciones y el resto de arreglos que no son una línea, escritos con el modelo del diagnóstico y comprobados (que el fichero siga compilando, que el cambio quede cerca de la llamada). Y un webhook de la App para enterarse de cuándo se fusiona y marcar el hallazgo como arreglado solo.
 - **Plano de control** (sección 1), empezando por el grafo del agente de todo el proyecto.
 - **Reglas nuevas** (cada una entra por `detect()` y `detail()`, con su prueba de catálogo):
   - lecturas de caché que se pagan (OpenAI);
@@ -130,6 +130,7 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
 - Decidir el dominio: `laplace.dev`, `laplace.ai` y `laplace.sh` están cogidos; `uselaplace.com` parecía libre, pero hay que confirmarlo.
 - Poner una clave de proveedor para las 4 pruebas vivas que validan las cifras contra la factura real (`LAPLACE_LIVE_TESTS=1`).
 - Una clave de pruebas de Stripe (`rk_test_…`) para probar la traída de ingresos contra la API real.
+- **Registrar la GitHub App de Laplace** (D-185): permisos de contenido y pull requests, y poner `LAPLACE_GITHUB_APP_ID` y `LAPLACE_GITHUB_APP_PRIVATE_KEY` en el despliegue. Sin ella, el bot funciona con un token por proyecto.
 
 ## 6. Negocio (del informe de auditoría)
 - **Mensaje:** «Laplace encuentra el dinero que tu agente tira, te dice cómo arreglarlo y demuestra cuánto has dejado de pagar». Complementario a Langfuse, no rival.

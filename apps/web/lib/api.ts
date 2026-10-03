@@ -15,6 +15,7 @@ import type {
   Instance,
   JudgeStatus,
   MarginView,
+  GitHubStatus,
   StripeStatus,
   Overview,
   Panel,
@@ -520,6 +521,36 @@ export function setExchangeRates(
   rates: Record<string, number>,
 ): Promise<{ rates: Record<string, number> }> {
   return send("/api/exchange-rates", "PUT", { project_id: projectId, rates });
+}
+
+export function getGitHub(projectId: string): Promise<GitHubStatus> {
+  return get<GitHubStatus>("/api/github", { project_id: projectId });
+}
+
+/** Pone el repositorio del bot; `null` lo quita. Un token vacío deja el que había. */
+export function setGitHub(
+  projectId: string,
+  ajustes: {
+    repo: string;
+    base_branch: string;
+    token: string | null;
+    installation_id: number | null;
+  } | null,
+): Promise<GitHubStatus> {
+  return send<GitHubStatus>("/api/github", "PUT", { project_id: projectId, ...(ajustes ?? { repo: "" }) });
+}
+
+/** Abre (o encuentra, si ya estaba) el pull request con el arreglo del hallazgo. */
+export function openPullRequest(
+  projectId: string,
+  findingId: string,
+  days: number,
+): Promise<{ url: string; number: number; already_open: boolean }> {
+  return send("/api/github/pull-request", "POST", {
+    project_id: projectId,
+    finding_id: findingId,
+    days,
+  });
 }
 
 export function getStripe(projectId: string): Promise<StripeStatus> {

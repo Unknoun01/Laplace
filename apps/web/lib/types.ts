@@ -304,6 +304,8 @@ export interface Finding {
   last_seen: string | null;
   state_note: string;
   fix_check: FixCheck | null;
+  /** Si el arreglo es cambiar de modelo, de cuál a cuál (D-185). */
+  model_change: ModelChange | null;
 }
 
 /** Antes y después de marcar un hallazgo como arreglado, por ejecución (D-123). */
@@ -318,6 +320,12 @@ export interface FixCheck {
   verdict: "pendiente" | "arreglado" | "mejor" | "sigue";
   headline: string;
   cost_is_floor: boolean;
+}
+
+/** El cambio de modelo que propone un hallazgo, cuando lo hay (D-185). */
+export interface ModelChange {
+  from: string;
+  to: string;
 }
 
 export interface FindingDetail extends Finding {
@@ -834,6 +842,17 @@ export interface CustomerMargin {
 }
 
 /** La conexión con Stripe de un proyecto (D-162). La clave nunca viene entera. */
+/** El repositorio del bot de pull requests (D-185). El token no vuelve nunca entero. */
+export interface GitHubStatus {
+  configured: boolean;
+  repo: string;
+  base_branch: string;
+  auth: "" | "app" | "token";
+  token_hint: string;
+  installation_id: number | null;
+  app_available: boolean;
+}
+
 export interface StripeStatus {
   configured: boolean;
   key_hint: string;

@@ -24,7 +24,10 @@ dependencies = [
 [project.optional-dependencies]
 # Los almacenes de la nube. El modo local corre sobre SQLite, que viene con Python, y
 # no debe pagar por drivers que no usa (D-068). El despliegue instala `[cloud]`.
-cloud = ["clickhouse-connect>=0.7", "psycopg[binary,pool]>=3.1"]
+cloud = ["clickhouse-connect>=0.7", "psycopg[binary,pool]>=3.1", "cryptography>=42"]
+# Firmar como GitHub App (el bot de PR, D-185) es RS256, que la biblioteca estándar no
+# hace. Va con la nube, que es donde vive la App; en local basta un token del usuario.
+github = ["cryptography>=42"]
 # `httpx2` lo pide el TestClient de Starlette para montar la app en memoria, y los dos
 # SDK de proveedor están aquí porque `test_proveedores_reales.py` los usa DE VERDAD:
 # cliente real, parseo real, lector de SSE real, con el transporte HTTP falseado. Si no
@@ -43,6 +46,7 @@ dev = [
     "anthropic>=0.30",
     # La clase base de los instrumentadores ajenos, para probar que se les cede (D-141).
     "opentelemetry-instrumentation>=0.50b0",
+    "cryptography>=42",
 ]
 
 [tool.pytest.ini_options]

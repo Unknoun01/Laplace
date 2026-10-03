@@ -174,6 +174,7 @@ Todo se puede fijar por entorno, para no tener que tocar el código en cada desp
 | `LAPLACE_SAMPLE_RATE`      | `1`                     | Fracción de trazas normales que se guarda.      |
 | `LAPLACE_SAMPLE_KEEP_TOKENS` | `20000`               | Desde aquí, la traza se guarda siempre.         |
 | `LAPLACE_SAMPLE_KEEP_MS`   | —                       | Ídem por duración.                              |
+| `LAPLACE_CAPTURE_CODE_LOCATION` | `true`             | Anota el fichero y la línea de cada llamada al modelo (ruta relativa al repositorio), para proponer el arreglo en el código. |
 
 En scripts cortos, llama a `laplace.flush()` antes de salir (o deja que lo haga el
 `atexit` que registra `init()`).

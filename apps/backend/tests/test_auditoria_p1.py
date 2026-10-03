@@ -77,6 +77,12 @@ def test_alerts_sin_proyecto_sólo_lista_los_que_ve_la_clave(cerrado):
             {"json": {"project_id": "mio", "generic_webhook_url": "https://atacante.example/x"}},
         ),
         ("post", "/api/alert-settings/test", {"params": {"project_id": "mio"}}),
+        # Un token que escribe en el repositorio de alguien (D-185).
+        (
+            "put",
+            "/api/github",
+            {"json": {"project_id": "mio", "repo": "atacante/repo", "token": "ghp_x"}},
+        ),
     ],
 )
 def test_la_clave_de_un_proyecto_no_hace_escrituras_de_admin(cerrado, metodo, ruta, kwargs):

@@ -1036,6 +1036,26 @@ export const es = {
   "cl.stripe.traer": "Traer de Stripe",
   "cl.stripe.quitar": "Quitar la clave",
   "cl.stripe.fuente": "Stripe",
+  // Bot de pull requests (D-185).
+  "aj.gh.titulo": "Pull requests en GitHub",
+  "aj.gh.lead": "Laplace puede proponer el arreglo de un problema como pull request en tu repositorio: hoy, cambiar de modelo en la llamada exacta. Nunca escribe en la rama principal; fusionar es cosa tuya.",
+  "aj.gh.puesto_app": "Conectado a {repo} con la GitHub App (instalación {n}).",
+  "aj.gh.puesto_token": "Conectado a {repo} con un token ({pista}).",
+  "aj.gh.repo": "Repositorio (dueño/nombre)",
+  "aj.gh.rama": "Rama base (vacía: la principal)",
+  "aj.gh.instalacion": "Número de instalación de la GitHub App",
+  "aj.gh.token": "Token con permiso de contenido y pull requests",
+  "aj.gh.guardar": "Guardar",
+  "aj.gh.quitar": "Desconectar",
+  "aj.gh.guardado": "Guardado.",
+  "aj.gh.quitado": "Desconectado. El token se ha borrado.",
+  "aj.gh.error": "No se ha podido guardar.",
+  "prob.pr.titulo": "Proponerlo en el código",
+  "prob.pr.lead": "Un pull request que cambia {de} por {a} en la llamada de este paso. Lo revisas y lo fusionas tú.",
+  "prob.pr.conectar": "Conecta un repositorio de GitHub en Ajustes para proponerlo.",
+  "prob.pr.abierto": "Pull request abierto: ábrelo en GitHub",
+  "prob.pr.abrir": "Abrir pull request en {repo}",
+  "prob.pr.error": "No se ha podido abrir el pull request.",
 } as const;
 
 export type Clave = keyof typeof es;

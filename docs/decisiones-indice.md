@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 185 decisiones.
+final. 186 decisiones.
 
 ## Coste, precios y caché
 
@@ -73,6 +73,7 @@ final. 185 decisiones.
 - [D-180](../DECISIONS.md#d-180--diagnóstico-con-modelo-que-cita-los-spans-de-los-que-sale) — Diagnóstico con modelo, que cita los spans de los que sale
 - [D-183](../DECISIONS.md#d-183--las-medianas-del-uso-por-paso-la-misma-cuenta-en-los-dos-almacenes-y-una-llamada-con-respuesta-y-sin-recuento-ya-no-sale-gratis) — Las medianas del uso por paso, la misma cuenta en los dos almacenes; y una llamada con respuesta y sin recuento ya no sale gratis
 - [D-184](../DECISIONS.md#d-184--un-límite-de-gasto-y-de-bucles-en-el-sdk-con-la-misma-cuenta-que-la-traza) — Un límite de gasto y de bucles en el SDK, con la misma cuenta que la traza
+- [D-185](../DECISIONS.md#d-185--el-arreglo-del-modelo-caro-propuesto-como-pull-request-en-el-repositorio-del-usuario) — El arreglo del modelo caro, propuesto como pull request en el repositorio del usuario
 
 ## Probar: evaluaciones, juez y replay
 
@@ -597,3 +598,7 @@ final. 185 decisiones.
 **2026-10-03 — `laplace.guard`: cortar la ejecución mientras pasa**
 
 - [D-184](../DECISIONS.md#d-184--un-límite-de-gasto-y-de-bucles-en-el-sdk-con-la-misma-cuenta-que-la-traza) — Un límite de gasto y de bucles en el SDK, con la misma cuenta que la traza
+
+**2026-10-03 — El bot de pull requests**
+
+- [D-185](../DECISIONS.md#d-185--el-arreglo-del-modelo-caro-propuesto-como-pull-request-en-el-repositorio-del-usuario) — El arreglo del modelo caro, propuesto como pull request en el repositorio del usuario
