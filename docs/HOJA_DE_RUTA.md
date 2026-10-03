@@ -87,7 +87,11 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
 ### Siguiente: funciones diferenciales (confirmar el orden con el usuario)
 - **Replay contrafactual, más allá** (lo básico está hecho, D-167): llamadas con herramientas (habría que simular sus resultados con los grabados, sin ejecutarlas), imágenes y bloques entre proveedores, y un botón en la versión local que lo lance sin copiar la orden.
 - **Bot de pull requests, más allá** (lo básico está hecho, D-185: el cambio de modelo, con la línea que anota el SDK): `cache_control`, límites de iteraciones y el resto de arreglos que no son una línea, escritos con el modelo del diagnóstico y comprobados (que el fichero siga compilando, que el cambio quede cerca de la llamada). Y un webhook de la App para enterarse de cuándo se fusiona y marcar el hallazgo como arreglado solo.
-- **Plano de control** (sección 1), empezando por el grafo del agente de todo el proyecto.
+- **Plano de control — confirmado con el usuario el 2026-10-03, siguiente fase:**
+  - **Tope y parada desde la interfaz.** Por proyecto: tope de gasto por ejecución, bucles y un botón de parada. El SDK los aplica con `laplace.guard` (D-184): lo puesto en Laplace se suma a lo del código y manda el más estricto.
+  - **El SDK pregunta cada 30 s**, en segundo plano, por las reglas del proyecto, con la copia guardada como `get_prompt`. **Si Laplace no responde y no hay copia, el agente sigue sin reglas**: nunca se cae un agente porque Laplace esté caído.
+  - **Grafo del proyecto, sólo lectura:** el agente entero (pasos, modelos, coste por arista) sumando las trazas; hoy existe por traza (D-153).
+  - Fuera de la primera versión, por decisión del usuario: modelo por paso desde la interfaz y repartos A/B.
 - **Reglas nuevas** (cada una entra por `detect()` y `detail()`, con su prueba de catálogo):
   - lecturas de caché que se pagan (OpenAI);
   - caché semántica (prompts casi iguales);
