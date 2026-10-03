@@ -34,3 +34,5 @@ Thumbs.db
 packages/sdk-python/laplace/ui/
 apps/web/out/
 graphify-out/
+# La base del banco de agentes de Node: se crea al pasarlo y se tira.
+scripts/integraciones_js/banco.db*

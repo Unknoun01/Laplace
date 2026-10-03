@@ -293,31 +293,39 @@ LIMIT :limit
 
 #: Medianas por (paso, modelo): duración y tokens de salida. Va aparte de `MODEL_USAGE_SQL` porque
 #: SQLite no trae percentiles y hay que sacarla ordenando: se numeran las filas del
-#: grupo y se toma la de en medio (las dos de en medio si el grupo es par).
+#: grupo y se toma la que coge `quantileExact(0.5)` en ClickHouse, la fila `n / 2 + 1`
+#: (con un número par, la de arriba de las dos del medio).
+#:
+#: **Cada mediana con su propio orden.** La de la salida se sacaba de las filas ordenadas
+#: por duración —la salida de la llamada mediana en tiempo, no la mediana de las
+#: salidas—, y con un número par se hacía la media de las dos del medio: ninguna de las
+#: dos era la cuenta de la nube (D-183).
 MEDIAN_DURATION_SQL = f"""
-WITH ordenadas AS (
+WITH grupo AS (
     SELECT
         CASE WHEN step_key != '' THEN step_key ELSE name END AS paso_clave,
-        request_model,
-        duration_ms,
-        output_tokens,
-        ROW_NUMBER() OVER (
-            PARTITION BY CASE WHEN step_key != '' THEN step_key ELSE name END, request_model
-            ORDER BY duration_ms, span_id
-        ) AS fila,
-        COUNT(*) OVER (
-            PARTITION BY CASE WHEN step_key != '' THEN step_key ELSE name END, request_model
-        ) AS n
+        request_model, span_id, duration_ms, output_tokens
     FROM spans
     WHERE {RULES_WHERE} AND span_type = 'llm' AND request_model != '' AND status != 'error'
+),
+ordenadas AS (
+    SELECT
+        paso_clave, request_model, duration_ms, output_tokens,
+        ROW_NUMBER() OVER (
+            PARTITION BY paso_clave, request_model ORDER BY duration_ms, span_id
+        ) AS fila_duracion,
+        ROW_NUMBER() OVER (
+            PARTITION BY paso_clave, request_model ORDER BY output_tokens, span_id
+        ) AS fila_salida,
+        COUNT(*) OVER (PARTITION BY paso_clave, request_model) AS n
+    FROM grupo
 )
 SELECT
     paso_clave,
     request_model,
-    AVG(duration_ms)   AS mediana,
-    AVG(output_tokens) AS mediana_salida
+    MAX(CASE WHEN fila_duracion = n / 2 + 1 THEN duration_ms END)  AS mediana,
+    MAX(CASE WHEN fila_salida = n / 2 + 1 THEN output_tokens END)  AS mediana_salida
 FROM ordenadas
-WHERE fila IN ((n + 1) / 2, (n + 2) / 2)
 GROUP BY paso_clave, request_model
 """
 
