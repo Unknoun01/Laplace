@@ -4313,3 +4313,27 @@ casa una sola vez y por tramos enteros, el PR ya abierto, la regla de `site-pack
 el permiso de admin) y en todos falla alguna; la de `site-packages` no mordía, porque
 el entorno virtual ya cae en las rutas de `sysconfig`, y tiene ahora su prueba con un
 paquete instalado fuera.
+
+## 2026-10-03 — Los preagregados, fuera de UTC
+
+### D-186 — Las horas de los preagregados se apuntan con su zona: fuera de UTC no se daban nunca por calculadas
+`clickhouse-connect` lee una fecha sin zona como hora **local** del ordenador que inserta,
+y devuelve `now64()` sin zona aunque sea UTC. `marcar` y `recalcular` (D-177) le quitaban
+la zona a la hora y le pasaban el `calculado` tal cual vino. En un servidor en UTC no se
+nota, y por eso no saltó en la nube; en este portátil, en Madrid, las dos quedaban dos
+horas antes. Con eso, el `calculado` de `pre_horas` era siempre anterior a la marca de
+sucia, ninguna hora salía de pendientes y `_calcular_todo` daba vueltas sin fin: la suite
+se quedaba horas en `test_preagregados.py`, recalculando cada hora cuarenta veces. Y lo
+leído tampoco cuadraba, porque la lectura busca los parciales por ese `calculado`.
+
+Ahora las dos inserciones llevan la zona (`hora_de(h)` ya es UTC; el `calculado`, con
+`_utc`). Los despliegues en contenedor corren en UTC y no se ven afectados; una base de
+ClickHouse rellenada desde un ordenador fuera de UTC tiene horas mal apuntadas, y lo
+limpio es volver a ensuciarlo todo para que se recalcule con la cuenta buena:
+`INSERT INTO pre_sucias (project_id, hora) SELECT DISTINCT project_id,
+toStartOfHour(start_time) FROM spans`, lo mismo que hace `marcar_todo_si_nuevo` en una
+instalación nueva.
+
+Pruebas en `test_preagregados.py`: una con un cliente que apunta lo que se le inserta, que
+no depende de la zona del ordenador (en rojo antes del arreglo en cualquier sitio), y una
+contra ClickHouse que exige que calcular lo pendiente se acabe (en rojo aquí antes).

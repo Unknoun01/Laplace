@@ -291,7 +291,9 @@ def marcar(client: Any, horas: set[tuple[str, datetime]]) -> None:
         return
     client.insert(
         "pre_sucias",
-        [[proyecto, hora_de(h).replace(tzinfo=None)] for proyecto, h in sorted(horas)],
+        # Con su zona: una fecha sin ella, el driver la lee como hora local del ordenador
+        # que inserta, y fuera de UTC la hora quedaba desplazada (D-186).
+        [[proyecto, hora_de(h)] for proyecto, h in sorted(horas)],
         column_names=["project_id", "hora"],
         # Como los spans: una parte por lote de la ingesta ahogaría las fusiones. La marca
         # la pone el servidor al escribir el lote, que es después de los spans.
@@ -322,7 +324,9 @@ def recalcular(client: Any, project_id: str, hora: datetime) -> None:
     # Lo último: hasta aquí se sigue leyendo el cálculo anterior, entero.
     client.insert(
         "pre_horas",
-        [[project_id, hora.replace(tzinfo=None), calculado]],
+        # El driver devuelve `now64()` sin zona aunque sea UTC: se le pone antes de volver a
+        # escribirlo, o fuera de UTC el cálculo quedaba horas por detrás de su marca (D-186).
+        [[project_id, hora, _utc(calculado)]],
         column_names=["project_id", "hora", "calculado"],
     )
 

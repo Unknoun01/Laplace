@@ -275,3 +275,59 @@ def test_la_hora_en_curso_no_se_recalcula_mientras_llegan_datos(almacenes):
     assert clickhouse.preagregados.hora_de(ahora) not in pendientes, "la que se está llenando, no"
     quieta = {h for _, h in clickhouse.preagregados.pendientes(pre._client, quieta_s=0)}
     assert clickhouse.preagregados.hora_de(ahora) in quieta, "cuando se queda quieta, sí"
+
+
+class _ClienteQueApunta:
+    """Lo justo de `clickhouse-connect` para ver qué se le pasa al insertar."""
+
+    def __init__(self, ahora: datetime) -> None:
+        self.ahora = ahora
+        self.filas: dict[str, list] = {}
+
+    def insert(self, tabla, filas, column_names, **_):
+        self.filas[tabla] = filas
+
+    def query(self, sql, parameters=None):
+        # El driver devuelve `now64()` sin zona, aunque sea UTC.
+        filas = [[self.ahora.replace(tzinfo=None)]] if "now64" in sql else []
+        return type("R", (), {"result_rows": filas})()
+
+    def command(self, *_, **__):
+        pass
+
+
+def test_las_horas_se_apuntan_en_utc_y_no_en_la_hora_del_ordenador():
+    """El driver lee una fecha sin zona como hora LOCAL del ordenador que inserta. En un
+    servidor en UTC da igual; en uno en Madrid, la hora y el cálculo quedaban dos horas
+    antes. Ninguna hora llegaba a darse por calculada —el bucle de recalcular no acababa
+    nunca— y las lecturas no casaban el cálculo con sus parciales. Por eso se le pasan
+    con su zona: no depende de dónde corra."""
+    from laplace_backend.storage import preagregados
+
+    ahora = datetime(2026, 10, 3, 13, 46, 30, 726000, tzinfo=timezone.utc)
+    cliente = _ClienteQueApunta(ahora)
+    hora = datetime(2026, 9, 26, 10, 0, tzinfo=timezone.utc)
+
+    preagregados.marcar(cliente, {("p", hora + timedelta(minutes=15))})
+    assert cliente.filas["pre_sucias"] == [["p", hora]]
+    assert cliente.filas["pre_sucias"][0][1].tzinfo is not None
+
+    preagregados.recalcular(cliente, "p", hora)
+    _, apuntada, calculado = cliente.filas["pre_horas"][0]
+    assert (apuntada, calculado) == (hora, ahora)
+    assert apuntada.tzinfo is not None and calculado.tzinfo is not None
+
+
+def test_calcular_lo_pendiente_se_acaba(almacenes):
+    """Calculada una hora, deja de estar pendiente. Con el desfase de arriba no dejaba
+    de estarlo nunca, y `_calcular_todo` daba vueltas para siempre."""
+    pre, _ = almacenes
+    traza = uuid.uuid4().hex
+    inicio = datetime(2026, 9, 20, 10, 0, tzinfo=timezone.utc)
+    pre.insert_spans(
+        [_llamada("fin", traza, inicio + timedelta(minutes=m), f"m{m}") for m in (5, 65, 125)]
+    )
+    vueltas = 0
+    while pre.recalcular_preagregados(limite=500, quieta_s=0):
+        vueltas += 1
+        assert vueltas < 3, "lo calculado vuelve a salir como pendiente"

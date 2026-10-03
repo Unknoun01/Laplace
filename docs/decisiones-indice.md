@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 186 decisiones.
+final. 187 decisiones.
 
 ## Coste, precios y caché
 
@@ -602,3 +602,7 @@ final. 186 decisiones.
 **2026-10-03 — El bot de pull requests**
 
 - [D-185](../DECISIONS.md#d-185--el-arreglo-del-modelo-caro-propuesto-como-pull-request-en-el-repositorio-del-usuario) — El arreglo del modelo caro, propuesto como pull request en el repositorio del usuario
+
+**2026-10-03 — Los preagregados, fuera de UTC**
+
+- [D-186](../DECISIONS.md#d-186--las-horas-de-los-preagregados-se-apuntan-con-su-zona-fuera-de-utc-no-se-daban-nunca-por-calculadas) — Las horas de los preagregados se apuntan con su zona: fuera de UTC no se daban nunca por calculadas

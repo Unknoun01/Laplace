@@ -34,7 +34,7 @@ ingesta OTLP, reglas en `insights/`, almacenes en `storage/`), `apps/web` (Next.
   muerde rompiendo el código a propósito.
 - Cada cambio con criterio lleva su `D-xxx` al final de `DECISIONS.md`, y después
   `python scripts/indice_decisiones.py` (una prueba exige el índice al día). La siguiente
-  libre: **D-184** (compruébalo en `origin/master`).
+  libre: **D-187** (compruébalo en `origin/master`).
 - Los commits terminan con `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - Al cerrar una fase: la hoja de ruta y `STATUS.md` al día.
 
@@ -55,6 +55,8 @@ Paridad entre SQLite y ClickHouse. El dinero se formatea sólo en `cifras.py` y
 - Nube: `docker compose up -d clickhouse postgres` (sin ellos, unas 90 pruebas se saltan).
 - Web: `cd apps/web && npx tsc --noEmit`; tras tocarla, `.venv/Scripts/python.exe
   scripts/build_ui.py` (las pruebas de pantalla prueban `apps/web/out`).
+- Si Ollama está abierto en `localhost:11434`, las pruebas de `test_modelo_local.py` generan
+  de verdad y la suite tarda bastante más; no está colgada.
 - Carga: `scripts/carga.py`. **Nunca a la vez que la suite** y con poco volumen en este
   portátil (15 GB): 80 millones de spans tumbaron Docker y dejaron partes rotas en
   ClickHouse. Después, `--borrar`.
