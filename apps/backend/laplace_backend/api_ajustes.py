@@ -12,7 +12,9 @@ pide que quien llama la vea entera, que en local es cualquiera y en la nube el o
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -810,6 +812,9 @@ async def put_github(request: Request, body: GitHubIn) -> github_bot.GitHubStatu
         raise HTTPException(status_code=422, detail=t("github.repo_invalido"))
     ajustes = await run_in_threadpool(github_bot.leer, meta, body.project_id)
     ajustes.update(repo=repo, base_branch=body.base_branch.strip())
+    # Para el aviso de GitHub al fusionar (D-191). Se genera una vez y se conserva: si
+    # cambiase al guardar otra cosa, el webhook ya puesto en GitHub dejaría de valer.
+    ajustes.setdefault("webhook_secret", github_bot.nuevo_secreto())
     token = (body.token or "").strip()
     if body.installation_id:
         if not github_bot.app_disponible():
@@ -823,6 +828,109 @@ async def put_github(request: Request, body: GitHubIn) -> github_bot.GitHubStatu
         raise HTTPException(status_code=422, detail=t("github.sin_credencial"))
     await run_in_threadpool(_guard, meta.set_setting, body.project_id, github_bot.CLAVE, ajustes)
     return await run_in_threadpool(github_bot.estado, meta, body.project_id)
+
+
+@router.post("/github/webhook")
+async def github_webhook(request: Request) -> dict[str, Any]:
+    """El aviso de GitHub cuando se cierra un pull request (D-191).
+
+    No pide clave de Laplace —está en `PUBLIC_PATHS`, porque la llama GitHub—: lo que la
+    cierra es la firma del cuerpo. Vale el secreto de la GitHub App de la instalación o el
+    del proyecto que tenga conectado ese repositorio, y sólo para ese proyecto. Antes de
+    comprobar la firma no se hace nada con lo que dice el cuerpo salvo buscar el
+    repositorio, que es lo que dice qué secretos probar.
+    """
+    cuerpo = await request.body()
+    firma = request.headers.get("X-Hub-Signature-256", "")
+    evento = request.headers.get("X-GitHub-Event", "")
+    try:
+        datos = json.loads(cuerpo or b"{}")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=t("github.webhook_cuerpo")) from exc
+    repo = str((datos.get("repository") or {}).get("full_name") or "").lower()
+    proyectos = await run_in_threadpool(_proyectos_del_repo, request, repo)
+    secreto_app = os.environ.get(github_bot.ENV_WEBHOOK_SECRET, "")
+    validos = [
+        p
+        for p, ajustes in proyectos
+        if github_bot.firma_valida(cuerpo, firma, secreto_app)
+        or github_bot.firma_valida(cuerpo, firma, ajustes.get("webhook_secret") or "")
+    ]
+    if not validos:
+        raise HTTPException(status_code=401, detail=t("github.webhook_firma"))
+    if evento == "ping":
+        return {"ok": True, "projects": len(validos)}
+    if evento != "pull_request" or datos.get("action") != "closed":
+        return {"ignored": evento or "?", "fixed": []}
+    pr = datos.get("pull_request") or {}
+    arreglados = []
+    for project_id in validos:
+        arreglados += await run_in_threadpool(_pr_cerrado, _meta(request), project_id, pr)
+    return {"fixed": arreglados}
+
+
+def _proyectos_del_repo(request: Request, repo: str) -> list[tuple[str, dict[str, Any]]]:
+    """Los proyectos de esta instalación con ese repositorio conectado."""
+    if not repo:
+        return []
+    meta = _meta(request)
+    salida = []
+    for proyecto in _store(request).list_projects():
+        ajustes = github_bot.leer(meta, proyecto.project_id)
+        if str(ajustes.get("repo") or "").lower() == repo:
+            salida.append((proyecto.project_id, ajustes))
+    return salida
+
+
+def _pr_cerrado(meta: Any, project_id: str, pr: dict[str, Any]) -> list[str]:
+    """Apunta cómo acabó el PR de Laplace y, si se fusionó, marca su hallazgo arreglado.
+
+    El PR se reconoce por su número **y** por su rama (`rama_para`), cuando GitHub la
+    manda: un número suelto puede ser de otro PR si el repositorio se recreó. Lo que el
+    usuario ignoró sigue ignorado. La hora es la de la fusión, no la de llegada del aviso:
+    es la frontera desde la que el seguimiento mide si ha servido.
+    """
+    numero = pr.get("number")
+    rama = str((pr.get("head") or {}).get("ref") or "")
+    fusionado = bool(pr.get("merged"))
+    momento = str(pr.get("merged_at") or datetime.now(timezone.utc).isoformat())
+    if momento.endswith("Z"):
+        momento = momento[:-1] + "+00:00"
+    arreglados = []
+    for clave_pr, guardado in _guard(
+        meta.list_settings, project_id, github_bot.PREFIJO_PR
+    ).items():
+        finding_id = clave_pr[len(github_bot.PREFIJO_PR) :]
+        if guardado.get("number") != numero:
+            continue
+        if rama and rama != github_bot.rama_para(finding_id):
+            continue
+        _guard(
+            meta.set_setting,
+            project_id,
+            clave_pr,
+            {**guardado, "state": "merged" if fusionado else "closed", "closed_at": momento},
+        )
+        if not fusionado:
+            continue
+        actual = _guard(meta.get_setting, project_id, clave(finding_id)) or {}
+        if actual.get("status") == "ignorado":
+            continue
+        _guard(
+            meta.set_setting,
+            project_id,
+            clave(finding_id),
+            {
+                "status": "arreglado",
+                "at": momento,
+                "note": t("github.fusionado", numero=numero, url=pr.get("html_url") or ""),
+                "by": "github",
+            },
+        )
+        logger.info("hallazgo %s arreglado al fusionar el PR #%s — %s", finding_id, numero,
+                    project_id)
+        arreglados.append(finding_id)
+    return arreglados
 
 
 class PullRequestIn(BaseModel):

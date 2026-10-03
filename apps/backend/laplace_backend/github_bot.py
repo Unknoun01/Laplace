@@ -25,10 +25,12 @@ from __future__ import annotations
 import ast
 import base64
 import hashlib
+import hmac
 import json
 import logging
 import os
 import re
+import secrets
 import time
 import urllib.error
 import urllib.parse
@@ -87,6 +89,12 @@ class GitHubStatus(BaseModel):
     installation_id: int | None = None
     #: Si esta instalación de Laplace tiene GitHub App (id y clave en el entorno).
     app_available: bool = False
+    #: El secreto con el que GitHub firma los avisos de este repositorio (D-191). No es
+    #: una credencial de GitHub: sólo deja marcar como arreglado un hallazgo de este
+    #: proyecto, y eso lo vuelve a comprobar el seguimiento con las trazas.
+    webhook_secret: str = ""
+    #: Si la instalación tiene el secreto de la GitHub App (`LAPLACE_GITHUB_WEBHOOK_SECRET`).
+    app_webhook: bool = False
 
 
 # ---------------------------------------------------------------------------------
@@ -135,7 +143,30 @@ def estado(metadata: Any, project_id: str) -> GitHubStatus:
         token_hint=f"…{token[-4:]}" if token else "",
         installation_id=int(instalacion) if instalacion else None,
         app_available=app_disponible(),
+        webhook_secret=ajustes.get("webhook_secret") or "",
+        app_webhook=bool(os.environ.get(ENV_WEBHOOK_SECRET)),
     )
+
+
+# ---------------------------------------------------------------------------------
+# El aviso de GitHub al fusionar (D-191)
+# ---------------------------------------------------------------------------------
+
+#: El secreto de los avisos de la GitHub App: uno para toda la instalación de Laplace.
+ENV_WEBHOOK_SECRET = "LAPLACE_GITHUB_WEBHOOK_SECRET"
+
+
+def nuevo_secreto() -> str:
+    return secrets.token_hex(24)
+
+
+def firma_valida(cuerpo: bytes, firma: str, secreto: str) -> bool:
+    """`X-Hub-Signature-256`: HMAC-SHA256 del cuerpo tal cual llegó, comparado en tiempo
+    constante. Sin secreto no vale nada: un secreto vacío no puede firmar."""
+    if not secreto or not firma.startswith("sha256="):
+        return False
+    esperada = hmac.new(secreto.encode("utf-8"), cuerpo, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(esperada, firma.removeprefix("sha256="))
 
 
 # ---------------------------------------------------------------------------------
