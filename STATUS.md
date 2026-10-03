@@ -52,6 +52,9 @@ Lo que sostiene esas casillas, en concreto:
   hacer la llamada siguiente si la ejecución ha gastado de más o da vueltas sin avanzar,
   con la misma tabla de precios que la traza y la misma definición de bucle que el
   Diagnóstico (D-184).
+- **El arreglo, propuesto en el código**: desde la ficha del modelo caro, Laplace abre un
+  pull request con el cambio de modelo en la línea exacta de la llamada, que anota el
+  SDK; si el modelo no está escrito ahí, dice por qué no lo propone (D-185).
 - **La identidad de un paso no es su nombre**, sino desde dónde se llama y con qué
   instrucciones. Sin eso, las reglas mezclaban pasos distintos en cualquier código real.
 - **El modo local es el mismo producto**, no una versión recortada: hay un test que

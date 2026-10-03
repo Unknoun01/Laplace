@@ -188,6 +188,7 @@ def _modelo_caro_sin_tarifa(
         ],
         sample_trace_id=usage.sample_trace_id,
         step_key=usage.key,
+        model_change={"from": usage.model, "to": nombre_rapido},
     )
 
 
@@ -266,6 +267,7 @@ def _expensive_model_finding(
         ],
         sample_trace_id=usage.sample_trace_id,
         step_key=usage.key,
+        model_change={"from": usage.model, "to": price.alternative},
     )
 
 

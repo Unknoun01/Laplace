@@ -178,6 +178,7 @@ def record_request(
     # El camino entero, no sólo el padre. Se lee de la pila de `@observe`, que este span
     # todavía no ha tocado: abrir el span de LLM no apila nada (D-106).
     set_attr(span, semconv.LAPLACE_STEP_SITE, _pasos.camino() or enclosing)
+    record_code_location(span)
     set_attr(span, semconv.GEN_AI_SYSTEM, system)
     set_attr(span, semconv.GEN_AI_OPERATION_NAME, operation)
     set_attr(span, semconv.GEN_AI_REQUEST_MODEL, model)
@@ -195,6 +196,29 @@ def record_request(
         set_attr(span, semconv.GEN_AI_INPUT_MESSAGES, body)
 
     record_prompt(span, messages)
+
+
+def record_code_location(span: OtelSpan) -> None:
+    """El fichero y la línea del código del usuario que hace la llamada (D-185).
+
+    Va en `record_request`, por donde pasan todas las integraciones y `llm_span`: una
+    que lo anotase y otra que no dejaría al bot de PR sin sitio según el proveedor.
+    """
+    try:
+        if not get_config().capture_code_location:
+            return
+        from .._sitio import sitio_llamada
+
+        lugar = sitio_llamada()
+    except Exception:  # noqa: BLE001 - nunca romper la llamada del usuario
+        logger.debug("laplace: no se pudo anotar el sitio de la llamada", exc_info=True)
+        return
+    if lugar is None:
+        return
+    ruta, linea, funcion = lugar
+    set_attr(span, semconv.CODE_FILE_PATH, ruta)
+    set_attr(span, semconv.CODE_LINE_NUMBER, linea)
+    set_attr(span, semconv.CODE_FUNCTION_NAME, funcion)
 
 
 def record_prompt(span: OtelSpan, messages: Any) -> None:

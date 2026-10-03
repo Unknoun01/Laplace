@@ -156,3 +156,9 @@ SYSTEM_COHERE = "cohere"
 #: Etiqueta de la raíz de cada ejecución lanzada por `run_dataset`. El backend la usa
 #: para que un experimento hecho a propósito no salga como algo que arreglar (D-135).
 EVAL_TAG = "laplace-eval"
+
+# Desde dónde del código del usuario se llama al modelo (D-185). Los nombres son los de
+# las convenciones de OpenTelemetry; la ruta, relativa al repositorio (`_sitio.py`).
+CODE_FILE_PATH = "code.file.path"
+CODE_LINE_NUMBER = "code.line.number"
+CODE_FUNCTION_NAME = "code.function.name"

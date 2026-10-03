@@ -86,6 +86,9 @@ class LaplaceConfig:
     #: Si hay otro instrumentador de LLM activo (OpenInference, OpenLLMetry), no se
     #: traza la llamada: ya la traza él, y contarla dos veces duplicaría el gasto (D-141).
     defer_to_others: bool = True
+    #: Anota en cada llamada al modelo el fichero y la línea desde donde se hace, para
+    #: poder proponer el arreglo en el código (D-185). La ruta nunca es absoluta.
+    capture_code_location: bool = True
 
     headers: dict[str, str] = field(default_factory=dict)
 
@@ -116,6 +119,7 @@ class LaplaceConfig:
             debug=_env_bool("LAPLACE_DEBUG", False),
             disabled=_env_bool("LAPLACE_DISABLED", False),
             defer_to_others=_env_bool("LAPLACE_DEFER_TO_OTHERS", True),
+            capture_code_location=_env_bool("LAPLACE_CAPTURE_CODE_LOCATION", True),
             redact=_env_redact(),
             sample_rate=_env_float("LAPLACE_SAMPLE_RATE", 1.0),
             sample_keep_tokens=_env_int("LAPLACE_SAMPLE_KEEP_TOKENS", 20_000),

@@ -14,6 +14,7 @@ import { useApi } from "@/lib/useApi";
 import { Head, Repetitions, SpanAttributes, Markup } from "./tecnico";
 import { EstadoHallazgo } from "./seguimiento";
 import { Ciclo, versionesDelPrompt } from "./ciclo";
+import { PullRequest } from "./pull-request";
 import { tr } from "@/lib/i18n";
 import { t } from "@/lib/textos";
 
@@ -215,6 +216,10 @@ function Contenido() {
           (D-156). Marcar, ignorar y crear conjuntos es escribir: un lector no lo ve
           ofrecido (D-127). El backend lo rechazaría igual. */}
       <Ciclo project={project} finding={finding} query={query} escribir={permisos.escribir} />
+
+      {permisos.escribir && (
+        <PullRequest project={project} finding={finding} days={days} query={query} />
+      )}
 
       <VolverAVersion finding={finding} query={query} />
 

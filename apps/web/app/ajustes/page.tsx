@@ -24,6 +24,7 @@ import { Aviso } from "./aviso";
 import { Tarifas } from "./tarifas";
 import { Apariencia, Moneda } from "./preferencias";
 import { Alertas } from "./alertas";
+import { GitHub } from "./github";
 import { t } from "@/lib/textos";
 
 /**
@@ -76,6 +77,7 @@ function Contenido() {
       <fieldset className="sin-marco" disabled={!permisos.administrar}>
         <Presupuesto project={project} inicial={budget} />
         <Alertas project={project} inicial={alertas} />
+        <GitHub project={project} />
       </fieldset>
       <Tarifas inicial={precios} />
       <Apariencia />
