@@ -86,7 +86,6 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
 
 ### Siguiente: funciones diferenciales (confirmar el orden con el usuario)
 - **Replay contrafactual, más allá** (lo básico está hecho, D-167): llamadas con herramientas (habría que simular sus resultados con los grabados, sin ejecutarlas), imágenes y bloques entre proveedores, y un botón en la versión local que lo lance sin copiar la orden.
-- **`laplace.guard(max_usd_per_run, max_loop)`:** cortacircuitos en el SDK.
 - **Bot de pull requests** (GitHub App): cambio de modelo, `cache_control`, `max_iterations`. `step_site` dice dónde está el código.
 - **Plano de control** (sección 1), empezando por el grafo del agente de todo el proyecto.
 - **Reglas nuevas** (cada una entra por `detect()` y `detail()`, con su prueba de catálogo):

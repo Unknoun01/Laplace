@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import laplace.pricing
 import pytest
 
 from laplace_backend.pricing import (
@@ -23,7 +24,7 @@ from laplace_backend.pricing import (
     get_price_table,
 )
 
-PROPIA = Path(__file__).parents[1] / "laplace_backend" / "pricing" / "model_prices.json"
+PROPIA = Path(laplace.pricing.__file__).with_name("model_prices.json")
 
 
 def _tabla(tmp_path, modelos_litellm: dict, *, propia: dict | None = None) -> PriceTable:

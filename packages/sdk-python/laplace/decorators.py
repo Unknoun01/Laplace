@@ -14,7 +14,7 @@ from opentelemetry import trace as otel_trace
 from opentelemetry.trace import Span as OtelSpan
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
-from . import _pasos, semconv
+from . import _guardia, _pasos, semconv
 from ._tracer import get_config, get_tracer
 from .serialization import dumps
 
@@ -124,6 +124,18 @@ def _record_output(span: OtelSpan, span_type: str, value: Any) -> None:
         _set(span, semconv.LAPLACE_RETRIEVAL_DOCUMENTS, payload)
     else:
         _set(span, semconv.LAPLACE_OUTPUT, payload)
+
+
+def _vigilar(span_type: str, name: str, fn: Callable[..., Any], args: tuple, kwargs: dict) -> Any:
+    """Si hay un `laplace.guard` abierto, si este paso se puede ejecutar.
+
+    Dentro del span: si se corta, el corte queda como error de este paso en la traza. Los
+    argumentos se miran aunque no se capturen, porque el guard no los manda a ninguna
+    parte; y sólo con un guard abierto, porque emparejarlos cuesta.
+    """
+    if not _guardia.hay_alguno():
+        return None
+    return _guardia.antes(span_type, name, _bind_arguments(fn, args, kwargs))
 
 
 def _record_error(span: OtelSpan, exc: BaseException) -> None:
@@ -459,7 +471,9 @@ def observe(
                 ) as otel_span:
                     if capture_input:
                         _record_input(otel_span, type, _bind_arguments(fn, args, kwargs))
+                    vuelta = _vigilar(type, span_name, fn, args, kwargs)
                     result = await fn(*args, **kwargs)
+                    _guardia.despues(vuelta, result)
                     if capture_output:
                         _record_output(otel_span, type, result)
                     return result
@@ -478,7 +492,9 @@ def observe(
             ) as otel_span:
                 if capture_input:
                     _record_input(otel_span, type, _bind_arguments(fn, args, kwargs))
+                vuelta = _vigilar(type, span_name, fn, args, kwargs)
                 result = fn(*args, **kwargs)
+                _guardia.despues(vuelta, result)
                 if capture_output:
                     _record_output(otel_span, type, result)
                 return result

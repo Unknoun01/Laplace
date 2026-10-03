@@ -38,6 +38,17 @@ perder dinero.
 emite los mismos atributos que las integraciones automáticas, y el coste se calcula
 igual.
 
+**Un límite por ejecución.** Para que un agente no gaste más de la cuenta ni se quede
+dando vueltas:
+
+```python
+with laplace.guard(max_usd_per_run=0.50, max_loop=5):
+    agente.run(pregunta)
+```
+
+Si se pasa, la llamada siguiente no se hace y salta `laplace.GuardExceeded`. El bucle es
+el mismo que señala el Diagnóstico: el mismo paso, con la misma entrada, sin avanzar.
+
 ## TypeScript y Node
 
 Todavía no hay SDK de Laplace para Node, y no hace falta: la ingesta entiende

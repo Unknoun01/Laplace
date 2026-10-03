@@ -129,7 +129,7 @@ Controles:
 
 El coste **no lo calcula el SDK** (quedaría congelado en la versión instalada por el
 usuario). Se calcula en la ingesta a partir de `gen_ai.request.model` + tokens, contra la
-tabla de precios del backend (`apps/backend/laplace_backend/pricing/model_prices.json`).
+tabla de precios (`packages/sdk-python/laplace/pricing/model_prices.json`, la misma para la ingesta y para `laplace.guard`).
 
 Se guarda **desglosado por span**:
 

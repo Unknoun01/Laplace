@@ -112,6 +112,30 @@ esas mismas llamadas, y la del modelo nuevo. Si el juez de Laplace está encendi
 juzga cada respuesta contra la que dio el original. Desde Python:
 `laplace.replay_dataset("ab-3f9c2e1a", model="gpt-5.6-luna", max_usd=1)`.
 
+### Cortar una ejecución que se va de madre
+
+```python
+with laplace.guard(max_usd_per_run=0.50, max_loop=5):
+    agente.run(pregunta)
+```
+
+Antes de cada llamada al modelo y de cada paso de `@observe`, comprueba los límites; si
+se ha pasado alguno, la llamada **no se hace** y se lanza `laplace.GuardExceeded`, que
+queda en la traza como el error del paso. También como decorador
+(`@laplace.guard(max_usd_per_run=0.50)`, cada llamada es una ejecución) y con
+`async with`.
+
+- **`max_usd_per_run`:** lo gastado en el bloque, con la misma tabla y la misma cuenta
+  que el coste de la traza. La llamada que cruza el límite ya está pagada; se corta la
+  siguiente.
+- **`max_loop`:** cuántas veces puede repetirse el mismo paso con la misma entrada (sin
+  mirar los números) **sin avanzar**, es decir, con dos salidas distintas como mucho. Un
+  paso que procesa seis pedidos distintos no se corta.
+- Un modelo sin tarifa no cuenta como gratis: queda en `g.unknown_cost_models` y se avisa
+  por el log. Dale tarifa con `LAPLACE_PRICES_EXTRA`.
+- Al acabar, `g.spent_usd` y `g.exceeded`. Cortada una vez, el resto del bloque sigue
+  cortado aunque el agente capture la excepción.
+
 ### Datos personales y muestreo
 
 ```python

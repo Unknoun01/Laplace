@@ -151,6 +151,14 @@ def span_name(operation: str, model: str | None) -> str:
     return f"{operation} {model}" if model else operation
 
 
+def vigilar(model: str | None, messages: Any, operation: str = semconv.OPERATION_CHAT) -> Any:
+    """Antes de abrir el span de una llamada al modelo: si un `laplace.guard` la corta,
+    lanza y la llamada ni se hace ni se abre. Lo que devuelve va a `record_request`."""
+    from .._guardia import antes
+
+    return antes(semconv.SPAN_TYPE_LLM, span_name(operation, model), messages)
+
+
 def record_request(
     span: OtelSpan,
     *,
@@ -160,7 +168,11 @@ def record_request(
     kwargs: dict[str, Any],
     operation: str = semconv.OPERATION_CHAT,
     enclosing: str | None = None,
+    vuelta: Any = None,
 ) -> None:
+    from .._guardia import vincular
+
+    vincular(span, vuelta)
     set_attr(span, semconv.LAPLACE_SPAN_TYPE, semconv.SPAN_TYPE_LLM)
     set_attr(span, semconv.LAPLACE_STEP_PARENT, enclosing)
     # El camino entero, no sólo el padre. Se lee de la pila de `@observe`, que este span
@@ -283,6 +295,9 @@ def record_response(
     finish_reasons: list[str] | None,
     messages: Any,
 ) -> None:
+    from .._guardia import salida_de_span
+
+    salida_de_span(span, messages)
     set_attr(span, semconv.GEN_AI_RESPONSE_MODEL, model)
     set_attr(span, semconv.GEN_AI_RESPONSE_ID, response_id)
     if finish_reasons:

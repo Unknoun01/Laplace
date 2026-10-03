@@ -348,7 +348,7 @@ Lo que todavía **no** hay: entrar con Google/GitHub (SSO) ni verificación de e
 
 ## Los precios
 
-`apps/backend/laplace_backend/pricing/model_prices.json` lleva versión, y cada modelo
+`packages/sdk-python/laplace/pricing/model_prices.json` lleva versión, y cada modelo
 declara de qué fuente oficial salen sus números y cuándo se verificó.
 
 **La tabla caduca, y rápido.** No es una formalidad: el 30 de julio de 2026 OpenAI

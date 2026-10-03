@@ -37,7 +37,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if git diff --quiet -- apps/backend/laplace_backend/pricing/litellm_prices.json; then
+          if git diff --quiet -- packages/sdk-python/laplace/pricing/litellm_prices.json; then
             echo "La capa no ha cambiado."
             exit 0
           fi
@@ -45,7 +45,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -c "$rama"
-          git add apps/backend/laplace_backend/pricing/litellm_prices.json
+          git add packages/sdk-python/laplace/pricing/litellm_prices.json
           git commit -m "Precios: capa de LiteLLM del $(date +%Y-%m-%d)"
           git push origin "$rama"
           gh pr create --base master --head "$rama" \

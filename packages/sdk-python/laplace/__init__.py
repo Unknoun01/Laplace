@@ -13,6 +13,7 @@ Y si los prompts los gestiona Laplace, `laplace.get_prompt("nombre")` los sirve 
 escrito en cada traza con qué versión se ejecutó.
 """
 
+from ._guardia import GuardExceeded, guard
 from ._tracer import flush, get_config, init, is_enabled, shutdown
 from .decorators import (
     get_current_trace_id,
@@ -29,6 +30,7 @@ from .version import __version__
 
 __all__ = [
     "Case",
+    "GuardExceeded",
     "PromptError",
     "ReplayResult",
     "RunResult",
@@ -39,6 +41,7 @@ __all__ = [
     "get_config",
     "get_current_trace_id",
     "get_prompt",
+    "guard",
     "init",
     "is_enabled",
     "llm_span",
