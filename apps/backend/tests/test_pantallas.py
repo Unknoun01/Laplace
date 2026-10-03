@@ -928,3 +928,47 @@ def test_ajustes_para_reanuda_y_pone_topes(servidor, navegador):
             )
         ).read()
         pagina.close()
+
+
+def test_el_bucle_ofrece_un_pr_con_tope_y_ajustes_ensena_el_webhook(servidor, navegador):
+    """D-190 y D-191: la ficha de un bucle ofrece el PR del tope, y con el repositorio
+    conectado, Ajustes dice qué poner en GitHub para que avise al fusionar."""
+    with urllib.request.urlopen(f"{servidor}/api/overview?project_id=demo&days=30") as r:
+        hallazgos = json.load(r)["findings"]
+    bucle = next(h for h in hallazgos if h["kind"] == "bucle")
+    assert bucle["code_fix"] == "tope"
+    pagina, errores = _abrir(
+        navegador,
+        f"{servidor}/problema/?project=demo&days=30&id={urllib.parse.quote(bucle['id'])}",
+        "escritorio",
+    )
+
+    def poner_github(cuerpo: dict) -> dict:
+        peticion = urllib.request.Request(
+            servidor + "/api/github",
+            data=json.dumps({"project_id": "demo", **cuerpo}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="PUT",
+        )
+        with urllib.request.urlopen(peticion) as r:
+            return json.loads(r.read())
+
+    try:
+        pr = pagina.locator("section.prob-pr")
+        pr.wait_for(timeout=15_000)
+        assert "laplace.guard(max_loop=4)" in pr.inner_text()
+
+        secreto = poner_github({"repo": "acme/agentes", "token": "tok-de-prueba"})[
+            "webhook_secret"
+        ]
+        pagina.goto(servidor + "/ajustes/?project=demo", wait_until="networkidle")
+        bloque = pagina.locator(".gh-webhook")
+        bloque.wait_for(timeout=15_000)
+        texto = bloque.inner_text()
+        assert "/api/github/webhook" in texto and secreto in texto
+        assert "tok-de-prueba" not in pagina.content(), "el token no vuelve nunca entero"
+        assert errores == [], errores
+    finally:
+        # El servidor es de todo el módulo: se deja como estaba.
+        poner_github({"repo": ""})
+        pagina.close()

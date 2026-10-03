@@ -165,6 +165,10 @@ class Finding(BaseModel):
     #: Si el arreglo es cambiar de modelo, de cuál a cuál: `{"from": …, "to": …}`. Es lo
     #: que el bot de PR cambia en el código (D-185); vacío en los demás hallazgos.
     model_change: dict[str, str] | None = None
+    #: El arreglo que el bot de PR sabe escribir en el código, si hay alguno: `modelo`
+    #: (D-185), `cache` (`cache_control` en el `system` de Anthropic) o `tope` (un
+    #: `laplace.guard(max_loop=…)` en la función raíz) (D-190). Vacío: ninguno.
+    code_fix: str = ""
 
 
 def reparto(finding: Finding) -> dict[str, float]:

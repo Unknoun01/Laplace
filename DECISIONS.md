@@ -4427,3 +4427,93 @@ Pruebas de pantalla en `test_pantallas.py`: el grafo del Panel con cajas, flecha
 «×» y dinero, y ningún texto fuera de su caja; y en Ajustes, parar, reanudar, un bucle
 de 1 rechazado y los topes guardados de verdad (leídos de la API). Las dos fallan sin
 los componentes en la página.
+
+## 2026-10-03 — El bot de pull requests, más allá
+
+### D-190 — `cache_control` y un tope de vueltas, escritos sobre el árbol de sintaxis
+El bot de PR (D-185) sabía cambiar un literal de modelo en una línea. Ahora propone dos
+arreglos de más de una línea, cada uno donde lo dice su hallazgo (`Finding.code_fix`:
+`modelo`, `cache` o `tope`):
+
+* **Contexto fijo → `cache_control`** en el `system` de la llamada anotada, sólo con
+  modelos de Anthropic (`claude` en el nombre, también Bedrock y Vertex) y sólo cuando la
+  regla propone cachear (no cuando lo que pesa son las lecturas de caché). OpenAI cachea
+  solo: no hay nada que escribir y el hallazgo no ofrece PR. Un `system` de texto (literal,
+  f-string, concatenación, `.render()` de un prompt gestionado, `.format()`, o una variable
+  asignada una vez a uno de ésos) se envuelve en un bloque con `cache_control`; una lista
+  de bloques lo lleva en el último, también si la lista se define aparte. Si no se sabe si
+  es texto —sale de una función cualquiera, de un atributo—, **no se toca**: si fuese ya
+  una lista, envolverla rompería la llamada. Si ya cachea, se dice.
+* **Bucle → `@laplace.guard(max_loop=4)`** en la función que arranca la ejecución (la raíz
+  de la traza de ejemplo), con `import laplace` si falta. Cuatro es `MIN_VUELTAS_BUCLE`: el
+  tope corta justo donde el Diagnóstico señala. No se propone si la función ya tiene un
+  `guard` ni si es un generador (`guard` como decorador cerraría el bloque al devolverlo).
+  El PR dice que es un freno y no el arreglo de fondo, y que hay que decidir qué hacer con
+  `GuardExceeded`. Para saber dónde está la raíz, **`@observe` anota ahora en su span el
+  fichero, la primera línea y el nombre de la función** (`code.*`, como las llamadas), una
+  vez al decorar; `sitio()` del cambio de modelo sólo mira llamadas al modelo, para no
+  quedarse con la línea de una función.
+* **Sobre el árbol de sintaxis de Python, no con búsquedas de texto, y sin un modelo de
+  lenguaje escribiendo el parche** (la hoja de ruta lo dejaba abierto): lo que se puede
+  derivar del código no necesita que nadie lo imagine, y lo que no se puede derivar no
+  debería proponerse sin que alguien lo mire. Se cambia sólo el trozo de la llamada o de
+  la cabecera de la función, carácter a carácter (las columnas de `ast` son bytes UTF-8 y
+  se traducen), y **todo arreglo, también el de modelo, tiene que dejar el fichero
+  compilando** (`comprobar_cambio`); si no cambia nada, tampoco hay PR. Sólo Python: las
+  anotaciones de línea las pone el SDK de Python.
+
+Pruebas en `test_bot_arreglos.py` (28): las dos transformaciones con sus casos (en varias
+líneas, lista definida aparte, prompt gestionado, ya cachea, sin `system`, `system`
+desconocido, tildes antes en la misma línea, el def o el decorador, método con sangría,
+`import` ya puesto, ya tiene `guard`, generador, fuera de una función, no es Python), el
+SDK anotando la función y la ingesta guardándolo, y de la ficha al PR por la API contra
+el GitHub falso (Claude sí, OpenAI no, bucle sin raíz anotada, un cambio que no compila).
+Se rompieron a propósito trece sitios y en todos falla alguna.
+
+### D-191 — El webhook de GitHub marca el hallazgo como arreglado al fusionar su PR
+`POST /api/github/webhook` recibe los avisos de GitHub. Cuando se cierra **fusionado** un
+PR que abrió Laplace, el hallazgo pasa a «arreglado» con la hora de la fusión, que es la
+frontera desde la que el seguimiento (D-123) compara antes y después; si el problema
+sigue, vuelve como «reaparecido», igual que si lo hubiese marcado una persona.
+
+* **Sin clave, con firma.** La llama GitHub, así que está en `PUBLIC_PATHS` (la lista
+  blanca pasa de una ruta a dos, y su prueba lo fija). Lo que la cierra es la firma HMAC
+  del cuerpo (`X-Hub-Signature-256`), comparada en tiempo constante. Valen dos secretos:
+  el de la GitHub App de la instalación (`LAPLACE_GITHUB_WEBHOOK_SECRET`) o el del
+  proyecto, que se genera al conectar el repositorio, se conserva al guardar otra cosa y
+  se enseña en Ajustes para pegarlo en GitHub. Un secreto sólo vale para los proyectos
+  con ese repositorio conectado. Antes de comprobar la firma no se hace nada con el
+  cuerpo salvo leer el nombre del repositorio, que dice qué secretos probar.
+* **El secreto del proyecto se devuelve** en `GET /api/github`, a diferencia del token: no
+  es una credencial de GitHub, sólo deja marcar como arreglado un hallazgo de este
+  proyecto, y eso lo vuelve a comprobar el seguimiento con las trazas.
+* **El PR se reconoce por número y por rama** (`rama_para`): un número suelto podría ser de
+  otro PR si el repositorio se recreó. Un PR cerrado sin fusionar no es un arreglo: sólo
+  se apunta su estado (`merged` o `closed`) junto al PR guardado. Lo que el usuario
+  ignoró sigue ignorado.
+* **Fusionar no es desplegar.** La nota del estado lo dice: si se desplegó más tarde, hay
+  que volver a marcarlo al desplegar para medir desde entonces. Sin una señal de
+  despliegue en las trazas, inventarse la hora sería peor. El cuerpo de los PR ya no pide
+  marcarlo a mano: lo hace el aviso, y si no llega, la persona.
+
+Pruebas en `test_bot_webhook.py` (10) y en `test_auth.py` (la ruta no pide clave pero sí
+firma; la lista blanca). Se rompieron a propósito diez sitios (cualquier firma vale, la
+firma de otro cuerpo, sin mirar la rama, cerrado como fusionado, pisar lo ignorado, la
+hora de llegada en vez de la de fusión, un secreto nuevo en cada guardado, sin el secreto
+de la App, el repositorio de otro, el webhook detrás de la clave) y en todos falla alguna.
+
+### D-192 — Las pantallas del bot, más allá: el PR de cada arreglo y el webhook en Ajustes
+* **La ficha** ofrece «Proponerlo en el código» cuando el hallazgo tiene `code_fix`, no
+  sólo cuando tiene cambio de modelo, con una frase por arreglo: el cambio de modelo, el
+  `cache_control` o el `laplace.guard(max_loop=4)`. Si al abrirlo el bot no puede hacerlo
+  con seguridad, se ve el motivo, como en D-185.
+* **Ajustes → GitHub**, con el repositorio conectado, dice qué poner en GitHub para el
+  aviso al fusionar: la URL de esta instalación y el secreto del proyecto, que se pueden
+  seleccionar enteros, y el evento *Pull requests*. Con la GitHub App y su secreto en el
+  entorno no hace falta, y lo dice. El token sigue sin volver nunca.
+* De paso, el texto inglés del PR de modelo decía «this step"s call»: una comilla en vez
+  del apóstrofo, de la traducción de D-185.
+
+Prueba de pantalla en `test_pantallas.py`: la ficha de un bucle de la demo ofrece el PR con
+el tope, y Ajustes, con un repositorio conectado, enseña la URL y el secreto que da la API
+y no el token. Falla con el botón limitado al cambio de modelo y sin el bloque del webhook.

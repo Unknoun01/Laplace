@@ -53,7 +53,12 @@ KEY_PREFIX = "lp_"
 #: Rutas que no piden credencial, exhaustivas y con motivo. Todo lo demás la pide.
 #: `/health` queda fuera porque lo llama el orquestador antes de que nadie tenga clave,
 #: y porque no dice nada de nadie: responde si el proceso está vivo.
-PUBLIC_PATHS = frozenset({"/health"})
+PUBLIC_PATHS = frozenset({
+    "/health",
+    # Lo llama GitHub al cerrar un PR, sin clave de Laplace: la ruta exige la firma HMAC
+    # del cuerpo con el secreto del repositorio o de la App (D-191).
+    "/api/github/webhook",
+})
 
 #: Las rutas de entrar: tienen que atender a quien todavía no tiene sesión. Cada una
 #: decide por su cuenta qué puede hacer un anónimo —entrar, aceptar una invitación,

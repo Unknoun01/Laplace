@@ -138,6 +138,28 @@ def _vigilar(span_type: str, name: str, fn: Callable[..., Any], args: tuple, kwa
     return _guardia.antes(span_type, name, _bind_arguments(fn, args, kwargs))
 
 
+def _lugar(fn: Callable[..., Any]) -> tuple[str, int, str] | None:
+    """Dónde está la función decorada. Se calcula una vez, al decorar: es estático."""
+    try:
+        from ._sitio import de_funcion
+
+        return de_funcion(fn)
+    except Exception:  # noqa: BLE001 - observar nunca rompe lo observado
+        logger.debug("laplace: no se pudo ubicar la función", exc_info=True)
+        return None
+
+
+def _anotar_lugar(span: OtelSpan, lugar: tuple[str, int, str] | None) -> None:
+    """El fichero y la primera línea de la función del paso (D-190): con eso el bot de PR
+    sabe dónde poner un tope de vueltas. Se respeta `capture_code_location`."""
+    if lugar is None or not get_config().capture_code_location:
+        return
+    ruta, linea, funcion = lugar
+    _set(span, semconv.CODE_FILE_PATH, ruta)
+    _set(span, semconv.CODE_LINE_NUMBER, linea)
+    _set(span, semconv.CODE_FUNCTION_NAME, funcion)
+
+
 def _record_error(span: OtelSpan, exc: BaseException) -> None:
     span.record_exception(exc)
     span.set_status(Status(StatusCode.ERROR, f"{type(exc).__name__}: {exc}"))
@@ -311,6 +333,7 @@ class _Generador:
                 tags=comunes["tags"],
                 metadata=comunes["metadata"],
             )
+            _anotar_lugar(self.span, _lugar(fn))
         except Exception:  # noqa: BLE001 - observar nunca rompe lo observado
             logger.debug("laplace: no se pudo preparar el span de %s", span_name, exc_info=True)
 
@@ -440,6 +463,7 @@ def observe(
 
     def decorate(fn: F) -> F:
         span_name = name or _default_name(fn)
+        lugar = _lugar(fn)
         comunes = {
             "type": type,
             "session_id": session_id,
@@ -471,6 +495,7 @@ def observe(
                     tags=tags,
                     metadata=metadata,
                 ) as otel_span:
+                    _anotar_lugar(otel_span, lugar)
                     if capture_input:
                         _record_input(otel_span, type, _bind_arguments(fn, args, kwargs))
                     vuelta = _vigilar(type, span_name, fn, args, kwargs)
@@ -492,6 +517,7 @@ def observe(
                 tags=tags,
                 metadata=metadata,
             ) as otel_span:
+                _anotar_lugar(otel_span, lugar)
                 if capture_input:
                     _record_input(otel_span, type, _bind_arguments(fn, args, kwargs))
                 vuelta = _vigilar(type, span_name, fn, args, kwargs)

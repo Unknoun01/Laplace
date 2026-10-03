@@ -138,3 +138,34 @@
 .control .parada.parado p {
   color: var(--rose-ink);
 }
+/* Lo que hay que pegar en GitHub para el aviso al fusionar (D-191). */
+.gh-webhook {
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--hair-soft);
+}
+.gh-webhook h4 {
+  margin: 0 0 4px;
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+.gh-webhook dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 12px;
+  margin: var(--sp-2) 0 0;
+}
+.gh-webhook dt {
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+}
+.gh-webhook dd {
+  margin: 0;
+  min-width: 0;
+}
+.gh-webhook code {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+  user-select: all;
+}

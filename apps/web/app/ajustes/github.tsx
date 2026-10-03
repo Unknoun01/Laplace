@@ -6,6 +6,37 @@ import type { GitHubStatus } from "@/lib/types";
 import { t } from "@/lib/textos";
 
 /**
+ * Lo que hay que poner en GitHub para que avise al fusionar un PR de Laplace (D-191). Con
+ * la GitHub App de la instalación los avisos llegan solos; con un token, se pone a mano
+ * en el repositorio con el secreto de este proyecto.
+ */
+function Webhook({ estado }: { estado: GitHubStatus }) {
+  if (estado.auth === "app" && estado.app_webhook) {
+    return <p className="muted">{t("aj.gh.webhook.app")}</p>;
+  }
+  const url =
+    typeof window === "undefined"
+      ? "/api/github/webhook"
+      : `${window.location.origin}/api/github/webhook`;
+  return (
+    <div className="gh-webhook">
+      <h4>{t("aj.gh.webhook.titulo")}</h4>
+      <p className="muted">{t("aj.gh.webhook.texto")}</p>
+      <dl>
+        <dt>{t("aj.gh.webhook.url")}</dt>
+        <dd>
+          <code>{url}</code>
+        </dd>
+        <dt>{t("aj.gh.webhook.secreto")}</dt>
+        <dd>
+          <code>{estado.webhook_secret}</code>
+        </dd>
+      </dl>
+    </div>
+  );
+}
+
+/**
  * El repositorio donde el bot propone los arreglos (D-185). Con la GitHub App de Laplace
  * basta el número de la instalación; sin ella, un token del usuario con permiso de
  * escribir contenido y abrir pull requests en ese repositorio. El token se escribe una
@@ -119,6 +150,7 @@ export function GitHub({ project }: { project: string }) {
         )}
       </div>
       {msg.texto && <p className={msg.ok ? "okline" : "verr"}>{msg.texto}</p>}
+      {estado.configured && <Webhook estado={estado} />}
     </section>
   );
 }

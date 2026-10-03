@@ -306,6 +306,8 @@ export interface Finding {
   fix_check: FixCheck | null;
   /** Si el arreglo es cambiar de modelo, de cuál a cuál (D-185). */
   model_change: ModelChange | null;
+  /** El arreglo que el bot de PR sabe escribir: `modelo`, `cache` o `tope` (D-190). */
+  code_fix: "" | "modelo" | "cache" | "tope";
 }
 
 /** Antes y después de marcar un hallazgo como arreglado, por ejecución (D-123). */
@@ -894,6 +896,10 @@ export interface GitHubStatus {
   token_hint: string;
   installation_id: number | null;
   app_available: boolean;
+  /** Con el que GitHub firma los avisos de este repositorio (D-191). */
+  webhook_secret: string;
+  /** Si la instalación tiene el secreto de la GitHub App. */
+  app_webhook: boolean;
 }
 
 export interface StripeStatus {

@@ -12,7 +12,9 @@ pide que quien llama la vea entera, que en local es cualquiera y en la nube el o
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -20,7 +22,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from . import control, github_bot, idioma, margen, presupuesto, stripe_ingresos
+from . import arreglos_codigo, control, github_bot, idioma, margen, presupuesto, stripe_ingresos
 from .alerts import CLAVE_AJUSTES, webhook_valido
 from .auth import identity_of
 from .ingest.otlp import recalcular_coste
@@ -810,6 +812,9 @@ async def put_github(request: Request, body: GitHubIn) -> github_bot.GitHubStatu
         raise HTTPException(status_code=422, detail=t("github.repo_invalido"))
     ajustes = await run_in_threadpool(github_bot.leer, meta, body.project_id)
     ajustes.update(repo=repo, base_branch=body.base_branch.strip())
+    # Para el aviso de GitHub al fusionar (D-191). Se genera una vez y se conserva: si
+    # cambiase al guardar otra cosa, el webhook ya puesto en GitHub dejaría de valer.
+    ajustes.setdefault("webhook_secret", github_bot.nuevo_secreto())
     token = (body.token or "").strip()
     if body.installation_id:
         if not github_bot.app_disponible():
@@ -825,10 +830,183 @@ async def put_github(request: Request, body: GitHubIn) -> github_bot.GitHubStatu
     return await run_in_threadpool(github_bot.estado, meta, body.project_id)
 
 
+@router.post("/github/webhook")
+async def github_webhook(request: Request) -> dict[str, Any]:
+    """El aviso de GitHub cuando se cierra un pull request (D-191).
+
+    No pide clave de Laplace —está en `PUBLIC_PATHS`, porque la llama GitHub—: lo que la
+    cierra es la firma del cuerpo. Vale el secreto de la GitHub App de la instalación o el
+    del proyecto que tenga conectado ese repositorio, y sólo para ese proyecto. Antes de
+    comprobar la firma no se hace nada con lo que dice el cuerpo salvo buscar el
+    repositorio, que es lo que dice qué secretos probar.
+    """
+    cuerpo = await request.body()
+    firma = request.headers.get("X-Hub-Signature-256", "")
+    evento = request.headers.get("X-GitHub-Event", "")
+    try:
+        datos = json.loads(cuerpo or b"{}")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=t("github.webhook_cuerpo")) from exc
+    repo = str((datos.get("repository") or {}).get("full_name") or "").lower()
+    proyectos = await run_in_threadpool(_proyectos_del_repo, request, repo)
+    secreto_app = os.environ.get(github_bot.ENV_WEBHOOK_SECRET, "")
+    validos = [
+        p
+        for p, ajustes in proyectos
+        if github_bot.firma_valida(cuerpo, firma, secreto_app)
+        or github_bot.firma_valida(cuerpo, firma, ajustes.get("webhook_secret") or "")
+    ]
+    if not validos:
+        raise HTTPException(status_code=401, detail=t("github.webhook_firma"))
+    if evento == "ping":
+        return {"ok": True, "projects": len(validos)}
+    if evento != "pull_request" or datos.get("action") != "closed":
+        return {"ignored": evento or "?", "fixed": []}
+    pr = datos.get("pull_request") or {}
+    arreglados = []
+    for project_id in validos:
+        arreglados += await run_in_threadpool(_pr_cerrado, _meta(request), project_id, pr)
+    return {"fixed": arreglados}
+
+
+def _proyectos_del_repo(request: Request, repo: str) -> list[tuple[str, dict[str, Any]]]:
+    """Los proyectos de esta instalación con ese repositorio conectado."""
+    if not repo:
+        return []
+    meta = _meta(request)
+    salida = []
+    for proyecto in _store(request).list_projects():
+        ajustes = github_bot.leer(meta, proyecto.project_id)
+        if str(ajustes.get("repo") or "").lower() == repo:
+            salida.append((proyecto.project_id, ajustes))
+    return salida
+
+
+def _pr_cerrado(meta: Any, project_id: str, pr: dict[str, Any]) -> list[str]:
+    """Apunta cómo acabó el PR de Laplace y, si se fusionó, marca su hallazgo arreglado.
+
+    El PR se reconoce por su número **y** por su rama (`rama_para`), cuando GitHub la
+    manda: un número suelto puede ser de otro PR si el repositorio se recreó. Lo que el
+    usuario ignoró sigue ignorado. La hora es la de la fusión, no la de llegada del aviso:
+    es la frontera desde la que el seguimiento mide si ha servido.
+    """
+    numero = pr.get("number")
+    rama = str((pr.get("head") or {}).get("ref") or "")
+    fusionado = bool(pr.get("merged"))
+    momento = str(pr.get("merged_at") or datetime.now(timezone.utc).isoformat())
+    if momento.endswith("Z"):
+        momento = momento[:-1] + "+00:00"
+    arreglados = []
+    for clave_pr, guardado in _guard(
+        meta.list_settings, project_id, github_bot.PREFIJO_PR
+    ).items():
+        finding_id = clave_pr[len(github_bot.PREFIJO_PR) :]
+        if guardado.get("number") != numero:
+            continue
+        if rama and rama != github_bot.rama_para(finding_id):
+            continue
+        _guard(
+            meta.set_setting,
+            project_id,
+            clave_pr,
+            {**guardado, "state": "merged" if fusionado else "closed", "closed_at": momento},
+        )
+        if not fusionado:
+            continue
+        actual = _guard(meta.get_setting, project_id, clave(finding_id)) or {}
+        if actual.get("status") == "ignorado":
+            continue
+        _guard(
+            meta.set_setting,
+            project_id,
+            clave(finding_id),
+            {
+                "status": "arreglado",
+                "at": momento,
+                "note": t("github.fusionado", numero=numero, url=pr.get("html_url") or ""),
+                "by": "github",
+            },
+        )
+        logger.info("hallazgo %s arreglado al fusionar el PR #%s — %s", finding_id, numero,
+                    project_id)
+        arreglados.append(finding_id)
+    return arreglados
+
+
 class PullRequestIn(BaseModel):
     project_id: str
     finding_id: str = Field(max_length=500)
     days: int = Field(default=7, ge=1, le=90)
+
+
+def _arreglo(store: Any, project_id: str, hallazgo: Any) -> dict[str, Any]:
+    """Qué cambiar, dónde y con qué textos, según el arreglo del hallazgo (D-185, D-190).
+
+    Lanza `SinPropuesta` con el motivo cuando no se puede proponer con seguridad.
+    """
+    from .insights.modelos import MIN_VUELTAS_BUCLE
+
+    spans = (
+        store.get_trace_spans(hallazgo.sample_trace_id, project_id)
+        if hallazgo.sample_trace_id
+        else []
+    )
+    # Las llamadas de ese paso; si el paso no se reconoce en los spans, todas las de la
+    # traza, y `sitio` se queda con las llamadas al modelo.
+    del_paso = [s for s in spans if s.step_key == hallazgo.step_key] or spans
+    comun = {"titulo": hallazgo.title, "resumen": hallazgo.summary}
+
+    if hallazgo.code_fix == "modelo" and hallazgo.model_change:
+        de, a = hallazgo.model_change["from"], hallazgo.model_change["to"]
+        ruta, linea = github_bot.sitio(del_paso, de)
+        return {
+            "ruta_anotada": ruta,
+            "de": de,
+            "a": a,
+            "linea": linea,
+            "titulo": t("pr.titulo", de=de, a=a),
+            "cuerpo": t("pr.cuerpo", **comun, de=de, a=a, ruta=ruta, linea=linea),
+            "mensaje": t("pr.commit", de=de, a=a),
+        }
+
+    if hallazgo.code_fix == "cache":
+        ruta, linea = github_bot.sitio(del_paso, "")
+
+        def _cache(fuente: str, _ruta: str) -> str:
+            return arreglos_codigo.poner_cache(fuente, linea)
+
+        return {
+            "ruta_anotada": ruta,
+            "cambiar": _cache,
+            "titulo": t("pr.cache.titulo", ruta=ruta),
+            "cuerpo": t("pr.cache.cuerpo", **comun, ruta=ruta, linea=linea),
+            "mensaje": t("pr.cache.commit", ruta=ruta),
+        }
+
+    if hallazgo.code_fix == "tope":
+        # La función raíz de la ejecución de ejemplo: la anota `@observe` (D-190).
+        raiz = next((s for s in spans if not s.parent_span_id), None)
+        attrs = (raiz.attributes if raiz is not None else None) or {}
+        ruta, linea = attrs.get(github_bot.ATTR_RUTA), attrs.get(github_bot.ATTR_LINEA)
+        if not ruta or not linea:
+            raise github_bot.SinPropuesta("pr.sin_raiz")
+        funcion = str(attrs.get("code.function.name") or raiz.name)
+        tope = MIN_VUELTAS_BUCLE
+
+        def _tope(fuente: str, _ruta: str) -> str:
+            return arreglos_codigo.poner_tope(fuente, int(linea), tope)
+
+        return {
+            "ruta_anotada": str(ruta),
+            "cambiar": _tope,
+            "titulo": t("pr.tope.titulo", funcion=funcion, tope=tope),
+            "cuerpo": t(
+                "pr.tope.cuerpo", **comun, funcion=funcion, tope=tope, ruta=ruta, linea=linea
+            ),
+            "mensaje": t("pr.tope.commit", funcion=funcion, tope=tope),
+        }
+
+    raise github_bot.SinPropuesta("pr.sin_cambio")
 
 
 def _abrir_pr(store: Any, meta: Any, project_id: str, body: PullRequestIn) -> dict[str, Any]:
@@ -841,39 +1019,8 @@ def _abrir_pr(store: Any, meta: Any, project_id: str, body: PullRequestIn) -> di
     hallazgo = finding_detail(store, project_id, _window(body.days), body.finding_id)
     if hallazgo is None:
         raise HTTPException(status_code=404, detail=t("error.problema_no_aparece"))
-    cambio = hallazgo.model_change
-    if not cambio:
-        raise HTTPException(status_code=409, detail=t("pr.sin_cambio"))
-    de, a = cambio["from"], cambio["to"]
-    spans = (
-        store.get_trace_spans(hallazgo.sample_trace_id, project_id)
-        if hallazgo.sample_trace_id
-        else []
-    )
-    # Las llamadas de ese paso; si el paso no se reconoce en los spans, todas las de la
-    # traza, y `sitio` se queda con las del modelo que se cambia.
-    del_paso = [s for s in spans if s.step_key == hallazgo.step_key] or spans
     try:
-        ruta, linea = github_bot.sitio(del_paso, de)
-        pr = github_bot.abrir(
-            ajustes,
-            body.finding_id,
-            de=de,
-            a=a,
-            ruta_anotada=ruta,
-            linea=linea,
-            titulo=t("pr.titulo", de=de, a=a),
-            cuerpo=t(
-                "pr.cuerpo",
-                titulo=hallazgo.title,
-                resumen=hallazgo.summary,
-                de=de,
-                a=a,
-                ruta=ruta,
-                linea=linea,
-            ),
-            mensaje=t("pr.commit", de=de, a=a),
-        )
+        pr = github_bot.abrir(ajustes, body.finding_id, **_arreglo(store, project_id, hallazgo))
     except github_bot.SinPropuesta as exc:
         raise HTTPException(status_code=409, detail=t(exc.clave, **exc.datos)) from exc
     except github_bot.GitHubError as exc:

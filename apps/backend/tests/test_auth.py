@@ -351,7 +351,20 @@ def test_el_preflight_de_cors_pasa_pero_no_trae_datos(cerrado):
 
 def test_la_lista_blanca_es_corta_y_explicita():
     """Si esta lista crece, que sea con un diff que alguien tenga que aprobar."""
-    assert auth.PUBLIC_PATHS == frozenset({"/health"})
+    assert auth.PUBLIC_PATHS == frozenset({"/health", "/api/github/webhook"})
+
+
+def test_el_webhook_de_github_no_pide_clave_pero_si_firma(cerrado):
+    """Lo llama GitHub, que no tiene clave de Laplace: lo que lo cierra es la firma del
+    cuerpo (D-191). Sin ella, un 401 de la propia ruta, no del middleware."""
+    client, _ = cerrado
+    r = client.post(
+        "/api/github/webhook",
+        json={"action": "closed", "repository": {"full_name": "acme/agentes"}},
+        headers={"X-GitHub-Event": "pull_request"},
+    )
+    assert r.status_code == 401
+    assert r.headers.get("WWW-Authenticate") != "Bearer"
 
 
 # ---------------------------------------------------------------------------------
