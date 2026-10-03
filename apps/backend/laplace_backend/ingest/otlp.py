@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from laplace import semconv
+from laplace.integrations._streaming import estimate_messages_tokens
 from laplace.schema import (
     Cost,
     LLMAttributes,
@@ -639,6 +640,25 @@ def _build_llm(attrs: dict[str, Any], prices: Any) -> LLMAttributes:
     )
     request_model = _str_or_none(attrs.get(semconv.GEN_AI_REQUEST_MODEL))
     response_model = _str_or_none(attrs.get(semconv.GEN_AI_RESPONSE_MODEL))
+    entrada = _as_message_list(attrs.get(semconv.GEN_AI_INPUT_MESSAGES))
+    salida = _as_message_list(attrs.get(semconv.GEN_AI_OUTPUT_MESSAGES))
+    if (
+        (request_model or response_model)
+        and semconv.GEN_AI_USAGE_INPUT_TOKENS not in attrs
+        and semconv.GEN_AI_USAGE_OUTPUT_TOKENS not in attrs
+        # Sólo si hubo respuesta: una llamada que no llegó al proveedor (un error de
+        # conexión) no se cobró, y estimarle la entrada sería inventarse una factura.
+        and salida
+    ):
+        # Una llamada con respuesta y sin recuento costaba 0 $ medidos. Pasa, por
+        # ejemplo, con Mastra por la API de Chat en streaming, que no pide el uso al
+        # proveedor. Se cuenta como lo cuenta el SDK en el mismo caso —por el texto— y se
+        # marca como estimado, que la interfaz ya distingue (D-183).
+        usage = usage.model_copy(update={
+            "input_tokens": estimate_messages_tokens(entrada) if entrada else 0,
+            "output_tokens": estimate_messages_tokens(salida),
+            "estimated": True,
+        })
     # Sin atributo, el metro es el estándar: es lo que los proveedores facturan por
     # defecto, no una suposición que haya que marcar como tal.
     tier = str(attrs.get(semconv.LAPLACE_BILLING_TIER) or "standard")
@@ -668,8 +688,8 @@ def _build_llm(attrs: dict[str, Any], prices: Any) -> LLMAttributes:
         billing_region=region,
         usage=usage,
         cost=coste,
-        input_messages=_as_message_list(attrs.get(semconv.GEN_AI_INPUT_MESSAGES)),
-        output_messages=_as_message_list(attrs.get(semconv.GEN_AI_OUTPUT_MESSAGES)),
+        input_messages=entrada,
+        output_messages=salida,
         params=params,
         finish_reasons=[str(r) for r in finish],
     )

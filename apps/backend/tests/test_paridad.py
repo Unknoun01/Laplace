@@ -249,6 +249,40 @@ def test_un_bucle_justo_en_el_minimo_sale_en_los_dos(dos_almacenes):
     assert [g.loop_hash for g in aqui] == [g.loop_hash for g in alli]
 
 
+def test_las_medianas_del_uso_por_paso_son_la_misma_cuenta(tmp_path):
+    """Con un número par de llamadas, ClickHouse (`quantileExact`) coge la de arriba de
+    las dos del medio. SQLite hacía la media de las dos, y la mediana de la salida la
+    sacaba de las filas ordenadas **por duración**: la salida de la llamada mediana en
+    tiempo, no la mediana de las salidas. La regla del modelo caro decide con ella (D-183).
+
+    Cuatro llamadas en las que ninguna de las dos cuentas viejas coincide por casualidad:
+    duraciones 100–400 y salidas 40, 10, 20, 30 en ese orden.
+    """
+    nube = _nube()
+    proyecto = f"medianas-{uuid.uuid4().hex[:8]}"
+    local = SQLiteStore(tmp_path / "medianas.db")
+    local.migrate()
+    spans = []
+    pares = zip((100, 200, 300, 400), (40, 10, 20, 30), strict=True)
+    for i, (duracion, salida) in enumerate(pares):
+        span = _llm(proyecto, f"{proyecto}-{i}", f"m-{i}", nombre="chat",
+                    dedup=f"h-{i}", paso="clasificar", instante=AHORA)
+        span.duration_ms = float(duracion)
+        span.end_time = AHORA + timedelta(milliseconds=duracion)
+        span.llm.usage.output_tokens = salida
+        spans.append(span)
+    local.insert_spans(spans)
+    nube.insert_spans(spans)
+    try:
+        ventana = _ventana()
+        (aqui,) = local.model_usage(proyecto, ventana, min_calls=1)
+        (alli,) = nube.model_usage(proyecto, ventana, min_calls=1)
+    finally:
+        nube.delete_project(proyecto)
+    assert (alli.p50_duration_ms, alli.p50_output_tokens) == (300, 30)
+    assert (aqui.p50_duration_ms, aqui.p50_output_tokens) == (300, 30)
+
+
 def test_la_cobertura_agrupa_por_camino_igual_en_los_dos(dos_almacenes):
     """La agrupación por sitio de llamada también se escribió dos veces (D-106)."""
     ventana = _ventana()

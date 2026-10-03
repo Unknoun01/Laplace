@@ -11,7 +11,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from helpers import exporter, ingest
+from helpers import exporter, ingest, span_llm
 from opentelemetry import trace as otel_trace
 
 from laplace_backend import insights
@@ -66,6 +66,45 @@ def test_una_llamada_de_openinference_llega_con_modelo_tokens_y_coste():
     assert not any(k.startswith("llm.input_messages.") for k in span.attributes), (
         "los mensajes aplanados no se guardan otra vez en crudo"
     )
+
+
+def _sin_recuento(*, respuesta: bool = True, **uso: int) -> dict:
+    atributos = {
+        "gen_ai.operation.name": "chat",
+        "gen_ai.request.model": "gpt-5.6-terra",
+        "gen_ai.input.messages": json.dumps([{"role": "user", "content": "x" * 400}]),
+        **{f"gen_ai.usage.{k}": v for k, v in uso.items()},
+    }
+    if respuesta:
+        atributos["gen_ai.output.messages"] = json.dumps(
+            [{"role": "assistant", "content": "y" * 80}]
+        )
+    return atributos
+
+
+def test_una_llamada_con_respuesta_y_sin_recuento_no_sale_gratis():
+    """Mastra por la API de Chat en streaming no pide el uso al proveedor, y la llamada
+    llegaba con cero tokens medidos: cero dólares. Se cuenta por el texto, como hace el
+    SDK en el mismo caso, y se dice que es una estimación (D-183)."""
+    _emitir("chat gpt-5.6-terra", _sin_recuento())
+    span = span_llm()
+    assert span.llm.usage.estimated
+    assert span.llm.usage.input_tokens > 0 and span.llm.usage.output_tokens > 0
+    assert span.llm.cost.total_usd > 0 and not span.llm.cost.unknown
+
+
+def test_un_recuento_de_cero_que_manda_el_proveedor_es_un_cero_medido():
+    _emitir("chat gpt-5.6-terra", _sin_recuento(input_tokens=0, output_tokens=0))
+    span = span_llm()
+    assert not span.llm.usage.estimated
+    assert span.llm.usage.input_tokens == 0 and span.llm.usage.output_tokens == 0
+
+
+def test_una_llamada_sin_respuesta_no_se_estima():
+    """Un error de conexión: la llamada no llegó al proveedor y no se cobró."""
+    _emitir("chat gpt-5.6-terra", _sin_recuento(respuesta=False))
+    span = span_llm()
+    assert not span.llm.usage.estimated and span.llm.usage.input_tokens == 0
 
 
 def test_una_herramienta_de_openinference_es_una_herramienta():

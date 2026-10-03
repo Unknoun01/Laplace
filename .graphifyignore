@@ -1,0 +1,7 @@
+# Lo que graphify no indexa. Los documentos grandes se extraen con un modelo y cuestan
+# cientos de miles de tokens cada vez que cambian; para buscar en ellos basta Grep.
+DECISIONS.md
+STATUS.md
+docs/decisiones-indice.md
+docs/auditoria-*.md
+scripts/integraciones_js/package-lock.json

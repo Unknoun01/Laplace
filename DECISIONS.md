@@ -4184,3 +4184,27 @@ Pruebas (`test_empresa.py`, con un proveedor OIDC y un correo falsos):
 SSO, la vuelta con error y la página de verificar. Se rompieron a propósito trece
 comprobaciones, del `nonce` a la del correo del enlace, y alguna prueba falla. La del
 correo del enlace no mordía al principio; ahora hay una prueba que cambia el correo.
+
+## 2026-10-03 — Dos cosas de una sesión local que no estaban en master
+
+### D-183 — Las medianas del uso por paso, la misma cuenta en los dos almacenes; y una llamada con respuesta y sin recuento ya no sale gratis
+Una sesión local hizo en paralelo parte de D-170 a D-177 sin ver estos commits. De lo
+suyo, esto es lo que master no tenía:
+
+* **Las medianas del uso por paso no eran la misma cuenta.** ClickHouse
+  (`quantileExact(0.5)`, también en los preagregados) coge, con un número par de
+  llamadas, la de arriba de las dos del medio. SQLite hacía la media de las dos, y la
+  mediana de la salida la sacaba de las filas ordenadas **por duración**: la salida de la
+  llamada mediana en tiempo, no la mediana de las salidas. La regla del modelo caro
+  decide con ella. Ahora SQLite toma la fila `n / 2 + 1`, cada mediana con su orden. Se
+  cambia SQLite y no la nube: la nube ya era una mediana, y cambiarla obligaba a migrar
+  los preagregados. Prueba en `test_paridad.py`, con cuatro llamadas en las que ninguna
+  de las dos cuentas viejas coincide por casualidad; en rojo con la de antes (250 y 15
+  frente a 300 y 30).
+* **Una llamada con respuesta y sin recuento costaba 0 $ medidos.** Mastra por la API de
+  Chat en streaming no pide `include_usage`, y OpenAI no devuelve el uso. Un span con
+  modelo y respuesta y sin ningún `gen_ai.usage.*` se cuenta ahora por el texto y se
+  marca como estimado, como hace el SDK de Python en el mismo caso. Un cero que manda el
+  proveedor sigue siendo un cero medido, y una llamada sin respuesta —un error de
+  conexión, que no se cobró— no se estima. Pruebas en `test_convenciones.py` (3); la de
+  la llamada sin respuesta vino de `test_modelo_local.py`, que la primera versión rompió.
