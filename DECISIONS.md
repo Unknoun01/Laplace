@@ -4376,3 +4376,34 @@ implícita, la parada sin mirar, la parada que no deja cortada la ejecución, un
 la ve, el fallo que borra la copia, la respuesta sin validar, la copia que pasa de
 proyecto, `init` que no arranca, el hilo que bloquea, el PUT sin admin —en las dos
 pruebas— y el bucle de 1 admitido) y en todos falla alguna.
+
+### D-188 — El grafo del proyecto: el agente entero, sumando las trazas
+El grafo de la vista de traza (D-153) se arma en la web con el árbol de una ejecución.
+El del proyecto sale del almacén para la ventana entera (`project_graph` en los dos
+almacenes, `grafo.py`, `GET /api/graph`): un nodo por paso con la misma identidad
+(`step_key`, o `tipo:nombre`), con sus llamadas, trazas, raíces, errores, modelos y
+coste, y una arista por cada «este paso llama a este otro» con cuántas veces y lo que
+costaron. Es de sólo lectura.
+
+* **El coste de una arista es el coste propio de las llamadas que lleva**: lo que
+  costaron los spans de destino llamados desde el origen. Sólo cuestan las llamadas al
+  modelo, así que la arista hacia una herramienta o un subpaso no lleva dinero; el de
+  debajo está en sus propias aristas. Sumar el subárbol pediría recorrer cada traza y
+  contaría dos veces el mismo gasto en cuanto se sumasen dos aristas.
+* **Un modelo sin tarifa no cuesta cero**: nodo y arista llevan `unknown_cost_spans`, y
+  el nodo `estimated_spans` (tokens contados por el SDK). Están en el guardia de D-107,
+  que ahora recorre también `grafo.py` y `control.py`.
+* **Sin tiradas de evaluación** (`RULES_WHERE`; en ClickHouse, resuelta antes como en
+  D-177). Una arista une dos spans de la ventana de la misma traza: un padre que empezó
+  antes de la ventana se queda fuera, igual en los dos almacenes. Un paso que se llama a
+  sí mismo no es arista, como en D-153.
+* **Como mucho 40 pasos**, los más llamados (por llamadas y por id, en el almacén), y se
+  dice cuántos pasos y cuántas llamadas quedan fuera. Las aristas, sólo entre los que se
+  dibujan.
+* Los modelos se ordenan en Python: `GROUP_CONCAT` y `groupUniqArray` no prometen orden.
+
+Pruebas en `test_grafo_proyecto.py` (6), con una de paridad contra ClickHouse sobre una
+siembra con empates. Se rompieron a propósito siete sitios (las evaluaciones dentro en
+SQLite y en las aristas de ClickHouse, la arista a sí mismo, sin tarifa sin contar, las
+raíces contadas distinto en ClickHouse, sin recorte y aristas hacia nodos que no se
+dibujan) y en todos falla alguna.

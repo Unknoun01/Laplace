@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 188 decisiones.
+final. 189 decisiones.
 
 ## Coste, precios y caché
 
@@ -181,6 +181,7 @@ final. 188 decisiones.
 - [D-174](../DECISIONS.md#d-174--globalscss-en-29-hojas-un-índice-de-decisiones-y-documentación-de-usuario) — `globals.css` en 29 hojas, un índice de decisiones y documentación de usuario
 - [D-175](../DECISIONS.md#d-175--las-pantallas-con-sesión-recorridas-en-un-navegador) — Las pantallas con sesión, recorridas en un navegador
 - [D-176](../DECISIONS.md#d-176--el-contraste-medido-sobre-cada-pantalla) — El contraste, medido sobre cada pantalla
+- [D-188](../DECISIONS.md#d-188--el-grafo-del-proyecto-el-agente-entero-sumando-las-trazas) — El grafo del proyecto: el agente entero, sumando las trazas
 
 ## Alertas y presupuesto
 
@@ -274,6 +275,7 @@ final. 188 decisiones.
 - [D-174](../DECISIONS.md#d-174--globalscss-en-29-hojas-un-índice-de-decisiones-y-documentación-de-usuario) — `globals.css` en 29 hojas, un índice de decisiones y documentación de usuario
 - [D-180](../DECISIONS.md#d-180--diagnóstico-con-modelo-que-cita-los-spans-de-los-que-sale) — Diagnóstico con modelo, que cita los spans de los que sale
 - [D-184](../DECISIONS.md#d-184--un-límite-de-gasto-y-de-bucles-en-el-sdk-con-la-misma-cuenta-que-la-traza) — Un límite de gasto y de bucles en el SDK, con la misma cuenta que la traza
+- [D-188](../DECISIONS.md#d-188--el-grafo-del-proyecto-el-agente-entero-sumando-las-trazas) — El grafo del proyecto: el agente entero, sumando las trazas
 
 ## Pruebas y método
 
@@ -612,3 +614,4 @@ final. 188 decisiones.
 **2026-10-03 — Plano de control**
 
 - [D-187](../DECISIONS.md#d-187--tope-bucles-y-parada-desde-laplace-el-sdk-los-pide-cada-30-s-y-manda-el-más-estricto) — Tope, bucles y parada desde Laplace: el SDK los pide cada 30 s y manda el más estricto
+- [D-188](../DECISIONS.md#d-188--el-grafo-del-proyecto-el-agente-entero-sumando-las-trazas) — El grafo del proyecto: el agente entero, sumando las trazas

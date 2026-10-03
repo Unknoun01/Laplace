@@ -12,7 +12,7 @@ from laplace.schema import Trace, TraceListPage
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceResponse
 from starlette.concurrency import run_in_threadpool
 
-from . import idioma
+from . import grafo, idioma
 from .auth import ALL_PROJECTS, identity_of
 from .cache_diagnostico import CacheDiagnostico
 from .config import get_settings
@@ -393,6 +393,18 @@ async def get_panel(
     en lugar de a cero (D-073, D-077).
     """
     return await run_in_threadpool(build_panel, _store(request), project_id, _window(days))
+
+
+@router.get("/api/graph", response_model=grafo.ProjectGraph)
+async def get_graph(
+    request: Request,
+    project_id: str,
+    days: int = Query(7, ge=1, le=90),
+) -> grafo.ProjectGraph:
+    """El agente entero en la ventana: pasos, modelos y coste por arista (D-188)."""
+    return await run_in_threadpool(
+        grafo.del_proyecto, _store(request), project_id, _window(days)
+    )
 
 
 @router.get("/api/alerts")
