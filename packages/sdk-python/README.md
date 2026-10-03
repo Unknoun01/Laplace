@@ -135,6 +135,13 @@ queda en la traza como el error del paso. También como decorador
   por el log. Dale tarifa con `LAPLACE_PRICES_EXTRA`.
 - Al acabar, `g.spent_usd` y `g.exceeded`. Cortada una vez, el resto del bloque sigue
   cortado aunque el agente capture la excepción.
+- **Desde Laplace** (Ajustes → Tope y parada) se ponen los mismos dos límites y un botón
+  de parada, sin tocar el código. El SDK los pide cada 30 s en segundo plano; se suman a
+  los del código y manda el más estricto (`GuardExceeded.source` dice de dónde salió).
+  Sin `guard` en el código, la ejecución es el `@observe` más externo. Parado, ninguna
+  llamada al modelo ni ningún paso se hace (`reason="stopped"`). Si Laplace no responde,
+  se sigue con lo último recibido; si nunca respondió, sin límites. Se apaga con
+  `laplace.init(remote_rules=False)` o `LAPLACE_REMOTE_RULES=false`.
 
 ### Datos personales y muestreo
 

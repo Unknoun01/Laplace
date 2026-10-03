@@ -1,6 +1,6 @@
 # Estado de Laplace
 
-Última actualización: 2 de octubre de 2026.
+Última actualización: 3 de octubre de 2026, al cerrar el plano de control.
 
 ## Dónde está el producto
 
@@ -52,6 +52,14 @@ Lo que sostiene esas casillas, en concreto:
   hacer la llamada siguiente si la ejecución ha gastado de más o da vueltas sin avanzar,
   con la misma tabla de precios que la traza y la misma definición de bucle que el
   Diagnóstico (D-184).
+- **Y se puede cortar desde Laplace, sin tocar el código**: en Ajustes, un tope por
+  ejecución, uno de bucles y un botón de parada por proyecto. El SDK los pide cada 30 s
+  en segundo plano y manda el más estricto entre eso y el código; sin `guard` en el
+  código, la ejecución es el `@observe` más externo. Con Laplace caído sigue con la
+  última copia, y sin copia, sin reglas: el agente no se cae (D-187, D-189).
+- **El agente entero, en el Panel**: el grafo del proyecto suma todas las trazas de la
+  ventana —pasos, modelos, llamadas y coste por arista—, sin tiradas de evaluación, igual
+  en SQLite y en ClickHouse (D-188, D-189).
 - **El arreglo, propuesto en el código**: desde la ficha del modelo caro, Laplace abre un
   pull request con el cambio de modelo en la línea exacta de la llamada, que anota el
   SDK; si el modelo no está escrito ahí, dice por qué no lo propone (D-185).
@@ -143,7 +151,7 @@ Lo que sostiene esas casillas, en concreto:
   Anthropic estaba completo; faltaba leer `prompt_tokens_details.cache_write_tokens`, así
   que esos tokens se cobraban a tarifa de entrada y **nuestro coste de OpenAI salía por
   debajo del real** (D-101).
-- **364 pruebas, 360 pasando y 4 saltadas** con ClickHouse y Postgres levantados: las 4
+- **1215 pruebas, 1211 pasando y 4 saltadas** (3 de octubre, 28 min con la nube y las pantallas) con ClickHouse y Postgres levantados: las 4
   son las que necesitan una clave de proveedor. El camino de la nube se ejecuta, que es
   lo que faltaba: una tanda que toca SQL de nube y se entrega con esas pruebas saltadas
   está sin terminar (D-112). Con los almacenes en pie la suite tarda dos minutos y medio;
@@ -386,6 +394,17 @@ producto miente en silencio» a «el producto avisa de que no sabe»—, que era
 que había que conseguir antes de enseñarlo.
 
 ## Qué hay que vigilar
+
+**La parada no alcanza lo que el SDK de Python no ve.** Llamadas instrumentadas por
+OpenInference u OpenLLMetry en vez de por las integraciones de Laplace, agentes en Node
+(no hay SDK) y lo que corre en otro hilo sin copiar el contexto siguen gastando aunque el
+proyecto esté parado. La pantalla dice «ninguna llamada al modelo ni ningún paso se
+ejecuta»: es verdad para lo instrumentado con el SDK de Python, y si alguien pregunta por
+lo demás, la respuesta es ésa. Y tarda hasta 30 s en llegar (D-187).
+
+**El coste de una arista del grafo del proyecto es el de las llamadas que lleva**, no el
+del subárbol: la flecha hacia una herramienta o un subpaso no lleva dinero. Si alguien
+pide sumar el subárbol, cuidado con contar dos veces el mismo gasto (D-188).
 
 **Los precios caducan, y rápido.** `model_prices.json` lleva fecha de verificación y hay
 que reverificarlo **cada 30 días**. Tres tests fallan solos: cuando una fuente pasa de 30
