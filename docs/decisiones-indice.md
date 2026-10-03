@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 189 decisiones.
+final. 190 decisiones.
 
 ## Coste, precios y caché
 
@@ -182,6 +182,7 @@ final. 189 decisiones.
 - [D-175](../DECISIONS.md#d-175--las-pantallas-con-sesión-recorridas-en-un-navegador) — Las pantallas con sesión, recorridas en un navegador
 - [D-176](../DECISIONS.md#d-176--el-contraste-medido-sobre-cada-pantalla) — El contraste, medido sobre cada pantalla
 - [D-188](../DECISIONS.md#d-188--el-grafo-del-proyecto-el-agente-entero-sumando-las-trazas) — El grafo del proyecto: el agente entero, sumando las trazas
+- [D-189](../DECISIONS.md#d-189--las-pantallas-del-plano-de-control-tope-y-parada-en-ajustes-el-agente-entero-en-el-panel) — Las pantallas del plano de control: Tope y parada en Ajustes, el agente entero en el Panel
 
 ## Alertas y presupuesto
 
@@ -205,6 +206,7 @@ final. 189 decisiones.
 - [D-177](../DECISIONS.md#d-177--preagregados-por-minuto-del-diagnóstico-y-clave-por-hora) — Preagregados por minuto del Diagnóstico y clave por hora
 - [D-183](../DECISIONS.md#d-183--las-medianas-del-uso-por-paso-la-misma-cuenta-en-los-dos-almacenes-y-una-llamada-con-respuesta-y-sin-recuento-ya-no-sale-gratis) — Las medianas del uso por paso, la misma cuenta en los dos almacenes; y una llamada con respuesta y sin recuento ya no sale gratis
 - [D-184](../DECISIONS.md#d-184--un-límite-de-gasto-y-de-bucles-en-el-sdk-con-la-misma-cuenta-que-la-traza) — Un límite de gasto y de bucles en el SDK, con la misma cuenta que la traza
+- [D-189](../DECISIONS.md#d-189--las-pantallas-del-plano-de-control-tope-y-parada-en-ajustes-el-agente-entero-en-el-panel) — Las pantallas del plano de control: Tope y parada en Ajustes, el agente entero en el Panel
 
 ## Margen por cliente
 
@@ -615,3 +617,4 @@ final. 189 decisiones.
 
 - [D-187](../DECISIONS.md#d-187--tope-bucles-y-parada-desde-laplace-el-sdk-los-pide-cada-30-s-y-manda-el-más-estricto) — Tope, bucles y parada desde Laplace: el SDK los pide cada 30 s y manda el más estricto
 - [D-188](../DECISIONS.md#d-188--el-grafo-del-proyecto-el-agente-entero-sumando-las-trazas) — El grafo del proyecto: el agente entero, sumando las trazas
+- [D-189](../DECISIONS.md#d-189--las-pantallas-del-plano-de-control-tope-y-parada-en-ajustes-el-agente-entero-en-el-panel) — Las pantallas del plano de control: Tope y parada en Ajustes, el agente entero en el Panel

@@ -100,11 +100,13 @@ function construirGrafo(trace: Trace): { nodos: Nodo[]; aristas: Arista[] } {
 }
 
 /** Un modelo sin tarifa no cuesta cero: se dice, o la cifra va como suelo. */
-function costeDe(n: Nodo): string {
-  if (n.sinTarifa > 0) {
-    return n.coste > 0 ? t("grafo.al_menos", { coste: money(n.coste) }) : t("grafo.sin_tarifa");
+export function costeDe(coste: number, sinTarifa: number, estimadas = 0): string {
+  if (sinTarifa > 0) {
+    return coste > 0 ? t("grafo.al_menos", { coste: money(coste) }) : t("grafo.sin_tarifa");
   }
-  return n.coste > 0 ? money(n.coste) : "";
+  if (coste <= 0) return "";
+  // Con tokens contados por el SDK la cifra es una aproximación, y se dice.
+  return estimadas > 0 ? t("grafo.aprox", { coste: money(coste) }) : money(coste);
 }
 
 /**
@@ -134,6 +136,113 @@ function recortar(texto: string, max = 22): string {
   return texto.length > max ? `${texto.slice(0, max - 1)}…` : texto;
 }
 
+/** Una caja ya colocada. `meta` es su segunda línea y `titulo`, el texto entero. */
+export interface CajaDibujo {
+  id: string;
+  nombre: string;
+  tipo: string;
+  meta: string;
+  titulo: string;
+  errores: number;
+  columna: number;
+  fila: number;
+}
+
+/** Una flecha. `texto` va encima; `destacada`, en ámbar. */
+export interface FlechaDibujo {
+  de: string;
+  a: string;
+  texto: string;
+  destacada: boolean;
+}
+
+/**
+ * El dibujo, común al grafo de una traza y al del proyecto (D-188): cajas por columnas y
+ * filas, flechas hacia delante en curva suave y hacia atrás curvadas por debajo.
+ */
+export function DibujoGrafo({
+  cajas,
+  flechas,
+  resaltados,
+  aria,
+  hueco = HUECO_X,
+}: {
+  cajas: CajaDibujo[];
+  flechas: FlechaDibujo[];
+  resaltados: Set<string>;
+  aria: string;
+  /** Hueco entre columnas: más ancho si las flechas llevan texto largo. */
+  hueco?: number;
+}) {
+  const columnas = Math.max(...cajas.map((n) => n.columna)) + 1;
+  const filas = Math.max(...cajas.map((n) => n.fila)) + 1;
+  const ancho = MARGEN * 2 + columnas * ANCHO + (columnas - 1) * hueco;
+  const alto = MARGEN * 2 + filas * ALTO + (filas - 1) * HUECO_Y + 28;
+  const pos = new Map(
+    cajas.map((n) => [
+      n.id,
+      { x: MARGEN + n.columna * (ANCHO + hueco), y: MARGEN + n.fila * (ALTO + HUECO_Y) },
+    ]),
+  );
+
+  return (
+    <div className="grafo-marco">
+      <svg width={ancho} height={alto} viewBox={`0 0 ${ancho} ${alto}`} role="img" aria-label={aria}>
+        <defs>
+          <marker id="punta" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0 0 L8 4 L0 8 z" className="punta" />
+          </marker>
+        </defs>
+        {flechas.map((a) => {
+          const de = pos.get(a.de)!;
+          const aq = pos.get(a.a)!;
+          const adelante = aq.x > de.x;
+          const x1 = adelante ? de.x + ANCHO : de.x + ANCHO / 2;
+          const y1 = adelante ? de.y + ALTO / 2 : de.y + ALTO;
+          const x2 = adelante ? aq.x : aq.x + ANCHO / 2;
+          const y2 = adelante ? aq.y + ALTO / 2 : aq.y + ALTO;
+          const d = adelante
+            ? `M${x1} ${y1} C ${x1 + hueco / 2} ${y1}, ${x2 - hueco / 2} ${y2}, ${x2} ${y2}`
+            : `M${x1} ${y1} C ${x1} ${y1 + 30}, ${x2} ${y2 + 30}, ${x2} ${y2 + 2}`;
+          const mx = (x1 + x2) / 2;
+          const my = adelante ? (y1 + y2) / 2 - 6 : Math.max(y1, y2) + 24;
+          return (
+            <g key={`${a.de}→${a.a}`} className={a.destacada ? "arista varias" : "arista"}>
+              <path d={d} markerEnd="url(#punta)" />
+              {a.texto && (
+                <text x={mx} y={my} textAnchor="middle">
+                  {a.texto}
+                </text>
+              )}
+            </g>
+          );
+        })}
+        {cajas.map((n) => {
+          const p = pos.get(n.id)!;
+          const clase = [
+            "nodo",
+            n.tipo,
+            resaltados.has(n.id) ? "problema" : "",
+            n.errores > 0 ? "error" : "",
+          ]
+            .filter(Boolean)
+            .join(" ");
+          return (
+            <g key={n.id} className={clase} transform={`translate(${p.x} ${p.y})`}>
+              <title>{n.titulo}</title>
+              <rect width={ANCHO} height={ALTO} rx={8} />
+              <text x={12} y={21} className="nombre">
+                {recortar(n.nombre)}
+              </text>
+              <Meta texto={n.meta} />
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
 export function GrafoAgente({
   trace,
   resaltados,
@@ -146,90 +255,39 @@ export function GrafoAgente({
   // Una traza de un solo paso no tiene forma que enseñar.
   if (nodos.length < 2) return null;
 
-  const columnas = Math.max(...nodos.map((n) => n.columna)) + 1;
-  const filas = Math.max(...nodos.map((n) => n.fila)) + 1;
-  const ancho = MARGEN * 2 + columnas * ANCHO + (columnas - 1) * HUECO_X;
-  const alto = MARGEN * 2 + filas * ALTO + (filas - 1) * HUECO_Y + 28;
-  const pos = new Map(
-    nodos.map((n) => [
-      n.id,
-      { x: MARGEN + n.columna * (ANCHO + HUECO_X), y: MARGEN + n.fila * (ALTO + HUECO_Y) },
-    ]),
-  );
+  const cajas: CajaDibujo[] = nodos.map((n) => {
+    const coste = costeDe(n.coste, n.sinTarifa);
+    return {
+      id: n.id,
+      nombre: n.nombre,
+      tipo: n.tipo,
+      errores: n.errores,
+      columna: n.columna,
+      fila: n.fila,
+      meta: `${t(`grafo.tipo.${tipoConocido(n.tipo)}`)} · ×${n.llamadas}` + (coste ? ` · ${coste}` : ""),
+      titulo:
+        `${n.nombre} · ${tn("grafo.llamadas", n.llamadas, { n: n.llamadas })}` +
+        (coste ? ` · ${coste}` : "") +
+        (n.errores > 0 ? ` · ${tn("grafo.errores", n.errores, { n: n.errores })}` : ""),
+    };
+  });
+  const flechas: FlechaDibujo[] = aristas.map((a) => ({
+    de: a.de,
+    a: a.a,
+    texto: a.veces > 1 ? `×${a.veces}` : "",
+    destacada: a.veces > 1,
+  }));
 
   return (
     <section className="grafo-agente">
       <h2>{t("grafo.titulo")}</h2>
       <p className="lead">{t("grafo.lead")}</p>
-      <div className="grafo-marco">
-        <svg
-          width={ancho}
-          height={alto}
-          viewBox={`0 0 ${ancho} ${alto}`}
-          role="img"
-          aria-label={t("grafo.aria", { pasos: nodos.length })}
-        >
-          <defs>
-            <marker id="punta" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
-              <path d="M0 0 L8 4 L0 8 z" className="punta" />
-            </marker>
-          </defs>
-          {aristas.map((a) => {
-            const de = pos.get(a.de)!;
-            const aq = pos.get(a.a)!;
-            const adelante = aq.x > de.x;
-            const x1 = adelante ? de.x + ANCHO : de.x + ANCHO / 2;
-            const y1 = adelante ? de.y + ALTO / 2 : de.y + ALTO;
-            const x2 = adelante ? aq.x : aq.x + ANCHO / 2;
-            const y2 = adelante ? aq.y + ALTO / 2 : aq.y + ALTO;
-            const d = adelante
-              ? `M${x1} ${y1} C ${x1 + HUECO_X / 2} ${y1}, ${x2 - HUECO_X / 2} ${y2}, ${x2} ${y2}`
-              : `M${x1} ${y1} C ${x1} ${y1 + 30}, ${x2} ${y2 + 30}, ${x2} ${y2 + 2}`;
-            const mx = adelante ? (x1 + x2) / 2 : (x1 + x2) / 2;
-            const my = adelante ? (y1 + y2) / 2 - 6 : Math.max(y1, y2) + 24;
-            return (
-              <g key={`${a.de}→${a.a}`} className={a.veces > 1 ? "arista varias" : "arista"}>
-                <path d={d} markerEnd="url(#punta)" />
-                {a.veces > 1 && (
-                  <text x={mx} y={my} textAnchor="middle">
-                    ×{a.veces}
-                  </text>
-                )}
-              </g>
-            );
-          })}
-          {nodos.map((n) => {
-            const p = pos.get(n.id)!;
-            const clase = [
-              "nodo",
-              n.tipo,
-              resaltados.has(n.id) ? "problema" : "",
-              n.errores > 0 ? "error" : "",
-            ]
-              .filter(Boolean)
-              .join(" ");
-            return (
-              <g key={n.id} className={clase} transform={`translate(${p.x} ${p.y})`}>
-                <title>
-                  {`${n.nombre} · ${tn("grafo.llamadas", n.llamadas, { n: n.llamadas })}` +
-                    (costeDe(n) ? ` · ${costeDe(n)}` : "") +
-                    (n.errores > 0 ? ` · ${tn("grafo.errores", n.errores, { n: n.errores })}` : "")}
-                </title>
-                <rect width={ANCHO} height={ALTO} rx={8} />
-                <text x={12} y={21} className="nombre">
-                  {recortar(n.nombre)}
-                </text>
-                <Meta
-                  texto={
-                    `${t(`grafo.tipo.${tipoConocido(n.tipo)}`)} · ×${n.llamadas}` +
-                    (costeDe(n) ? ` · ${costeDe(n)}` : "")
-                  }
-                />
-              </g>
-            );
-          })}
-        </svg>
-      </div>
+      <DibujoGrafo
+        cajas={cajas}
+        flechas={flechas}
+        resaltados={resaltados}
+        aria={t("grafo.aria", { pasos: nodos.length })}
+      />
     </section>
   );
 }
@@ -237,6 +295,6 @@ export function GrafoAgente({
 const TIPOS = ["agent", "llm", "tool", "retrieval", "chain"] as const;
 type TipoConocido = (typeof TIPOS)[number] | "otro";
 
-function tipoConocido(tipo: string): TipoConocido {
+export function tipoConocido(tipo: string): TipoConocido {
   return (TIPOS as readonly string[]).includes(tipo) ? (tipo as TipoConocido) : "otro";
 }

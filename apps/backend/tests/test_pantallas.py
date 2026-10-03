@@ -18,6 +18,7 @@ Playwright o si la interfaz no está construida (`python scripts/build_ui.py`).
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import socket
@@ -858,4 +859,72 @@ def test_el_diagnostico_cita_sus_pasos_y_lleva_a_ellos(servidor, navegador):
         pagina.locator(f"#span-{citado['id']}[aria-selected='true']").wait_for(timeout=5_000)
         assert errores == [], errores
     finally:
+        pagina.close()
+
+
+def test_el_panel_ensena_el_agente_entero(servidor, navegador):
+    """D-188: el grafo del proyecto, sumando las trazas de la ventana. Las flechas dicen
+    cuántas veces y, las que van al modelo, lo que costaron."""
+    pagina, errores = _abrir(navegador, servidor + "/panel/?project=demo&days=30", "escritorio")
+    try:
+        grafo = pagina.locator("section.grafo-proyecto")
+        grafo.wait_for(timeout=15_000)
+        assert grafo.locator("g.nodo").count() >= 3
+        textos = grafo.locator("g.arista text").all_text_contents()
+        assert textos and all(x.startswith("×") for x in textos), textos
+        assert any("US$" in x or "$" in x for x in textos), textos
+        assert grafo.locator("g.nodo.llm").count() >= 1
+        sobran = pagina.evaluate(
+            """() => [...document.querySelectorAll('section.grafo-proyecto g.nodo')]
+                .map(g => [g.querySelector('rect').getBBox().width,
+                           ...[...g.querySelectorAll('text')].map(t => t.getBBox().x
+                              + t.getBBox().width)])
+                .filter(([ancho, ...fines]) => fines.some(f => f > ancho))"""
+        )
+        assert sobran == [], sobran
+        assert errores == [], errores
+    finally:
+        pagina.close()
+
+
+def test_ajustes_para_reanuda_y_pone_topes(servidor, navegador):
+    """D-187: el botón de parada y los topes por ejecución, guardados de verdad."""
+    pagina, errores = _abrir(navegador, servidor + "/ajustes/?project=demo", "escritorio")
+
+    def reglas() -> dict:
+        with urllib.request.urlopen(servidor + "/api/control?project_id=demo") as r:
+            return json.loads(r.read())
+
+    try:
+        seccion = pagina.locator("section.control")
+        seccion.wait_for(timeout=15_000)
+        seccion.get_by_role("button", name="Parar todo").click()
+        seccion.locator(".parada.parado").wait_for(timeout=15_000)
+        assert reglas()["stopped"] is True
+        seccion.get_by_role("button", name="Reanudar").click()
+        seccion.get_by_role("button", name="Parar todo").wait_for(timeout=15_000)
+        assert reglas()["stopped"] is False
+
+        seccion.get_by_label("Vueltas sin avanzar").fill("1")
+        seccion.get_by_role("button", name="Guardar").click()
+        seccion.get_by_text("de 2 o más").wait_for(timeout=15_000)
+        assert reglas()["max_loop"] is None
+
+        seccion.get_by_label("Dólares por ejecución").fill("0,5")
+        seccion.get_by_label("Vueltas sin avanzar").fill("4")
+        seccion.get_by_role("button", name="Guardar").click()
+        seccion.get_by_text("Límites guardados").wait_for(timeout=15_000)
+        puestas = reglas()
+        assert (puestas["max_usd_per_run"], puestas["max_loop"]) == (0.5, 4)
+        assert errores == [], errores
+    finally:
+        # El servidor es de todo el módulo: se deja como estaba.
+        urllib.request.urlopen(
+            urllib.request.Request(
+                servidor + "/api/control",
+                data=json.dumps({"project_id": "demo"}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="PUT",
+            )
+        ).read()
         pagina.close()

@@ -7,6 +7,7 @@ import type {
   Breakdown,
   Budget,
   Comparison,
+  ControlRules,
   CustomPrices,
   Dataset,
   Diagnosis,
@@ -19,6 +20,7 @@ import type {
   StripeStatus,
   Overview,
   Panel,
+  ProjectGraph,
   ProjectStats,
   PromptCard,
   PromptsView,
@@ -214,6 +216,11 @@ export function getOverview(
 
 export function getPanel(projectId: string, days: number, senal?: AbortSignal): Promise<Panel> {
   return get<Panel>("/api/panel", { project_id: projectId, days }, senal);
+}
+
+/** El grafo del proyecto en la ventana (D-188). */
+export function getGraph(projectId: string, days: number, senal?: AbortSignal): Promise<ProjectGraph> {
+  return get<ProjectGraph>("/api/graph", { project_id: projectId, days }, senal);
 }
 
 export async function getFinding(
@@ -521,6 +528,18 @@ export function setExchangeRates(
   rates: Record<string, number>,
 ): Promise<{ rates: Record<string, number> }> {
   return send("/api/exchange-rates", "PUT", { project_id: projectId, rates });
+}
+
+export function getControl(projectId: string): Promise<ControlRules> {
+  return get<ControlRules>("/api/control", { project_id: projectId });
+}
+
+/** Pone el tope, los bucles y la parada. `null` quita un límite. */
+export function setControl(
+  projectId: string,
+  reglas: { max_usd_per_run: number | null; max_loop: number | null; stopped: boolean },
+): Promise<ControlRules> {
+  return send<ControlRules>("/api/control", "PUT", { project_id: projectId, ...reglas });
 }
 
 export function getGitHub(projectId: string): Promise<GitHubStatus> {

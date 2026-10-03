@@ -311,6 +311,8 @@ const ACCIONES = {
   crear_clave: "org.acc.crear_clave",
   revocar_clave: "org.acc.revocar_clave",
   borrar_proyecto: "org.acc.borrar_proyecto",
+  parar_proyecto: "org.acc.parar_proyecto",
+  reanudar_proyecto: "org.acc.reanudar_proyecto",
   login_sso: "org.acc.login_sso",
   sso_rechazado: "org.acc.sso_rechazado",
   configurar_sso: "org.acc.configurar_sso",

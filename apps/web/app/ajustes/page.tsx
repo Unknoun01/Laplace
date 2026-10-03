@@ -25,6 +25,7 @@ import { Tarifas } from "./tarifas";
 import { Apariencia, Moneda } from "./preferencias";
 import { Alertas } from "./alertas";
 import { GitHub } from "./github";
+import { Control } from "./control";
 import { t } from "@/lib/textos";
 
 /**
@@ -76,6 +77,7 @@ function Contenido() {
           quien no puede cambiarlo (D-127). */}
       <fieldset className="sin-marco" disabled={!permisos.administrar}>
         <Presupuesto project={project} inicial={budget} />
+        <Control project={project} />
         <Alertas project={project} inicial={alertas} />
         <GitHub project={project} />
       </fieldset>

@@ -4407,3 +4407,23 @@ siembra con empates. Se rompieron a propósito siete sitios (las evaluaciones de
 SQLite y en las aristas de ClickHouse, la arista a sí mismo, sin tarifa sin contar, las
 raíces contadas distinto en ClickHouse, sin recorte y aristas hacia nodos que no se
 dibujan) y en todos falla alguna.
+
+### D-189 — Las pantallas del plano de control: Tope y parada en Ajustes, el agente entero en el Panel
+* **Ajustes → «Tope y parada»**, debajo del presupuesto: la línea de estado lleva el
+  botón («Parar todo», o «Reanudar» en rosa con la hora a la que se paró), y debajo los
+  dos topes, que se comprueban en la pantalla con los mismos límites que la API. Para
+  quien no es admin, deshabilitado y no escondido, como el resto de Ajustes (D-127).
+  Parar y reanudar salen en el registro de la organización.
+* **Panel → «El agente entero»**, después de «Quién gasta»: el grafo del proyecto
+  (D-188) con el mismo dibujo que el de la traza, que se ha separado en `DibujoGrafo`.
+  Columnas por la menor distancia a una entrada del agente (un paso raíz de alguna traza
+  o al que no llega ninguna flecha de las dibujadas). En las cajas de modelo se lee el
+  modelo («gpt-5.5-pro +1») en vez de «modelo»; todas las flechas dicen «×n» y las que
+  van al modelo, su coste, así que ninguna va en ámbar (en la traza el ámbar es «más de
+  una vez»). Con recuento estimado el coste va con «≈». Si quedan pasos fuera, se dice.
+* No es una pestaña nueva: la barra ya tiene siete (`HOJA_DE_RUTA.md` §4).
+
+Pruebas de pantalla en `test_pantallas.py`: el grafo del Panel con cajas, flechas con
+«×» y dinero, y ningún texto fuera de su caja; y en Ajustes, parar, reanudar, un bucle
+de 1 rechazado y los topes guardados de verdad (leídos de la API). Las dos fallan sin
+los componentes en la página.

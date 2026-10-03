@@ -68,3 +68,11 @@
 .grafo-agente .punta {
   fill: var(--ink-4);
 }
+/* El del proyecto (D-188): todas las flechas llevan veces y coste, así que ninguna es
+   «la que destaca»; el texto va en el gris de las cifras. */
+.grafo-proyecto .arista text {
+  fill: var(--ink-3);
+}
+.grafo-proyecto > .muted {
+  margin: var(--sp-2) 0 0;
+}

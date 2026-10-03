@@ -842,6 +842,49 @@ export interface CustomerMargin {
 }
 
 /** La conexión con Stripe de un proyecto (D-162). La clave nunca viene entera. */
+/** Tope, bucles y parada del proyecto (D-187). El SDK los pide cada 30 s. */
+export interface ControlRules {
+  project_id: string;
+  max_usd_per_run: number | null;
+  max_loop: number | null;
+  stopped: boolean;
+  stopped_at: string;
+  updated_at: string;
+}
+
+/** El grafo del proyecto: el agente entero sumando las trazas de la ventana (D-188). */
+export interface ProjectGraphNode {
+  id: string;
+  label: string;
+  type: string;
+  calls: number;
+  traces: number;
+  roots: number;
+  cost_usd: number;
+  unknown_cost_spans: number;
+  estimated_spans: number;
+  errors: number;
+  models: string[];
+}
+
+export interface ProjectGraphEdge {
+  source: string;
+  target: string;
+  calls: number;
+  cost_usd: number;
+  unknown_cost_spans: number;
+}
+
+export interface ProjectGraph {
+  project_id: string;
+  days: number;
+  traces: number;
+  nodes: ProjectGraphNode[];
+  edges: ProjectGraphEdge[];
+  hidden_nodes: number;
+  hidden_calls: number;
+}
+
 /** El repositorio del bot de pull requests (D-185). El token no vuelve nunca entero. */
 export interface GitHubStatus {
   configured: boolean;

@@ -114,3 +114,27 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+/* Tope y parada (D-187): la línea de estado lleva el botón; parado, en rosa. */
+.control .parada {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--hair-soft);
+  border-radius: var(--r);
+  padding: 10px 14px;
+  margin: 0 0 var(--sp-4);
+}
+.control .parada p {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--fs-md);
+}
+.control .parada.parado {
+  border-color: var(--rose-line);
+  background: var(--rose-bg);
+}
+.control .parada.parado p {
+  color: var(--rose-ink);
+}
