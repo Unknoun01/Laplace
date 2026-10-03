@@ -41,8 +41,10 @@ from laplace_backend import (
     api_ajustes,
     api_evals,
     api_prompts,
+    control,
     coverage,
     dinero,
+    grafo,
     insights,
     panel,
     presupuesto,
@@ -52,7 +54,10 @@ from laplace_backend.storage.sqlite import SQLiteStore
 
 AHORA = datetime.now(timezone.utc) - timedelta(minutes=20)
 
-MODULOS = (api, api_ajustes, api_evals, api_prompts, coverage, insights, panel, presupuesto)
+MODULOS = (
+    api, api_ajustes, api_evals, api_prompts, control, coverage, grafo, insights, panel,
+    presupuesto,
+)
 
 
 # ---------------------------------------------------------------------------------

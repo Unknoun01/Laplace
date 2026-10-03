@@ -89,6 +89,9 @@ class LaplaceConfig:
     #: Anota en cada llamada al modelo el fichero y la línea desde donde se hace, para
     #: poder proponer el arreglo en el código (D-185). La ruta nunca es absoluta.
     capture_code_location: bool = True
+    #: Pide cada 30 s el tope, los bucles y la parada puestos en Laplace para el proyecto
+    #: y los aplica como `laplace.guard` (D-187). `LAPLACE_REMOTE_RULES=false` lo apaga.
+    remote_rules: bool = True
 
     headers: dict[str, str] = field(default_factory=dict)
 
@@ -120,6 +123,7 @@ class LaplaceConfig:
             disabled=_env_bool("LAPLACE_DISABLED", False),
             defer_to_others=_env_bool("LAPLACE_DEFER_TO_OTHERS", True),
             capture_code_location=_env_bool("LAPLACE_CAPTURE_CODE_LOCATION", True),
+            remote_rules=_env_bool("LAPLACE_REMOTE_RULES", True),
             redact=_env_redact(),
             sample_rate=_env_float("LAPLACE_SAMPLE_RATE", 1.0),
             sample_keep_tokens=_env_int("LAPLACE_SAMPLE_KEEP_TOKENS", 20_000),

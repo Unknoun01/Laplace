@@ -4337,3 +4337,93 @@ instalación nueva.
 Pruebas en `test_preagregados.py`: una con un cliente que apunta lo que se le inserta, que
 no depende de la zona del ordenador (en rojo antes del arreglo en cualquier sitio), y una
 contra ClickHouse que exige que calcular lo pendiente se acabe (en rojo aquí antes).
+
+## 2026-10-03 — Plano de control
+
+### D-187 — Tope, bucles y parada desde Laplace: el SDK los pide cada 30 s y manda el más estricto
+Por proyecto, en Ajustes: un tope de gasto por ejecución, uno de bucles y un botón de
+parada. Se guardan como un ajuste más (`control.py`, `GET/PUT /api/control`; el PUT es de
+admin, en `ADMIN_WRITES`, y parar o reanudar queda en el registro de la organización). El
+SDK los pide en un hilo aparte cada 30 s (`laplace/_control.py`) y los aplica con la
+maquinaria de `laplace.guard` (D-184).
+
+* **Se suman y manda el más estricto.** Con un `guard` en el código, cada límite es el
+  menor de los dos; con uno en cada sitio, aplican los dos. Nada de lo que se ponga en la
+  interfaz puede aflojar un límite del código. `GuardExceeded.source` dice de dónde salió
+  el que cortó (`code` o `laplace`), y el mensaje lo dice también.
+* **Sin `guard` en el código, la ejecución es la raíz de `@observe`** (o de
+  `laplace.span`): ahí se abre una ejecución implícita, sólo si Laplace tiene algún
+  límite puesto, para no pagar huellas en cada paso de quien no los usa. Una llamada al
+  modelo suelta, fuera de todo paso, no tiene ejecución y sólo la alcanza la parada.
+* **Los límites se leen en cada comprobación**, no al abrir el bloque: un tope puesto a
+  mitad de una ejecución larga la alcanza en la siguiente llamada.
+* **La parada corta cualquier llamada al modelo y cualquier paso**, esté donde esté, con
+  `reason="stopped"`. Las ejecuciones en marcha quedan cortadas: reanudar deja empezar
+  otras, no resucita la que se paró a medias. Tarda en llegar, como mucho, 30 s.
+* **Laplace caído:** se sigue con la última copia buena, y una respuesta que no se
+  entiende (un tope de cero, un bucle de una vuelta, algo que no es un objeto) cuenta como
+  caído y no la borra. **Sin copia, sin reglas:** el agente sigue. La copia es de un
+  proyecto y de un Laplace; si `init()` cambia cualquiera de los dos, se tira. El aviso
+  sale una vez por el log, no cada 30 s.
+* Los límites aceptados son los de `guard()` (tope mayor que cero, bucles de 2 o más),
+  en la API y al leer la respuesta en el SDK. `init(remote_rules=False)` o
+  `LAPLACE_REMOTE_RULES=false` lo apagan.
+
+Pruebas en `test_plano_control.py` (22) y en `test_auditoria_p1.py` (la clave de un
+proyecto no puede cambiar las reglas, sí leer las suyas y no las de otro). Se rompieron a
+propósito catorce sitios (manda siempre el código, manda siempre Laplace, sin ejecución
+implícita, la parada sin mirar, la parada que no deja cortada la ejecución, un paso que no
+la ve, el fallo que borra la copia, la respuesta sin validar, la copia que pasa de
+proyecto, `init` que no arranca, el hilo que bloquea, el PUT sin admin —en las dos
+pruebas— y el bucle de 1 admitido) y en todos falla alguna.
+
+### D-188 — El grafo del proyecto: el agente entero, sumando las trazas
+El grafo de la vista de traza (D-153) se arma en la web con el árbol de una ejecución.
+El del proyecto sale del almacén para la ventana entera (`project_graph` en los dos
+almacenes, `grafo.py`, `GET /api/graph`): un nodo por paso con la misma identidad
+(`step_key`, o `tipo:nombre`), con sus llamadas, trazas, raíces, errores, modelos y
+coste, y una arista por cada «este paso llama a este otro» con cuántas veces y lo que
+costaron. Es de sólo lectura.
+
+* **El coste de una arista es el coste propio de las llamadas que lleva**: lo que
+  costaron los spans de destino llamados desde el origen. Sólo cuestan las llamadas al
+  modelo, así que la arista hacia una herramienta o un subpaso no lleva dinero; el de
+  debajo está en sus propias aristas. Sumar el subárbol pediría recorrer cada traza y
+  contaría dos veces el mismo gasto en cuanto se sumasen dos aristas.
+* **Un modelo sin tarifa no cuesta cero**: nodo y arista llevan `unknown_cost_spans`, y
+  el nodo `estimated_spans` (tokens contados por el SDK). Están en el guardia de D-107,
+  que ahora recorre también `grafo.py` y `control.py`.
+* **Sin tiradas de evaluación** (`RULES_WHERE`; en ClickHouse, resuelta antes como en
+  D-177). Una arista une dos spans de la ventana de la misma traza: un padre que empezó
+  antes de la ventana se queda fuera, igual en los dos almacenes. Un paso que se llama a
+  sí mismo no es arista, como en D-153.
+* **Como mucho 40 pasos**, los más llamados (por llamadas y por id, en el almacén), y se
+  dice cuántos pasos y cuántas llamadas quedan fuera. Las aristas, sólo entre los que se
+  dibujan.
+* Los modelos se ordenan en Python: `GROUP_CONCAT` y `groupUniqArray` no prometen orden.
+
+Pruebas en `test_grafo_proyecto.py` (6), con una de paridad contra ClickHouse sobre una
+siembra con empates. Se rompieron a propósito siete sitios (las evaluaciones dentro en
+SQLite y en las aristas de ClickHouse, la arista a sí mismo, sin tarifa sin contar, las
+raíces contadas distinto en ClickHouse, sin recorte y aristas hacia nodos que no se
+dibujan) y en todos falla alguna.
+
+### D-189 — Las pantallas del plano de control: Tope y parada en Ajustes, el agente entero en el Panel
+* **Ajustes → «Tope y parada»**, debajo del presupuesto: la línea de estado lleva el
+  botón («Parar todo», o «Reanudar» en rosa con la hora a la que se paró), y debajo los
+  dos topes, que se comprueban en la pantalla con los mismos límites que la API. Para
+  quien no es admin, deshabilitado y no escondido, como el resto de Ajustes (D-127).
+  Parar y reanudar salen en el registro de la organización.
+* **Panel → «El agente entero»**, después de «Quién gasta»: el grafo del proyecto
+  (D-188) con el mismo dibujo que el de la traza, que se ha separado en `DibujoGrafo`.
+  Columnas por la menor distancia a una entrada del agente (un paso raíz de alguna traza
+  o al que no llega ninguna flecha de las dibujadas). En las cajas de modelo se lee el
+  modelo («gpt-5.5-pro +1») en vez de «modelo»; todas las flechas dicen «×n» y las que
+  van al modelo, su coste, así que ninguna va en ámbar (en la traza el ámbar es «más de
+  una vez»). Con recuento estimado el coste va con «≈». Si quedan pasos fuera, se dice.
+* No es una pestaña nueva: la barra ya tiene siete (`HOJA_DE_RUTA.md` §4).
+
+Pruebas de pantalla en `test_pantallas.py`: el grafo del Panel con cajas, flechas con
+«×» y dinero, y ningún texto fuera de su caja; y en Ajustes, parar, reanudar, un bucle
+de 1 rechazado y los topes guardados de verdad (leídos de la API). Las dos fallan sin
+los componentes en la página.

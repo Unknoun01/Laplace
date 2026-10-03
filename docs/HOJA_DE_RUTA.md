@@ -1,8 +1,7 @@
 # Hoja de ruta de Laplace
 
-Documento de traspaso entre sesiones. Última actualización: 28 de septiembre de 2026,
-tras probar las integraciones que faltaban (D-164 y D-165) y con el replay contrafactual
-(D-167). Aquí sólo está **lo que
+Documento de traspaso entre sesiones. Última actualización: 3 de octubre de 2026, al
+cerrar el plano de control (D-187 a D-189). Aquí sólo está **lo que
 queda**: lo hecho vive en `DECISIONS.md` y en la historia de git. Léelo entero antes de tocar nada; después lee `STATUS.md` y las
 últimas entradas de `DECISIONS.md` (D-168 a D-177).
 
@@ -23,10 +22,9 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
 - La observabilidad completa se mantiene para el análisis en profundidad.
 - **Margen por cliente:** hecho (D-161 a D-163), salvo lo que espera al usuario.
 - **En vez de un editor tipo n8n:** un **plano de control**. Laplace no ejecuta agentes.
-  - El grafo del agente existe por traza (D-153); falta el de todo el proyecto.
-  - Controles desde la interfaz que aplica el SDK: modelo por paso, tope de gasto, botón
-    de parada y repartos A/B, siempre con copia de reserva si Laplace no responde.
-  - Hay que confirmarlo con el usuario antes de empezar.
+  - Hecho: el grafo de todo el proyecto en el Panel (D-188) y, desde Ajustes, tope por
+    ejecución, bucles y parada que aplica el SDK con copia de reserva (D-187, D-189).
+  - Fuera por decisión del usuario: modelo por paso desde la interfaz y repartos A/B.
 
 ## 2. Cómo se trabaja en este repo
 
@@ -35,7 +33,7 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
   verde (`git merge --no-ff`); si no dice otra cosa, se sigue así.
 - **Nada entra sin su prueba.** Primero la prueba en rojo, después el arreglo.
 - **Hay que comprobar que la prueba muerde:** romper el código a propósito y verla fallar.
-- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-183**.
+- **Cada cambio con criterio lleva su entrada `D-xxx` en `DECISIONS.md`.** La siguiente libre es **D-190**.
 - **Todo en español:** código, comentarios, commits y textos. Los textos de la interfaz y
   del backend, en los cinco idiomas a la vez (`apps/web/lib/mensajes/*.ts`,
   `apps/backend/laplace_backend/textos/*.json`); las pruebas exigen las mismas claves.
@@ -87,11 +85,15 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
 ### Siguiente: funciones diferenciales (confirmar el orden con el usuario)
 - **Replay contrafactual, más allá** (lo básico está hecho, D-167): llamadas con herramientas (habría que simular sus resultados con los grabados, sin ejecutarlas), imágenes y bloques entre proveedores, y un botón en la versión local que lo lance sin copiar la orden.
 - **Bot de pull requests, más allá** (lo básico está hecho, D-185: el cambio de modelo, con la línea que anota el SDK): `cache_control`, límites de iteraciones y el resto de arreglos que no son una línea, escritos con el modelo del diagnóstico y comprobados (que el fichero siga compilando, que el cambio quede cerca de la llamada). Y un webhook de la App para enterarse de cuándo se fusiona y marcar el hallazgo como arreglado solo.
-- **Plano de control — confirmado con el usuario el 2026-10-03, siguiente fase:**
-  - **Tope y parada desde la interfaz.** Por proyecto: tope de gasto por ejecución, bucles y un botón de parada. El SDK los aplica con `laplace.guard` (D-184): lo puesto en Laplace se suma a lo del código y manda el más estricto.
-  - **El SDK pregunta cada 30 s**, en segundo plano, por las reglas del proyecto, con la copia guardada como `get_prompt`. **Si Laplace no responde y no hay copia, el agente sigue sin reglas**: nunca se cae un agente porque Laplace esté caído.
-  - **Grafo del proyecto, sólo lectura:** el agente entero (pasos, modelos, coste por arista) sumando las trazas; hoy existe por traza (D-153).
-  - Fuera de la primera versión, por decisión del usuario: modelo por paso desde la interfaz y repartos A/B.
+- **Plano de control, más allá** (lo básico está hecho, D-187 a D-189: tope, bucles y
+  parada desde Ajustes, y el grafo del proyecto en el Panel):
+  - Modelo por paso desde la interfaz y repartos A/B: **fuera por decisión del usuario**;
+    no empezar sin que lo pida.
+  - La parada sólo alcanza lo que instrumenta el SDK de Python: no las llamadas por
+    OpenInference u OpenLLMetry ni los agentes en Node (`STATUS.md`, «Qué hay que vigilar»).
+  - El grafo del proyecto es de sólo lectura y no marca los pasos con hallazgos del
+    Diagnóstico, como hace el de la traza; se podría, con los `step_key` de los hallazgos
+    de la misma ventana.
 - **Reglas nuevas** (cada una entra por `detect()` y `detail()`, con su prueba de catálogo):
   - lecturas de caché que se pagan (OpenAI);
   - caché semántica (prompts casi iguales);

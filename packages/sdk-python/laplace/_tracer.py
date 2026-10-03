@@ -45,6 +45,7 @@ def init(
     sample_rate: float | None = None,
     sample_keep_tokens: int | None = -1,
     sample_keep_ms: int | None = -1,
+    remote_rules: bool | None = None,
 ) -> LaplaceConfig:
     """Configura Laplace. Llamar una vez, al arrancar el proceso.
 
@@ -59,6 +60,7 @@ def init(
     patrones (`re.compile(...)`) o funciones `texto -> texto`. `sample_rate=0.1` guarda
     una de cada diez trazas normales y todas las que fallan, las de evaluaciones y las
     que pasan de `sample_keep_tokens` (20 000) o `sample_keep_ms`. Ver D-181.
+    `remote_rules=False` deja de pedir a Laplace el tope y la parada del proyecto (D-187).
     """
     global _config, _provider
 
@@ -93,6 +95,8 @@ def init(
         cfg.sample_keep_tokens = sample_keep_tokens
     if sample_keep_ms != -1:
         cfg.sample_keep_ms = sample_keep_ms
+    if remote_rules is not None:
+        cfg.remote_rules = remote_rules
     if not 0 < cfg.sample_rate <= 1:
         raise ValueError(f"sample_rate tiene que estar en (0, 1]: {cfg.sample_rate}")
     # Un detector que no existe se dice al arrancar, no al primer span.
@@ -140,6 +144,14 @@ def init(
         atexit.register(_flush_at_exit)
 
     _auto_instrument(cfg)
+
+    from . import _control
+
+    if cfg.remote_rules:
+        # En segundo plano: `init()` no espera a Laplace, y sin respuesta no hay reglas.
+        _control.arrancar(project=cfg.project, endpoint_url=cfg.endpoint)
+    else:
+        _control.reiniciar()
 
     logger.debug("laplace inicializado: proyecto=%s endpoint=%s", cfg.project, cfg.endpoint)
     return cfg

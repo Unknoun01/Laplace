@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
+import { GrafoProyecto } from "@/components/GrafoProyecto";
 import { BackendDown, Cargando, NeedsKey, NoProject, NoTracesYet, NotYours } from "@/components/states";
 import { getBreakdown, getPanel, listProjects, parseDays } from "@/lib/api";
 import { dayHour, decimal, inicioDeTramo, duration, money, number, porcentaje, spanLabel, tokens } from "@/lib/format";
@@ -78,6 +79,8 @@ function Contenido() {
       </section>
 
       <QuienGasta project={project} days={days} currency={panel.currency} />
+
+      <GrafoProyecto project={project} days={days} />
 
       <Spikes panel={panel} />
     </main>

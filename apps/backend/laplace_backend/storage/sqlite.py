@@ -47,6 +47,7 @@ from .base import (
     Bucket,
     CostGroup,
     CoverageFacts,
+    GraphFacts,
     Latency,
     LoopGroup,
     ModelUsage,
@@ -67,6 +68,7 @@ from .base import (
     densify_steps,
     disambiguate,
     encode_cursor,
+    graph_facts,
     nearest_rank,
 )
 
@@ -221,6 +223,53 @@ RULES_WHERE = (
     f"{WINDOW_WHERE} AND trace_id NOT IN (SELECT trace_id FROM spans WHERE {WINDOW_WHERE} "
     f"AND tags LIKE '%\"{EVAL_TAG}\"%')"
 )
+
+#: El grafo del proyecto (D-188). La identidad de un paso es la del grafo de la traza
+#: (D-153): `step_key`, o `tipo:nombre`. Los alias son los mismos que en ClickHouse.
+_NODO_SQL = "CASE WHEN step_key != '' THEN step_key ELSE span_type || ':' || name END"
+
+GRAPH_STEPS_SQL = f"""
+SELECT
+    {_NODO_SQL}                                                   AS nodo,
+    MAX(CASE WHEN step_label != '' THEN step_label ELSE name END) AS etiqueta,
+    MAX(span_type)                                                AS tipo,
+    COUNT(*)                                                      AS llamadas,
+    COUNT(DISTINCT trace_id)                                      AS trazas,
+    SUM(CASE WHEN parent_span_id = '' THEN 1 ELSE 0 END)          AS raices,
+    SUM(cost_total_usd)                                           AS coste,
+    SUM(cost_unknown)                                             AS sin_tarifa,
+    SUM(usage_estimated)                                          AS estimadas,
+    SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END)             AS errores,
+    GROUP_CONCAT(DISTINCT CASE WHEN span_type = 'llm' THEN
+        CASE WHEN response_model != '' THEN response_model ELSE request_model END
+    END)                                                          AS modelos
+FROM spans
+WHERE {RULES_WHERE}
+GROUP BY nodo
+ORDER BY llamadas DESC, nodo
+"""
+
+#: Las aristas unen un span con su padre dentro de la ventana y de la misma traza. Un
+#: padre que empezó antes de la ventana se queda fuera: lo mismo en los dos almacenes.
+GRAPH_LINKS_SQL = f"""
+WITH v AS (
+    SELECT trace_id, span_id, parent_span_id, {_NODO_SQL} AS nodo,
+           cost_total_usd, cost_unknown
+    FROM spans
+    WHERE {RULES_WHERE}
+)
+SELECT
+    p.nodo                  AS de,
+    c.nodo                  AS a,
+    COUNT(*)                AS llamadas,
+    SUM(c.cost_total_usd)   AS coste,
+    SUM(c.cost_unknown)     AS sin_tarifa
+FROM v AS c
+JOIN v AS p ON p.trace_id = c.trace_id AND p.span_id = c.parent_span_id
+WHERE p.nodo != c.nodo
+GROUP BY de, a
+ORDER BY llamadas DESC, de, a
+"""
 
 #: El mismo paso, con la misma entrada, repetido dentro de una misma traza.
 #:
@@ -1360,6 +1409,15 @@ class SQLiteStore:
             self._window_params(project_id, window),
         )
         return {f["clave"] for f in filas}
+
+    def project_graph(self, project_id: str, window: Window) -> GraphFacts:
+        params = self._window_params(project_id, window)
+        pasos = self._query(GRAPH_STEPS_SQL, params)
+        aristas = self._query(GRAPH_LINKS_SQL, params)
+        trazas = self._query(
+            f"SELECT COUNT(DISTINCT trace_id) AS n FROM spans WHERE {RULES_WHERE}", params
+        )
+        return graph_facts(pasos, aristas, trazas[0]["n"] if trazas else 0)
 
     def coverage(self, project_id: str, window: Window) -> CoverageFacts:
         """Una sola consulta de cuentas sobre las llamadas a modelos de la ventana.

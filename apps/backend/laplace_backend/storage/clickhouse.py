@@ -30,6 +30,7 @@ from .base import (
     Bucket,
     CostGroup,
     CoverageFacts,
+    GraphFacts,
     Latency,
     LoopGroup,
     ModelUsage,
@@ -50,6 +51,7 @@ from .base import (
     densify_steps,
     disambiguate,
     encode_cursor,
+    graph_facts,
 )
 
 #: El texto en el que busca `TraceFilter.content`. **Tiene que ser idéntica** a la
@@ -108,6 +110,52 @@ _MAX_EVALUACIONES = 5000
 #: llevan el desempate dentro de una tupla. No es cosmética: sin esto, el mismo proyecto
 #: con los mismos spans puede enseñar un paso de ejemplo distinto en local y en la nube,
 #: y eso afecta a las reglas de detección, que es el peor sitio posible (D-099).
+
+#: El grafo del proyecto (D-188), con los alias de SQLite. El alias del paso es `nodo`
+#: y no `step_key`, que taparía la columna (el tropiezo de `MODEL_USAGE_SQL`).
+_NODO_SQL = "if(step_key != '', step_key, concat(span_type, ':', name))"
+
+GRAPH_STEPS_SQL = f"""
+SELECT
+    {_NODO_SQL}                                     AS nodo,
+    max(if(step_label != '', step_label, name))     AS etiqueta,
+    max(span_type)                                  AS tipo,
+    count()                                         AS llamadas,
+    uniqExact(trace_id)                             AS trazas,
+    countIf(parent_span_id = '')                    AS raices,
+    sum(cost_total_usd)                             AS coste,
+    sum(cost_unknown)                               AS sin_tarifa,
+    sum(usage_estimated)                            AS estimadas,
+    countIf(status = 'error')                       AS errores,
+    groupUniqArrayIf(
+        if(response_model != '', response_model, request_model), span_type = 'llm'
+    )                                               AS modelos
+FROM spans FINAL
+WHERE {RULES_WHERE}
+GROUP BY nodo
+ORDER BY llamadas DESC, nodo
+"""
+
+#: Un padre que empezó antes de la ventana se queda fuera, como en SQLite.
+GRAPH_LINKS_SQL = f"""
+WITH v AS (
+    SELECT trace_id, span_id, parent_span_id, {_NODO_SQL} AS nodo,
+           cost_total_usd, cost_unknown
+    FROM spans FINAL
+    WHERE {RULES_WHERE}
+)
+SELECT
+    p.nodo                  AS de,
+    c.nodo                  AS a,
+    count()                 AS llamadas,
+    sum(c.cost_total_usd)   AS coste,
+    sum(c.cost_unknown)     AS sin_tarifa
+FROM v AS c
+INNER JOIN v AS p ON p.trace_id = c.trace_id AND p.span_id = c.parent_span_id
+WHERE p.nodo != c.nodo
+GROUP BY de, a
+ORDER BY llamadas DESC, de, a
+"""
 
 #: Un mismo paso, con la misma entrada, repetido dentro de una misma traza.
 #:
@@ -1311,6 +1359,18 @@ class ClickHouseStore:
             )
         )
         return {f["clave"] for f in filas}
+
+    def project_graph(self, project_id: str, window: Window) -> GraphFacts:
+        params = self._window_params(project_id, window)
+        pasos = _named(self._consulta(GRAPH_STEPS_SQL, parameters=params))
+        aristas = _named(self._consulta(GRAPH_LINKS_SQL, parameters=params))
+        trazas = _named(
+            self._consulta(
+                f"SELECT uniqExact(trace_id) AS n FROM spans FINAL WHERE {RULES_WHERE}",
+                parameters=params,
+            )
+        )
+        return graph_facts(pasos, aristas, trazas[0]["n"] if trazas else 0)
 
     def coverage(self, project_id: str, window: Window) -> CoverageFacts:
         """La misma cuenta que en local, con los mismos alias (D-066).

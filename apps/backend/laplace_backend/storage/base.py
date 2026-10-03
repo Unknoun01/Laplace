@@ -537,6 +537,91 @@ class TraceCost:
 
 
 @dataclass
+class GraphStep:
+    """Un paso del agente sumado en la ventana: un nodo del grafo del proyecto (D-188).
+
+    La identidad es la del grafo de la traza (D-153): `step_key`, o `tipo:nombre`.
+    """
+
+    id: str
+    label: str
+    type: str
+    calls: int = 0
+    traces: int = 0
+    #: Veces que es la raíz de una traza: por dónde entra el agente.
+    roots: int = 0
+    cost_usd: float = 0.0
+    unknown_cost_spans: int = 0
+    estimated_spans: int = 0
+    errors: int = 0
+    #: Los modelos de sus llamadas, ordenados. Vacío si no es una llamada al modelo.
+    models: tuple[str, ...] = ()
+
+
+@dataclass
+class GraphLink:
+    """«Este paso llama a este otro» en la ventana, y lo que costaron esas llamadas."""
+
+    source: str
+    target: str
+    calls: int = 0
+    #: Lo que costaron las llamadas a `target` hechas desde `source` (su coste propio).
+    cost_usd: float = 0.0
+    unknown_cost_spans: int = 0
+
+
+@dataclass
+class GraphFacts:
+    steps: list[GraphStep]
+    links: list[GraphLink]
+    traces: int = 0
+
+
+def graph_facts(
+    pasos: list[dict[str, Any]], aristas: list[dict[str, Any]], trazas: int
+) -> GraphFacts:
+    """Las filas de los dos almacenes, con los mismos alias, a lo mismo.
+
+    Los modelos se ordenan aquí: `GROUP_CONCAT` y `groupUniqArray` no prometen orden, y
+    la misma pantalla no puede leerse distinta en local y en la nube (D-099).
+    """
+    def _modelos(valor: Any) -> tuple[str, ...]:
+        if isinstance(valor, str):
+            valor = valor.split(",") if valor else []
+        return tuple(sorted({str(m) for m in valor or [] if m}))
+
+    return GraphFacts(
+        steps=[
+            GraphStep(
+                id=str(f["nodo"]),
+                label=str(f["etiqueta"] or f["nodo"]),
+                type=str(f["tipo"]),
+                calls=int(f["llamadas"]),
+                traces=int(f["trazas"]),
+                roots=int(f["raices"] or 0),
+                cost_usd=float(f["coste"] or 0),
+                unknown_cost_spans=int(f["sin_tarifa"] or 0),
+                estimated_spans=int(f["estimadas"] or 0),
+                errors=int(f["errores"] or 0),
+                models=_modelos(f["modelos"]),
+            )
+            for f in pasos
+        ],
+        links=[
+            GraphLink(
+                source=str(f["de"]),
+                target=str(f["a"]),
+                calls=int(f["llamadas"]),
+                cost_usd=float(f["coste"] or 0),
+                unknown_cost_spans=int(f["sin_tarifa"] or 0),
+            )
+            for f in aristas
+        ],
+        traces=int(trazas or 0),
+    )
+
+
+@dataclass
 class ProjectStats:
     project_id: str
     trace_count: int = 0
@@ -788,6 +873,14 @@ class SpanStore(Protocol):
 
     def coverage(self, project_id: str, window: Window) -> CoverageFacts:
         """Cuántas llamadas de la ventana entiende Laplace, y cuántas no."""
+
+    def project_graph(self, project_id: str, window: Window) -> GraphFacts:
+        """El agente entero en la ventana: pasos y quién llama a quién (D-188).
+
+        Sin tiradas de evaluación. Los pasos, por llamadas de mayor a menor y por id; las
+        aristas, igual. Una arista une dos spans de la ventana de la misma traza; un paso
+        que se llama a sí mismo no es arista.
+        """
 
     # Lo que añadieron D-117 y D-123 sin pasar por aquí. Las rutas lo llaman en los dos
     # almacenes, así que es parte del contrato; `test_auditoria_p2` compara las firmas.

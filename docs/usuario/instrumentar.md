@@ -49,6 +49,12 @@ with laplace.guard(max_usd_per_run=0.50, max_loop=5):
 Si se pasa, la llamada siguiente no se hace y salta `laplace.GuardExceeded`. El bucle es
 el mismo que señala el Diagnóstico: el mismo paso, con la misma entrada, sin avanzar.
 
+Los mismos límites, y un botón para parar todos los agentes del proyecto, se ponen
+también en **Ajustes → Tope y parada**, sin tocar el código. El SDK los pide cada 30
+segundos; se suman a los del código y manda el más estricto. Sin `guard` en el código,
+cada ejecución es el `@observe` más externo. Si Laplace no responde, el agente sigue con
+lo último que recibió, o sin límites si nunca recibió nada.
+
 ## TypeScript y Node
 
 Todavía no hay SDK de Laplace para Node, y no hace falta: la ingesta entiende
