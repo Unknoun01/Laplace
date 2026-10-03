@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 191 decisiones.
+final. 192 decisiones.
 
 ## Coste, precios y caché
 
@@ -76,6 +76,7 @@ final. 191 decisiones.
 - [D-184](../DECISIONS.md#d-184--un-límite-de-gasto-y-de-bucles-en-el-sdk-con-la-misma-cuenta-que-la-traza) — Un límite de gasto y de bucles en el SDK, con la misma cuenta que la traza
 - [D-185](../DECISIONS.md#d-185--el-arreglo-del-modelo-caro-propuesto-como-pull-request-en-el-repositorio-del-usuario) — El arreglo del modelo caro, propuesto como pull request en el repositorio del usuario
 - [D-187](../DECISIONS.md#d-187--tope-bucles-y-parada-desde-laplace-el-sdk-los-pide-cada-30-s-y-manda-el-más-estricto) — Tope, bucles y parada desde Laplace: el SDK los pide cada 30 s y manda el más estricto
+- [D-191](../DECISIONS.md#d-191--el-webhook-de-github-marca-el-hallazgo-como-arreglado-al-fusionar-su-pr) — El webhook de GitHub marca el hallazgo como arreglado al fusionar su PR
 
 ## Probar: evaluaciones, juez y replay
 
@@ -624,3 +625,4 @@ final. 191 decisiones.
 **2026-10-03 — El bot de pull requests, más allá**
 
 - [D-190](../DECISIONS.md#d-190--cache_control-y-un-tope-de-vueltas-escritos-sobre-el-árbol-de-sintaxis) — `cache_control` y un tope de vueltas, escritos sobre el árbol de sintaxis
+- [D-191](../DECISIONS.md#d-191--el-webhook-de-github-marca-el-hallazgo-como-arreglado-al-fusionar-su-pr) — El webhook de GitHub marca el hallazgo como arreglado al fusionar su PR

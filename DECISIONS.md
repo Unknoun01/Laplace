@@ -4469,3 +4469,35 @@ desconocido, tildes antes en la misma línea, el def o el decorador, método con
 SDK anotando la función y la ingesta guardándolo, y de la ficha al PR por la API contra
 el GitHub falso (Claude sí, OpenAI no, bucle sin raíz anotada, un cambio que no compila).
 Se rompieron a propósito trece sitios y en todos falla alguna.
+
+### D-191 — El webhook de GitHub marca el hallazgo como arreglado al fusionar su PR
+`POST /api/github/webhook` recibe los avisos de GitHub. Cuando se cierra **fusionado** un
+PR que abrió Laplace, el hallazgo pasa a «arreglado» con la hora de la fusión, que es la
+frontera desde la que el seguimiento (D-123) compara antes y después; si el problema
+sigue, vuelve como «reaparecido», igual que si lo hubiese marcado una persona.
+
+* **Sin clave, con firma.** La llama GitHub, así que está en `PUBLIC_PATHS` (la lista
+  blanca pasa de una ruta a dos, y su prueba lo fija). Lo que la cierra es la firma HMAC
+  del cuerpo (`X-Hub-Signature-256`), comparada en tiempo constante. Valen dos secretos:
+  el de la GitHub App de la instalación (`LAPLACE_GITHUB_WEBHOOK_SECRET`) o el del
+  proyecto, que se genera al conectar el repositorio, se conserva al guardar otra cosa y
+  se enseña en Ajustes para pegarlo en GitHub. Un secreto sólo vale para los proyectos
+  con ese repositorio conectado. Antes de comprobar la firma no se hace nada con el
+  cuerpo salvo leer el nombre del repositorio, que dice qué secretos probar.
+* **El secreto del proyecto se devuelve** en `GET /api/github`, a diferencia del token: no
+  es una credencial de GitHub, sólo deja marcar como arreglado un hallazgo de este
+  proyecto, y eso lo vuelve a comprobar el seguimiento con las trazas.
+* **El PR se reconoce por número y por rama** (`rama_para`): un número suelto podría ser de
+  otro PR si el repositorio se recreó. Un PR cerrado sin fusionar no es un arreglo: sólo
+  se apunta su estado (`merged` o `closed`) junto al PR guardado. Lo que el usuario
+  ignoró sigue ignorado.
+* **Fusionar no es desplegar.** La nota del estado lo dice: si se desplegó más tarde, hay
+  que volver a marcarlo al desplegar para medir desde entonces. Sin una señal de
+  despliegue en las trazas, inventarse la hora sería peor. El cuerpo de los PR ya no pide
+  marcarlo a mano: lo hace el aviso, y si no llega, la persona.
+
+Pruebas en `test_bot_webhook.py` (10) y en `test_auth.py` (la ruta no pide clave pero sí
+firma; la lista blanca). Se rompieron a propósito diez sitios (cualquier firma vale, la
+firma de otro cuerpo, sin mirar la rama, cerrado como fusionado, pisar lo ignorado, la
+hora de llegada en vez de la de fusión, un secreto nuevo en cada guardado, sin el secreto
+de la App, el repositorio de otro, el webhook detrás de la clave) y en todos falla alguna.

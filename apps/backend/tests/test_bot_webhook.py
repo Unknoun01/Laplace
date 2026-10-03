@@ -54,7 +54,7 @@ def _mandar(c, datos: dict, secreto: str, evento: str = "pull_request"):
 
 
 @pytest.fixture
-def con_pr(api, monkeypatch):
+def con_pr(api, monkeypatch):  # noqa: F811 - `api` es la fixture importada
     """Un proyecto con un bucle, el repositorio conectado y su PR abierto."""
     c, app = api
     _sembrar_bucle(app.state.store, "p")
