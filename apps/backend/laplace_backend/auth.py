@@ -70,6 +70,8 @@ ADMIN_WRITES = (
     ("POST", "/api/alert-settings/test"),
     # Un token que escribe en el repositorio del usuario (D-185).
     ("PUT", "/api/github"),
+    # Tope, bucles y parada de los agentes del proyecto (D-187).
+    ("PUT", "/api/control"),
 )
 
 _ESCRITURAS = ("POST", "PUT", "PATCH", "DELETE")

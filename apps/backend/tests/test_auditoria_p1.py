@@ -83,6 +83,8 @@ def test_alerts_sin_proyecto_sólo_lista_los_que_ve_la_clave(cerrado):
             "/api/github",
             {"json": {"project_id": "mio", "repo": "atacante/repo", "token": "ghp_x"}},
         ),
+        # Parar los agentes del proyecto, o quitarles el tope (D-187).
+        ("put", "/api/control", {"json": {"project_id": "mio", "stopped": True}}),
     ],
 )
 def test_la_clave_de_un_proyecto_no_hace_escrituras_de_admin(cerrado, metodo, ruta, kwargs):
@@ -103,6 +105,18 @@ def test_la_clave_de_un_proyecto_sigue_escribiendo_lo_suyo(cerrado):
         headers=_cab(claves, "mio"),
     )
     assert r.status_code == 200, r.text
+
+
+def test_la_clave_de_un_proyecto_lee_sus_reglas_y_no_las_de_otro(cerrado):
+    """El SDK pide las reglas con la clave de ingesta (D-187): tiene que poder leer las
+    de su proyecto, y sólo ésas."""
+    client, claves = cerrado
+    suyas = client.get("/api/control", params={"project_id": "mio"}, headers=_cab(claves, "mio"))
+    assert suyas.status_code == 200, suyas.text
+    ajenas = client.get(
+        "/api/control", params={"project_id": "ajeno"}, headers=_cab(claves, "mio")
+    )
+    assert ajenas.status_code == 403
 
 
 def test_la_clave_de_instalación_sí_puede_lo_de_admin(cerrado):

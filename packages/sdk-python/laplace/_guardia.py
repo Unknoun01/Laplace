@@ -29,6 +29,11 @@ Un modelo sin tarifa no cuesta cero (contrato): su gasto no se puede sumar, y en
 contarlo como gratis se dice. Queda en `unknown_cost_models`, `cost_complete` pasa a
 False y se avisa una vez por el log. Para darle tarifa: `LAPLACE_PRICES_EXTRA`.
 
+Lo que se pone en Laplace (Ajustes: tope por ejecución, de bucles y la parada) se suma
+a lo del código y manda el más estricto (`_control.py`). Sin `guard` en el código, la
+ejecución es la raíz de `@observe` (o de `laplace.span`); la parada corta cualquier
+llamada, esté donde esté.
+
 Lo que no ve: llamadas hechas por otra instrumentación (OpenInference, OpenLLMetry) en
 lugar de por las integraciones de Laplace, y lo que corra en otro hilo sin copiar el
 contexto (`contextvars.copy_context()`); los límites viven en el contexto, como la traza.
@@ -44,7 +49,8 @@ import logging
 import re
 import threading
 import weakref
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
@@ -62,6 +68,11 @@ MAX_SALIDAS_BUCLE = 2
 
 MOTIVO_GASTO = "max_usd_per_run"
 MOTIVO_BUCLE = "max_loop"
+MOTIVO_PARADA = "stopped"
+
+#: De dónde salió el límite que cortó: del código o de lo puesto en Laplace.
+ORIGEN_CODIGO = "code"
+ORIGEN_LAPLACE = "laplace"
 
 
 class GuardExceeded(Exception):  # noqa: N818 - el nombre es la API pública
@@ -76,6 +87,7 @@ class GuardExceeded(Exception):  # noqa: N818 - el nombre es la API pública
         spent_usd: float,
         step: str = "",
         repeats: int = 0,
+        source: str = ORIGEN_CODIGO,
     ) -> None:
         super().__init__(message)
         #: `max_usd_per_run` o `max_loop`.
@@ -85,6 +97,8 @@ class GuardExceeded(Exception):  # noqa: N818 - el nombre es la API pública
         #: El paso que se iba a repetir, si el corte es por bucle.
         self.step = step
         self.repeats = repeats
+        #: `code` (el `guard` del código) o `laplace` (lo puesto en Ajustes).
+        self.source = source
 
 
 # ---------------------------------------------------------------------------------
@@ -197,41 +211,55 @@ class _Ejecucion:
 
     # -- comprobar -----------------------------------------------------------------
 
-    def comprobar(self, clave: str, nombre: str) -> None:
-        """Lanza `GuardExceeded` si la llamada que viene no se debe hacer."""
+    def comprobar(self, clave: str, nombre: str, remotas: Any) -> None:
+        """Lanza `GuardExceeded` si la llamada que viene no se debe hacer.
+
+        Los límites se leen en cada comprobación y no al abrir el bloque: un tope puesto
+        en Laplace a mitad de una ejecución larga la alcanza en la siguiente llamada.
+        """
         with self._lock:
             if self.cortada is not None:
                 # Cortada una vez, cortada para el resto del bloque: un agente que
                 # captura la excepción y sigue no puede volver a gastar.
                 raise self.cortada
             self._cobrar_cerrados()
-            if self.max_usd is not None and self._gastado >= self.max_usd:
+            max_usd, origen_usd = mas_estricto(self.max_usd, remotas.max_usd_per_run)
+            if max_usd is not None and self._gastado >= max_usd:
                 self.cortada = GuardExceeded(
                     f"laplace.guard: la ejecución lleva gastados {self._gastado:.4f} USD y "
-                    f"el límite es {self.max_usd:.4f} USD; la llamada siguiente no se hace.",
+                    f"el límite es {max_usd:.4f} USD{_puesto(origen_usd)}; la llamada "
+                    f"siguiente no se hace.",
                     reason=MOTIVO_GASTO,
-                    limit=self.max_usd,
+                    limit=max_usd,
                     spent_usd=self._gastado,
+                    source=origen_usd,
                 )
                 raise self.cortada
+            max_loop, origen_bucle = mas_estricto(self.max_loop, remotas.max_loop)
             paso = self._pasos.get(clave)
             if (
-                self.max_loop is not None
+                max_loop is not None
                 and paso is not None
-                and paso.veces >= self.max_loop
+                and paso.veces >= max_loop
                 and len(paso.salidas) <= min(MAX_SALIDAS_BUCLE, paso.veces - 1)
             ):
                 self.cortada = GuardExceeded(
                     f"laplace.guard: «{nombre}» va a repetirse por {paso.veces + 1}ª vez con "
                     f"la misma entrada y sin avanzar ({len(paso.salidas)} salidas distintas); "
-                    f"el límite es {self.max_loop}.",
+                    f"el límite es {max_loop}{_puesto(origen_bucle)}.",
                     reason=MOTIVO_BUCLE,
-                    limit=float(self.max_loop),
+                    limit=float(max_loop),
                     spent_usd=self._gastado,
                     step=nombre,
                     repeats=paso.veces,
+                    source=origen_bucle,
                 )
                 raise self.cortada
+
+    def cortar(self, exc: GuardExceeded) -> None:
+        with self._lock:
+            if self.cortada is None:
+                self.cortada = exc
 
     def apuntar(self, clave: str, nombre: str) -> None:
         with self._lock:
@@ -251,27 +279,59 @@ class _Ejecucion:
 _activas: ContextVar[tuple[_Ejecucion, ...]] = ContextVar("laplace_guard", default=())
 
 
+def mas_estricto(codigo: Any, laplace: Any) -> tuple[Any, str]:
+    """El límite que manda y de dónde sale. Con los dos iguales, el del código."""
+    if laplace is None or (codigo is not None and codigo <= laplace):
+        return codigo, ORIGEN_CODIGO
+    return laplace, ORIGEN_LAPLACE
+
+
+def _puesto(origen: str) -> str:
+    return ", puesto en Laplace" if origen == ORIGEN_LAPLACE else ""
+
+
+def _remotas() -> Any:
+    from ._control import actuales
+
+    return actuales()
+
+
 # ---------------------------------------------------------------------------------
 # Lo que llaman las integraciones y `@observe`
 # ---------------------------------------------------------------------------------
 
 
 def hay_alguno() -> bool:
-    return bool(_activas.get())
+    return bool(_activas.get()) or _remotas().stopped
 
 
 def antes(tipo: str, nombre: str, entrada: Any) -> Vuelta | None:
     """Antes de una llamada al modelo o de un paso. Lanza si no se debe hacer.
 
     Devuelve con qué apuntarle la salida (`despues`) y, si es del modelo, el span
-    (`con_span`). Sin ningún `guard` abierto no hace nada ni cuesta nada.
+    (`con_span`). Sin ningún `guard` abierto ni parada no hace nada ni cuesta nada.
     """
+    remotas = _remotas()
     guardias = _activas.get()
+    if remotas.stopped:
+        parada = GuardExceeded(
+            f"laplace.guard: el proyecto está parado desde Laplace; «{nombre}» no se hace.",
+            reason=MOTIVO_PARADA,
+            limit=0.0,
+            spent_usd=guardias[-1].gastado if guardias else 0.0,
+            step=nombre,
+            source=ORIGEN_LAPLACE,
+        )
+        # Las ejecuciones en marcha quedan cortadas: reanudar deja empezar otras, no
+        # resucita una que se paró a medias.
+        for guardia in guardias:
+            guardia.cortar(parada)
+        raise parada
     if not guardias:
         return None
     clave = huella(tipo, nombre, entrada, ignorar_numeros=True)
     for guardia in guardias:
-        guardia.comprobar(clave, nombre)
+        guardia.comprobar(clave, nombre, remotas)
     for guardia in guardias:
         guardia.apuntar(clave, nombre)
     return Vuelta(guardias, clave, tipo, nombre)
@@ -317,6 +377,24 @@ def salida_de_span(span: Any, salida: Any) -> None:
     except TypeError:
         return
     despues(vuelta, salida)
+
+
+@contextmanager
+def implicita(raiz: bool) -> Iterator[None]:
+    """La ejecución de quien no ha escrito `guard`: la raíz de `@observe`.
+
+    Sólo si Laplace tiene algún límite puesto, y sólo en la raíz y sin otro `guard`
+    abierto: con uno, ése ya aplica lo de Laplace. Sin límites no se abre nada, para no
+    pagar huellas en cada paso de quien no las necesita.
+    """
+    if not raiz or _activas.get() or not _remotas().limita:
+        yield
+        return
+    token = _activas.set((_Ejecucion(None, None),))
+    try:
+        yield
+    finally:
+        _activas.reset(token)
 
 
 # ---------------------------------------------------------------------------------

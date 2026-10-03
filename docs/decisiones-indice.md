@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 187 decisiones.
+final. 188 decisiones.
 
 ## Coste, precios y caché
 
@@ -74,6 +74,7 @@ final. 187 decisiones.
 - [D-183](../DECISIONS.md#d-183--las-medianas-del-uso-por-paso-la-misma-cuenta-en-los-dos-almacenes-y-una-llamada-con-respuesta-y-sin-recuento-ya-no-sale-gratis) — Las medianas del uso por paso, la misma cuenta en los dos almacenes; y una llamada con respuesta y sin recuento ya no sale gratis
 - [D-184](../DECISIONS.md#d-184--un-límite-de-gasto-y-de-bucles-en-el-sdk-con-la-misma-cuenta-que-la-traza) — Un límite de gasto y de bucles en el SDK, con la misma cuenta que la traza
 - [D-185](../DECISIONS.md#d-185--el-arreglo-del-modelo-caro-propuesto-como-pull-request-en-el-repositorio-del-usuario) — El arreglo del modelo caro, propuesto como pull request en el repositorio del usuario
+- [D-187](../DECISIONS.md#d-187--tope-bucles-y-parada-desde-laplace-el-sdk-los-pide-cada-30-s-y-manda-el-más-estricto) — Tope, bucles y parada desde Laplace: el SDK los pide cada 30 s y manda el más estricto
 
 ## Probar: evaluaciones, juez y replay
 
@@ -126,6 +127,7 @@ final. 187 decisiones.
 - [D-170](../DECISIONS.md#d-170--los-tres-frameworks-que-faltaban-probados-y-lo-que-mastra-no-manda-donde-toca) — Los tres frameworks que faltaban, probados; y lo que Mastra no manda donde toca
 - [D-181](../DECISIONS.md#d-181--redacción-de-datos-personales-y-muestreo-por-cola-en-el-sdk) — Redacción de datos personales y muestreo por cola, en el SDK
 - [D-184](../DECISIONS.md#d-184--un-límite-de-gasto-y-de-bucles-en-el-sdk-con-la-misma-cuenta-que-la-traza) — Un límite de gasto y de bucles en el SDK, con la misma cuenta que la traza
+- [D-187](../DECISIONS.md#d-187--tope-bucles-y-parada-desde-laplace-el-sdk-los-pide-cada-30-s-y-manda-el-más-estricto) — Tope, bucles y parada desde Laplace: el SDK los pide cada 30 s y manda el más estricto
 
 ## Almacenes y escala
 
@@ -606,3 +608,7 @@ final. 187 decisiones.
 **2026-10-03 — Los preagregados, fuera de UTC**
 
 - [D-186](../DECISIONS.md#d-186--las-horas-de-los-preagregados-se-apuntan-con-su-zona-fuera-de-utc-no-se-daban-nunca-por-calculadas) — Las horas de los preagregados se apuntan con su zona: fuera de UTC no se daban nunca por calculadas
+
+**2026-10-03 — Plano de control**
+
+- [D-187](../DECISIONS.md#d-187--tope-bucles-y-parada-desde-laplace-el-sdk-los-pide-cada-30-s-y-manda-el-más-estricto) — Tope, bucles y parada desde Laplace: el SDK los pide cada 30 s y manda el más estricto

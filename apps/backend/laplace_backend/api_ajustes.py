@@ -20,7 +20,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from . import github_bot, idioma, margen, presupuesto, stripe_ingresos
+from . import control, github_bot, idioma, margen, presupuesto, stripe_ingresos
 from .alerts import CLAVE_AJUSTES, webhook_valido
 from .auth import identity_of
 from .ingest.otlp import recalcular_coste
@@ -745,6 +745,38 @@ async def delete_project(request: Request, project_id: str, confirm: str) -> dic
         )
     logger.warning("proyecto borrado entero — %s", project_id)
     return {"project_id": project_id, "deleted": True}
+
+
+# Plano de control (D-187): tope por ejecución, bucles y parada. El GET lo usa también el
+# SDK del usuario cada 30 s, con su clave de proyecto; el PUT es de admin (`ADMIN_WRITES`).
+
+
+@router.get("/control", response_model=control.Control)
+async def get_control(request: Request, project_id: str) -> control.Control:
+    return await run_in_threadpool(_guard, control.leer, _meta(request), project_id)
+
+
+@router.put("/control", response_model=control.Control)
+async def put_control(request: Request, body: control.ControlIn) -> control.Control:
+    meta = _meta(request)
+    antes = await run_in_threadpool(_guard, control.leer, meta, body.project_id)
+    puesto = await run_in_threadpool(_guard, control.guardar, meta, body)
+    cuentas = getattr(request.app.state, "cuentas", None)
+    if cuentas is not None and antes.stopped != puesto.stopped:
+        # Parar los agentes de todos es de las cosas que tiene que quedar escritas.
+        org_id = await run_in_threadpool(cuentas.org_del_proyecto, body.project_id)
+        await run_in_threadpool(
+            cuentas.anotar,
+            org_id or "",
+            identity_of(request).user_id,
+            "parar_proyecto" if puesto.stopped else "reanudar_proyecto",
+            body.project_id,
+        )
+    if antes.stopped != puesto.stopped:
+        logger.warning(
+            "proyecto %s — %s", "parado" if puesto.stopped else "reanudado", body.project_id
+        )
+    return puesto
 
 
 # Bot de pull requests (D-185). El token es un secreto: se guarda y no se devuelve.

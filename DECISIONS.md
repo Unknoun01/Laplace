@@ -4337,3 +4337,42 @@ instalación nueva.
 Pruebas en `test_preagregados.py`: una con un cliente que apunta lo que se le inserta, que
 no depende de la zona del ordenador (en rojo antes del arreglo en cualquier sitio), y una
 contra ClickHouse que exige que calcular lo pendiente se acabe (en rojo aquí antes).
+
+## 2026-10-03 — Plano de control
+
+### D-187 — Tope, bucles y parada desde Laplace: el SDK los pide cada 30 s y manda el más estricto
+Por proyecto, en Ajustes: un tope de gasto por ejecución, uno de bucles y un botón de
+parada. Se guardan como un ajuste más (`control.py`, `GET/PUT /api/control`; el PUT es de
+admin, en `ADMIN_WRITES`, y parar o reanudar queda en el registro de la organización). El
+SDK los pide en un hilo aparte cada 30 s (`laplace/_control.py`) y los aplica con la
+maquinaria de `laplace.guard` (D-184).
+
+* **Se suman y manda el más estricto.** Con un `guard` en el código, cada límite es el
+  menor de los dos; con uno en cada sitio, aplican los dos. Nada de lo que se ponga en la
+  interfaz puede aflojar un límite del código. `GuardExceeded.source` dice de dónde salió
+  el que cortó (`code` o `laplace`), y el mensaje lo dice también.
+* **Sin `guard` en el código, la ejecución es la raíz de `@observe`** (o de
+  `laplace.span`): ahí se abre una ejecución implícita, sólo si Laplace tiene algún
+  límite puesto, para no pagar huellas en cada paso de quien no los usa. Una llamada al
+  modelo suelta, fuera de todo paso, no tiene ejecución y sólo la alcanza la parada.
+* **Los límites se leen en cada comprobación**, no al abrir el bloque: un tope puesto a
+  mitad de una ejecución larga la alcanza en la siguiente llamada.
+* **La parada corta cualquier llamada al modelo y cualquier paso**, esté donde esté, con
+  `reason="stopped"`. Las ejecuciones en marcha quedan cortadas: reanudar deja empezar
+  otras, no resucita la que se paró a medias. Tarda en llegar, como mucho, 30 s.
+* **Laplace caído:** se sigue con la última copia buena, y una respuesta que no se
+  entiende (un tope de cero, un bucle de una vuelta, algo que no es un objeto) cuenta como
+  caído y no la borra. **Sin copia, sin reglas:** el agente sigue. La copia es de un
+  proyecto y de un Laplace; si `init()` cambia cualquiera de los dos, se tira. El aviso
+  sale una vez por el log, no cada 30 s.
+* Los límites aceptados son los de `guard()` (tope mayor que cero, bucles de 2 o más),
+  en la API y al leer la respuesta en el SDK. `init(remote_rules=False)` o
+  `LAPLACE_REMOTE_RULES=false` lo apagan.
+
+Pruebas en `test_plano_control.py` (22) y en `test_auditoria_p1.py` (la clave de un
+proyecto no puede cambiar las reglas, sí leer las suyas y no las de otro). Se rompieron a
+propósito catorce sitios (manda siempre el código, manda siempre Laplace, sin ejecución
+implícita, la parada sin mirar, la parada que no deja cortada la ejecución, un paso que no
+la ve, el fallo que borra la copia, la respuesta sin validar, la copia que pasa de
+proyecto, `init` que no arranca, el hilo que bloquea, el PUT sin admin —en las dos
+pruebas— y el bucle de 1 admitido) y en todos falla alguna.

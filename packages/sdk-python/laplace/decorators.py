@@ -207,10 +207,12 @@ def span(
     """
     tracer = get_tracer()
     # `_pasos.entrar` apila el nombre mientras dure el bloque: es lo que permite saber
-    # desde qué **camino** se llama al modelo, y no sólo desde qué función (D-106).
-    with tracer.start_as_current_span(name, kind=SpanKind.INTERNAL) as otel_span, _pasos.entrar(
-        name
-    ):
+    # desde qué **camino** se llama al modelo, y no sólo desde qué función (D-106). La
+    # raíz es además la ejecución a la que se aplican los topes de Laplace cuando el
+    # código no tiene su propio `guard`.
+    with _guardia.implicita(_pasos.hoja() is None), tracer.start_as_current_span(
+        name, kind=SpanKind.INTERNAL
+    ) as otel_span, _pasos.entrar(name):
         _preparar(
             otel_span,
             name,
