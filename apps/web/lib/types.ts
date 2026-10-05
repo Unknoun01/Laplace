@@ -246,7 +246,13 @@ export type FindingKind =
   /** Una versión nueva de un prompt gestionado que encarece cada ejecución (D-157). */
   | "prompt_caro"
   /** El mismo prefijo en varios pasos, sin compartir la caché (D-178). */
-  | "cache_compartida";
+  | "cache_compartida"
+  /** Una respuesta cortada por el tope de salida y rehecha (D-193). */
+  | "salida_truncada"
+  /** Una salida con el JSON roto y rehecha (D-194). */
+  | "json_roto"
+  /** La entrada de un paso que crece en cada turno sin recortarse (D-195). */
+  | "historial";
 export type Difficulty = "easy" | "mid" | "hard";
 
 export interface TechItem {

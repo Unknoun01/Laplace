@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 193 decisiones.
+final. 196 decisiones.
 
 ## Coste, precios y caché
 
@@ -35,6 +35,7 @@ final. 193 decisiones.
 - [D-179](../DECISIONS.md#d-179--margen-por-cliente-lo-evitable-de-cada-uno-otras-monedas-y-su-columna) — Margen por cliente: lo evitable de cada uno, otras monedas y su columna
 - [D-184](../DECISIONS.md#d-184--un-límite-de-gasto-y-de-bucles-en-el-sdk-con-la-misma-cuenta-que-la-traza) — Un límite de gasto y de bucles en el SDK, con la misma cuenta que la traza
 - [D-190](../DECISIONS.md#d-190--cache_control-y-un-tope-de-vueltas-escritos-sobre-el-árbol-de-sintaxis) — `cache_control` y un tope de vueltas, escritos sobre el árbol de sintaxis
+- [D-195](../DECISIONS.md#d-195--historial-que-crece-sin-límite-tokens-medidos-sin-dinero) — Historial que crece sin límite: tokens medidos, sin dinero
 
 ## Detección: reglas y hallazgos
 
@@ -628,3 +629,6 @@ final. 193 decisiones.
 - [D-190](../DECISIONS.md#d-190--cache_control-y-un-tope-de-vueltas-escritos-sobre-el-árbol-de-sintaxis) — `cache_control` y un tope de vueltas, escritos sobre el árbol de sintaxis
 - [D-191](../DECISIONS.md#d-191--el-webhook-de-github-marca-el-hallazgo-como-arreglado-al-fusionar-su-pr) — El webhook de GitHub marca el hallazgo como arreglado al fusionar su PR
 - [D-192](../DECISIONS.md#d-192--las-pantallas-del-bot-más-allá-el-pr-de-cada-arreglo-y-el-webhook-en-ajustes) — Las pantallas del bot, más allá: el PR de cada arreglo y el webhook en Ajustes
+- [D-193](../DECISIONS.md#d-193--salida-truncada-la-respuesta-cortada-por-el-tope-de-salida-y-rehecha) — Salida truncada: la respuesta cortada por el tope de salida, y rehecha
+- [D-194](../DECISIONS.md#d-194--reintentos-por-json-mal-formado-la-salida-que-no-se-lee-y-rehecha) — Reintentos por JSON mal formado: la salida que no se lee, y rehecha
+- [D-195](../DECISIONS.md#d-195--historial-que-crece-sin-límite-tokens-medidos-sin-dinero) — Historial que crece sin límite: tokens medidos, sin dinero

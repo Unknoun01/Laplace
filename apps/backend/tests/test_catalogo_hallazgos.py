@@ -223,6 +223,52 @@ def almacen_con_los_cuatro_tipos(tmp_path):
             span.prefix_hash = "prefijo-comun"
             spans.append(span)
 
+    # Regla 7 — salida truncada (D-193): la respuesta se corta por el tope de salida y
+    # el mismo paso vuelve a llamar en la misma ejecución.
+    for t in range(6):
+        for j, motivo in enumerate(("length", "stop")):
+            span = _span(
+                f"corte-{t}",
+                paso="traducir",
+                clave="k-traducir",
+                entrada_tokens=500,
+                salida_tokens=300,
+                i=2400 + t * 20 + j,
+                dedup=f"traducir-{t}-{j}",
+            )
+            span.llm.finish_reasons = [motivo]
+            spans.append(span)
+
+    # Regla 8 — JSON roto (D-194): la salida no se lee y el mismo paso vuelve a llamar.
+    for t in range(6):
+        for j, marca in enumerate(("roto", "ok")):
+            span = _span(
+                f"json-{t}",
+                paso="extraer",
+                clave="k-extraer",
+                entrada_tokens=500,
+                salida_tokens=300,
+                i=2600 + t * 20 + j,
+                dedup=f"extraer-{t}-{j}",
+            )
+            span.output_json = marca
+            spans.append(span)
+
+    # Regla 9 — historial (D-195): la entrada del paso crece en cada turno y no baja.
+    for c in range(4):
+        for turno in range(5):
+            spans.append(
+                _span(
+                    f"charla-{c}",
+                    paso="charlar",
+                    clave="k-charlar",
+                    entrada_tokens=1_000 + 500 * turno,
+                    salida_tokens=300,
+                    i=2800 + c * 20 + turno,
+                    dedup=f"charlar-{c}-{turno}",
+                )
+            )
+
     store.insert_spans(spans)
     return store
 
@@ -503,6 +549,23 @@ GARANTIAS: dict[str, dict[str, str]] = {
         "tarifa sobre el modelo barato si se recomienda y reparte su dinero entre sus pasos "
         "(`step_shares`)",
     },
+    "salida_truncada": {
+        "nombre": "`_nombrar` y `disambiguate` sobre (paso, modelo), como el modelo caro",
+        "descuento": "su consulta deja fuera las cortadas que reclaman la repetición y los "
+        "bucles; las que reclama entran en `_duplicate_tokens` para que el modelo caro, el "
+        "contexto fijo y la caché compartida no las cuenten otra vez",
+    },
+    "json_roto": {
+        "nombre": "`_nombrar` y `disambiguate` sobre (paso, modelo), como la truncada",
+        "descuento": "su consulta deja fuera las cortadas (de la truncada) y lo que reclaman "
+        "la repetición y los bucles; lo suyo entra en `_duplicate_tokens`",
+    },
+    "historial": {
+        "nombre": "`_nombrar` y `disambiguate` sobre el paso",
+        "descuento": "sólo tokens, nunca dinero; su consulta deja fuera lo que reclaman la "
+        "repetición, los bucles y las rehechas, y mide lo que está por encima del primer "
+        "turno, que no es el suelo del contexto fijo",
+    },
     "prompt_caro": {
         "nombre": "el nombre del prompt y sus dos versiones, que son únicos",
         "descuento": "va la última y resta lo que las demás reclaman sobre sus pasos "
@@ -521,6 +584,25 @@ def test_toda_regla_dice_como_se_nombra_y_como_no_cuenta_dos_veces():
     )
     for tipo, garantias in GARANTIAS.items():
         assert garantias.get("nombre") and garantias.get("descuento"), tipo
+
+
+def test_la_web_conoce_todos_los_tipos_de_hallazgo():
+    """El tipo de la web y la lista de reglas que se pueden silenciar en Ajustes son los
+    mismos que los del motor. Nada lo exigía: una regla nueva salía en el inicio con un
+    tipo que la web no declaraba, y sin forma de silenciar sus alertas (D-193)."""
+    import re
+    from pathlib import Path
+
+    web = Path(__file__).resolve().parents[2] / "web"
+    tipos_ts = (web / "lib" / "types.ts").read_text(encoding="utf-8")
+    union = re.search(r"export type FindingKind =(.*?);", tipos_ts, re.S)
+    assert union, "no encuentro `FindingKind` en lib/types.ts"
+    en_web = set(re.findall(r'\|\s*"([a-z_]+)"', union.group(1)))
+    alertas = (web / "app" / "ajustes" / "alertas.tsx").read_text(encoding="utf-8")
+    silenciables = set(re.findall(r'\["([a-z_]+)", "aj\.regla\.', alertas))
+    motor = set(get_args(insights.FindingKind))
+    assert en_web == motor, f"types.ts: sobran {en_web - motor}, faltan {motor - en_web}"
+    assert motor <= silenciables, f"Ajustes no deja silenciar: {motor - silenciables}"
 
 
 @pytest.fixture(scope="module")

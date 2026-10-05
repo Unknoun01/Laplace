@@ -4517,3 +4517,108 @@ de la App, el repositorio de otro, el webhook detrás de la clave) y en todos fa
 Prueba de pantalla en `test_pantallas.py`: la ficha de un bucle de la demo ofrece el PR con
 el tope, y Ajustes, con un repositorio conectado, enseña la URL y el secreto que da la API
 y no el token. Falla con el botón limitado al cambio de modelo y sin el bloque del webhook.
+
+### D-193 — Salida truncada: la respuesta cortada por el tope de salida, y rehecha
+Primera de las reglas nuevas del Diagnóstico (regla 7, `insights/salida_truncada.py`).
+Cuando el modelo llega al tope de tokens de salida, para a media frase y lo dice en el
+motivo de fin: `length` en OpenAI Chat, `max_tokens` en Anthropic (y `MAX_TOKENS` en
+Gemini) y `max_output_tokens` en la Responses API. Se comparan sin mayúsculas.
+
+* **Qué dinero es.** Sólo el de la llamada cortada **cuando el mismo paso vuelve a llamar
+  más tarde en la misma ejecución**: eso prueba que la primera no sirvió, y se tiró entera,
+  entrada y salida. La llamada que la rehace no se cuenta: es la que hizo el trabajo.
+* **Lo que no se cobra.** Una respuesta cortada que nadie rehízo pudo usarse a medias o
+  continuarse; no lo sabemos. Se cuenta en la ficha («hubo N más que nadie rehízo»), sin
+  dinero. «Descartada» (una salida que nadie usa) queda fuera: no hay cómo saberlo.
+* **Sin contar dos veces.** La consulta deja fuera las cortadas cuya entrada sale tantas
+  veces en la traza como pide la repetición (`MIN_REPEATS`) o cuyo `loop_hash` da tantas
+  vueltas como pide el bucle (`MIN_VUELTAS_BUCLE`), aunque el bucle luego no salga: por lo
+  bajo. Lo que reclama esta regla entra en `_duplicate_tokens` por (paso, modelo), así
+  que el modelo caro, el contexto fijo y la caché compartida no lo vuelven a mirar; sus
+  fichas usan los mismos descuentos (`_duplicados_de`).
+* **Umbral:** 5 cortadas y rehechas en la ventana (`MIN_TRUNCADAS_REHECHAS`). Agrupa por
+  (paso, modelo), como el modelo caro.
+* **Escala.** Se lee en crudo en los dos almacenes, también con preagregados: la consulta
+  empieza por las trazas con algún corte, que son pocas, y sólo sobre ésas abre ventanas.
+  Si con volumen pesa, el candidato es un preagregado de trazas con corte.
+* Margen por cliente y la vista de traza la tratan como la repetición: hace falta pasar
+  dos veces por el paso para que sea de esa ejecución.
+
+Pruebas: `test_regla_salida_truncada.py` en SQLite y ClickHouse (el caso de libro con su
+dinero exacto, los tres motivos, la que nadie rehízo, la que se rehace en otra ejecución,
+el mínimo, la repetición, las evaluaciones, el modelo caro sin doble cuenta, la ficha);
+el catálogo siembra el tipo nuevo, y una prueba nueva exige que `FindingKind` de la web y
+las reglas silenciables de Ajustes sean las del motor, que nada exigía. Se rompió a
+propósito: sin el descuento al modelo caro, sin excluir la repetición (en los dos
+almacenes) y cobrando las cortadas sin rehacer; en todos falla alguna.
+
+### D-194 — Reintentos por JSON mal formado: la salida que no se lee, y rehecha
+Segunda de las reglas nuevas (regla 8, `insights/json_roto.py`), detrás de la truncada.
+
+* **La señal la pone la ingesta.** Cada span de modelo lleva `output_json`: `ok` si la
+  salida es JSON que se lee, `roto` si lo intenta y no se lee, y vacío si no lo intenta
+  (texto, herramientas, sin salida). «Lo intenta» es empezar por `{` o `[`, quitado antes
+  un bloque de código: casi todos los agentes lo quitan antes de leer, así que un JSON
+  bueno dentro de ```` ```json ```` no es roto (por lo bajo). Se lee el texto de la última
+  respuesta en las tres formas que llegan: `content` como cadena, como bloques y `parts`.
+  Calcularlo al ingerir y no en SQL deja a los dos almacenes con la misma cuenta, sin
+  analizar JSON en dos dialectos. Es un campo nuevo del contrato y una columna tardía en
+  los dos almacenes; el tráfico de antes no la tiene y no sale.
+* **Qué dinero es:** el de la llamada rota cuando el mismo paso vuelve a llamar más tarde
+  en la misma ejecución, como en D-193; las rotas que nadie rehízo se cuentan en la ficha,
+  sin dinero.
+* **Lo que reclama la truncada no se cuenta otra vez.** Una salida cortada por el tope
+  casi siempre deja el JSON roto, pero su arreglo es el tope: es de la truncada. Aquí
+  entran sólo las rotas que **no** terminaron por el tope. Como las dos excluyen igual la
+  repetición y los bucles, eso resta exactamente lo que reclama aquélla. Lo suyo entra en
+  `_duplicate_tokens` con lo de la truncada.
+* La consulta de D-193 se generaliza a «llamada fallida y rehecha» (`_rehechas_sql`, una
+  por almacén) con un predicado por regla, y su tipo pasa a `RedoneGroup`; la evidencia de
+  las dos fichas sale de `sample_step_calls`. Umbral: 5 (`MIN_JSON_ROTO_REHECHAS`).
+* Los arreglos que propone: salida estructurada del proveedor (`json_schema`, o una
+  herramienta en Anthropic), reparar el JSON en local antes de volver a preguntar, y si hay
+  que reintentar, mandar el error del parser.
+
+Pruebas: `test_regla_json_roto.py` (la marca de la ingesta en diez formas y por OTLP de
+verdad; en los dos almacenes, el caso de libro, la rota sin rehacer, el texto que no es
+JSON, el mínimo, la cortada que es de la truncada, las dos juntas sin reclamar más que lo
+gastado, la repetición, las evaluaciones, el modelo caro, la ficha); el catálogo siembra el
+tipo, y el margen por cliente pide dos pasadas como en D-193. Se rompió a propósito: dejar
+entrar las cortadas (en los dos almacenes), no descontar al modelo caro y no quitar el
+bloque de código; en todos falla alguna.
+
+### D-195 — Historial que crece sin límite: tokens medidos, sin dinero
+Tercera de las reglas nuevas (regla 9, `insights/historial.py`).
+
+* **Conversación:** la sesión si la hay (`s:<sesión>`), si no la ejecución (`t:<traza>`).
+  Dentro, las llamadas de un mismo paso en orden. Sale cuando hay al menos 4 turnos
+  (`MIN_TURNOS_HISTORIAL`), la entrada no baja **nunca** y crece de media al menos 200
+  tokens por turno (`MIN_CRECIMIENTO_POR_TURNO`), en al menos 3 conversaciones de la
+  ventana (`MIN_CONVERSACIONES_HISTORIAL`). Un historial que se recorta alguna vez no es
+  «sin límite» y no sale.
+* **Lo que se afirma:** «la entrada crece N tokens por turno», y los tokens de historial
+  reenviados (lo que cada turno manda por encima del primero, sumado). Las dos cosas están
+  medidas.
+* **Dinero, nunca, aunque haya tarifa.** El ahorro necesitaría un tope, y desde las trazas
+  no se puede defender ninguno: cuánto historial necesita un paso para responder bien no
+  está en ellas. Cualquier número sería inventado. Como en D-108, sin cifra que defender se
+  habla de tokens; el aviso en lugar del dinero lo dice. La ficha explica cómo conseguir
+  un tope defendible: probarlo con `laplace replay` sobre conversaciones reales y una
+  evaluación. Por no tener dinero, no alerta (las alertas son de coste) ni suma al
+  evitable del inicio.
+* **Sin contar dos veces:** se dejan fuera las llamadas que reclaman la repetición, los
+  bucles, la truncada y la del JSON (con los mismos criterios que ellas). Lo que se mide
+  está por encima del primer turno de cada conversación, que no es el suelo común de la
+  entrada que reclama el contexto fijo.
+* **Escala:** se lee en crudo. En ClickHouse se filtran antes, sin FINAL, las parejas
+  (conversación, paso) con turnos y crecimiento de sobra, y sólo sobre ésas se abren las
+  ventanas. No se ha medido con la carga grande; es lo primero a mirar si el Diagnóstico
+  de siete días se pone lento.
+
+Pruebas: `test_regla_historial.py` en los dos almacenes (el caso de libro, sin dinero con
+tarifa, la sesión, el recorte, pocos turnos, poco crecimiento, pocas conversaciones, las
+evaluaciones, el contexto fijo, las rehechas, la ficha). Y una prueba de paridad nueva
+sobre empates para las tres lecturas de esta fase (truncadas, JSON roto e historial), que
+la regla de los almacenes pide (D-099) y D-193 y D-194 no tenían. Se rompió a propósito:
+sin exigir que no baje, sin la sesión, contando las rehechas, poniendo dinero, y con otro
+desempate en un almacén (en cada uno); en todos falla alguna.

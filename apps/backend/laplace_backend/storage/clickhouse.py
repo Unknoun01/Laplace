@@ -26,17 +26,20 @@ from ._rows import (
 )
 from ._rows import utc as _utc
 from .base import (
+    _MOTIVOS_SQL,
     MARGEN_FILTROS,
     Bucket,
     CostGroup,
     CoverageFacts,
     GraphFacts,
+    HistoryGroup,
     Latency,
     LoopGroup,
     ModelUsage,
     ObservedPrompt,
     ProjectStats,
     PromptUsage,
+    RedoneGroup,
     RepeatedGroup,
     StepCostSeries,
     StepFacts,
@@ -343,6 +346,166 @@ GROUP BY paso_clave
 ORDER BY extra_spans DESC, paso_clave
 LIMIT %(limit)s
 """
+
+#: Una llamada cortada por el tope de salida (D-193). Gemelo de `_CORTADA` de sqlite.py.
+_CORTADA = f"arrayExists(m -> lower(m) IN ({_MOTIVOS_SQL}), finish_reasons)"
+
+def _rehechas_sql(fallida: str) -> str:
+    """Gemelo de `_rehechas_sql` de sqlite.py (D-193, D-194). Mismo criterio y mismos
+    alias. Primero las trazas con alguna llamada fallida, sin FINAL: son pocas, y así las
+    ventanas de abajo no recorren la ventana entera."""
+    return f"""
+SELECT
+    paso_clave                                 AS paso,
+    request_model                              AS modelo,
+    max(etiqueta)                              AS nombre,
+    max(step_hint)                             AS pista,
+    max(step_site)                             AS sitio,
+    uniqExactIf(trace_id, rehecha)             AS trazas,
+    countIf(rehecha)                           AS rehechas,
+    countIf(sola)                              AS sin_rehacer,
+    sumIf(cost_total_usd, rehecha)             AS coste,
+    sumIf(duration_ms, rehecha)                AS duracion,
+    sumIf(input_tokens, rehecha)               AS tok_in,
+    sumIf(output_tokens, rehecha)              AS tok_out,
+    sumIf(cost_unknown, rehecha)               AS sin_tarifa,
+    sumIf(cost_rate_assumed, rehecha)          AS asumida,
+    maxIf(trace_id, rehecha)                   AS traza_ejemplo,
+    maxIf(start_time, rehecha)                 AS ultima
+FROM (
+    SELECT
+        *,
+        start_time < ultima_del_paso
+            AND (dedup_hash = '' OR copias < %(min_repeats)s)
+            AND (loop_hash = '' OR vueltas < %(min_vueltas)s) AS rehecha,
+        start_time = ultima_del_paso                          AS sola
+    FROM (
+        SELECT
+            trace_id, start_time, request_model, dedup_hash, loop_hash,
+            if(step_key != '', step_key, name)     AS paso_clave,
+            if(step_label != '', step_label, name) AS etiqueta,
+            step_hint, step_site, cost_total_usd, duration_ms, input_tokens,
+            output_tokens, cost_unknown, cost_rate_assumed,
+            {fallida}                                                     AS fallida,
+            max(start_time) OVER (PARTITION BY trace_id, paso_clave)      AS ultima_del_paso,
+            count() OVER (PARTITION BY trace_id, dedup_hash)              AS copias,
+            count() OVER (PARTITION BY trace_id, loop_hash)               AS vueltas
+        FROM spans FINAL
+        WHERE {RULES_WHERE} AND span_type = 'llm'
+          AND trace_id IN (
+              SELECT trace_id FROM spans
+              WHERE {WINDOW_WHERE} AND span_type = 'llm' AND {fallida}
+          )
+    )
+    WHERE fallida
+)
+GROUP BY paso_clave, request_model
+HAVING rehechas >= %(min_rehechas)s
+ORDER BY coste DESC, rehechas DESC, paso_clave, modelo
+LIMIT %(limit)s
+"""
+
+
+#: Salidas truncadas (D-193).
+TRUNCATED_GROUPS_SQL = _rehechas_sql(_CORTADA)
+
+#: Historial que crece sin límite: gemelo de `HISTORY_GROUPS_SQL` de sqlite.py (D-195).
+#: Mismos alias. Primero, sin FINAL, las parejas (conversación, paso) con turnos y
+#: crecimiento de sobra; las ventanas de abajo sólo recorren ésas.
+_CONVERSACION = (
+    "if(session_id != '', concat('s:', session_id), concat('t:', trace_id))"
+)
+_PASO = "if(step_key != '', step_key, name)"
+
+HISTORY_GROUPS_SQL = f"""
+SELECT
+    paso_clave                                             AS paso,
+    max(etiqueta)                                          AS nombre,
+    max(pista)                                             AS pista,
+    max(sitio)                                             AS sitio,
+    max(modelo)                                            AS modelo,
+    count()                                                AS conversaciones,
+    sum(n)                                                 AS llamadas,
+    sum(trazas)                                            AS trazas,
+    sum(historial)                                         AS historial,
+    sum(entrada_ultima - entrada_primera) / sum(n - 1)     AS crece,
+    max(n)                                                 AS max_turnos,
+    max(ejemplo)                                           AS conv_ejemplo,
+    maxIf(traza, conversacion = ejemplo)                   AS traza_ejemplo,
+    maxIf(n, conversacion = ejemplo)                       AS turnos_ejemplo,
+    maxIf(entrada_primera, conversacion = ejemplo)         AS primera_ejemplo,
+    maxIf(entrada_ultima, conversacion = ejemplo)          AS ultima_ejemplo,
+    max(ultima_vez)                                        AS ultima
+FROM (
+    SELECT
+        *,
+        max(if(n = max_n, conversacion, '')) OVER (PARTITION BY paso_clave) AS ejemplo
+    FROM (
+        SELECT *, max(n) OVER (PARTITION BY paso_clave) AS max_n
+        FROM (
+            SELECT
+                conversacion, paso_clave,
+                max(etiqueta)                         AS etiqueta,
+                max(step_hint)                        AS pista,
+                max(step_site)                        AS sitio,
+                max(request_model)                    AS modelo,
+                count()                               AS n,
+                min(primera_turno)                    AS entrada_primera,
+                max(input_tokens)                     AS entrada_ultima,
+                sum(input_tokens - primera_turno)     AS historial,
+                countIf(crece < 0)                    AS bajadas,
+                uniqExact(trace_id)                   AS trazas,
+                max(trace_id)                         AS traza,
+                max(start_time)                       AS ultima_vez
+            FROM (
+                SELECT
+                    *,
+                    toInt64(input_tokens) - lagInFrame(toInt64(input_tokens), 1,
+                        toInt64(input_tokens)) OVER w      AS crece,
+                    first_value(input_tokens) OVER w      AS primera_turno
+                FROM (
+                    SELECT
+                        trace_id, span_id, start_time, input_tokens, request_model,
+                        dedup_hash, loop_hash, output_json, step_hint, step_site,
+                        {_CONVERSACION}                       AS conversacion,
+                        {_PASO}                               AS paso_clave,
+                        if(step_label != '', step_label, name) AS etiqueta,
+                        {_CORTADA}                            AS cortada,
+                        count() OVER (PARTITION BY trace_id, dedup_hash) AS copias,
+                        count() OVER (PARTITION BY trace_id, loop_hash)  AS vueltas
+                    FROM spans FINAL
+                    WHERE {RULES_WHERE} AND span_type = 'llm' AND input_tokens > 0
+                      AND sipHash64({_CONVERSACION}, {_PASO}) IN (
+                          SELECT sipHash64({_CONVERSACION}, {_PASO}) FROM spans
+                          WHERE {RULES_WHERE} AND span_type = 'llm' AND input_tokens > 0
+                          GROUP BY sipHash64({_CONVERSACION}, {_PASO})
+                          HAVING count() >= %(min_turnos)s
+                             AND max(input_tokens) - min(input_tokens)
+                                 >= %(min_crece)s * (count() - 1)
+                      )
+                )
+                WHERE (dedup_hash = '' OR copias < %(min_repeats)s)
+                  AND (loop_hash = '' OR vueltas < %(min_vueltas)s)
+                  AND output_json != 'roto' AND NOT cortada
+                WINDOW w AS (
+                    PARTITION BY conversacion, paso_clave ORDER BY start_time, span_id
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                )
+            )
+            GROUP BY conversacion, paso_clave
+            HAVING n >= %(min_turnos)s AND bajadas = 0
+               AND entrada_ultima - entrada_primera >= %(min_crece)s * (n - 1)
+        )
+    )
+)
+GROUP BY paso_clave
+HAVING conversaciones >= %(min_conversaciones)s
+ORDER BY historial DESC, paso_clave
+LIMIT %(limit)s
+"""
+
+#: Reintentos por JSON mal formado (D-194): sin las cortadas, que son de la de arriba.
+JSON_ROTO_SQL = _rehechas_sql(f"(output_json = 'roto' AND NOT {_CORTADA})")
 
 #: Uso por (paso, modelo): base de las reglas de modelo caro y de contexto fijo.
 MODEL_USAGE_SQL = f"""
@@ -814,6 +977,18 @@ class ClickHouseStore:
         return LOOP_GROUPS_SQL
 
     @property
+    def truncated_groups_sql(self) -> str:
+        return TRUNCATED_GROUPS_SQL
+
+    @property
+    def json_retry_groups_sql(self) -> str:
+        return JSON_ROTO_SQL
+
+    @property
+    def history_groups_sql(self) -> str:
+        return HISTORY_GROUPS_SQL
+
+    @property
     def model_usage_sql(self) -> str:
         return MODEL_USAGE_SQL
 
@@ -901,6 +1076,116 @@ class ClickHouseStore:
         # El gemelo de sqlite: los bucles nunca pasaron por el desambiguado, así que dos
         # llamantes del mismo paso daban dos tarjetas con el título idéntico (D-115).
         return disambiguate(grupos)
+
+    def truncated_groups(
+        self, project_id: str, window: Window, *, min_redone: int = 5,
+        min_repeats: int = 3, min_vueltas: int = 4, limit: int = 20,
+    ) -> list[RedoneGroup]:
+        """Gemelo del de sqlite.py (D-193). Se lee en crudo también con preagregados: los
+        cortes son pocos y la consulta empieza por sus trazas."""
+        return self._rehechas(
+            TRUNCATED_GROUPS_SQL, project_id, window, min_redone, min_repeats, min_vueltas,
+            limit,
+        )
+
+    def json_retry_groups(
+        self, project_id: str, window: Window, *, min_redone: int = 5,
+        min_repeats: int = 3, min_vueltas: int = 4, limit: int = 20,
+    ) -> list[RedoneGroup]:
+        """Gemelo del de sqlite.py (D-194), en crudo por lo mismo que el de arriba."""
+        return self._rehechas(
+            JSON_ROTO_SQL, project_id, window, min_redone, min_repeats, min_vueltas, limit
+        )
+
+    def _rehechas(
+        self, sql: str, project_id: str, window: Window, min_redone: int,
+        min_repeats: int, min_vueltas: int, limit: int,
+    ) -> list[RedoneGroup]:
+        params = self._window_params(project_id, window)
+        params.update(
+            min_rehechas=min_redone, min_repeats=min_repeats, min_vueltas=min_vueltas,
+            limit=limit,
+        )
+        grupos = [
+            RedoneGroup(
+                name=r["nombre"],
+                model=r["modelo"] or "",
+                step_key=r["paso"] or "",
+                site=r["sitio"] or "",
+                hint=r["pista"] or "",
+                traces=int(r["trazas"]),
+                redone=int(r["rehechas"]),
+                not_redone=int(r["sin_rehacer"] or 0),
+                redone_cost_usd=float(r["coste"] or 0.0),
+                redone_duration_ms=float(r["duracion"] or 0.0),
+                redone_input_tokens=int(r["tok_in"] or 0),
+                redone_output_tokens=int(r["tok_out"] or 0),
+                redone_unknown_cost_spans=int(r["sin_tarifa"] or 0),
+                redone_assumed_rate_spans=int(r["asumida"] or 0),
+                sample_trace_id=r["traza_ejemplo"] or "",
+                last_seen=_utc(r["ultima"]) if r["ultima"] else None,
+            )
+            for r in _named(self._consulta(sql, parameters=params))
+        ]
+        return disambiguate(grupos)
+
+    def history_groups(
+        self, project_id: str, window: Window, *, min_turnos: int = 4,
+        min_crece: int = 200, min_conversaciones: int = 3, min_repeats: int = 3,
+        min_vueltas: int = 4, limit: int = 20,
+    ) -> list[HistoryGroup]:
+        """Gemelo del de sqlite.py (D-195), en crudo."""
+        params = self._window_params(project_id, window)
+        params.update(
+            min_turnos=min_turnos, min_crece=min_crece,
+            min_conversaciones=min_conversaciones, min_repeats=min_repeats,
+            min_vueltas=min_vueltas, limit=limit,
+        )
+        filas = _named(self._consulta(HISTORY_GROUPS_SQL, parameters=params))
+        return disambiguate([_history_group(r) for r in filas])
+
+    def sample_conversation(
+        self, project_id: str, window: Window, step_key: str, conversation: str,
+        limit: int = 40,
+    ) -> list[Span]:
+        params = self._window_params(project_id, window)
+        tipo, _, valor = conversation.partition(":")
+        params.update(paso=step_key, valor=valor, limit=limit)
+        columna = "session_id" if tipo == "s" else "trace_id"
+        columns = ", ".join(COLUMNS)
+        sql = f"""
+            SELECT {columns} FROM (
+                SELECT {columns}
+                FROM spans
+                WHERE {WINDOW_WHERE} AND {columna} = %(valor)s AND span_type = 'llm'
+                  AND if(step_key != '', step_key, name) = %(paso)s
+                ORDER BY span_id, ingested_at DESC
+                LIMIT 1 BY span_id
+            )
+            ORDER BY start_time, span_id
+            LIMIT %(limit)s
+        """
+        return [row_to_span(r) for r in _named(self._consulta(sql, parameters=params))]
+
+    def sample_step_calls(
+        self, project_id: str, window: Window, step_key: str, trace_id: str, limit: int = 40
+    ) -> list[Span]:
+        params = self._window_params(project_id, window)
+        params.update(paso=step_key, trace_id=trace_id, limit=limit)
+        columns = ", ".join(COLUMNS)
+        sql = f"""
+            SELECT {columns} FROM (
+                SELECT {columns}
+                FROM spans
+                WHERE {WINDOW_WHERE} AND trace_id = %(trace_id)s AND span_type = 'llm'
+                  AND if(step_key != '', step_key, name) = %(paso)s
+                ORDER BY span_id, ingested_at DESC
+                LIMIT 1 BY span_id
+            )
+            ORDER BY start_time, span_id
+            LIMIT %(limit)s
+        """
+        return [row_to_span(r) for r in _named(self._consulta(sql, parameters=params))]
 
     def model_usage(
         self, project_id: str, window: Window, *, min_calls: int = 5, limit: int = 50
@@ -1686,3 +1971,26 @@ def _statements(sql: str) -> list[str]:
         line for line in sql.splitlines() if not line.strip().startswith("--")
     )
     return [s.strip() for s in cleaned.split(";") if s.strip()]
+
+
+def _history_group(r: Any) -> HistoryGroup:
+    """Una fila de `HISTORY_GROUPS_SQL`; los alias son los de los dos almacenes."""
+    return HistoryGroup(
+        name=r["nombre"],
+        model=r["modelo"] or "",
+        step_key=r["paso"] or "",
+        site=r["sitio"] or "",
+        hint=r["pista"] or "",
+        conversations=int(r["conversaciones"]),
+        calls=int(r["llamadas"]),
+        traces=int(r["trazas"]),
+        history_tokens=int(r["historial"] or 0),
+        growth_per_turn=float(r["crece"] or 0.0),
+        max_turns=int(r["max_turnos"]),
+        sample_conversation=r["conv_ejemplo"] or "",
+        sample_trace_id=r["traza_ejemplo"] or "",
+        sample_turns=int(r["turnos_ejemplo"] or 0),
+        sample_first_input=int(r["primera_ejemplo"] or 0),
+        sample_last_input=int(r["ultima_ejemplo"] or 0),
+        last_seen=_utc(r["ultima"]) if r["ultima"] else None,
+    )

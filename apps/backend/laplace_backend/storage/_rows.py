@@ -104,6 +104,8 @@ COLUMNS = (
     "prefix_hash",
     # A cuántas trazas representa, si el SDK muestrea (D-181).
     "sample_rate",
+    # Si la salida es JSON que se lee, para los reintentos por JSON roto (D-194).
+    "output_json",
 )
 
 
@@ -367,6 +369,7 @@ def row_to_span(r: dict[str, Any]) -> Span:
         step_site=(r["step_site"] if "step_site" in r.keys() else ""),
         prefix_hash=(r["prefix_hash"] if "prefix_hash" in r.keys() else ""),
         sample_rate=float(r["sample_rate"] or 1) if "sample_rate" in r.keys() else 1.0,
+        output_json=(r["output_json"] or "") if "output_json" in r.keys() else "",
         prompt_name=r["prompt_name"] or "",
         prompt_version=int(r["prompt_version"] or 0),
         events=events,
@@ -544,4 +547,5 @@ def span_to_row(span: Span) -> list[Any]:
         span.customer_id or "",
         span.prefix_hash,
         float(span.sample_rate or 1.0),
+        span.output_json,
     ]

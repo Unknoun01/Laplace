@@ -20,7 +20,15 @@ from ..textos import t, tn
 logger = logging.getLogger("laplace.insights")
 
 FindingKind = Literal[
-    "repeticion", "modelo_caro", "contexto_fijo", "bucle", "prompt_caro", "cache_compartida"
+    "repeticion",
+    "modelo_caro",
+    "contexto_fijo",
+    "bucle",
+    "prompt_caro",
+    "cache_compartida",
+    "salida_truncada",
+    "json_roto",
+    "historial",
 ]
 Difficulty = Literal["easy", "mid", "hard"]
 

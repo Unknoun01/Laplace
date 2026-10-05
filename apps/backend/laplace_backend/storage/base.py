@@ -201,6 +201,74 @@ class LoopGroup:
     #: ahorro futuro: sería prometer dinero por arreglar algo que ya no pasa (D-135).
     last_seen: datetime | None = None
 
+
+#: Motivos de fin que quieren decir «se cortó por el tope de salida», en minúsculas:
+#: `length` (OpenAI Chat y los que lo imitan), `max_tokens` (Anthropic y Gemini, que lo
+#: escribe en mayúsculas) y `max_output_tokens` (la Responses API de OpenAI). D-193.
+MOTIVOS_DE_CORTE = ("length", "max_tokens", "max_output_tokens")
+_MOTIVOS_SQL = ", ".join(f"'{m}'" for m in MOTIVOS_DE_CORTE)
+
+
+@dataclass
+class RedoneGroup:
+    """Las llamadas fallidas de un paso, por (paso, modelo): cortadas por el tope de
+    salida (D-193) o con el JSON roto (D-194).
+
+    `redone_*` son las fallidas que el mismo paso volvió a hacer más tarde en la misma
+    ejecución: ésas se tiraron enteras. Las que nadie rehízo (`not_redone`) sólo se
+    cuentan: no sabemos si la respuesta le sirvió a alguien. Las que ya reclaman la
+    repetición exacta o un bucle no entran en ninguna de las dos.
+    """
+
+    name: str
+    model: str
+    step_key: str = ""
+    site: str = ""
+    hint: str = ""
+    traces: int = 0
+    redone: int = 0
+    not_redone: int = 0
+    redone_cost_usd: float = 0.0
+    redone_duration_ms: float = 0.0
+    redone_input_tokens: int = 0
+    redone_output_tokens: int = 0
+    redone_unknown_cost_spans: int = 0
+    redone_assumed_rate_spans: int = 0
+    sample_trace_id: str = ""
+    last_seen: datetime | None = None
+
+
+@dataclass
+class HistoryGroup:
+    """Un paso cuya entrada crece en cada turno de una conversación (D-195).
+
+    La conversación es la sesión si la hay, si no la ejecución. Sólo entran las que
+    tienen bastantes turnos del paso, nunca bajan y crecen bastante por turno.
+    `history_tokens` es lo que cada turno manda por encima del primero, sumado: medido.
+    """
+
+    name: str
+    model: str = ""
+    step_key: str = ""
+    site: str = ""
+    hint: str = ""
+    conversations: int = 0
+    calls: int = 0
+    traces: int = 0
+    history_tokens: int = 0
+    #: Tokens que crece la entrada por turno, de media sobre todas las conversaciones.
+    growth_per_turn: float = 0.0
+    max_turns: int = 0
+    #: La conversación más larga, para el ejemplo: su id, una traza, sus turnos y su
+    #: entrada al principio y al final.
+    sample_conversation: str = ""
+    sample_trace_id: str = ""
+    sample_turns: int = 0
+    sample_first_input: int = 0
+    sample_last_input: int = 0
+    last_seen: datetime | None = None
+
+
 @dataclass
 class ModelUsage:
     """Uso agregado de un modelo por paso, para razonar sobre alternativas.
@@ -763,6 +831,18 @@ class SpanStore(Protocol):
         """
 
     @property
+    def truncated_groups_sql(self) -> str:
+        """La consulta de las salidas truncadas, tal cual se ejecuta (D-193)."""
+
+    @property
+    def history_groups_sql(self) -> str:
+        """La consulta del historial que crece, tal cual se ejecuta (D-195)."""
+
+    @property
+    def json_retry_groups_sql(self) -> str:
+        """La consulta de los reintentos por JSON roto, tal cual se ejecuta (D-194)."""
+
+    @property
     def model_usage_sql(self) -> str:
         """La consulta que agrega el uso por paso, tal cual se ejecuta."""
 
@@ -895,6 +975,55 @@ class SpanStore(Protocol):
         limit: int = 20,
     ) -> list[LoopGroup]:
         """Pasos que se repiten con la misma entrada sin avanzar (D-117)."""
+
+    def truncated_groups(
+        self,
+        project_id: str,
+        window: Window,
+        *,
+        min_redone: int = 5,
+        min_repeats: int = 3,
+        min_vueltas: int = 4,
+        limit: int = 20,
+    ) -> list[RedoneGroup]:
+        """Llamadas cortadas por el tope de salida y rehechas, por paso y modelo (D-193)."""
+
+    def json_retry_groups(
+        self,
+        project_id: str,
+        window: Window,
+        *,
+        min_redone: int = 5,
+        min_repeats: int = 3,
+        min_vueltas: int = 4,
+        limit: int = 20,
+    ) -> list[RedoneGroup]:
+        """Salidas con JSON roto y rehechas, sin las cortadas, por paso y modelo (D-194)."""
+
+    def history_groups(
+        self,
+        project_id: str,
+        window: Window,
+        *,
+        min_turnos: int = 4,
+        min_crece: int = 200,
+        min_conversaciones: int = 3,
+        min_repeats: int = 3,
+        min_vueltas: int = 4,
+        limit: int = 20,
+    ) -> list[HistoryGroup]:
+        """Pasos cuya entrada crece en cada turno sin bajar nunca, por paso (D-195)."""
+
+    def sample_conversation(
+        self, project_id: str, window: Window, step_key: str, conversation: str,
+        limit: int = 40,
+    ) -> list[Span]:
+        """Las llamadas de ese paso en esa conversación (`s:<sesión>` o `t:<traza>`)."""
+
+    def sample_step_calls(
+        self, project_id: str, window: Window, step_key: str, trace_id: str, limit: int = 40
+    ) -> list[Span]:
+        """Las llamadas de ese paso en esa traza: la fallida y la que la rehízo."""
 
     def cost_by(
         self,

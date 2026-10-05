@@ -43,17 +43,20 @@ from ._rows import (
     utc,
 )
 from .base import (
+    _MOTIVOS_SQL,
     MARGEN_FILTROS,
     Bucket,
     CostGroup,
     CoverageFacts,
     GraphFacts,
+    HistoryGroup,
     Latency,
     LoopGroup,
     ModelUsage,
     ObservedPrompt,
     ProjectStats,
     PromptUsage,
+    RedoneGroup,
     RepeatedGroup,
     StepCostSeries,
     StepFacts,
@@ -170,6 +173,7 @@ CREATE TABLE IF NOT EXISTS spans (
     customer_id           TEXT NOT NULL DEFAULT '',
     prefix_hash           TEXT NOT NULL DEFAULT '',
     sample_rate           REAL NOT NULL DEFAULT 1,
+    output_json           TEXT NOT NULL DEFAULT '',
 
     events                TEXT NOT NULL DEFAULT '',
     attributes            TEXT NOT NULL DEFAULT '',
@@ -202,6 +206,8 @@ COLUMNAS_TARDIAS = (
     ("prefix_hash", "TEXT NOT NULL DEFAULT ''"),
     # A cuántas trazas representa, si el SDK muestrea (D-181).
     ("sample_rate", "REAL NOT NULL DEFAULT 1"),
+    # Si la salida es JSON que se lee (D-194).
+    ("output_json", "TEXT NOT NULL DEFAULT ''"),
 )
 
 #: Índices sobre columnas tardías. Van aquí y **no** en `SCHEMA` por un motivo que costó
@@ -440,6 +446,174 @@ GROUP BY paso_clave
 ORDER BY extra_spans DESC, paso_clave
 LIMIT :limit
 """
+
+#: Una llamada cortada por el tope de salida (D-193). Se guarda como texto JSON; antes de
+#: abrirla se descartan las vacías, que son casi todas.
+_CORTADA = (
+    "(finish_reasons LIKE '[%' AND finish_reasons != '[]' AND EXISTS ("
+    f"SELECT 1 FROM json_each(finish_reasons) WHERE lower(value) IN ({_MOTIVOS_SQL})))"
+)
+
+def _rehechas_sql(fallida: str) -> str:
+    """Llamadas fallidas y rehechas, por (paso, modelo): la consulta de la salida truncada
+    (D-193) y de los reintentos por JSON roto (D-194), cada una con su `fallida`.
+
+    Una llamada fallida se ha tirado si el mismo paso vuelve a llamar más tarde en la
+    misma ejecución. No se cuentan las que ya reclama la repetición exacta (tantas copias
+    de la misma entrada en la traza como pide esa regla) ni las de un bucle posible
+    (tantas vueltas como pide esa regla): por lo bajo, nunca dos veces.
+    """
+    return f"""
+WITH paso AS (
+    SELECT
+        trace_id, span_id, start_time, request_model, dedup_hash, loop_hash,
+        CASE WHEN step_key != '' THEN step_key ELSE name END AS paso_clave,
+        CASE WHEN step_label != '' THEN step_label ELSE name END AS etiqueta,
+        step_hint, step_site, cost_total_usd, duration_ms, input_tokens, output_tokens,
+        cost_unknown, cost_rate_assumed,
+        {fallida} AS fallida
+    FROM spans
+    WHERE {RULES_WHERE} AND span_type = 'llm'
+      AND trace_id IN (
+          SELECT trace_id FROM spans
+          WHERE {WINDOW_WHERE} AND span_type = 'llm' AND {fallida}
+      )
+),
+marcadas AS (
+    SELECT
+        paso.*,
+        MAX(start_time) OVER (PARTITION BY trace_id, paso_clave) AS ultima_del_paso,
+        COUNT(*) OVER (PARTITION BY trace_id, dedup_hash)        AS copias,
+        COUNT(*) OVER (PARTITION BY trace_id, loop_hash)         AS vueltas
+    FROM paso
+),
+fallidas AS (
+    SELECT
+        marcadas.*,
+        (start_time < ultima_del_paso
+         AND (dedup_hash = '' OR copias < :min_repeats)
+         AND (loop_hash = '' OR vueltas < :min_vueltas)) AS rehecha,
+        (start_time = ultima_del_paso)                     AS sola
+    FROM marcadas
+    WHERE fallida
+)
+SELECT
+    paso_clave                                                    AS paso,
+    request_model                                                 AS modelo,
+    MAX(etiqueta)                                                 AS nombre,
+    MAX(step_hint)                                                AS pista,
+    MAX(step_site)                                                AS sitio,
+    COUNT(DISTINCT CASE WHEN rehecha THEN trace_id END)           AS trazas,
+    SUM(rehecha)                                                  AS rehechas,
+    SUM(sola)                                                     AS sin_rehacer,
+    SUM(CASE WHEN rehecha THEN cost_total_usd ELSE 0 END)         AS coste,
+    SUM(CASE WHEN rehecha THEN duration_ms ELSE 0 END)            AS duracion,
+    SUM(CASE WHEN rehecha THEN input_tokens ELSE 0 END)           AS tok_in,
+    SUM(CASE WHEN rehecha THEN output_tokens ELSE 0 END)          AS tok_out,
+    SUM(CASE WHEN rehecha THEN cost_unknown ELSE 0 END)           AS sin_tarifa,
+    SUM(CASE WHEN rehecha THEN cost_rate_assumed ELSE 0 END)      AS asumida,
+    MAX(CASE WHEN rehecha THEN trace_id END)                      AS traza_ejemplo,
+    MAX(CASE WHEN rehecha THEN start_time END)                    AS ultima
+FROM fallidas
+GROUP BY paso_clave, request_model
+HAVING rehechas >= :min_rehechas
+ORDER BY coste DESC, rehechas DESC, paso_clave, modelo
+LIMIT :limit
+"""
+
+
+#: Salidas truncadas (D-193).
+TRUNCATED_GROUPS_SQL = _rehechas_sql(_CORTADA)
+
+#: Historial que crece sin límite (D-195). La conversación es la sesión si la hay, si no
+#: la ejecución; dentro, las llamadas de un paso en orden. Se dejan fuera las que ya
+#: cuentan la repetición, los bucles y las rehechas (cortadas o con el JSON roto).
+HISTORY_GROUPS_SQL = f"""
+WITH base AS (
+    SELECT
+        trace_id, span_id, start_time, input_tokens, request_model, dedup_hash, loop_hash,
+        output_json, step_hint, step_site,
+        CASE WHEN session_id != '' THEN 's:' || session_id ELSE 't:' || trace_id END
+                                                                AS conversacion,
+        CASE WHEN step_key != '' THEN step_key ELSE name END     AS paso_clave,
+        CASE WHEN step_label != '' THEN step_label ELSE name END AS etiqueta,
+        {_CORTADA}                                              AS cortada,
+        COUNT(*) OVER (PARTITION BY trace_id, dedup_hash)        AS copias,
+        COUNT(*) OVER (PARTITION BY trace_id, loop_hash)         AS vueltas
+    FROM spans
+    WHERE {RULES_WHERE} AND span_type = 'llm' AND input_tokens > 0
+),
+turnos AS (
+    SELECT
+        base.*,
+        input_tokens - LAG(input_tokens) OVER w AS crece,
+        FIRST_VALUE(input_tokens) OVER w        AS primera
+    FROM base
+    WHERE (dedup_hash = '' OR copias < :min_repeats)
+      AND (loop_hash = '' OR vueltas < :min_vueltas)
+      AND output_json != 'roto' AND NOT cortada
+    WINDOW w AS (PARTITION BY conversacion, paso_clave ORDER BY start_time, span_id)
+),
+conversaciones AS (
+    SELECT
+        conversacion, paso_clave,
+        MAX(etiqueta)                               AS etiqueta,
+        MAX(step_hint)                              AS pista,
+        MAX(step_site)                              AS sitio,
+        MAX(request_model)                          AS modelo,
+        COUNT(*)                                    AS n,
+        MIN(primera)                                AS entrada_primera,
+        MAX(input_tokens)                           AS entrada_ultima,
+        SUM(input_tokens - primera)                 AS historial,
+        SUM(CASE WHEN crece < 0 THEN 1 ELSE 0 END)  AS bajadas,
+        COUNT(DISTINCT trace_id)                    AS trazas,
+        MAX(trace_id)                               AS traza,
+        MAX(start_time)                             AS ultima_vez
+    FROM turnos
+    GROUP BY conversacion, paso_clave
+    HAVING n >= :min_turnos AND bajadas = 0
+       AND entrada_ultima - entrada_primera >= :min_crece * (n - 1)
+),
+marcadas AS (
+    SELECT conversaciones.*, MAX(n) OVER (PARTITION BY paso_clave) AS max_n
+    FROM conversaciones
+),
+con_ejemplo AS (
+    SELECT
+        marcadas.*,
+        MAX(CASE WHEN n = max_n THEN conversacion END) OVER (PARTITION BY paso_clave)
+                                                                  AS ejemplo
+    FROM marcadas
+)
+SELECT
+    paso_clave                                                  AS paso,
+    MAX(etiqueta)                                               AS nombre,
+    MAX(pista)                                                  AS pista,
+    MAX(sitio)                                                  AS sitio,
+    MAX(modelo)                                                 AS modelo,
+    COUNT(*)                                                    AS conversaciones,
+    SUM(n)                                                      AS llamadas,
+    SUM(trazas)                                                 AS trazas,
+    SUM(historial)                                              AS historial,
+    CAST(SUM(entrada_ultima - entrada_primera) AS REAL) / SUM(n - 1) AS crece,
+    MAX(n)                                                      AS max_turnos,
+    MAX(ejemplo)                                                AS conv_ejemplo,
+    MAX(CASE WHEN conversacion = ejemplo THEN traza END)        AS traza_ejemplo,
+    MAX(CASE WHEN conversacion = ejemplo THEN n END)            AS turnos_ejemplo,
+    MAX(CASE WHEN conversacion = ejemplo THEN entrada_primera END) AS primera_ejemplo,
+    MAX(CASE WHEN conversacion = ejemplo THEN entrada_ultima END)  AS ultima_ejemplo,
+    MAX(ultima_vez)                                             AS ultima
+FROM con_ejemplo
+GROUP BY paso_clave
+HAVING conversaciones >= :min_conversaciones
+ORDER BY historial DESC, paso_clave
+LIMIT :limit
+"""
+
+#: Reintentos por JSON mal formado (D-194). Una salida cortada es de la regla de arriba:
+#: aquí no entra aunque su JSON esté roto, y así lo que reclama aquélla no se cuenta dos
+#: veces.
+JSON_ROTO_SQL = _rehechas_sql(f"(output_json = 'roto' AND NOT {_CORTADA})")
 
 #: Uso por (paso, modelo): base de las reglas de modelo caro y de contexto fijo.
 MODEL_USAGE_SQL = f"""
@@ -835,6 +1009,18 @@ class SQLiteStore:
         return LOOP_GROUPS_SQL
 
     @property
+    def truncated_groups_sql(self) -> str:
+        return TRUNCATED_GROUPS_SQL
+
+    @property
+    def json_retry_groups_sql(self) -> str:
+        return JSON_ROTO_SQL
+
+    @property
+    def history_groups_sql(self) -> str:
+        return HISTORY_GROUPS_SQL
+
+    @property
     def model_usage_sql(self) -> str:
         return MODEL_USAGE_SQL
 
@@ -977,6 +1163,101 @@ class SQLiteStore:
         # Los bucles nunca pasaron por aquí, y por eso el inicio enseñaba dos tarjetas
         # con el título idéntico para dos llamantes distintos del mismo paso (D-115).
         return disambiguate(grupos)
+
+    def truncated_groups(
+        self, project_id: str, window: Window, *, min_redone: int = 5,
+        min_repeats: int = 3, min_vueltas: int = 4, limit: int = 20,
+    ) -> list[RedoneGroup]:
+        return self._rehechas(
+            TRUNCATED_GROUPS_SQL, project_id, window, min_redone, min_repeats, min_vueltas,
+            limit,
+        )
+
+    def json_retry_groups(
+        self, project_id: str, window: Window, *, min_redone: int = 5,
+        min_repeats: int = 3, min_vueltas: int = 4, limit: int = 20,
+    ) -> list[RedoneGroup]:
+        return self._rehechas(
+            JSON_ROTO_SQL, project_id, window, min_redone, min_repeats, min_vueltas, limit
+        )
+
+    def _rehechas(
+        self, sql: str, project_id: str, window: Window, min_redone: int,
+        min_repeats: int, min_vueltas: int, limit: int,
+    ) -> list[RedoneGroup]:
+        params = self._window_params(project_id, window)
+        params.update(
+            min_rehechas=min_redone, min_repeats=min_repeats, min_vueltas=min_vueltas,
+            limit=limit,
+        )
+        grupos = [
+            RedoneGroup(
+                name=r["nombre"],
+                model=r["modelo"] or "",
+                step_key=r["paso"] or "",
+                site=r["sitio"] or "",
+                hint=r["pista"] or "",
+                traces=int(r["trazas"]),
+                redone=int(r["rehechas"]),
+                not_redone=int(r["sin_rehacer"] or 0),
+                redone_cost_usd=float(r["coste"] or 0.0),
+                redone_duration_ms=float(r["duracion"] or 0.0),
+                redone_input_tokens=int(r["tok_in"] or 0),
+                redone_output_tokens=int(r["tok_out"] or 0),
+                redone_unknown_cost_spans=int(r["sin_tarifa"] or 0),
+                redone_assumed_rate_spans=int(r["asumida"] or 0),
+                sample_trace_id=r["traza_ejemplo"] or "",
+                last_seen=utc(r["ultima"]) if r["ultima"] else None,
+            )
+            for r in self._query(sql, params)
+        ]
+        return disambiguate(grupos)
+
+    def history_groups(
+        self, project_id: str, window: Window, *, min_turnos: int = 4,
+        min_crece: int = 200, min_conversaciones: int = 3, min_repeats: int = 3,
+        min_vueltas: int = 4, limit: int = 20,
+    ) -> list[HistoryGroup]:
+        params = self._window_params(project_id, window)
+        params.update(
+            min_turnos=min_turnos, min_crece=min_crece,
+            min_conversaciones=min_conversaciones, min_repeats=min_repeats,
+            min_vueltas=min_vueltas, limit=limit,
+        )
+        return disambiguate(
+            [_history_group(r) for r in self._query(HISTORY_GROUPS_SQL, params)]
+        )
+
+    def sample_conversation(
+        self, project_id: str, window: Window, step_key: str, conversation: str,
+        limit: int = 40,
+    ) -> list[Span]:
+        params = self._window_params(project_id, window)
+        tipo, _, valor = conversation.partition(":")
+        params.update(paso=step_key, valor=valor, limit=limit)
+        columna = "session_id" if tipo == "s" else "trace_id"
+        columnas = ", ".join(COLUMNS)
+        sql = f"""
+            SELECT {columnas} FROM spans
+            WHERE {WINDOW_WHERE} AND {columna} = :valor AND span_type = 'llm'
+              AND (CASE WHEN step_key != '' THEN step_key ELSE name END) = :paso
+            ORDER BY start_time, span_id LIMIT :limit
+        """
+        return [row_to_span(r) for r in self._query(sql, params)]
+
+    def sample_step_calls(
+        self, project_id: str, window: Window, step_key: str, trace_id: str, limit: int = 40
+    ) -> list[Span]:
+        params = self._window_params(project_id, window)
+        params.update(paso=step_key, trace_id=trace_id, limit=limit)
+        columnas = ", ".join(COLUMNS)
+        sql = f"""
+            SELECT {columnas} FROM spans
+            WHERE {WINDOW_WHERE} AND trace_id = :trace_id AND span_type = 'llm'
+              AND (CASE WHEN step_key != '' THEN step_key ELSE name END) = :paso
+            ORDER BY start_time, span_id LIMIT :limit
+        """
+        return [row_to_span(r) for r in self._query(sql, params)]
 
     def model_usage(
         self, project_id: str, window: Window, *, min_calls: int = 5, limit: int = 50
@@ -1651,3 +1932,26 @@ class SQLiteStore:
 
 def _iso(value: datetime) -> str:
     return utc(value).isoformat()
+
+
+def _history_group(r: Any) -> HistoryGroup:
+    """Una fila de `HISTORY_GROUPS_SQL`; los alias son los de los dos almacenes."""
+    return HistoryGroup(
+        name=r["nombre"],
+        model=r["modelo"] or "",
+        step_key=r["paso"] or "",
+        site=r["sitio"] or "",
+        hint=r["pista"] or "",
+        conversations=int(r["conversaciones"]),
+        calls=int(r["llamadas"]),
+        traces=int(r["trazas"]),
+        history_tokens=int(r["historial"] or 0),
+        growth_per_turn=float(r["crece"] or 0.0),
+        max_turns=int(r["max_turnos"]),
+        sample_conversation=r["conv_ejemplo"] or "",
+        sample_trace_id=r["traza_ejemplo"] or "",
+        sample_turns=int(r["turnos_ejemplo"] or 0),
+        sample_first_input=int(r["primera_ejemplo"] or 0),
+        sample_last_input=int(r["ultima_ejemplo"] or 0),
+        last_seen=utc(r["ultima"]) if r["ultima"] else None,
+    )

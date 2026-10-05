@@ -236,6 +236,11 @@ def _fila(
 MAX_PROBLEMAS = 3
 
 
+#: Los tipos de hallazgo que piden pasar al menos dos veces por el paso en una ejecución:
+#: repetir, dar vueltas o rehacer una respuesta cortada (D-193) o rota (D-194).
+_DOS_VECES = ("repeticion", "bucle", "salida_truncada", "json_roto")
+
+
 def con_problemas(
     vista: MarginView,
     findings: list[Any],
@@ -247,9 +252,10 @@ def con_problemas(
     cuánto de lo evitable es suyo.
 
     Se cruza por el paso, igual que la vista de traza: el problema está en un paso por
-    el que pasan las ejecuciones del cliente. Una repetición o un bucle, además, sólo
-    cuentan si el paso sale más de una vez en alguna de sus ejecuciones: pasar por él una
-    vez no es repetirlo. `findings` llega ordenado por dinero, y ese orden se respeta.
+    el que pasan las ejecuciones del cliente. Una repetición, un bucle o una respuesta
+    rehecha (D-193, D-194), además, sólo cuentan si el paso sale más de una vez en
+    alguna de sus ejecuciones: pasar por él una vez no es repetirlo. `findings` llega
+    ordenado por dinero, y ese orden se respeta.
 
     Lo evitable (D-179) se reparte por lo que gastó cada cliente en el paso, con
     `costes`, y se suma de todos sus problemas, también los que no caben en la lista.
@@ -262,7 +268,7 @@ def con_problemas(
             if len(cliente.findings) >= MAX_PROBLEMAS:
                 break
             veces = max((suyos.get(p, 0) for p in (reparto(f) or {f.step_key: 0})), default=0)
-            minimo = 2 if f.kind in ("repeticion", "bucle") else 1
+            minimo = 2 if f.kind in _DOS_VECES else 1
             if f.step_key and veces >= minimo:
                 cliente.findings.append(
                     FindingRef(id=f.id, title=f.title, avoidable_usd=dinero.get(f.id, 0.0))

@@ -36,6 +36,12 @@ from .contexto_fijo import (  # noqa: F401
     _fixed_context_detail,
     _fixed_context_finding,
 )
+from .historial import (  # noqa: F401
+    MIN_CONVERSACIONES_HISTORIAL,
+    MIN_CRECIMIENTO_POR_TURNO,
+    MIN_TURNOS_HISTORIAL,
+)
+from .json_roto import MIN_JSON_ROTO_REHECHAS  # noqa: F401
 from .modelo_caro import (  # noqa: F401
     MAX_SALIDA_TRIVIAL_SIN_TARIFA,
     MIN_CALLS_MODELO_RAPIDO,
@@ -105,6 +111,7 @@ from .repeticion import (  # noqa: F401
     _repetition_detail,
     _repetition_finding,
 )
+from .salida_truncada import MIN_TRUNCADAS_REHECHAS  # noqa: F401
 
 __all__ = [
     "CAUTION_SAVINGS_RATIO",
@@ -126,7 +133,12 @@ __all__ = [
     "MIN_FIXED_INPUT_TOKENS",
     "MIN_PARTE_DEL_GASTO_EN_LECTURAS",
     "MIN_PARTE_SIN_CACHEAR",
+    "MIN_CONVERSACIONES_HISTORIAL",
+    "MIN_CRECIMIENTO_POR_TURNO",
+    "MIN_JSON_ROTO_REHECHAS",
+    "MIN_TURNOS_HISTORIAL",
     "MIN_REPEATS",
+    "MIN_TRUNCADAS_REHECHAS",
     "MIN_VECES_MAS_LENTO",
     "MIN_VUELTAS_BUCLE",
     "MotivoSinDinero",
