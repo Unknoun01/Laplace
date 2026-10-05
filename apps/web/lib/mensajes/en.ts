@@ -952,6 +952,7 @@ export const en: Mensajes = {
   "grafo.proyecto.fuera": "There are {pasos} more steps, with {llamadas} calls, that aren't drawn: the most called ones are shown here.",
   "aj.regla.prompt_caro": "More expensive prompt",
   "aj.regla.cache_compartida": "Unshared cache",
+  "aj.regla.salida_truncada": "Cut-off answers",
   "diag.ahorrado_one": "You've already stopped paying {coste} since you fixed one problem.",
   "diag.ahorrado_other": "You've already stopped paying {coste} since you fixed {n} problems.",
   "diag.ahorrado.suelo": "at least {coste}",

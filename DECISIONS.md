@@ -4517,3 +4517,37 @@ de la App, el repositorio de otro, el webhook detrás de la clave) y en todos fa
 Prueba de pantalla en `test_pantallas.py`: la ficha de un bucle de la demo ofrece el PR con
 el tope, y Ajustes, con un repositorio conectado, enseña la URL y el secreto que da la API
 y no el token. Falla con el botón limitado al cambio de modelo y sin el bloque del webhook.
+
+### D-193 — Salida truncada: la respuesta cortada por el tope de salida, y rehecha
+Primera de las reglas nuevas del Diagnóstico (regla 7, `insights/salida_truncada.py`).
+Cuando el modelo llega al tope de tokens de salida, para a media frase y lo dice en el
+motivo de fin: `length` en OpenAI Chat, `max_tokens` en Anthropic (y `MAX_TOKENS` en
+Gemini) y `max_output_tokens` en la Responses API. Se comparan sin mayúsculas.
+
+* **Qué dinero es.** Sólo el de la llamada cortada **cuando el mismo paso vuelve a llamar
+  más tarde en la misma ejecución**: eso prueba que la primera no sirvió, y se tiró entera,
+  entrada y salida. La llamada que la rehace no se cuenta: es la que hizo el trabajo.
+* **Lo que no se cobra.** Una respuesta cortada que nadie rehízo pudo usarse a medias o
+  continuarse; no lo sabemos. Se cuenta en la ficha («hubo N más que nadie rehízo»), sin
+  dinero. «Descartada» (una salida que nadie usa) queda fuera: no hay cómo saberlo.
+* **Sin contar dos veces.** La consulta deja fuera las cortadas cuya entrada sale tantas
+  veces en la traza como pide la repetición (`MIN_REPEATS`) o cuyo `loop_hash` da tantas
+  vueltas como pide el bucle (`MIN_VUELTAS_BUCLE`), aunque el bucle luego no salga: por lo
+  bajo. Lo que reclama esta regla entra en `_duplicate_tokens` por (paso, modelo), así
+  que el modelo caro, el contexto fijo y la caché compartida no lo vuelven a mirar; sus
+  fichas usan los mismos descuentos (`_duplicados_de`).
+* **Umbral:** 5 cortadas y rehechas en la ventana (`MIN_TRUNCADAS_REHECHAS`). Agrupa por
+  (paso, modelo), como el modelo caro.
+* **Escala.** Se lee en crudo en los dos almacenes, también con preagregados: la consulta
+  empieza por las trazas con algún corte, que son pocas, y sólo sobre ésas abre ventanas.
+  Si con volumen pesa, el candidato es un preagregado de trazas con corte.
+* Margen por cliente y la vista de traza la tratan como la repetición: hace falta pasar
+  dos veces por el paso para que sea de esa ejecución.
+
+Pruebas: `test_regla_salida_truncada.py` en SQLite y ClickHouse (el caso de libro con su
+dinero exacto, los tres motivos, la que nadie rehízo, la que se rehace en otra ejecución,
+el mínimo, la repetición, las evaluaciones, el modelo caro sin doble cuenta, la ficha);
+el catálogo siembra el tipo nuevo, y una prueba nueva exige que `FindingKind` de la web y
+las reglas silenciables de Ajustes sean las del motor, que nada exigía. Se rompió a
+propósito: sin el descuento al modelo caro, sin excluir la repetición (en los dos
+almacenes) y cobrando las cortadas sin rehacer; en todos falla alguna.

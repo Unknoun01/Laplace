@@ -950,6 +950,7 @@ export const zh: Mensajes = {
   "grafo.proyecto.fuera": "另有 {pasos} 个步骤（共 {llamadas} 次调用）未画出：这里只显示调用最多的步骤。",
   "aj.regla.prompt_caro": "更贵的提示词",
   "aj.regla.cache_compartida": "未共享的缓存",
+  "aj.regla.salida_truncada": "被截断的回答",
   "diag.ahorrado_one": "自从你修复了一个问题，已经少付了 {coste}。",
   "diag.ahorrado_other": "自从你修复了 {n} 个问题，已经少付了 {coste}。",
   "diag.ahorrado.suelo": "至少 {coste}",

@@ -43,6 +43,7 @@ from ._rows import (
     utc,
 )
 from .base import (
+    _MOTIVOS_SQL,
     MARGEN_FILTROS,
     Bucket,
     CostGroup,
@@ -60,6 +61,7 @@ from .base import (
     TraceCost,
     TraceFilter,
     TracePage,
+    TruncatedGroup,
     Window,
     WindowFacts,
     WindowSummary,
@@ -438,6 +440,75 @@ SELECT
 FROM por_traza
 GROUP BY paso_clave
 ORDER BY extra_spans DESC, paso_clave
+LIMIT :limit
+"""
+
+#: Una llamada cortada por el tope de salida (D-193). Se guarda como texto JSON; antes de
+#: abrirla se descartan las vacías, que son casi todas.
+_CORTADA = (
+    "(finish_reasons LIKE '[%' AND finish_reasons != '[]' AND EXISTS ("
+    f"SELECT 1 FROM json_each(finish_reasons) WHERE lower(value) IN ({_MOTIVOS_SQL})))"
+)
+
+#: Salidas truncadas (D-193). Una llamada cortada se ha tirado si el mismo paso vuelve a
+#: llamar más tarde en la misma ejecución. No se cuentan las que ya reclama la repetición
+#: exacta (tantas copias de la misma entrada en la traza como pide esa regla) ni las de
+#: un bucle posible (tantas vueltas como pide esa regla): por lo bajo, nunca dos veces.
+TRUNCATED_GROUPS_SQL = f"""
+WITH paso AS (
+    SELECT
+        trace_id, span_id, start_time, request_model, dedup_hash, loop_hash,
+        CASE WHEN step_key != '' THEN step_key ELSE name END AS paso_clave,
+        CASE WHEN step_label != '' THEN step_label ELSE name END AS etiqueta,
+        step_hint, step_site, cost_total_usd, duration_ms, input_tokens, output_tokens,
+        cost_unknown, cost_rate_assumed,
+        {_CORTADA} AS cortada
+    FROM spans
+    WHERE {RULES_WHERE} AND span_type = 'llm'
+      AND trace_id IN (
+          SELECT trace_id FROM spans
+          WHERE {WINDOW_WHERE} AND span_type = 'llm' AND {_CORTADA}
+      )
+),
+marcadas AS (
+    SELECT
+        paso.*,
+        MAX(start_time) OVER (PARTITION BY trace_id, paso_clave) AS ultima_del_paso,
+        COUNT(*) OVER (PARTITION BY trace_id, dedup_hash)        AS copias,
+        COUNT(*) OVER (PARTITION BY trace_id, loop_hash)         AS vueltas
+    FROM paso
+),
+cortadas AS (
+    SELECT
+        marcadas.*,
+        (start_time < ultima_del_paso
+         AND (dedup_hash = '' OR copias < :min_repeats)
+         AND (loop_hash = '' OR vueltas < :min_vueltas)) AS rehecha,
+        (start_time = ultima_del_paso)                     AS sola
+    FROM marcadas
+    WHERE cortada
+)
+SELECT
+    paso_clave                                                    AS paso,
+    request_model                                                 AS modelo,
+    MAX(etiqueta)                                                 AS nombre,
+    MAX(step_hint)                                                AS pista,
+    MAX(step_site)                                                AS sitio,
+    COUNT(DISTINCT CASE WHEN rehecha THEN trace_id END)           AS trazas,
+    SUM(rehecha)                                                  AS rehechas,
+    SUM(sola)                                                     AS sin_rehacer,
+    SUM(CASE WHEN rehecha THEN cost_total_usd ELSE 0 END)         AS coste,
+    SUM(CASE WHEN rehecha THEN duration_ms ELSE 0 END)            AS duracion,
+    SUM(CASE WHEN rehecha THEN input_tokens ELSE 0 END)           AS tok_in,
+    SUM(CASE WHEN rehecha THEN output_tokens ELSE 0 END)          AS tok_out,
+    SUM(CASE WHEN rehecha THEN cost_unknown ELSE 0 END)           AS sin_tarifa,
+    SUM(CASE WHEN rehecha THEN cost_rate_assumed ELSE 0 END)      AS asumida,
+    MAX(CASE WHEN rehecha THEN trace_id END)                      AS traza_ejemplo,
+    MAX(CASE WHEN rehecha THEN start_time END)                    AS ultima
+FROM cortadas
+GROUP BY paso_clave, request_model
+HAVING rehechas >= :min_rehechas
+ORDER BY coste DESC, rehechas DESC, paso_clave, modelo
 LIMIT :limit
 """
 
@@ -835,6 +906,10 @@ class SQLiteStore:
         return LOOP_GROUPS_SQL
 
     @property
+    def truncated_groups_sql(self) -> str:
+        return TRUNCATED_GROUPS_SQL
+
+    @property
     def model_usage_sql(self) -> str:
         return MODEL_USAGE_SQL
 
@@ -977,6 +1052,52 @@ class SQLiteStore:
         # Los bucles nunca pasaron por aquí, y por eso el inicio enseñaba dos tarjetas
         # con el título idéntico para dos llamantes distintos del mismo paso (D-115).
         return disambiguate(grupos)
+
+    def truncated_groups(
+        self, project_id: str, window: Window, *, min_redone: int = 5,
+        min_repeats: int = 3, min_vueltas: int = 4, limit: int = 20,
+    ) -> list[TruncatedGroup]:
+        params = self._window_params(project_id, window)
+        params.update(
+            min_rehechas=min_redone, min_repeats=min_repeats, min_vueltas=min_vueltas,
+            limit=limit,
+        )
+        grupos = [
+            TruncatedGroup(
+                name=r["nombre"],
+                model=r["modelo"] or "",
+                step_key=r["paso"] or "",
+                site=r["sitio"] or "",
+                hint=r["pista"] or "",
+                traces=int(r["trazas"]),
+                redone=int(r["rehechas"]),
+                not_redone=int(r["sin_rehacer"] or 0),
+                redone_cost_usd=float(r["coste"] or 0.0),
+                redone_duration_ms=float(r["duracion"] or 0.0),
+                redone_input_tokens=int(r["tok_in"] or 0),
+                redone_output_tokens=int(r["tok_out"] or 0),
+                redone_unknown_cost_spans=int(r["sin_tarifa"] or 0),
+                redone_assumed_rate_spans=int(r["asumida"] or 0),
+                sample_trace_id=r["traza_ejemplo"] or "",
+                last_seen=utc(r["ultima"]) if r["ultima"] else None,
+            )
+            for r in self._query(TRUNCATED_GROUPS_SQL, params)
+        ]
+        return disambiguate(grupos)
+
+    def sample_truncation(
+        self, project_id: str, window: Window, step_key: str, trace_id: str, limit: int = 40
+    ) -> list[Span]:
+        params = self._window_params(project_id, window)
+        params.update(paso=step_key, trace_id=trace_id, limit=limit)
+        columnas = ", ".join(COLUMNS)
+        sql = f"""
+            SELECT {columnas} FROM spans
+            WHERE {WINDOW_WHERE} AND trace_id = :trace_id AND span_type = 'llm'
+              AND (CASE WHEN step_key != '' THEN step_key ELSE name END) = :paso
+            ORDER BY start_time, span_id LIMIT :limit
+        """
+        return [row_to_span(r) for r in self._query(sql, params)]
 
     def model_usage(
         self, project_id: str, window: Window, *, min_calls: int = 5, limit: int = 50

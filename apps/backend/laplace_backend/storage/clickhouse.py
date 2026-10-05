@@ -26,6 +26,7 @@ from ._rows import (
 )
 from ._rows import utc as _utc
 from .base import (
+    _MOTIVOS_SQL,
     MARGEN_FILTROS,
     Bucket,
     CostGroup,
@@ -43,6 +44,7 @@ from .base import (
     TraceCost,
     TraceFilter,
     TracePage,
+    TruncatedGroup,
     Window,
     WindowFacts,
     WindowSummary,
@@ -341,6 +343,63 @@ FROM (
 )
 GROUP BY paso_clave
 ORDER BY extra_spans DESC, paso_clave
+LIMIT %(limit)s
+"""
+
+#: Una llamada cortada por el tope de salida (D-193). Gemelo de `_CORTADA` de sqlite.py.
+_CORTADA = f"arrayExists(m -> lower(m) IN ({_MOTIVOS_SQL}), finish_reasons)"
+
+#: Salidas truncadas: gemelo de `TRUNCATED_GROUPS_SQL` de sqlite.py (D-193). Mismo
+#: criterio y mismos alias. Primero las trazas con algún corte, sin FINAL: son pocas, y
+#: así las ventanas de abajo no recorren la ventana entera.
+TRUNCATED_GROUPS_SQL = f"""
+SELECT
+    paso_clave                                 AS paso,
+    request_model                              AS modelo,
+    max(etiqueta)                              AS nombre,
+    max(step_hint)                             AS pista,
+    max(step_site)                             AS sitio,
+    uniqExactIf(trace_id, rehecha)             AS trazas,
+    countIf(rehecha)                           AS rehechas,
+    countIf(sola)                              AS sin_rehacer,
+    sumIf(cost_total_usd, rehecha)             AS coste,
+    sumIf(duration_ms, rehecha)                AS duracion,
+    sumIf(input_tokens, rehecha)               AS tok_in,
+    sumIf(output_tokens, rehecha)              AS tok_out,
+    sumIf(cost_unknown, rehecha)               AS sin_tarifa,
+    sumIf(cost_rate_assumed, rehecha)          AS asumida,
+    maxIf(trace_id, rehecha)                   AS traza_ejemplo,
+    maxIf(start_time, rehecha)                 AS ultima
+FROM (
+    SELECT
+        *,
+        start_time < ultima_del_paso
+            AND (dedup_hash = '' OR copias < %(min_repeats)s)
+            AND (loop_hash = '' OR vueltas < %(min_vueltas)s) AS rehecha,
+        start_time = ultima_del_paso                          AS sola
+    FROM (
+        SELECT
+            trace_id, start_time, request_model, dedup_hash, loop_hash,
+            if(step_key != '', step_key, name)     AS paso_clave,
+            if(step_label != '', step_label, name) AS etiqueta,
+            step_hint, step_site, cost_total_usd, duration_ms, input_tokens,
+            output_tokens, cost_unknown, cost_rate_assumed,
+            {_CORTADA}                                                    AS cortada,
+            max(start_time) OVER (PARTITION BY trace_id, paso_clave)      AS ultima_del_paso,
+            count() OVER (PARTITION BY trace_id, dedup_hash)              AS copias,
+            count() OVER (PARTITION BY trace_id, loop_hash)               AS vueltas
+        FROM spans FINAL
+        WHERE {RULES_WHERE} AND span_type = 'llm'
+          AND trace_id IN (
+              SELECT trace_id FROM spans
+              WHERE {WINDOW_WHERE} AND span_type = 'llm' AND {_CORTADA}
+          )
+    )
+    WHERE cortada
+)
+GROUP BY paso_clave, request_model
+HAVING rehechas >= %(min_rehechas)s
+ORDER BY coste DESC, rehechas DESC, paso_clave, modelo
 LIMIT %(limit)s
 """
 
@@ -814,6 +873,10 @@ class ClickHouseStore:
         return LOOP_GROUPS_SQL
 
     @property
+    def truncated_groups_sql(self) -> str:
+        return TRUNCATED_GROUPS_SQL
+
+    @property
     def model_usage_sql(self) -> str:
         return MODEL_USAGE_SQL
 
@@ -901,6 +964,60 @@ class ClickHouseStore:
         # El gemelo de sqlite: los bucles nunca pasaron por el desambiguado, así que dos
         # llamantes del mismo paso daban dos tarjetas con el título idéntico (D-115).
         return disambiguate(grupos)
+
+    def truncated_groups(
+        self, project_id: str, window: Window, *, min_redone: int = 5,
+        min_repeats: int = 3, min_vueltas: int = 4, limit: int = 20,
+    ) -> list[TruncatedGroup]:
+        """Gemelo del de sqlite.py (D-193). Se lee en crudo también con preagregados: los
+        cortes son pocos y la consulta empieza por sus trazas."""
+        params = self._window_params(project_id, window)
+        params.update(
+            min_rehechas=min_redone, min_repeats=min_repeats, min_vueltas=min_vueltas,
+            limit=limit,
+        )
+        grupos = [
+            TruncatedGroup(
+                name=r["nombre"],
+                model=r["modelo"] or "",
+                step_key=r["paso"] or "",
+                site=r["sitio"] or "",
+                hint=r["pista"] or "",
+                traces=int(r["trazas"]),
+                redone=int(r["rehechas"]),
+                not_redone=int(r["sin_rehacer"] or 0),
+                redone_cost_usd=float(r["coste"] or 0.0),
+                redone_duration_ms=float(r["duracion"] or 0.0),
+                redone_input_tokens=int(r["tok_in"] or 0),
+                redone_output_tokens=int(r["tok_out"] or 0),
+                redone_unknown_cost_spans=int(r["sin_tarifa"] or 0),
+                redone_assumed_rate_spans=int(r["asumida"] or 0),
+                sample_trace_id=r["traza_ejemplo"] or "",
+                last_seen=_utc(r["ultima"]) if r["ultima"] else None,
+            )
+            for r in _named(self._consulta(TRUNCATED_GROUPS_SQL, parameters=params))
+        ]
+        return disambiguate(grupos)
+
+    def sample_truncation(
+        self, project_id: str, window: Window, step_key: str, trace_id: str, limit: int = 40
+    ) -> list[Span]:
+        params = self._window_params(project_id, window)
+        params.update(paso=step_key, trace_id=trace_id, limit=limit)
+        columns = ", ".join(COLUMNS)
+        sql = f"""
+            SELECT {columns} FROM (
+                SELECT {columns}
+                FROM spans
+                WHERE {WINDOW_WHERE} AND trace_id = %(trace_id)s AND span_type = 'llm'
+                  AND if(step_key != '', step_key, name) = %(paso)s
+                ORDER BY span_id, ingested_at DESC
+                LIMIT 1 BY span_id
+            )
+            ORDER BY start_time, span_id
+            LIMIT %(limit)s
+        """
+        return [row_to_span(r) for r in _named(self._consulta(sql, parameters=params))]
 
     def model_usage(
         self, project_id: str, window: Window, *, min_calls: int = 5, limit: int = 50

@@ -313,6 +313,29 @@ def test_cada_cliente_lleva_los_problemas_de_sus_ejecuciones(almacen):
     assert "repeticion:paso-buscar" not in por_cliente["beta"], "pasar una vez no es repetir"
 
 
+def test_una_salida_truncada_tampoco_es_de_quien_pasa_una_vez(almacen):
+    """Rehacer una respuesta cortada es pasar dos veces por el paso (D-193)."""
+    from laplace_backend.insights import Finding
+
+    store, proyecto = almacen
+    spans = []
+    for d in range(4):
+        spans += _repetida(proyecto, "acme", AHORA - timedelta(days=d, hours=1), veces=2)
+        una = _ejecucion(proyecto, "beta", 0.01, AHORA - timedelta(days=d, hours=2))
+        una[1].step_key = "paso-buscar"
+        spans += una
+    store.insert_spans(spans)
+    cortada = Finding(
+        id="salida_truncada:paso-buscar:m", kind="salida_truncada", title="t", summary="s",
+        step_key="paso-buscar", window_waste_usd=0.01,
+    )
+    vista = margen.calcular(store, proyecto, VENTANA, {})
+    margen.con_problemas(vista, [cortada], store.customer_steps(proyecto, VENTANA))
+    por_cliente = {c.customer_id: [f.id for f in c.findings] for c in vista.customers}
+    assert cortada.id in por_cliente["acme"]
+    assert cortada.id not in por_cliente["beta"], "pasar una vez no es rehacer"
+
+
 class _Notificador:
     def __init__(self) -> None:
         self.enviados: list[str] = []

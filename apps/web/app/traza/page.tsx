@@ -226,7 +226,9 @@ function problemasDeLaTraza(trace: Trace, findings: Finding[]): Finding[] {
   }
   return findings.filter((f) => {
     const n = veces.get(f.step_key) ?? 0;
-    return f.kind === "repeticion" || f.kind === "bucle" ? n >= 2 : n >= 1;
+    // Rehacer una respuesta cortada también es pasar dos veces por el paso (D-193).
+    const dosVeces = f.kind === "repeticion" || f.kind === "bucle" || f.kind === "salida_truncada";
+    return dosVeces ? n >= 2 : n >= 1;
   });
 }
 

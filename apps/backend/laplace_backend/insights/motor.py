@@ -13,8 +13,15 @@ from ..coverage import build as build_coverage
 from ..dinero import motivo_sin_dinero
 from ..pasos import SEPARADOR as SEPARADOR_DE_CAMINO
 from ..pasos import con_pista
-from ..storage.base import LoopGroup, ModelUsage, RepeatedGroup, Window, WindowSummary
-from . import cache_compartida
+from ..storage.base import (
+    LoopGroup,
+    ModelUsage,
+    RepeatedGroup,
+    TruncatedGroup,
+    Window,
+    WindowSummary,
+)
+from . import cache_compartida, salida_truncada
 from .bucle import _loop_detail, _loop_finding
 from .contexto_fijo import _fixed_context_detail, _fixed_context_finding
 from .grafico import construir as construir_grafico
@@ -96,6 +103,7 @@ def _sin_envoltorios(loops: list[LoopGroup]) -> list[LoopGroup]:
 def _duplicate_tokens(
     groups: list[RepeatedGroup],
     loops: list[LoopGroup] | None = None,
+    truncadas: list[TruncatedGroup] | None = None,
 ) -> dict[tuple[str, str], tuple[int, int, int]]:
     """Lo que las reglas de repetición y de bucle ya reclaman, por (paso, modelo).
 
@@ -116,7 +124,8 @@ def _duplicate_tokens(
 
     Un bucle y una repetición exacta del mismo paso no se pisan entre sí: la consulta de
     bucles exige entradas distintas y la de repetición exige la misma. Por eso se suman
-    los dos sin miedo a descontar de más.
+    los dos sin miedo a descontar de más. Las salidas truncadas tampoco (D-193): su
+    consulta deja fuera las llamadas que podrían reclamar las otras dos.
     """
     total: dict[tuple[str, str], tuple[int, int, int]] = {}
     for group in [*groups, *(loops or [])]:
@@ -128,6 +137,16 @@ def _duplicate_tokens(
             entrada + group.extra_input_tokens,
             salida + group.extra_output_tokens,
             llamadas + group.extra_spans,
+        )
+    for grupo in truncadas or []:
+        if not grupo.model or not grupo.step_key:
+            continue
+        clave = (grupo.step_key, grupo.model)
+        entrada, salida, llamadas = total.get(clave, (0, 0, 0))
+        total[clave] = (
+            entrada + grupo.redone_input_tokens,
+            salida + grupo.redone_output_tokens,
+            llamadas + grupo.redone,
         )
     return total
 
@@ -258,11 +277,19 @@ def detect(store: Any, project_id: str, window: Window) -> list[Finding]:
     for bucle in bucles:
         findings.append(_con_fecha(_loop_finding(bucle, summary, dias, base), bucle))
 
+    # Una respuesta cortada por el tope y rehecha (D-193). Su consulta ya deja fuera lo
+    # que reclaman la repetición y los bucles.
+    truncadas = _truncadas(store, project_id, window, compartidos)
+    for grupo in truncadas:
+        findings.append(
+            _con_fecha(salida_truncada.hallazgo(grupo, summary, dias, base), grupo)
+        )
+
     # Las reglas no pueden solaparse: si una llamada al modelo se repite, la regla de
     # repetición ya cuenta el 100% de las copias sobrantes. Contarlas otra vez en la
     # regla del modelo caro inflaría el ahorro total, que es el número que vendemos.
     # Se descuentan los tokens duplicados antes de evaluar el resto de reglas.
-    duplicados = _duplicate_tokens(grupos, bucles)
+    duplicados = _duplicate_tokens(grupos, bucles, truncadas)
 
     netos = []
     for uso in usos:
@@ -302,6 +329,35 @@ def detect(store: Any, project_id: str, window: Window) -> list[Finding]:
         reverse=True,
     )
     return findings
+
+
+def _truncadas(
+    store: Any, project_id: str, window: Window, compartidos: set[str]
+) -> list[TruncatedGroup]:
+    return _nombrar(
+        store.truncated_groups(
+            project_id,
+            window,
+            min_redone=salida_truncada.MIN_TRUNCADAS_REHECHAS,
+            min_repeats=MIN_REPEATS,
+            min_vueltas=MIN_VUELTAS_BUCLE,
+        ),
+        compartidos,
+    )
+
+
+def _duplicados_de(store: Any, project_id: str, window: Window) -> dict:
+    """Lo que reclaman repetición, bucles y salidas truncadas, como en `detect()`."""
+    usos = store.model_usage(project_id, window, min_calls=1)
+    return _duplicate_tokens(
+        store.repeated_groups(project_id, window, min_repeats=MIN_REPEATS),
+        _sin_envoltorios(
+            store.loop_groups(
+                project_id, window, min_vueltas=MIN_VUELTAS_BUCLE, max_salidas=MAX_SALIDAS_BUCLE
+            )
+        ),
+        _truncadas(store, project_id, window, _pasos_compartidos(usos)),
+    )
 
 
 def _reclamado_por_paso(findings: list[Finding]) -> dict[str, float]:
@@ -488,14 +544,7 @@ def _detalle_modelo(
 ) -> FindingDetail | None:
     """Las reglas 2 y 3 comparten búsqueda: las dos cuelgan de un (paso, modelo)."""
     step_key, _, model = key.rpartition(":")
-    duplicados = _duplicate_tokens(
-        store.repeated_groups(project_id, window, min_repeats=MIN_REPEATS),
-        _sin_envoltorios(
-            store.loop_groups(
-                project_id, window, min_vueltas=MIN_VUELTAS_BUCLE, max_salidas=MAX_SALIDAS_BUCLE
-            )
-        ),
-    )
+    duplicados = _duplicados_de(store, project_id, window)
     for bruto in store.model_usage(project_id, window, min_calls=1):
         if bruto.key != step_key or bruto.model != model:
             continue
@@ -534,14 +583,7 @@ def _detalle_compartida(
     store: Any, project_id: str, window: Window, key: str, ctx: _Contexto
 ) -> FindingDetail | None:
     """Recalcula como `detect()`: el descuento depende de lo que reclaman las demás."""
-    duplicados = _duplicate_tokens(
-        store.repeated_groups(project_id, window, min_repeats=MIN_REPEATS),
-        _sin_envoltorios(
-            store.loop_groups(
-                project_id, window, min_vueltas=MIN_VUELTAS_BUCLE, max_salidas=MAX_SALIDAS_BUCLE
-            )
-        ),
-    )
+    duplicados = _duplicados_de(store, project_id, window)
     usos = store.model_usage(project_id, window, min_calls=1)
     netos = [_without_duplicates(u, duplicados) for u in usos]
     for grupo in _grupos_de_prefijo(store, project_id, window, netos):
@@ -551,6 +593,21 @@ def _detalle_compartida(
         if finding is None:
             return None
         return cache_compartida.detalle(finding, grupo, cache_compartida.CONSULTA)
+    return None
+
+
+def _detalle_truncada(
+    store: Any, project_id: str, window: Window, key: str, ctx: _Contexto
+) -> FindingDetail | None:
+    compartidos = _pasos_compartidos(store.model_usage(project_id, window, min_calls=1))
+    for grupo in _truncadas(store, project_id, window, compartidos):
+        if f"{grupo.step_key}:{grupo.model}" != key:
+            continue
+        finding = salida_truncada.hallazgo(grupo, ctx.summary, ctx.dias, ctx.base)
+        evidencia = store.sample_truncation(
+            project_id, window, grupo.step_key, grupo.sample_trace_id
+        )
+        return salida_truncada.detalle(finding, grupo, evidencia, store.truncated_groups_sql)
     return None
 
 
@@ -577,6 +634,7 @@ _DETALLADORES = {
     "contexto_fijo": _detalle_modelo,
     PROMPT_CARO: _detalle_prompt,
     cache_compartida.KIND: _detalle_compartida,
+    salida_truncada.KIND: _detalle_truncada,
 }
 
 #: Los tipos que `detail()` sabe reconstruir. Derivado, nunca escrito a mano: una lista

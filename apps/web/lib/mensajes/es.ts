@@ -959,6 +959,7 @@ export const es = {
   "grafo.proyecto.fuera": "Hay {pasos} pasos más, con {llamadas} llamadas, que no se dibujan: aquí salen los más llamados.",
   "aj.regla.prompt_caro": "Prompt más caro",
   "aj.regla.cache_compartida": "Caché sin compartir",
+  "aj.regla.salida_truncada": "Respuestas cortadas",
   "diag.ahorrado_one": "Ya has dejado de pagar {coste} desde que arreglaste un problema.",
   "diag.ahorrado_other": "Ya has dejado de pagar {coste} desde que arreglaste {n} problemas.",
   "diag.ahorrado.suelo": "al menos {coste}",

@@ -952,6 +952,7 @@ export const pt: Mensajes = {
   "grafo.proyecto.fuera": "Há mais {pasos} passos, com {llamadas} chamadas, que não são desenhados: aqui aparecem os mais chamados.",
   "aj.regla.prompt_caro": "Prompt mais caro",
   "aj.regla.cache_compartida": "Cache não partilhado",
+  "aj.regla.salida_truncada": "Respostas cortadas",
   "diag.ahorrado_one": "Você já deixou de pagar {coste} desde que corrigiu um problema.",
   "diag.ahorrado_other": "Você já deixou de pagar {coste} desde que corrigiu {n} problemas.",
   "diag.ahorrado.suelo": "pelo menos {coste}",

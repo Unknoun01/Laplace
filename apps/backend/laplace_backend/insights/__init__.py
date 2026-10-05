@@ -105,6 +105,7 @@ from .repeticion import (  # noqa: F401
     _repetition_detail,
     _repetition_finding,
 )
+from .salida_truncada import MIN_TRUNCADAS_REHECHAS  # noqa: F401
 
 __all__ = [
     "CAUTION_SAVINGS_RATIO",
@@ -127,6 +128,7 @@ __all__ = [
     "MIN_PARTE_DEL_GASTO_EN_LECTURAS",
     "MIN_PARTE_SIN_CACHEAR",
     "MIN_REPEATS",
+    "MIN_TRUNCADAS_REHECHAS",
     "MIN_VECES_MAS_LENTO",
     "MIN_VUELTAS_BUCLE",
     "MotivoSinDinero",

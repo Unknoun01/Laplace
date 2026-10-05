@@ -97,10 +97,11 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
   - El grafo del proyecto es de sólo lectura y no marca los pasos con hallazgos del
     Diagnóstico, como hace el de la traza; se podría, con los `step_key` de los hallazgos
     de la misma ventana.
-- **Reglas nuevas** (cada una entra por `detect()` y `detail()`, con su prueba de catálogo):
+- **Reglas nuevas** (cada una entra por `detect()` y `detail()`, con su prueba de catálogo;
+  fase `fase-reglas-diagnostico`). Hecha: la salida truncada y rehecha (D-193); la
+  «descartada» no se puede saber y queda fuera. Lo que queda:
   - lecturas de caché que se pagan (OpenAI);
   - caché semántica (prompts casi iguales);
-  - salida truncada o descartada;
   - reintentos por JSON mal formado;
   - historial que crece sin límite;
   - trabajo que podría ir a la Batch API.

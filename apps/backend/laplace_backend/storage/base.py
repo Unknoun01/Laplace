@@ -201,6 +201,42 @@ class LoopGroup:
     #: ahorro futuro: sería prometer dinero por arreglar algo que ya no pasa (D-135).
     last_seen: datetime | None = None
 
+
+#: Motivos de fin que quieren decir «se cortó por el tope de salida», en minúsculas:
+#: `length` (OpenAI Chat y los que lo imitan), `max_tokens` (Anthropic y Gemini, que lo
+#: escribe en mayúsculas) y `max_output_tokens` (la Responses API de OpenAI). D-193.
+MOTIVOS_DE_CORTE = ("length", "max_tokens", "max_output_tokens")
+_MOTIVOS_SQL = ", ".join(f"'{m}'" for m in MOTIVOS_DE_CORTE)
+
+
+@dataclass
+class TruncatedGroup:
+    """Las llamadas de un paso cortadas por el tope de salida, por (paso, modelo) (D-193).
+
+    `redone_*` son las cortadas que el mismo paso volvió a hacer más tarde en la misma
+    ejecución: ésas se tiraron enteras. Las que nadie rehízo (`not_redone`) sólo se
+    cuentan: no sabemos si la respuesta a medias le sirvió a alguien. Las que ya
+    reclaman la repetición exacta o un bucle no entran en ninguna de las dos.
+    """
+
+    name: str
+    model: str
+    step_key: str = ""
+    site: str = ""
+    hint: str = ""
+    traces: int = 0
+    redone: int = 0
+    not_redone: int = 0
+    redone_cost_usd: float = 0.0
+    redone_duration_ms: float = 0.0
+    redone_input_tokens: int = 0
+    redone_output_tokens: int = 0
+    redone_unknown_cost_spans: int = 0
+    redone_assumed_rate_spans: int = 0
+    sample_trace_id: str = ""
+    last_seen: datetime | None = None
+
+
 @dataclass
 class ModelUsage:
     """Uso agregado de un modelo por paso, para razonar sobre alternativas.
@@ -763,6 +799,10 @@ class SpanStore(Protocol):
         """
 
     @property
+    def truncated_groups_sql(self) -> str:
+        """La consulta de las salidas truncadas, tal cual se ejecuta (D-193)."""
+
+    @property
     def model_usage_sql(self) -> str:
         """La consulta que agrega el uso por paso, tal cual se ejecuta."""
 
@@ -895,6 +935,23 @@ class SpanStore(Protocol):
         limit: int = 20,
     ) -> list[LoopGroup]:
         """Pasos que se repiten con la misma entrada sin avanzar (D-117)."""
+
+    def truncated_groups(
+        self,
+        project_id: str,
+        window: Window,
+        *,
+        min_redone: int = 5,
+        min_repeats: int = 3,
+        min_vueltas: int = 4,
+        limit: int = 20,
+    ) -> list[TruncatedGroup]:
+        """Llamadas cortadas por el tope de salida y rehechas, por paso y modelo (D-193)."""
+
+    def sample_truncation(
+        self, project_id: str, window: Window, step_key: str, trace_id: str, limit: int = 40
+    ) -> list[Span]:
+        """Las llamadas de ese paso en esa traza: la cortada y la que la rehízo."""
 
     def cost_by(
         self,
