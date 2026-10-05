@@ -679,3 +679,113 @@ def test_la_regla_de_prompts_no_reclama_lo_que_ya_reclaman_las_demas(mes_de_demo
         assert ya + hallazgo.window_waste_usd <= actual.cost_usd * (1 + 1e-9), (
             ya, hallazgo.window_waste_usd, actual.cost_usd,
         )
+
+
+# ---------------------------------------------------------------------------------
+# OpenAI cachea solo: la ficha no le puede pedir `cache_control` (D-196)
+# ---------------------------------------------------------------------------------
+
+
+def _almacen_de_openai(tmp_path, cacheados: int) -> SQLiteStore:
+    """Un paso de OpenAI que reenvía 20.000 tokens fijos en cada llamada.
+
+    OpenAI cachea sola por encima de 1.024 tokens, sin nada que marcar en el código: con
+    `cacheados` > 0 la caché ya funciona desde la segunda llamada de cada ejecución, que
+    es lo que reporta su API en `cached_tokens`.
+    """
+    store = SQLiteStore(tmp_path / "openai.db")
+    store.migrate()
+    spans: list[Span] = []
+    for t in range(4):
+        for i in range(4):
+            span = _span(
+                f"oa-{t}",
+                paso="redactar",
+                clave="k-redactar",
+                entrada_tokens=20_000,
+                salida_tokens=1_500,
+                i=t * 10 + i,
+                dedup=uuid.uuid4().hex[:16],
+            )
+            leidos = cacheados if i else 0
+            span.llm.system = "openai"
+            span.llm.usage = TokenUsage(
+                input_tokens=20_000, output_tokens=1_500, cached_input_tokens=leidos
+            )
+            entrada = ((20_000 - leidos) * 2.0 + leidos * 0.2) / 1e6
+            salida = 1_500 * 12.0 / 1e6
+            span.llm.cost = Cost(
+                total_usd=entrada + salida, input_usd=entrada, output_usd=salida
+            )
+            spans.append(span)
+    store.insert_spans(spans)
+    return store
+
+
+def _contexto_de(store: SQLiteStore):
+    ventana = _ventana()
+    (hallazgo,) = [
+        f for f in insights.detect(store, "catalogo", ventana) if f.kind == "contexto_fijo"
+    ] or [None]
+    assert hallazgo is not None, "el prefijo fijo de OpenAI tiene que dar hallazgo"
+    ficha = insights.detail(store, "catalogo", ventana, hallazgo.id)
+    assert ficha is not None
+    return hallazgo, ficha
+
+
+def _pide_cache_control(ficha) -> list[str]:
+    return [
+        paso.title
+        for paso in ficha.fix_steps
+        if "cache_control" in (paso.code or "") or "cache_control" in paso.body
+    ]
+
+
+def test_openai_ya_cacheando_paga_las_lecturas_y_no_se_le_pide_activar_la_cache(tmp_path):
+    """D-111 sobre el proveedor que más lo necesita: OpenAI cachea sola, así que casi
+    todo paso con contexto largo trae caché, y lo que queda es lo que cuesta leerla.
+
+    La tarjeta ya lo decía bien. La ficha no: abría con «Activa la caché de prompt» y un
+    `cache_control` de Anthropic, que es proponer lo que ya se hace con una sintaxis que
+    OpenAI no tiene; y explicaba el ahorro de cachear con la cifra de las lecturas.
+    """
+    from laplace_backend.textos import t
+
+    store = _almacen_de_openai(tmp_path, cacheados=18_000)
+    hallazgo, ficha = _contexto_de(store)
+
+    # El dinero es sólo el de las lecturas, a la tarifa de lectura de caché (0,20 $/1M).
+    (uso,) = [u for u in store.model_usage("catalogo", _ventana(), min_calls=1)]
+    assert uso.cached_input_tokens == 12 * 18_000
+    assert hallazgo.window_waste_usd == pytest.approx(uso.cached_input_tokens * 0.2 / 1e6)
+    assert "leerla también se cobra" in hallazgo.summary.lower()
+    assert "cachearlos ahorraría" not in hallazgo.summary.lower()
+    assert hallazgo.code_fix == "", "el bot no puede abrir un PR de caché contra OpenAI"
+
+    assert _pide_cache_control(ficha) == []
+    titulos = [paso.title for paso in ficha.fix_steps]
+    assert t("contexto.arreglo.cache.titulo") not in titulos, "ya cachea: no se le propone"
+    assert titulos[0] == t("contexto.arreglo.menos.titulo"), "lo que baja la cifra es mandar menos"
+    # La cuenta de la ficha es la de la tarjeta: tokens leídos de caché por su tarifa.
+    assert "216.000" in ficha.savings_calculation
+    assert "pasarían de" not in ficha.savings_calculation
+    # Y la regla ya no se describe como «sólo pasos sin caché», que dejó de ser verdad
+    # en D-108: esta ficha es justo la de un paso que cachea.
+    assert "no está usando caché" not in ficha.detection_explanation
+
+
+def test_openai_sin_cachear_no_recibe_codigo_de_anthropic(tmp_path):
+    """Si a OpenAI no le funciona la caché, no es porque falte marcarla: lo cachea sola
+    el prefijo idéntico. Lo que la rompe es poner delante lo que cambia en cada petición,
+    y eso es lo que la ficha tiene que decir, sin un `cache_control` que no existe ahí."""
+    from laplace_backend.textos import t
+
+    store = _almacen_de_openai(tmp_path, cacheados=0)
+    hallazgo, ficha = _contexto_de(store)
+
+    assert "cachearlos ahorraría" in hallazgo.summary.lower()
+    assert hallazgo.code_fix == ""
+    assert _pide_cache_control(ficha) == []
+    titulos = [paso.title for paso in ficha.fix_steps]
+    assert t("contexto.arreglo.cache.titulo") not in titulos
+    assert t("contexto.arreglo.prefijo.titulo") in titulos

@@ -119,6 +119,18 @@ MIN_PARTE_SIN_CACHEAR = 0.35
 MIN_PARTE_DEL_GASTO_EN_LECTURAS = 0.05
 
 
+def _parte_sin_cachear(usage: ModelUsage) -> float:
+    """La parte del prefijo fijo reenviado que el proveedor **no** sirvió de caché (D-108).
+
+    La usan la tarjeta y la ficha: por debajo de `MIN_PARTE_SIN_CACHEAR` ninguna de las
+    dos puede proponer cachear, que sería proponer lo que ya se hace (D-196).
+    """
+    reenviado = usage.min_input_tokens * usage.calls
+    if not reenviado:
+        return 0.0
+    return max(reenviado - usage.cached_input_tokens, 0) / reenviado
+
+
 def _coste_de_leer_cache(usage: ModelUsage) -> float:
     """Lo que cuesta, en dinero medido, servir de caché el prefijo fijo del paso.
 
@@ -158,7 +170,7 @@ def _fixed_context_finding(
     if not reenviado:
         return None
     sin_cachear = max(reenviado - usage.cached_input_tokens, 0)
-    parte = sin_cachear / reenviado
+    parte = _parte_sin_cachear(usage)
 
     cuentas = _cache_arithmetic(usage)
     ahorro = 0.0
@@ -292,22 +304,54 @@ def _fixed_context_detail(
         "contexto.deteccion",
         llamadas=MIN_CALLS_FOR_CONTEXT_RULE,
         minimo=_miles(MIN_FIXED_INPUT_TOKENS),
+        parte=cifras.porcentaje(MIN_PARTE_SIN_CACHEAR),
+        lecturas=cifras.porcentaje(MIN_PARTE_DEL_GASTO_EN_LECTURAS),
     )
     detalle.detection_query = query.strip()
 
-    detalle.fix_steps = [
-        FixStep(
-            title=t("contexto.arreglo.cache.titulo"),
-            body=t("contexto.arreglo.cache.texto"),
-            code=t("contexto.arreglo.cache.codigo"),
-        ),
+    # La ficha propone lo mismo que la tarjeta (D-196). Si la caché ya se lleva casi
+    # todo, cachear no es el arreglo: lo que baja la cifra es mandar menos. Y marcar la
+    # caché con `cache_control` es cosa de Anthropic; OpenAI, Gemini o un servidor local
+    # cachean solos el prefijo idéntico, y lo que se la rompe es poner delante lo que
+    # cambia en cada petición.
+    propone_cachear = _parte_sin_cachear(usage) >= MIN_PARTE_SIN_CACHEAR
+    detalle.fix_steps = []
+    if propone_cachear and es_de_anthropic(usage.model):
+        detalle.fix_steps.append(
+            FixStep(
+                title=t("contexto.arreglo.cache.titulo"),
+                body=t("contexto.arreglo.cache.texto"),
+                code=t("contexto.arreglo.cache.codigo"),
+            )
+        )
+    elif propone_cachear:
+        detalle.fix_steps.append(
+            FixStep(
+                title=t("contexto.arreglo.prefijo.titulo"),
+                body=t("contexto.arreglo.prefijo.texto"),
+            )
+        )
+    detalle.fix_steps.append(
         FixStep(
             title=t("contexto.arreglo.menos.titulo"),
             body=t("contexto.arreglo.menos.texto"),
-        ),
-    ]
+        )
+    )
     cuentas = _cache_arithmetic(usage)
-    if price is not None and cuentas is not None:
+    coste_lecturas = _coste_de_leer_cache(usage)
+    lectura = table.lookup(usage.model)
+    if not propone_cachear and coste_lecturas > 0 and lectura is not None:
+        # La cifra de la tarjeta es sólo lo que cuesta leer la caché (D-111), y la
+        # cuenta tiene que ser esa, no la de cachear lo que ya se cachea.
+        detalle.savings_calculation = t(
+            "contexto.ahorro_lecturas",
+            cacheados=_miles(usage.cached_input_tokens),
+            cacheada=cifras.dinero(lectura.cached_input),
+            neto=cifras.dinero_exacto(finding.window_waste_usd),
+            ventana=window_label(finding.observed_days),
+            proyeccion=_projection_sentence(finding),
+        )
+    elif price is not None and cuentas is not None:
         lecturas, escrituras, _ = cuentas
         escritura_txt = (
             t(
@@ -331,7 +375,8 @@ def _fixed_context_detail(
             ventana=window_label(finding.observed_days),
             proyeccion=_projection_sentence(finding),
         )
-    if encadenado:
+    if encadenado and propone_cachear:
+        # Las lecturas se cobran al modelo de hoy: la nota sólo vale para cachear.
         detalle.savings_calculation += t(
             "contexto.encadenado", barato=encadenado, modelo=usage.model
         )

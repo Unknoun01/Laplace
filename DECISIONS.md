@@ -4622,3 +4622,34 @@ sobre empates para las tres lecturas de esta fase (truncadas, JSON roto e histor
 la regla de los almacenes pide (D-099) y D-193 y D-194 no tenían. Se rompió a propósito:
 sin exigir que no baje, sin la sesión, contando las rehechas, poniendo dinero, y con otro
 desempate en un almacén (en cada uno); en todos falla alguna.
+
+### D-196 — Lecturas de caché pagadas en OpenAI: la ficha propone lo mismo que la tarjeta
+Quedaba pendiente de D-111 la prueba del caso de OpenAI, que cachea sola por encima de
+1.024 tokens y sin nada que marcar en el código. La tarjeta ya acertaba: el hallazgo sale,
+el dinero es sólo el de las lecturas a la tarifa de lectura, y el bot no abre un PR de
+caché (D-190). La ficha, no, y por tres sitios:
+
+* **El arreglo.** Abría siempre con «Activa la caché de prompt» y un `cache_control` de
+  Anthropic: proponía lo que ya se hacía, con una sintaxis que OpenAI no tiene. Ahora la
+  ficha decide igual que la tarjeta (`_parte_sin_cachear`, el mismo umbral). Si la caché
+  ya se lleva casi todo, el único arreglo es mandar menos. Si no, a Anthropic se le
+  enseña `cache_control`, y a los demás (OpenAI, Gemini, un servidor local, que cachean
+  solos el prefijo idéntico) «pon delante lo que no cambia», sin código.
+* **La cuenta.** Explicaba el ahorro de cachear («pasarían de 2 $/1M a 0,20 $/1M») con la
+  cifra de las lecturas. Ahora, cuando no se propone cachear, la cuenta es la de la
+  tarjeta: tokens servidos de caché por la tarifa de lectura. La nota del modelo
+  encadenado sólo sale cuando se propone cachear, porque las lecturas se cobran al modelo
+  de hoy.
+* **La detección y el porqué.** Decían «un paso que no está usando caché» y «si se la
+  marcas», ciertos antes de D-108. Ahora describen la regla de verdad, con los dos
+  umbrales, y que unos proveedores reconocen el prefijo solos y otros piden marcarlo.
+
+Fuera: cuando sí se propone cachear y además hay lecturas, la cifra neta suma las dos y
+la cuenta sólo explica la primera. No lo tocan las pruebas de OpenAI y queda anotado.
+
+Pruebas: dos en `test_catalogo_hallazgos.py`, sobre SQLite y sin red ni claves: OpenAI
+ya cacheando (dinero de las lecturas, ningún `cache_control`, «manda menos» primero, la
+cuenta de las lecturas, la detección al día) y OpenAI sin cachear (ni código de Anthropic
+ni el paso de activar, sí el del prefijo). Se rompió a propósito tres veces: el código de
+Anthropic para todos, proponer cachear aunque ya se cachee, y la cuenta de cachear en
+lugar de la de las lecturas. Las tres fallan.
