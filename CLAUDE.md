@@ -58,3 +58,22 @@ Paridad entre SQLite y ClickHouse. El dinero se formatea sólo en `cifras.py` y
 - Grep y lecturas acotadas antes que ficheros enteros.
 - No lanzar dos cosas pesadas a la vez sobre ClickHouse.
 - Una sesión por fase: al cerrar una, empezar otra nueva en vez de alargar ésta.
+- **Búsquedas amplias y logs largos, al subagente `buscador`** (Haiku, sólo lectura,
+  `.claude/agents/buscador.md`): recorrer muchos ficheros, leer trozos grandes de
+  `DECISIONS.md` o `STATUS.md`, el final de una suite que falló. Vuelve sólo la
+  conclusión. Lo que se va a editar justo después, leerlo aquí.
+- **Modelo y esfuerzo según la tarea.** Al empezar una, si no encaja con el que está
+  puesto, decirlo en una línea (lo cambia el usuario en el selector de la app, o con
+  `/model` y `/effort` en el terminal):
+  - diseñar una fase, una decisión con criterio, un fallo que no se entiende: Opus, alto;
+  - implementar con el diseño claro, pruebas, mutaciones: Opus o Sonnet, medio;
+  - textos en cinco idiomas, documentación, hoja de ruta y `STATUS.md`, commits: Sonnet,
+    bajo.
+
+# Compact instructions
+
+Al resumir, conservar: la fase y la rama en curso; los D-xxx ya escritos y el siguiente
+libre; qué bloques están commiteados y cuáles no; las pruebas que siguen en rojo y por
+qué; lo que falta para cerrar la fase (suite, hoja de ruta, `STATUS.md`, fusión y push);
+las decisiones que tomó el usuario en esta sesión. Descartar el contenido de ficheros ya
+leídos y la salida de pruebas que ya pasaron: se vuelven a leer si hacen falta.
