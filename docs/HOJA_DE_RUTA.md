@@ -99,12 +99,18 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
     de la misma ventana.
 - **Reglas nuevas** (cada una entra por `detect()` y `detail()`, con su prueba de catálogo;
   fase `fase-reglas-diagnostico`). Hechas: la salida truncada y rehecha (D-193; la
-  «descartada» no se puede saber y queda fuera) y los reintentos por JSON mal formado
-  (D-194). Lo que queda:
-  - lecturas de caché que se pagan (OpenAI);
-  - caché semántica (prompts casi iguales);
-  - historial que crece sin límite;
-  - trabajo que podría ir a la Batch API.
+  «descartada» no se puede saber y queda fuera), los reintentos por JSON mal formado
+  (D-194) y el historial que crece sin límite (D-195, sólo tokens). Lo que queda, cada
+  una con su decisión de diseño pendiente:
+  - lecturas de caché que se pagan (OpenAI): casi todo lo cubre ya el contexto fijo
+    (D-111); falta una prueba de catálogo del caso de OpenAI sin `cache_control`;
+  - caché semántica (prompts casi iguales): hace falta medir el parecido y decir con
+    honradez que el ahorro no está garantizado;
+  - trabajo que podría ir a la Batch API: hace falta una señal de que la latencia no
+    importa, y no la tenemos;
+  - el historial con dinero: un tope que se pueda defender, sacado de un replay con
+    evaluación (D-195);
+  - medir con la carga grande las tres lecturas nuevas, que van en crudo (D-193 a D-195).
 - **Lo que dejaron D-178 a D-182, por si alguien lo pide:**
   - la caché compartida en la demo (hoy no la enseña: moverla cambiaría cifras fijadas);
   - el coste de los diagnósticos con modelo rechazados, que hoy no queda apuntado, y

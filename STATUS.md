@@ -8,7 +8,7 @@ Laplace observa agentes de IA y responde a dos preguntas: **cuánto cuestan** y 
 responden bien**. Los dos ciclos están cerrados y funcionando de punta a punta por los
 dos caminos —la instalación de nube con Docker y el modo local de un solo proceso—. Un
 agente instrumentado con una línea de Python emite trazas por OTLP, la ingesta les
-calcula el coste por tramos de tokens, cinco reglas deterministas encuentran el derroche,
+calcula el coste por tramos de tokens, nueve reglas deterministas encuentran el derroche,
 la interfaz lo cuenta en dinero con el cálculo detrás, una alerta a Slack avisa cuando
 algo pasa del umbral, el panel dice si el gasto sube porque hay más trabajo o porque el
 trabajo se ha encarecido, la pestaña de Evaluaciones compara dos versiones del agente
@@ -190,6 +190,18 @@ hallazgos (D-156, D-157). La Fase 6, margen por cliente, está cerrada (D-161, D
 una Stripe falsa y falta probarlo con una clave de pruebas. El paquete fino
 de TypeScript espera el nombre en npm.
 
+El 5 de octubre, la fase de reglas nuevas del Diagnóstico (`fase-reglas-diagnostico`):
+- la salida truncada por el tope de salida y rehecha (D-193);
+- los reintentos por JSON mal formado, con la marca `output_json` que pone la ingesta
+  (D-194);
+- el historial que crece sin límite, en tokens y sin dinero, porque no hay un tope que
+  se pueda defender desde las trazas (D-195);
+- y una prueba que exige que la web declare todos los tipos de hallazgo y deje silenciar
+  sus alertas.
+
+Quedan, cada una con su decisión de diseño pendiente, la caché semántica y la Batch API
+(hoja de ruta, §3).
+
 Del 1 al 2 de octubre entró el resto de la lista «siguiente»:
 - la caché compartida entre pasos (D-178);
 - lo evitable de cada cliente, ingresos en otras monedas y la columna de cliente en las
@@ -308,8 +320,8 @@ conviene que quede escrito por qué:
   91 % de esos tokens desde caché, así que lo que se reenvía de verdad es poco y la
   regla se calla. Contra OpenAI la caché también es automática por encima de 1.024
   tokens, pero ahí las lecturas **sí se cobran** —entre un 10 % y un 50 % de la entrada
-  según el proveedor—, y eso es dinero que esta regla todavía no mira. Es el siguiente
-  paso de la regla 3, y está sin hacer.
+  según el proveedor—. Eso lo mira la regla 3 desde D-111; falta una prueba de catálogo
+  del caso de OpenAI sin `cache_control`.
 
 ### Lo que los tests contra modelo local NO verifican
 
@@ -399,6 +411,17 @@ producto miente en silencio» a «el producto avisa de que no sabe»—, que era
 que había que conseguir antes de enseñarlo.
 
 ## Qué hay que vigilar
+
+**Las tres lecturas de las reglas nuevas van en crudo** (D-193 a D-195), también en
+ClickHouse con preagregados: empiezan por las trazas con algún corte o JSON roto, o por
+las conversaciones con turnos de sobra, pero no se han medido con la carga grande. Si el
+Diagnóstico de siete días se pone lento, mirarlas antes que nada. Y `output_json` sólo lo
+lleva el tráfico ingerido desde D-194: lo de antes no sale en la regla del JSON.
+
+**El historial no lleva dinero, y no hay que ponérselo a mano.** Cualquier tope sacado de
+las trazas sería inventado; el camino es un replay con evaluación (D-195). La tentación
+será multiplicar los tokens reenviados por la tarifa: eso sería decir que todo el
+historial sobra.
 
 **«Arreglado al fusionar» no es «arreglado al desplegar».** El webhook (D-191) pone la
 frontera del seguimiento en la hora de la fusión. Si el despliegue llega horas o días

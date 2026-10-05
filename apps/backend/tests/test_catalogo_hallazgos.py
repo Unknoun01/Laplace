@@ -254,6 +254,21 @@ def almacen_con_los_cuatro_tipos(tmp_path):
             span.output_json = marca
             spans.append(span)
 
+    # Regla 9 — historial (D-195): la entrada del paso crece en cada turno y no baja.
+    for c in range(4):
+        for turno in range(5):
+            spans.append(
+                _span(
+                    f"charla-{c}",
+                    paso="charlar",
+                    clave="k-charlar",
+                    entrada_tokens=1_000 + 500 * turno,
+                    salida_tokens=300,
+                    i=2800 + c * 20 + turno,
+                    dedup=f"charlar-{c}-{turno}",
+                )
+            )
+
     store.insert_spans(spans)
     return store
 
@@ -544,6 +559,12 @@ GARANTIAS: dict[str, dict[str, str]] = {
         "nombre": "`_nombrar` y `disambiguate` sobre (paso, modelo), como la truncada",
         "descuento": "su consulta deja fuera las cortadas (de la truncada) y lo que reclaman "
         "la repetición y los bucles; lo suyo entra en `_duplicate_tokens`",
+    },
+    "historial": {
+        "nombre": "`_nombrar` y `disambiguate` sobre el paso",
+        "descuento": "sólo tokens, nunca dinero; su consulta deja fuera lo que reclaman la "
+        "repetición, los bucles y las rehechas, y mide lo que está por encima del primer "
+        "turno, que no es el suelo del contexto fijo",
     },
     "prompt_caro": {
         "nombre": "el nombre del prompt y sus dos versiones, que son únicos",

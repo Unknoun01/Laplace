@@ -28,6 +28,7 @@ FindingKind = Literal[
     "cache_compartida",
     "salida_truncada",
     "json_roto",
+    "historial",
 ]
 Difficulty = Literal["easy", "mid", "hard"]
 

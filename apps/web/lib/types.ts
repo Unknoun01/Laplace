@@ -250,7 +250,9 @@ export type FindingKind =
   /** Una respuesta cortada por el tope de salida y rehecha (D-193). */
   | "salida_truncada"
   /** Una salida con el JSON roto y rehecha (D-194). */
-  | "json_roto";
+  | "json_roto"
+  /** La entrada de un paso que crece en cada turno sin recortarse (D-195). */
+  | "historial";
 export type Difficulty = "easy" | "mid" | "hard";
 
 export interface TechItem {

@@ -505,3 +505,66 @@ def test_una_traza_que_cruza_el_borde_se_sigue_encontrando(tmp_path, filtro):
         assert aqui == alli == [dentro]
     finally:
         nube.delete_project(project)
+
+
+# ---------------------------------------------------------------------------------
+# Las reglas nuevas del Diagnóstico (D-193, D-194, D-195), sobre empates
+# ---------------------------------------------------------------------------------
+
+
+def _rehechas_y_conversaciones(project: str) -> list[Span]:
+    """Tres conversaciones idénticas por paso, a la misma hora: el ejemplo de cada lectura
+    sale de un empate, y sólo un desempate escrito lo hace el mismo en los dos almacenes.
+    En cada una, una salida cortada, una con el JSON roto, la buena, y la entrada creciendo.
+    """
+    spans = []
+    for paso in ("redactar", "resumir"):
+        for c in range(3):
+            traza = f"{paso}-{c}"
+            for turno, (motivo, json_salida) in enumerate(
+                [("length", ""), ("stop", "roto"), ("stop", "ok"), ("stop", "ok")]
+            ):
+                span = _llm(
+                    project, traza, uuid.uuid4().hex[:16], nombre="chat",
+                    dedup=uuid.uuid4().hex, paso=f"k-{paso}",
+                    instante=AHORA + timedelta(seconds=turno),
+                )
+                span.llm.finish_reasons = [motivo]
+                span.llm.usage.input_tokens = 1_000 + 400 * turno
+                span.output_json = json_salida
+                spans.append(span)
+    return spans
+
+
+def test_las_lecturas_de_las_reglas_nuevas_salen_iguales_con_empates(tmp_path):
+    from dataclasses import asdict
+
+    nube = _nube()
+    project = f"paridad-{uuid.uuid4().hex[:8]}"
+    local = SQLiteStore(tmp_path / "r.db")
+    local.migrate()
+    spans = _rehechas_y_conversaciones(project)
+    local.insert_spans(spans)
+    nube.insert_spans(spans)
+    ventana = _ventana()
+    try:
+        lecturas = {
+            "truncadas": lambda s: s.truncated_groups(project, ventana, min_redone=1),
+            "json": lambda s: s.json_retry_groups(project, ventana, min_redone=1),
+            "historial": lambda s: s.history_groups(
+                project, ventana, min_turnos=2, min_crece=100, min_conversaciones=1
+            ),
+        }
+        def fila(g) -> dict:
+            # Las sumas con decimales, redondeadas: el orden en que suma cada motor no
+            # es parte del contrato; la última vez vista tampoco (precisión distinta).
+            d = asdict(g) | {"last_seen": None}
+            return {k: round(v, 9) if isinstance(v, float) else v for k, v in d.items()}
+
+        for nombre, leer in lecturas.items():
+            aqui = [fila(g) for g in leer(local)]
+            alli = [fila(g) for g in leer(nube)]
+            assert len(aqui) == 2, f"{nombre}: el tráfico sembrado tiene dos pasos"
+            assert aqui == alli, nombre
+    finally:
+        nube.delete_project(project)

@@ -14,6 +14,7 @@ from ..dinero import motivo_sin_dinero
 from ..pasos import SEPARADOR as SEPARADOR_DE_CAMINO
 from ..pasos import con_pista
 from ..storage.base import (
+    HistoryGroup,
     LoopGroup,
     ModelUsage,
     RedoneGroup,
@@ -21,7 +22,7 @@ from ..storage.base import (
     Window,
     WindowSummary,
 )
-from . import cache_compartida, json_roto, salida_truncada
+from . import cache_compartida, historial, json_roto, salida_truncada
 from .bucle import _loop_detail, _loop_finding
 from .contexto_fijo import _fixed_context_detail, _fixed_context_finding
 from .grafico import construir as construir_grafico
@@ -299,6 +300,11 @@ def detect(store: Any, project_id: str, window: Window) -> list[Finding]:
 
     duplicados = _duplicate_tokens(grupos, bucles, truncadas, rotas)
 
+    # El historial que crece (D-195): sólo tokens, nunca dinero, así que no descuenta
+    # nada a las de abajo. Su consulta deja fuera lo que reclaman las de arriba.
+    for grupo in _historiales(store, project_id, window, compartidos):
+        findings.append(_con_fecha(historial.hallazgo(grupo, summary, dias), grupo))
+
     netos = []
     for uso in usos:
         neto = _without_duplicates(uso, duplicados)
@@ -362,6 +368,23 @@ def _rotas(
             project_id,
             window,
             min_redone=json_roto.MIN_JSON_ROTO_REHECHAS,
+            min_repeats=MIN_REPEATS,
+            min_vueltas=MIN_VUELTAS_BUCLE,
+        ),
+        compartidos,
+    )
+
+
+def _historiales(
+    store: Any, project_id: str, window: Window, compartidos: set[str]
+) -> list[HistoryGroup]:
+    return _nombrar(
+        store.history_groups(
+            project_id,
+            window,
+            min_turnos=historial.MIN_TURNOS_HISTORIAL,
+            min_crece=historial.MIN_CRECIMIENTO_POR_TURNO,
+            min_conversaciones=historial.MIN_CONVERSACIONES_HISTORIAL,
             min_repeats=MIN_REPEATS,
             min_vueltas=MIN_VUELTAS_BUCLE,
         ),
@@ -652,6 +675,21 @@ def _detalle_json_roto(
     return None
 
 
+def _detalle_historial(
+    store: Any, project_id: str, window: Window, key: str, ctx: _Contexto
+) -> FindingDetail | None:
+    compartidos = _pasos_compartidos(store.model_usage(project_id, window, min_calls=1))
+    for grupo in _historiales(store, project_id, window, compartidos):
+        if grupo.step_key != key:
+            continue
+        finding = historial.hallazgo(grupo, ctx.summary, ctx.dias)
+        evidencia = store.sample_conversation(
+            project_id, window, grupo.step_key, grupo.sample_conversation
+        )
+        return historial.detalle(finding, grupo, evidencia, store.history_groups_sql)
+    return None
+
+
 @dataclass
 class _Contexto:
     """Lo que toda ficha necesita saber de la ventana, calculado una sola vez."""
@@ -677,6 +715,7 @@ _DETALLADORES = {
     cache_compartida.KIND: _detalle_compartida,
     salida_truncada.KIND: _detalle_truncada,
     json_roto.KIND: _detalle_json_roto,
+    historial.KIND: _detalle_historial,
 }
 
 #: Los tipos que `detail()` sabe reconstruir. Derivado, nunca escrito a mano: una lista

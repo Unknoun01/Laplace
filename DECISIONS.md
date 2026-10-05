@@ -4586,3 +4586,39 @@ gastado, la repetición, las evaluaciones, el modelo caro, la ficha); el catálo
 tipo, y el margen por cliente pide dos pasadas como en D-193. Se rompió a propósito: dejar
 entrar las cortadas (en los dos almacenes), no descontar al modelo caro y no quitar el
 bloque de código; en todos falla alguna.
+
+### D-195 — Historial que crece sin límite: tokens medidos, sin dinero
+Tercera de las reglas nuevas (regla 9, `insights/historial.py`).
+
+* **Conversación:** la sesión si la hay (`s:<sesión>`), si no la ejecución (`t:<traza>`).
+  Dentro, las llamadas de un mismo paso en orden. Sale cuando hay al menos 4 turnos
+  (`MIN_TURNOS_HISTORIAL`), la entrada no baja **nunca** y crece de media al menos 200
+  tokens por turno (`MIN_CRECIMIENTO_POR_TURNO`), en al menos 3 conversaciones de la
+  ventana (`MIN_CONVERSACIONES_HISTORIAL`). Un historial que se recorta alguna vez no es
+  «sin límite» y no sale.
+* **Lo que se afirma:** «la entrada crece N tokens por turno», y los tokens de historial
+  reenviados (lo que cada turno manda por encima del primero, sumado). Las dos cosas están
+  medidas.
+* **Dinero, nunca, aunque haya tarifa.** El ahorro necesitaría un tope, y desde las trazas
+  no se puede defender ninguno: cuánto historial necesita un paso para responder bien no
+  está en ellas. Cualquier número sería inventado. Como en D-108, sin cifra que defender se
+  habla de tokens; el aviso en lugar del dinero lo dice. La ficha explica cómo conseguir
+  un tope defendible: probarlo con `laplace replay` sobre conversaciones reales y una
+  evaluación. Por no tener dinero, no alerta (las alertas son de coste) ni suma al
+  evitable del inicio.
+* **Sin contar dos veces:** se dejan fuera las llamadas que reclaman la repetición, los
+  bucles, la truncada y la del JSON (con los mismos criterios que ellas). Lo que se mide
+  está por encima del primer turno de cada conversación, que no es el suelo común de la
+  entrada que reclama el contexto fijo.
+* **Escala:** se lee en crudo. En ClickHouse se filtran antes, sin FINAL, las parejas
+  (conversación, paso) con turnos y crecimiento de sobra, y sólo sobre ésas se abren las
+  ventanas. No se ha medido con la carga grande; es lo primero a mirar si el Diagnóstico
+  de siete días se pone lento.
+
+Pruebas: `test_regla_historial.py` en los dos almacenes (el caso de libro, sin dinero con
+tarifa, la sesión, el recorte, pocos turnos, poco crecimiento, pocas conversaciones, las
+evaluaciones, el contexto fijo, las rehechas, la ficha). Y una prueba de paridad nueva
+sobre empates para las tres lecturas de esta fase (truncadas, JSON roto e historial), que
+la regla de los almacenes pide (D-099) y D-193 y D-194 no tenían. Se rompió a propósito:
+sin exigir que no baje, sin la sesión, contando las rehechas, poniendo dinero, y con otro
+desempate en un almacén (en cada uno); en todos falla alguna.

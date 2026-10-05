@@ -239,6 +239,37 @@ class RedoneGroup:
 
 
 @dataclass
+class HistoryGroup:
+    """Un paso cuya entrada crece en cada turno de una conversación (D-195).
+
+    La conversación es la sesión si la hay, si no la ejecución. Sólo entran las que
+    tienen bastantes turnos del paso, nunca bajan y crecen bastante por turno.
+    `history_tokens` es lo que cada turno manda por encima del primero, sumado: medido.
+    """
+
+    name: str
+    model: str = ""
+    step_key: str = ""
+    site: str = ""
+    hint: str = ""
+    conversations: int = 0
+    calls: int = 0
+    traces: int = 0
+    history_tokens: int = 0
+    #: Tokens que crece la entrada por turno, de media sobre todas las conversaciones.
+    growth_per_turn: float = 0.0
+    max_turns: int = 0
+    #: La conversación más larga, para el ejemplo: su id, una traza, sus turnos y su
+    #: entrada al principio y al final.
+    sample_conversation: str = ""
+    sample_trace_id: str = ""
+    sample_turns: int = 0
+    sample_first_input: int = 0
+    sample_last_input: int = 0
+    last_seen: datetime | None = None
+
+
+@dataclass
 class ModelUsage:
     """Uso agregado de un modelo por paso, para razonar sobre alternativas.
 
@@ -804,6 +835,10 @@ class SpanStore(Protocol):
         """La consulta de las salidas truncadas, tal cual se ejecuta (D-193)."""
 
     @property
+    def history_groups_sql(self) -> str:
+        """La consulta del historial que crece, tal cual se ejecuta (D-195)."""
+
+    @property
     def json_retry_groups_sql(self) -> str:
         """La consulta de los reintentos por JSON roto, tal cual se ejecuta (D-194)."""
 
@@ -964,6 +999,26 @@ class SpanStore(Protocol):
         limit: int = 20,
     ) -> list[RedoneGroup]:
         """Salidas con JSON roto y rehechas, sin las cortadas, por paso y modelo (D-194)."""
+
+    def history_groups(
+        self,
+        project_id: str,
+        window: Window,
+        *,
+        min_turnos: int = 4,
+        min_crece: int = 200,
+        min_conversaciones: int = 3,
+        min_repeats: int = 3,
+        min_vueltas: int = 4,
+        limit: int = 20,
+    ) -> list[HistoryGroup]:
+        """Pasos cuya entrada crece en cada turno sin bajar nunca, por paso (D-195)."""
+
+    def sample_conversation(
+        self, project_id: str, window: Window, step_key: str, conversation: str,
+        limit: int = 40,
+    ) -> list[Span]:
+        """Las llamadas de ese paso en esa conversación (`s:<sesión>` o `t:<traza>`)."""
 
     def sample_step_calls(
         self, project_id: str, window: Window, step_key: str, trace_id: str, limit: int = 40

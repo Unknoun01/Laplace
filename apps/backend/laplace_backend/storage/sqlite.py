@@ -49,6 +49,7 @@ from .base import (
     CostGroup,
     CoverageFacts,
     GraphFacts,
+    HistoryGroup,
     Latency,
     LoopGroup,
     ModelUsage,
@@ -524,6 +525,91 @@ LIMIT :limit
 #: Salidas truncadas (D-193).
 TRUNCATED_GROUPS_SQL = _rehechas_sql(_CORTADA)
 
+#: Historial que crece sin límite (D-195). La conversación es la sesión si la hay, si no
+#: la ejecución; dentro, las llamadas de un paso en orden. Se dejan fuera las que ya
+#: cuentan la repetición, los bucles y las rehechas (cortadas o con el JSON roto).
+HISTORY_GROUPS_SQL = f"""
+WITH base AS (
+    SELECT
+        trace_id, span_id, start_time, input_tokens, request_model, dedup_hash, loop_hash,
+        output_json, step_hint, step_site,
+        CASE WHEN session_id != '' THEN 's:' || session_id ELSE 't:' || trace_id END
+                                                                AS conversacion,
+        CASE WHEN step_key != '' THEN step_key ELSE name END     AS paso_clave,
+        CASE WHEN step_label != '' THEN step_label ELSE name END AS etiqueta,
+        {_CORTADA}                                              AS cortada,
+        COUNT(*) OVER (PARTITION BY trace_id, dedup_hash)        AS copias,
+        COUNT(*) OVER (PARTITION BY trace_id, loop_hash)         AS vueltas
+    FROM spans
+    WHERE {RULES_WHERE} AND span_type = 'llm' AND input_tokens > 0
+),
+turnos AS (
+    SELECT
+        base.*,
+        input_tokens - LAG(input_tokens) OVER w AS crece,
+        FIRST_VALUE(input_tokens) OVER w        AS primera
+    FROM base
+    WHERE (dedup_hash = '' OR copias < :min_repeats)
+      AND (loop_hash = '' OR vueltas < :min_vueltas)
+      AND output_json != 'roto' AND NOT cortada
+    WINDOW w AS (PARTITION BY conversacion, paso_clave ORDER BY start_time, span_id)
+),
+conversaciones AS (
+    SELECT
+        conversacion, paso_clave,
+        MAX(etiqueta)                               AS etiqueta,
+        MAX(step_hint)                              AS pista,
+        MAX(step_site)                              AS sitio,
+        MAX(request_model)                          AS modelo,
+        COUNT(*)                                    AS n,
+        MIN(primera)                                AS entrada_primera,
+        MAX(input_tokens)                           AS entrada_ultima,
+        SUM(input_tokens - primera)                 AS historial,
+        SUM(CASE WHEN crece < 0 THEN 1 ELSE 0 END)  AS bajadas,
+        COUNT(DISTINCT trace_id)                    AS trazas,
+        MAX(trace_id)                               AS traza,
+        MAX(start_time)                             AS ultima_vez
+    FROM turnos
+    GROUP BY conversacion, paso_clave
+    HAVING n >= :min_turnos AND bajadas = 0
+       AND entrada_ultima - entrada_primera >= :min_crece * (n - 1)
+),
+marcadas AS (
+    SELECT conversaciones.*, MAX(n) OVER (PARTITION BY paso_clave) AS max_n
+    FROM conversaciones
+),
+con_ejemplo AS (
+    SELECT
+        marcadas.*,
+        MAX(CASE WHEN n = max_n THEN conversacion END) OVER (PARTITION BY paso_clave)
+                                                                  AS ejemplo
+    FROM marcadas
+)
+SELECT
+    paso_clave                                                  AS paso,
+    MAX(etiqueta)                                               AS nombre,
+    MAX(pista)                                                  AS pista,
+    MAX(sitio)                                                  AS sitio,
+    MAX(modelo)                                                 AS modelo,
+    COUNT(*)                                                    AS conversaciones,
+    SUM(n)                                                      AS llamadas,
+    SUM(trazas)                                                 AS trazas,
+    SUM(historial)                                              AS historial,
+    CAST(SUM(entrada_ultima - entrada_primera) AS REAL) / SUM(n - 1) AS crece,
+    MAX(n)                                                      AS max_turnos,
+    MAX(ejemplo)                                                AS conv_ejemplo,
+    MAX(CASE WHEN conversacion = ejemplo THEN traza END)        AS traza_ejemplo,
+    MAX(CASE WHEN conversacion = ejemplo THEN n END)            AS turnos_ejemplo,
+    MAX(CASE WHEN conversacion = ejemplo THEN entrada_primera END) AS primera_ejemplo,
+    MAX(CASE WHEN conversacion = ejemplo THEN entrada_ultima END)  AS ultima_ejemplo,
+    MAX(ultima_vez)                                             AS ultima
+FROM con_ejemplo
+GROUP BY paso_clave
+HAVING conversaciones >= :min_conversaciones
+ORDER BY historial DESC, paso_clave
+LIMIT :limit
+"""
+
 #: Reintentos por JSON mal formado (D-194). Una salida cortada es de la regla de arriba:
 #: aquí no entra aunque su JSON esté roto, y así lo que reclama aquélla no se cuenta dos
 #: veces.
@@ -931,6 +1017,10 @@ class SQLiteStore:
         return JSON_ROTO_SQL
 
     @property
+    def history_groups_sql(self) -> str:
+        return HISTORY_GROUPS_SQL
+
+    @property
     def model_usage_sql(self) -> str:
         return MODEL_USAGE_SQL
 
@@ -1122,6 +1212,38 @@ class SQLiteStore:
             for r in self._query(sql, params)
         ]
         return disambiguate(grupos)
+
+    def history_groups(
+        self, project_id: str, window: Window, *, min_turnos: int = 4,
+        min_crece: int = 200, min_conversaciones: int = 3, min_repeats: int = 3,
+        min_vueltas: int = 4, limit: int = 20,
+    ) -> list[HistoryGroup]:
+        params = self._window_params(project_id, window)
+        params.update(
+            min_turnos=min_turnos, min_crece=min_crece,
+            min_conversaciones=min_conversaciones, min_repeats=min_repeats,
+            min_vueltas=min_vueltas, limit=limit,
+        )
+        return disambiguate(
+            [_history_group(r) for r in self._query(HISTORY_GROUPS_SQL, params)]
+        )
+
+    def sample_conversation(
+        self, project_id: str, window: Window, step_key: str, conversation: str,
+        limit: int = 40,
+    ) -> list[Span]:
+        params = self._window_params(project_id, window)
+        tipo, _, valor = conversation.partition(":")
+        params.update(paso=step_key, valor=valor, limit=limit)
+        columna = "session_id" if tipo == "s" else "trace_id"
+        columnas = ", ".join(COLUMNS)
+        sql = f"""
+            SELECT {columnas} FROM spans
+            WHERE {WINDOW_WHERE} AND {columna} = :valor AND span_type = 'llm'
+              AND (CASE WHEN step_key != '' THEN step_key ELSE name END) = :paso
+            ORDER BY start_time, span_id LIMIT :limit
+        """
+        return [row_to_span(r) for r in self._query(sql, params)]
 
     def sample_step_calls(
         self, project_id: str, window: Window, step_key: str, trace_id: str, limit: int = 40
@@ -1810,3 +1932,26 @@ class SQLiteStore:
 
 def _iso(value: datetime) -> str:
     return utc(value).isoformat()
+
+
+def _history_group(r: Any) -> HistoryGroup:
+    """Una fila de `HISTORY_GROUPS_SQL`; los alias son los de los dos almacenes."""
+    return HistoryGroup(
+        name=r["nombre"],
+        model=r["modelo"] or "",
+        step_key=r["paso"] or "",
+        site=r["sitio"] or "",
+        hint=r["pista"] or "",
+        conversations=int(r["conversaciones"]),
+        calls=int(r["llamadas"]),
+        traces=int(r["trazas"]),
+        history_tokens=int(r["historial"] or 0),
+        growth_per_turn=float(r["crece"] or 0.0),
+        max_turns=int(r["max_turnos"]),
+        sample_conversation=r["conv_ejemplo"] or "",
+        sample_trace_id=r["traza_ejemplo"] or "",
+        sample_turns=int(r["turnos_ejemplo"] or 0),
+        sample_first_input=int(r["primera_ejemplo"] or 0),
+        sample_last_input=int(r["ultima_ejemplo"] or 0),
+        last_seen=utc(r["ultima"]) if r["ultima"] else None,
+    )
