@@ -953,6 +953,7 @@ export const pt: Mensajes = {
   "aj.regla.prompt_caro": "Prompt mais caro",
   "aj.regla.cache_compartida": "Cache não partilhado",
   "aj.regla.salida_truncada": "Respostas cortadas",
+  "aj.regla.json_roto": "JSON partido",
   "diag.ahorrado_one": "Você já deixou de pagar {coste} desde que corrigiu um problema.",
   "diag.ahorrado_other": "Você já deixou de pagar {coste} desde que corrigiu {n} problemas.",
   "diag.ahorrado.suelo": "pelo menos {coste}",

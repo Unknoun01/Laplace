@@ -27,6 +27,7 @@ FindingKind = Literal[
     "prompt_caro",
     "cache_compartida",
     "salida_truncada",
+    "json_roto",
 ]
 Difficulty = Literal["easy", "mid", "hard"]
 

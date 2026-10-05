@@ -1,19 +1,18 @@
-"""Regla 7 — una respuesta cortada por el tope de salida, y rehecha (D-193).
+"""Regla 8 — una salida con el JSON roto, y rehecha (D-194).
 
 Parte del motor de detección (`laplace_backend.insights`, D-130).
 
-Cuando el modelo llega al tope de tokens de salida, para a media frase y el proveedor lo
-dice en el motivo de fin (`length`, `max_tokens`, `max_output_tokens`). Si el agente se
-da cuenta y vuelve a llamar al mismo paso, lo que pagó por la primera respuesta lo ha
-tirado entero: entrada y salida. Ese dinero es el del hallazgo, medido.
+Un paso que pide JSON y recibe algo que empieza como JSON pero no se puede leer —una
+coma de más, una comilla sin cerrar, texto pegado detrás— suele acabar llamando otra vez
+al modelo. Lo que costó la primera respuesta se tiró entero, y eso es lo que se cobra.
+La ingesta marca cada salida (`output_json`: `ok`, `roto` o vacía si no intenta ser
+JSON), así que los dos almacenes leen la misma señal.
 
-Lo que **no** se cobra es la respuesta cortada que nadie rehízo. Puede que el agente la
-usara a medias, o que la continuara: no lo sabemos, y un «no lo sabemos» tiene que ser
-verdad. Se cuenta en la ficha, sin dinero.
-
-Para no reclamar dos veces el mismo dinero (D-117), el almacén deja fuera las cortadas
-que ya cuentan la repetición exacta y los bucles, y el motor descuenta las de aquí de lo
-que miran después el modelo caro, el contexto fijo y la caché compartida.
+Va después de la salida truncada y no se pisa con ella: una respuesta cortada por el
+tope casi siempre deja el JSON roto, pero su arreglo es el tope, y es de aquélla. Aquí
+sólo entran las rotas que terminaron por su cuenta. Como en las demás, lo que reclaman
+la repetición y los bucles queda fuera, y lo que reclama ésta se descuenta del modelo
+caro, el contexto fijo y la caché compartida (D-117).
 """
 
 from __future__ import annotations
@@ -21,7 +20,7 @@ from __future__ import annotations
 from laplace.schema import Span
 
 from .. import cifras
-from ..storage.base import MOTIVOS_DE_CORTE, RedoneGroup, WindowSummary
+from ..storage.base import RedoneGroup, WindowSummary
 from ..textos import t, tn
 from .modelos import (
     Finding,
@@ -38,11 +37,10 @@ from .modelos import (
     window_label,
 )
 
-KIND = "salida_truncada"
+KIND = "json_roto"
 
-#: Cortadas y rehechas en la ventana para hablar. Con menos, una pregunta rara que pidió
-#: una respuesta larga basta para disparar, y eso no es un patrón del agente.
-MIN_TRUNCADAS_REHECHAS = 5
+#: Rotas y rehechas en la ventana para hablar: el mismo mínimo que la salida truncada.
+MIN_JSON_ROTO_REHECHAS = 5
 
 
 def hallazgo(
@@ -54,17 +52,17 @@ def hallazgo(
 
     gasto = ""
     if cuesta:
-        gasto = t("truncada.gasto.cuesta", coste=_money(grupo.redone_cost_usd))
+        gasto = t("jsonroto.gasto.cuesta", coste=_money(grupo.redone_cost_usd))
     elif sin_tarifa:
-        gasto = t("truncada.gasto.sin_tarifa", tokens=_miles(tokens))
+        gasto = t("jsonroto.gasto.sin_tarifa", tokens=_miles(tokens))
 
     return Finding(
         id=f"{KIND}:{grupo.step_key}:{grupo.model}",
         kind=KIND,
-        title=tn("truncada.titulo", grupo.redone, paso=grupo.name, veces=_miles(grupo.redone)),
-        lead=t("truncada.lead"),
+        title=tn("jsonroto.titulo", grupo.redone, paso=grupo.name, veces=_miles(grupo.redone)),
+        lead=t("jsonroto.lead"),
         summary=tn(
-            "truncada.resumen",
+            "jsonroto.resumen",
             grupo.redone,
             paso=grupo.name,
             veces=_miles(grupo.redone),
@@ -85,13 +83,13 @@ def hallazgo(
             grupo.redone_unknown_cost_spans, grupo.redone_assumed_rate_spans, [grupo.model]
         ),
         difficulty="easy",
-        difficulty_label=t("dificultad.subir_tope"),
+        difficulty_label=t("dificultad.salida_estructurada"),
         scope_label=_scope_label(grupo.traces, summary.traces),
         tech=[
             TechItem(label=t("tec.paso"), value=grupo.name),
             TechItem(label=t("tec.modelo"), value=grupo.model),
-            TechItem(label=t("tec.cortadas_rehechas"), value=str(grupo.redone)),
-            TechItem(label=t("tec.cortadas_sin_rehacer"), value=str(grupo.not_redone)),
+            TechItem(label=t("tec.rotas_rehechas"), value=str(grupo.redone)),
+            TechItem(label=t("tec.rotas_sin_rehacer"), value=str(grupo.not_redone)),
             TechItem(label=t("tec.trazas"), value=str(grupo.traces)),
         ],
         sample_trace_id=grupo.sample_trace_id,
@@ -104,41 +102,37 @@ def detalle(
 ) -> FindingDetail:
     detalle = FindingDetail(**finding.model_dump())
     detalle.what_happens = t(
-        "truncada.que_pasa",
+        "jsonroto.que_pasa",
         paso=grupo.name,
         rehechas=_miles(grupo.redone),
         trazas=_miles(grupo.traces),
         solas=(
-            tn("truncada.solas", grupo.not_redone, n=_miles(grupo.not_redone))
+            tn("jsonroto.solas", grupo.not_redone, n=_miles(grupo.not_redone))
             if grupo.not_redone
-            else t("truncada.solas.ninguna")
+            else t("jsonroto.solas.ninguna")
         ),
     )
-    detalle.why = t("truncada.por_que")
-    detalle.detection_explanation = t(
-        "truncada.deteccion",
-        motivos=", ".join(f"`{m}`" for m in MOTIVOS_DE_CORTE),
-        minimo=MIN_TRUNCADAS_REHECHAS,
-    )
+    detalle.why = t("jsonroto.por_que")
+    detalle.detection_explanation = t("jsonroto.deteccion", minimo=MIN_JSON_ROTO_REHECHAS)
     detalle.detection_query = consulta.strip()
     detalle.fix_steps = [
         FixStep(
-            title=t("truncada.arreglo.tope.titulo"),
-            body=t("truncada.arreglo.tope.texto"),
-            code=t("truncada.arreglo.tope.codigo"),
+            title=t("jsonroto.arreglo.estructurada.titulo"),
+            body=t("jsonroto.arreglo.estructurada.texto"),
+            code=t("jsonroto.arreglo.estructurada.codigo"),
         ),
         FixStep(
-            title=t("truncada.arreglo.corta.titulo"),
-            body=t("truncada.arreglo.corta.texto"),
+            title=t("jsonroto.arreglo.reparar.titulo"),
+            body=t("jsonroto.arreglo.reparar.texto"),
         ),
         FixStep(
-            title=t("truncada.arreglo.sigue.titulo"),
-            body=t("truncada.arreglo.sigue.texto"),
+            title=t("jsonroto.arreglo.error.titulo"),
+            body=t("jsonroto.arreglo.error.texto"),
             advanced=True,
         ),
     ]
     rehechas = tn(
-        "truncada.rehechas",
+        "jsonroto.rehechas",
         grupo.traces,
         veces=_miles(grupo.redone),
         n=_miles(grupo.traces),
@@ -146,12 +140,12 @@ def detalle(
     )
     if finding.costs_money:
         detalle.savings_calculation = t(
-            "truncada.ahorro.cuesta",
+            "jsonroto.ahorro.cuesta",
             rehechas=rehechas,
             coste=cifras.dinero_exacto(grupo.redone_cost_usd),
             proyeccion=_projection_sentence(finding),
         )
-        detalle.savings_note = t("truncada.nota.cuesta")
+        detalle.savings_note = t("jsonroto.nota.cuesta")
     elif finding.window_waste_tokens > 0:
         detalle.savings_calculation = t(
             "truncada.ahorro.sin_tarifa",

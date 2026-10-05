@@ -313,8 +313,10 @@ def test_cada_cliente_lleva_los_problemas_de_sus_ejecuciones(almacen):
     assert "repeticion:paso-buscar" not in por_cliente["beta"], "pasar una vez no es repetir"
 
 
-def test_una_salida_truncada_tampoco_es_de_quien_pasa_una_vez(almacen):
-    """Rehacer una respuesta cortada es pasar dos veces por el paso (D-193)."""
+@pytest.mark.parametrize("tipo", ["salida_truncada", "json_roto"])
+def test_rehacer_una_respuesta_tampoco_es_de_quien_pasa_una_vez(almacen, tipo):
+    """Rehacer una respuesta cortada (D-193) o rota (D-194) es pasar dos veces por el
+    paso."""
     from laplace_backend.insights import Finding
 
     store, proyecto = almacen
@@ -326,7 +328,7 @@ def test_una_salida_truncada_tampoco_es_de_quien_pasa_una_vez(almacen):
         spans += una
     store.insert_spans(spans)
     cortada = Finding(
-        id="salida_truncada:paso-buscar:m", kind="salida_truncada", title="t", summary="s",
+        id=f"{tipo}:paso-buscar:m", kind=tipo, title="t", summary="s",
         step_key="paso-buscar", window_waste_usd=0.01,
     )
     vista = margen.calcular(store, proyecto, VENTANA, {})

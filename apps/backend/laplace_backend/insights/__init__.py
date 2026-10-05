@@ -36,6 +36,7 @@ from .contexto_fijo import (  # noqa: F401
     _fixed_context_detail,
     _fixed_context_finding,
 )
+from .json_roto import MIN_JSON_ROTO_REHECHAS  # noqa: F401
 from .modelo_caro import (  # noqa: F401
     MAX_SALIDA_TRIVIAL_SIN_TARIFA,
     MIN_CALLS_MODELO_RAPIDO,
@@ -127,6 +128,7 @@ __all__ = [
     "MIN_FIXED_INPUT_TOKENS",
     "MIN_PARTE_DEL_GASTO_EN_LECTURAS",
     "MIN_PARTE_SIN_CACHEAR",
+    "MIN_JSON_ROTO_REHECHAS",
     "MIN_REPEATS",
     "MIN_TRUNCADAS_REHECHAS",
     "MIN_VECES_MAS_LENTO",

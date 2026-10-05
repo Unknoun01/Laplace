@@ -4551,3 +4551,38 @@ el catálogo siembra el tipo nuevo, y una prueba nueva exige que `FindingKind` d
 las reglas silenciables de Ajustes sean las del motor, que nada exigía. Se rompió a
 propósito: sin el descuento al modelo caro, sin excluir la repetición (en los dos
 almacenes) y cobrando las cortadas sin rehacer; en todos falla alguna.
+
+### D-194 — Reintentos por JSON mal formado: la salida que no se lee, y rehecha
+Segunda de las reglas nuevas (regla 8, `insights/json_roto.py`), detrás de la truncada.
+
+* **La señal la pone la ingesta.** Cada span de modelo lleva `output_json`: `ok` si la
+  salida es JSON que se lee, `roto` si lo intenta y no se lee, y vacío si no lo intenta
+  (texto, herramientas, sin salida). «Lo intenta» es empezar por `{` o `[`, quitado antes
+  un bloque de código: casi todos los agentes lo quitan antes de leer, así que un JSON
+  bueno dentro de ```` ```json ```` no es roto (por lo bajo). Se lee el texto de la última
+  respuesta en las tres formas que llegan: `content` como cadena, como bloques y `parts`.
+  Calcularlo al ingerir y no en SQL deja a los dos almacenes con la misma cuenta, sin
+  analizar JSON en dos dialectos. Es un campo nuevo del contrato y una columna tardía en
+  los dos almacenes; el tráfico de antes no la tiene y no sale.
+* **Qué dinero es:** el de la llamada rota cuando el mismo paso vuelve a llamar más tarde
+  en la misma ejecución, como en D-193; las rotas que nadie rehízo se cuentan en la ficha,
+  sin dinero.
+* **Lo que reclama la truncada no se cuenta otra vez.** Una salida cortada por el tope
+  casi siempre deja el JSON roto, pero su arreglo es el tope: es de la truncada. Aquí
+  entran sólo las rotas que **no** terminaron por el tope. Como las dos excluyen igual la
+  repetición y los bucles, eso resta exactamente lo que reclama aquélla. Lo suyo entra en
+  `_duplicate_tokens` con lo de la truncada.
+* La consulta de D-193 se generaliza a «llamada fallida y rehecha» (`_rehechas_sql`, una
+  por almacén) con un predicado por regla, y su tipo pasa a `RedoneGroup`; la evidencia de
+  las dos fichas sale de `sample_step_calls`. Umbral: 5 (`MIN_JSON_ROTO_REHECHAS`).
+* Los arreglos que propone: salida estructurada del proveedor (`json_schema`, o una
+  herramienta en Anthropic), reparar el JSON en local antes de volver a preguntar, y si hay
+  que reintentar, mandar el error del parser.
+
+Pruebas: `test_regla_json_roto.py` (la marca de la ingesta en diez formas y por OTLP de
+verdad; en los dos almacenes, el caso de libro, la rota sin rehacer, el texto que no es
+JSON, el mínimo, la cortada que es de la truncada, las dos juntas sin reclamar más que lo
+gastado, la repetición, las evaluaciones, el modelo caro, la ficha); el catálogo siembra el
+tipo, y el margen por cliente pide dos pasadas como en D-193. Se rompió a propósito: dejar
+entrar las cortadas (en los dos almacenes), no descontar al modelo caro y no quitar el
+bloque de código; en todos falla alguna.

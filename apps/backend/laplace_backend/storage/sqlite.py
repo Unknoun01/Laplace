@@ -55,13 +55,13 @@ from .base import (
     ObservedPrompt,
     ProjectStats,
     PromptUsage,
+    RedoneGroup,
     RepeatedGroup,
     StepCostSeries,
     StepFacts,
     TraceCost,
     TraceFilter,
     TracePage,
-    TruncatedGroup,
     Window,
     WindowFacts,
     WindowSummary,
@@ -172,6 +172,7 @@ CREATE TABLE IF NOT EXISTS spans (
     customer_id           TEXT NOT NULL DEFAULT '',
     prefix_hash           TEXT NOT NULL DEFAULT '',
     sample_rate           REAL NOT NULL DEFAULT 1,
+    output_json           TEXT NOT NULL DEFAULT '',
 
     events                TEXT NOT NULL DEFAULT '',
     attributes            TEXT NOT NULL DEFAULT '',
@@ -204,6 +205,8 @@ COLUMNAS_TARDIAS = (
     ("prefix_hash", "TEXT NOT NULL DEFAULT ''"),
     # A cuántas trazas representa, si el SDK muestrea (D-181).
     ("sample_rate", "REAL NOT NULL DEFAULT 1"),
+    # Si la salida es JSON que se lee (D-194).
+    ("output_json", "TEXT NOT NULL DEFAULT ''"),
 )
 
 #: Índices sobre columnas tardías. Van aquí y **no** en `SCHEMA` por un motivo que costó
@@ -450,11 +453,16 @@ _CORTADA = (
     f"SELECT 1 FROM json_each(finish_reasons) WHERE lower(value) IN ({_MOTIVOS_SQL})))"
 )
 
-#: Salidas truncadas (D-193). Una llamada cortada se ha tirado si el mismo paso vuelve a
-#: llamar más tarde en la misma ejecución. No se cuentan las que ya reclama la repetición
-#: exacta (tantas copias de la misma entrada en la traza como pide esa regla) ni las de
-#: un bucle posible (tantas vueltas como pide esa regla): por lo bajo, nunca dos veces.
-TRUNCATED_GROUPS_SQL = f"""
+def _rehechas_sql(fallida: str) -> str:
+    """Llamadas fallidas y rehechas, por (paso, modelo): la consulta de la salida truncada
+    (D-193) y de los reintentos por JSON roto (D-194), cada una con su `fallida`.
+
+    Una llamada fallida se ha tirado si el mismo paso vuelve a llamar más tarde en la
+    misma ejecución. No se cuentan las que ya reclama la repetición exacta (tantas copias
+    de la misma entrada en la traza como pide esa regla) ni las de un bucle posible
+    (tantas vueltas como pide esa regla): por lo bajo, nunca dos veces.
+    """
+    return f"""
 WITH paso AS (
     SELECT
         trace_id, span_id, start_time, request_model, dedup_hash, loop_hash,
@@ -462,12 +470,12 @@ WITH paso AS (
         CASE WHEN step_label != '' THEN step_label ELSE name END AS etiqueta,
         step_hint, step_site, cost_total_usd, duration_ms, input_tokens, output_tokens,
         cost_unknown, cost_rate_assumed,
-        {_CORTADA} AS cortada
+        {fallida} AS fallida
     FROM spans
     WHERE {RULES_WHERE} AND span_type = 'llm'
       AND trace_id IN (
           SELECT trace_id FROM spans
-          WHERE {WINDOW_WHERE} AND span_type = 'llm' AND {_CORTADA}
+          WHERE {WINDOW_WHERE} AND span_type = 'llm' AND {fallida}
       )
 ),
 marcadas AS (
@@ -478,7 +486,7 @@ marcadas AS (
         COUNT(*) OVER (PARTITION BY trace_id, loop_hash)         AS vueltas
     FROM paso
 ),
-cortadas AS (
+fallidas AS (
     SELECT
         marcadas.*,
         (start_time < ultima_del_paso
@@ -486,7 +494,7 @@ cortadas AS (
          AND (loop_hash = '' OR vueltas < :min_vueltas)) AS rehecha,
         (start_time = ultima_del_paso)                     AS sola
     FROM marcadas
-    WHERE cortada
+    WHERE fallida
 )
 SELECT
     paso_clave                                                    AS paso,
@@ -505,12 +513,21 @@ SELECT
     SUM(CASE WHEN rehecha THEN cost_rate_assumed ELSE 0 END)      AS asumida,
     MAX(CASE WHEN rehecha THEN trace_id END)                      AS traza_ejemplo,
     MAX(CASE WHEN rehecha THEN start_time END)                    AS ultima
-FROM cortadas
+FROM fallidas
 GROUP BY paso_clave, request_model
 HAVING rehechas >= :min_rehechas
 ORDER BY coste DESC, rehechas DESC, paso_clave, modelo
 LIMIT :limit
 """
+
+
+#: Salidas truncadas (D-193).
+TRUNCATED_GROUPS_SQL = _rehechas_sql(_CORTADA)
+
+#: Reintentos por JSON mal formado (D-194). Una salida cortada es de la regla de arriba:
+#: aquí no entra aunque su JSON esté roto, y así lo que reclama aquélla no se cuenta dos
+#: veces.
+JSON_ROTO_SQL = _rehechas_sql(f"(output_json = 'roto' AND NOT {_CORTADA})")
 
 #: Uso por (paso, modelo): base de las reglas de modelo caro y de contexto fijo.
 MODEL_USAGE_SQL = f"""
@@ -910,6 +927,10 @@ class SQLiteStore:
         return TRUNCATED_GROUPS_SQL
 
     @property
+    def json_retry_groups_sql(self) -> str:
+        return JSON_ROTO_SQL
+
+    @property
     def model_usage_sql(self) -> str:
         return MODEL_USAGE_SQL
 
@@ -1056,14 +1077,31 @@ class SQLiteStore:
     def truncated_groups(
         self, project_id: str, window: Window, *, min_redone: int = 5,
         min_repeats: int = 3, min_vueltas: int = 4, limit: int = 20,
-    ) -> list[TruncatedGroup]:
+    ) -> list[RedoneGroup]:
+        return self._rehechas(
+            TRUNCATED_GROUPS_SQL, project_id, window, min_redone, min_repeats, min_vueltas,
+            limit,
+        )
+
+    def json_retry_groups(
+        self, project_id: str, window: Window, *, min_redone: int = 5,
+        min_repeats: int = 3, min_vueltas: int = 4, limit: int = 20,
+    ) -> list[RedoneGroup]:
+        return self._rehechas(
+            JSON_ROTO_SQL, project_id, window, min_redone, min_repeats, min_vueltas, limit
+        )
+
+    def _rehechas(
+        self, sql: str, project_id: str, window: Window, min_redone: int,
+        min_repeats: int, min_vueltas: int, limit: int,
+    ) -> list[RedoneGroup]:
         params = self._window_params(project_id, window)
         params.update(
             min_rehechas=min_redone, min_repeats=min_repeats, min_vueltas=min_vueltas,
             limit=limit,
         )
         grupos = [
-            TruncatedGroup(
+            RedoneGroup(
                 name=r["nombre"],
                 model=r["modelo"] or "",
                 step_key=r["paso"] or "",
@@ -1081,11 +1119,11 @@ class SQLiteStore:
                 sample_trace_id=r["traza_ejemplo"] or "",
                 last_seen=utc(r["ultima"]) if r["ultima"] else None,
             )
-            for r in self._query(TRUNCATED_GROUPS_SQL, params)
+            for r in self._query(sql, params)
         ]
         return disambiguate(grupos)
 
-    def sample_truncation(
+    def sample_step_calls(
         self, project_id: str, window: Window, step_key: str, trace_id: str, limit: int = 40
     ) -> list[Span]:
         params = self._window_params(project_id, window)

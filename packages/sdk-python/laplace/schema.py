@@ -242,6 +242,10 @@ class Span(_Model):
     #: el avance. Muchas vueltas con pocas salidas distintas es la definición medible
     #: de «da vueltas sin llegar a ninguna parte».
     loop_out_hash: str = ""
+    #: Si la salida del modelo intenta ser JSON y si se lee: `ok`, `roto`, o vacío
+    #: cuando no lo intenta (texto, herramientas, sin salida). Lo calcula la ingesta;
+    #: es la señal de los reintentos por JSON mal formado (D-194).
+    output_json: str = ""
 
     #: Prompt **gestionado** con el que se hizo esta llamada, si lo hubo. Lo escribe el
     #: SDK sólo cuando el texto de esa versión aparece de verdad en los mensajes

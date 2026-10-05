@@ -317,6 +317,59 @@ def _sample_rate(valor: Any) -> float:
     return rate if 1.0 <= rate <= 1_000_000 else 1.0
 
 
+def _texto_de_salida(messages: list[dict[str, Any]]) -> str:
+    """El texto de la última respuesta, en las formas de mensaje que llegan: `content`
+    como cadena (OpenAI), como bloques (Anthropic) o `parts` (convenciones de OTel)."""
+    for mensaje in reversed(messages or []):
+        if not isinstance(mensaje, dict):
+            continue
+        contenido = mensaje.get("content")
+        if contenido is None:
+            contenido = mensaje.get("parts")
+        if isinstance(contenido, str):
+            return contenido
+        if isinstance(contenido, list):
+            trozos = []
+            for bloque in contenido:
+                if isinstance(bloque, str):
+                    trozos.append(bloque)
+                elif isinstance(bloque, dict):
+                    texto = bloque.get("text", bloque.get("content"))
+                    if isinstance(texto, str):
+                        trozos.append(texto)
+            return "".join(trozos)
+        return ""
+    return ""
+
+
+_BLOQUE_DE_CODIGO = re.compile(r"^```[a-zA-Z0-9_-]*\s*\n?(.*?)\n?```\s*$", re.S)
+
+
+def salida_json(messages: list[dict[str, Any]]) -> str:
+    """`ok` si la salida es JSON que se lee, `roto` si lo intenta y no se lee, y vacío
+    si no lo intenta (D-194).
+
+    «Lo intenta» es empezar por `{` o `[`, quitado antes un bloque de código
+    (```` ```json ````): casi todos los agentes lo quitan antes de leer, así que un JSON
+    bueno dentro de un bloque no se cuenta como roto. Por lo bajo: un agente que se
+    atasque precisamente con el bloque no sale aquí.
+    """
+    texto = _texto_de_salida(messages).strip()
+    bloque = _BLOQUE_DE_CODIGO.match(texto)
+    if bloque:
+        texto = bloque.group(1).strip()
+    elif texto.startswith("```"):
+        # Un bloque abierto que no se cierra: lo de dentro, sin la primera línea.
+        texto = texto.split("\n", 1)[1].strip() if "\n" in texto else ""
+    if not texto or texto[0] not in "{[":
+        return ""
+    try:
+        json.loads(texto)
+    except ValueError:
+        return "roto"
+    return "ok"
+
+
 def prefix_hash(messages: list[dict[str, Any]], tools: Any) -> str:
     """La huella de las instrucciones y las herramientas: lo que va delante de cada
     llamada y la caché del proveedor puede reutilizar. Es la mitad «con las mismas
@@ -561,6 +614,7 @@ def _build_span(
         # El de la salida sirve para la otra mitad de la pregunta: un bucle que da
         # vueltas sin avanzar produce siempre lo mismo (D-109).
         loop_out_hash=loop_hash(span_type, name, salida_payload, ignorar_numeros=False),
+        output_json=salida_json(llm.output_messages) if llm is not None else "",
         step_key=step_key,
         step_site=step_site,
         step_label=step_label,

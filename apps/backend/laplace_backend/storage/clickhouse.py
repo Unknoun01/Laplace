@@ -38,13 +38,13 @@ from .base import (
     ObservedPrompt,
     ProjectStats,
     PromptUsage,
+    RedoneGroup,
     RepeatedGroup,
     StepCostSeries,
     StepFacts,
     TraceCost,
     TraceFilter,
     TracePage,
-    TruncatedGroup,
     Window,
     WindowFacts,
     WindowSummary,
@@ -349,10 +349,11 @@ LIMIT %(limit)s
 #: Una llamada cortada por el tope de salida (D-193). Gemelo de `_CORTADA` de sqlite.py.
 _CORTADA = f"arrayExists(m -> lower(m) IN ({_MOTIVOS_SQL}), finish_reasons)"
 
-#: Salidas truncadas: gemelo de `TRUNCATED_GROUPS_SQL` de sqlite.py (D-193). Mismo
-#: criterio y mismos alias. Primero las trazas con algún corte, sin FINAL: son pocas, y
-#: así las ventanas de abajo no recorren la ventana entera.
-TRUNCATED_GROUPS_SQL = f"""
+def _rehechas_sql(fallida: str) -> str:
+    """Gemelo de `_rehechas_sql` de sqlite.py (D-193, D-194). Mismo criterio y mismos
+    alias. Primero las trazas con alguna llamada fallida, sin FINAL: son pocas, y así las
+    ventanas de abajo no recorren la ventana entera."""
+    return f"""
 SELECT
     paso_clave                                 AS paso,
     request_model                              AS modelo,
@@ -384,7 +385,7 @@ FROM (
             if(step_label != '', step_label, name) AS etiqueta,
             step_hint, step_site, cost_total_usd, duration_ms, input_tokens,
             output_tokens, cost_unknown, cost_rate_assumed,
-            {_CORTADA}                                                    AS cortada,
+            {fallida}                                                     AS fallida,
             max(start_time) OVER (PARTITION BY trace_id, paso_clave)      AS ultima_del_paso,
             count() OVER (PARTITION BY trace_id, dedup_hash)              AS copias,
             count() OVER (PARTITION BY trace_id, loop_hash)               AS vueltas
@@ -392,16 +393,23 @@ FROM (
         WHERE {RULES_WHERE} AND span_type = 'llm'
           AND trace_id IN (
               SELECT trace_id FROM spans
-              WHERE {WINDOW_WHERE} AND span_type = 'llm' AND {_CORTADA}
+              WHERE {WINDOW_WHERE} AND span_type = 'llm' AND {fallida}
           )
     )
-    WHERE cortada
+    WHERE fallida
 )
 GROUP BY paso_clave, request_model
 HAVING rehechas >= %(min_rehechas)s
 ORDER BY coste DESC, rehechas DESC, paso_clave, modelo
 LIMIT %(limit)s
 """
+
+
+#: Salidas truncadas (D-193).
+TRUNCATED_GROUPS_SQL = _rehechas_sql(_CORTADA)
+
+#: Reintentos por JSON mal formado (D-194): sin las cortadas, que son de la de arriba.
+JSON_ROTO_SQL = _rehechas_sql(f"(output_json = 'roto' AND NOT {_CORTADA})")
 
 #: Uso por (paso, modelo): base de las reglas de modelo caro y de contexto fijo.
 MODEL_USAGE_SQL = f"""
@@ -877,6 +885,10 @@ class ClickHouseStore:
         return TRUNCATED_GROUPS_SQL
 
     @property
+    def json_retry_groups_sql(self) -> str:
+        return JSON_ROTO_SQL
+
+    @property
     def model_usage_sql(self) -> str:
         return MODEL_USAGE_SQL
 
@@ -968,16 +980,34 @@ class ClickHouseStore:
     def truncated_groups(
         self, project_id: str, window: Window, *, min_redone: int = 5,
         min_repeats: int = 3, min_vueltas: int = 4, limit: int = 20,
-    ) -> list[TruncatedGroup]:
+    ) -> list[RedoneGroup]:
         """Gemelo del de sqlite.py (D-193). Se lee en crudo también con preagregados: los
         cortes son pocos y la consulta empieza por sus trazas."""
+        return self._rehechas(
+            TRUNCATED_GROUPS_SQL, project_id, window, min_redone, min_repeats, min_vueltas,
+            limit,
+        )
+
+    def json_retry_groups(
+        self, project_id: str, window: Window, *, min_redone: int = 5,
+        min_repeats: int = 3, min_vueltas: int = 4, limit: int = 20,
+    ) -> list[RedoneGroup]:
+        """Gemelo del de sqlite.py (D-194), en crudo por lo mismo que el de arriba."""
+        return self._rehechas(
+            JSON_ROTO_SQL, project_id, window, min_redone, min_repeats, min_vueltas, limit
+        )
+
+    def _rehechas(
+        self, sql: str, project_id: str, window: Window, min_redone: int,
+        min_repeats: int, min_vueltas: int, limit: int,
+    ) -> list[RedoneGroup]:
         params = self._window_params(project_id, window)
         params.update(
             min_rehechas=min_redone, min_repeats=min_repeats, min_vueltas=min_vueltas,
             limit=limit,
         )
         grupos = [
-            TruncatedGroup(
+            RedoneGroup(
                 name=r["nombre"],
                 model=r["modelo"] or "",
                 step_key=r["paso"] or "",
@@ -995,11 +1025,11 @@ class ClickHouseStore:
                 sample_trace_id=r["traza_ejemplo"] or "",
                 last_seen=_utc(r["ultima"]) if r["ultima"] else None,
             )
-            for r in _named(self._consulta(TRUNCATED_GROUPS_SQL, parameters=params))
+            for r in _named(self._consulta(sql, parameters=params))
         ]
         return disambiguate(grupos)
 
-    def sample_truncation(
+    def sample_step_calls(
         self, project_id: str, window: Window, step_key: str, trace_id: str, limit: int = 40
     ) -> list[Span]:
         params = self._window_params(project_id, window)

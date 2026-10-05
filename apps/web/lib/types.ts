@@ -248,7 +248,9 @@ export type FindingKind =
   /** El mismo prefijo en varios pasos, sin compartir la caché (D-178). */
   | "cache_compartida"
   /** Una respuesta cortada por el tope de salida y rehecha (D-193). */
-  | "salida_truncada";
+  | "salida_truncada"
+  /** Una salida con el JSON roto y rehecha (D-194). */
+  | "json_roto";
 export type Difficulty = "easy" | "mid" | "hard";
 
 export interface TechItem {

@@ -239,6 +239,21 @@ def almacen_con_los_cuatro_tipos(tmp_path):
             span.llm.finish_reasons = [motivo]
             spans.append(span)
 
+    # Regla 8 — JSON roto (D-194): la salida no se lee y el mismo paso vuelve a llamar.
+    for t in range(6):
+        for j, marca in enumerate(("roto", "ok")):
+            span = _span(
+                f"json-{t}",
+                paso="extraer",
+                clave="k-extraer",
+                entrada_tokens=500,
+                salida_tokens=300,
+                i=2600 + t * 20 + j,
+                dedup=f"extraer-{t}-{j}",
+            )
+            span.output_json = marca
+            spans.append(span)
+
     store.insert_spans(spans)
     return store
 
@@ -524,6 +539,11 @@ GARANTIAS: dict[str, dict[str, str]] = {
         "descuento": "su consulta deja fuera las cortadas que reclaman la repetición y los "
         "bucles; las que reclama entran en `_duplicate_tokens` para que el modelo caro, el "
         "contexto fijo y la caché compartida no las cuenten otra vez",
+    },
+    "json_roto": {
+        "nombre": "`_nombrar` y `disambiguate` sobre (paso, modelo), como la truncada",
+        "descuento": "su consulta deja fuera las cortadas (de la truncada) y lo que reclaman "
+        "la repetición y los bucles; lo suyo entra en `_duplicate_tokens`",
     },
     "prompt_caro": {
         "nombre": "el nombre del prompt y sus dos versiones, que son únicos",

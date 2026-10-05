@@ -210,13 +210,14 @@ _MOTIVOS_SQL = ", ".join(f"'{m}'" for m in MOTIVOS_DE_CORTE)
 
 
 @dataclass
-class TruncatedGroup:
-    """Las llamadas de un paso cortadas por el tope de salida, por (paso, modelo) (D-193).
+class RedoneGroup:
+    """Las llamadas fallidas de un paso, por (paso, modelo): cortadas por el tope de
+    salida (D-193) o con el JSON roto (D-194).
 
-    `redone_*` son las cortadas que el mismo paso volvió a hacer más tarde en la misma
+    `redone_*` son las fallidas que el mismo paso volvió a hacer más tarde en la misma
     ejecución: ésas se tiraron enteras. Las que nadie rehízo (`not_redone`) sólo se
-    cuentan: no sabemos si la respuesta a medias le sirvió a alguien. Las que ya
-    reclaman la repetición exacta o un bucle no entran en ninguna de las dos.
+    cuentan: no sabemos si la respuesta le sirvió a alguien. Las que ya reclaman la
+    repetición exacta o un bucle no entran en ninguna de las dos.
     """
 
     name: str
@@ -803,6 +804,10 @@ class SpanStore(Protocol):
         """La consulta de las salidas truncadas, tal cual se ejecuta (D-193)."""
 
     @property
+    def json_retry_groups_sql(self) -> str:
+        """La consulta de los reintentos por JSON roto, tal cual se ejecuta (D-194)."""
+
+    @property
     def model_usage_sql(self) -> str:
         """La consulta que agrega el uso por paso, tal cual se ejecuta."""
 
@@ -945,13 +950,25 @@ class SpanStore(Protocol):
         min_repeats: int = 3,
         min_vueltas: int = 4,
         limit: int = 20,
-    ) -> list[TruncatedGroup]:
+    ) -> list[RedoneGroup]:
         """Llamadas cortadas por el tope de salida y rehechas, por paso y modelo (D-193)."""
 
-    def sample_truncation(
+    def json_retry_groups(
+        self,
+        project_id: str,
+        window: Window,
+        *,
+        min_redone: int = 5,
+        min_repeats: int = 3,
+        min_vueltas: int = 4,
+        limit: int = 20,
+    ) -> list[RedoneGroup]:
+        """Salidas con JSON roto y rehechas, sin las cortadas, por paso y modelo (D-194)."""
+
+    def sample_step_calls(
         self, project_id: str, window: Window, step_key: str, trace_id: str, limit: int = 40
     ) -> list[Span]:
-        """Las llamadas de ese paso en esa traza: la cortada y la que la rehízo."""
+        """Las llamadas de ese paso en esa traza: la fallida y la que la rehízo."""
 
     def cost_by(
         self,

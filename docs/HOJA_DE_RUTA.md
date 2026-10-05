@@ -98,11 +98,11 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
     Diagnóstico, como hace el de la traza; se podría, con los `step_key` de los hallazgos
     de la misma ventana.
 - **Reglas nuevas** (cada una entra por `detect()` y `detail()`, con su prueba de catálogo;
-  fase `fase-reglas-diagnostico`). Hecha: la salida truncada y rehecha (D-193); la
-  «descartada» no se puede saber y queda fuera. Lo que queda:
+  fase `fase-reglas-diagnostico`). Hechas: la salida truncada y rehecha (D-193; la
+  «descartada» no se puede saber y queda fuera) y los reintentos por JSON mal formado
+  (D-194). Lo que queda:
   - lecturas de caché que se pagan (OpenAI);
   - caché semántica (prompts casi iguales);
-  - reintentos por JSON mal formado;
   - historial que crece sin límite;
   - trabajo que podría ir a la Batch API.
 - **Lo que dejaron D-178 a D-182, por si alguien lo pide:**
