@@ -4653,3 +4653,50 @@ cuenta de las lecturas, la detección al día) y OpenAI sin cachear (ni código 
 ni el paso de activar, sí el del prefijo). Se rompió a propósito tres veces: el código de
 Anthropic para todos, proponer cachear aunque ya se cachee, y la cuenta de cachear en
 lugar de la de las lecturas. Las tres fallan.
+
+### D-197 — La carga mide lo que habrá: casos para las reglas nuevas y preagregados calculados
+Lo pendiente de D-193 a D-195 era medir con `scripts/carga.py` las tres lecturas que van
+en crudo. Antes de medir hubo que arreglar la carga, que daba cifras falsas por dos lados:
+
+* **Las reglas nuevas no tenían nada que encontrar.** El generador no traía ni salidas
+  cortadas ni JSON roto ni conversaciones que crecen. Una lectura que no encuentra nada
+  mide menos de lo que costará: la truncada y la del JSON salían a 0,11 s, y con casos, a
+  0,37 s. Ahora una de cada cincuenta trazas rehace «extraer» tras cortarse
+  (`finish_reasons = ['length']`), otra tras un JSON roto (`output_json = 'roto'`), y una
+  de cada veinte conversaciones crece 800 tokens por turno. Las trazas elegidas son pares,
+  porque las impares van a los proyectos pequeños, y las sesiones ya no mezclan
+  proyectos: con `intDiv(t, 5)` una sesión dejaba 2 o 3 trazas en el proyecto grande, por
+  debajo de los cuatro turnos del historial. La medida imprime qué hallazgos salen, para
+  ver que ninguna lectura se mide en vacío.
+* **Los preagregados no se calculaban.** Los spans entran con SQL, sin pasar por la
+  ingesta, y nadie apuntaba sus horas (D-177): el Diagnóstico se leía entero en crudo.
+  Ahora la carga apunta las horas del proyecto grande y las recalcula al terminar, y
+  `--borrar` limpia también los preagregados.
+
+**Medido** en este portátil (ClickHouse en Docker, 16 hilos, 9,7 GB), con 500.000 spans
+al día durante 7 días (la mitad, del proyecto grande):
+
+| | 1 día | 7 días |
+|---|---|---|
+| Diagnóstico | 3,0–3,2 s | 8,5–9,4 s |
+| historial | 0,59 s (19 %) | 2,84 s (32 %) |
+| truncada | 0,28 s (9 %) | 0,78 s (9 %) |
+| JSON roto | 0,29 s (9 %) | 0,78 s (9 %) |
+| las tres juntas | 37 % | 49 % |
+
+* **El historial es el problema.** Con 7 días pidió **1,09 GiB de memoria** para 1,75
+  millones de spans del proyecto. No se proyecta a diez millones al día, pero crece con la
+  ventana, y D-142 ya tumbó Docker con 2 GB en una sola consulta. Su filtro previo apenas
+  descarta nada cuando las entradas varían mucho de una llamada a otra, como en la carga,
+  y entonces las ventanas recorren casi todo. Es lo primero que hay que arreglar.
+* La truncada y la del JSON leen la ventana dos veces, aunque busquen pocas trazas, y se
+  quedan en 221 MiB. Cuestan, pero no son peligrosas.
+* Las cifras absolutas no se comparan con las de D-177 (1,1 s con 10 millones), que se
+  midieron en el contenedor de 4 núcleos con sólo el proyecto grande. Aquí cada lector
+  tiene un suelo de 0,2–0,3 s aunque lea de los preagregados, y no se ha averiguado por
+  qué. Lo que sí vale es el reparto entre lecturas, medido todo en la misma máquina.
+
+Pruebas: `test_carga.py`, en una base de ClickHouse propia, genera 40.000 spans y exige
+que salgan las tres reglas en el proyecto grande y que sus horas queden calculadas. Se
+rompió a propósito tres veces: con las trazas impares, con las sesiones que mezclan
+proyectos y sin calcular los preagregados. Las tres fallan.

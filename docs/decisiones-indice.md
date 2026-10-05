@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 197 decisiones.
+final. 198 decisiones.
 
 ## Coste, precios y caché
 
@@ -79,6 +79,7 @@ final. 197 decisiones.
 - [D-185](../DECISIONS.md#d-185--el-arreglo-del-modelo-caro-propuesto-como-pull-request-en-el-repositorio-del-usuario) — El arreglo del modelo caro, propuesto como pull request en el repositorio del usuario
 - [D-187](../DECISIONS.md#d-187--tope-bucles-y-parada-desde-laplace-el-sdk-los-pide-cada-30-s-y-manda-el-más-estricto) — Tope, bucles y parada desde Laplace: el SDK los pide cada 30 s y manda el más estricto
 - [D-191](../DECISIONS.md#d-191--el-webhook-de-github-marca-el-hallazgo-como-arreglado-al-fusionar-su-pr) — El webhook de GitHub marca el hallazgo como arreglado al fusionar su PR
+- [D-197](../DECISIONS.md#d-197--la-carga-mide-lo-que-habrá-casos-para-las-reglas-nuevas-y-preagregados-calculados) — La carga mide lo que habrá: casos para las reglas nuevas y preagregados calculados
 
 ## Probar: evaluaciones, juez y replay
 
@@ -92,6 +93,7 @@ final. 197 decisiones.
 - [D-156](../DECISIONS.md#d-156--el-producto-alrededor-del-ciclo-detectar-probar-arreglar-verificar) — El producto alrededor del ciclo: detectar, probar, arreglar, verificar
 - [D-160](../DECISIONS.md#d-160--prompts-sin-tiradas-de-evaluación-envoltorios-con--y-el-modelo-rápido-ponderado) — Prompts sin tiradas de evaluación, envoltorios con «=» y el modelo rápido ponderado
 - [D-167](../DECISIONS.md#d-167--probar-el-modelo-barato-reenviando-las-llamadas-reales-sin-escribir-código) — Probar el modelo barato reenviando las llamadas reales, sin escribir código
+- [D-197](../DECISIONS.md#d-197--la-carga-mide-lo-que-habrá-casos-para-las-reglas-nuevas-y-preagregados-calculados) — La carga mide lo que habrá: casos para las reglas nuevas y preagregados calculados
 
 ## Prompts
 
@@ -156,6 +158,7 @@ final. 197 decisiones.
 - [D-169](../DECISIONS.md#d-169--health-nombra-el-almacén-que-hay-y-la-limpieza) — `/health` nombra el almacén que hay, y la limpieza
 - [D-173](../DECISIONS.md#d-173--retención-por-proyecto-y-borrar-lo-de-una-persona-o-un-cliente) — Retención por proyecto, y borrar lo de una persona o un cliente
 - [D-183](../DECISIONS.md#d-183--las-medianas-del-uso-por-paso-la-misma-cuenta-en-los-dos-almacenes-y-una-llamada-con-respuesta-y-sin-recuento-ya-no-sale-gratis) — Las medianas del uso por paso, la misma cuenta en los dos almacenes; y una llamada con respuesta y sin recuento ya no sale gratis
+- [D-197](../DECISIONS.md#d-197--la-carga-mide-lo-que-habrá-casos-para-las-reglas-nuevas-y-preagregados-calculados) — La carga mide lo que habrá: casos para las reglas nuevas y preagregados calculados
 
 ## Interfaz
 
@@ -636,3 +639,4 @@ final. 197 decisiones.
 - [D-194](../DECISIONS.md#d-194--reintentos-por-json-mal-formado-la-salida-que-no-se-lee-y-rehecha) — Reintentos por JSON mal formado: la salida que no se lee, y rehecha
 - [D-195](../DECISIONS.md#d-195--historial-que-crece-sin-límite-tokens-medidos-sin-dinero) — Historial que crece sin límite: tokens medidos, sin dinero
 - [D-196](../DECISIONS.md#d-196--lecturas-de-caché-pagadas-en-openai-la-ficha-propone-lo-mismo-que-la-tarjeta) — Lecturas de caché pagadas en OpenAI: la ficha propone lo mismo que la tarjeta
+- [D-197](../DECISIONS.md#d-197--la-carga-mide-lo-que-habrá-casos-para-las-reglas-nuevas-y-preagregados-calculados) — La carga mide lo que habrá: casos para las reglas nuevas y preagregados calculados

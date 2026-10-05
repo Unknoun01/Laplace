@@ -16,6 +16,11 @@ herramientas y dos pasos—, repartidas en un día, con un 3 % de errores, repet
 una de cada diez trazas y payloads de un par de KB. La mitad del tráfico es de un solo
 proyecto grande, que es el caso que hay que aguantar: un cliente con mucho volumen.
 
+Y cada regla con algo que encontrar, porque una lectura que no encuentra nada mide menos
+de lo que costará: una de cada cincuenta trazas rehace «extraer» tras cortarse por el
+tope de salida, otra lo rehace tras un JSON roto, y una de cada veinte conversaciones (5
+trazas del mismo proyecto) crece 800 tokens por turno (D-197).
+
 El objetivo, escrito para que haya algo contra lo que medir: **10 millones de spans al
 día en la instalación, y el Diagnóstico de un proyecto por debajo de 1,5 s**.
 
@@ -37,6 +42,7 @@ sys.path.insert(0, str(RAIZ / "apps" / "backend"))
 
 from laplace_backend import insights, panel
 from laplace_backend.config import Settings
+from laplace_backend.storage import preagregados
 from laplace_backend.storage.base import TraceFilter, Window
 from laplace_backend.storage.clickhouse import ClickHouseStore
 
@@ -55,7 +61,8 @@ INSERT INTO spans (
     cost_input_usd, cost_output_usd, cost_total_usd, price_rate,
     input_messages, output_messages, tool_name, tool_arguments, tool_output,
     session_id, user_id, dedup_hash, loop_hash, loop_out_hash,
-    step_key, step_site, step_label, step_hint, ingested_at
+    step_key, step_site, step_label, step_hint, finish_reasons, output_json,
+    ingested_at
 )
 SELECT
     if(t %% 2 = 0, '{GRANDE}', concat('{PREFIJO}', toString(t %% 10))) AS project_id,
@@ -64,8 +71,8 @@ SELECT
     if(p = 0, '',
        substring(lower(hex(MD5(concat(%(semilla)s, toString(t * {SPANS_POR_TRAZA}), 's')))),
                  1, 16))                                              AS parent_span_id,
-    multiIf(p = 0, 'atender_ticket', p = 1, 'chat gpt-5.6-luna',
-            p = 3, 'chat gpt-5.6-terra', p = 5, 'chat claude-sonnet-5',
+    multiIf(p = 0, 'atender_ticket', q = 1, 'chat gpt-5.6-luna',
+            q = 3, 'chat gpt-5.6-terra', q = 5, 'chat claude-sonnet-5',
             p = 2, 'buscar_vuelo', p = 4, 'reservar', 'preparar')    AS name,
     multiIf(p = 0, 'agent', p IN (1, 3, 5), 'llm', p IN (2, 4), 'tool', 'chain')
                                                                       AS span_type,
@@ -74,16 +81,19 @@ SELECT
                     toInt64(t * %(ms_por_traza)s) + p * 300)          AS start_time,
     addMilliseconds(start_time, if(p = 0, 2400, 250))                 AS end_time,
     if(p = 0, 2400., 250.)                                            AS duration_ms,
-    if(p IN (1, 3), 'openai', if(p = 5, 'anthropic', ''))             AS gen_ai_system,
+    if(q IN (1, 3), 'openai', if(q = 5, 'anthropic', ''))             AS gen_ai_system,
     if(p IN (1, 3, 5), 'chat', '')                                    AS operation,
-    multiIf(p = 1, 'gpt-5.6-luna', p = 3, 'gpt-5.6-terra', p = 5, 'claude-sonnet-5', '')
+    multiIf(q = 1, 'gpt-5.6-luna', q = 3, 'gpt-5.6-terra', q = 5, 'claude-sonnet-5', '')
                                                                       AS request_model,
     request_model                                                     AS response_model,
-    if(p IN (1, 3, 5), 1000 + (n * 7919) %% 5000, 0)                   AS input_tokens,
+    -- Las conversaciones del historial crecen 800 tokens por turno, en orden.
+    if(p IN (1, 3, 5),
+       if(historial, 1500 + intDiv(t %% 10, 2) * 800, 1000 + (n * 7919) %% 5000),
+       0)                                                            AS input_tokens,
     if(p IN (1, 3, 5), 20 + (n * 104729) %% 300, 0)                    AS output_tokens,
     if(p IN (1, 3, 5), intDiv(input_tokens, 2), 0)                    AS cached_input_tokens,
-    input_tokens * multiIf(p = 1, 0.2, p = 3, 1.0, p = 5, 2.0, 0) / 1e6 AS cost_input_usd,
-    output_tokens * multiIf(p = 1, 1.2, p = 3, 6.0, p = 5, 10.0, 0) / 1e6 AS cost_output_usd,
+    input_tokens * multiIf(q = 1, 0.2, q = 3, 1.0, q = 5, 2.0, 0) / 1e6 AS cost_input_usd,
+    output_tokens * multiIf(q = 1, 1.2, q = 3, 6.0, q = 5, 10.0, 0) / 1e6 AS cost_output_usd,
     cost_input_usd + cost_output_usd                                  AS cost_total_usd,
     if(request_model != '', concat(request_model, ' @ carga'), '')    AS price_rate,
     if(p IN (1, 3, 5),
@@ -97,23 +107,29 @@ SELECT
     if(p IN (2, 4), name, '')                                         AS tool_name,
     if(p IN (2, 4), concat('{{"vuelo":"IB', toString(t %% 9000), '"}}'), '') AS tool_arguments,
     if(p IN (2, 4), '{{"ok":true}}', '')                              AS tool_output,
-    concat('sesion-', toString(intDiv(t, 5)))                         AS session_id,
+    concat('sesion-', toString(t %% 2), '-', toString(intDiv(t, 10))) AS session_id,
     concat('cliente-', toString(t %% 5000))                            AS user_id,
     -- Una de cada diez trazas repite la llamada a terra: mismo hash que la de luna.
     if(t %% 10 = 0 AND p IN (1, 3), concat('rep-', toString(t)), toString(n))
                                                                       AS dedup_hash,
     dedup_hash                                                        AS loop_hash,
     toString(n)                                                       AS loop_out_hash,
-    if(p IN (1, 3, 5), concat('paso-', toString(p)), '')              AS step_key,
+    if(p IN (1, 3, 5), concat('paso-', toString(q)), '')              AS step_key,
     if(p IN (1, 3, 5), 'atender_ticket', '')                          AS step_site,
-    if(p IN (1, 3, 5), multiIf(p = 1, 'clasificar', p = 3, 'extraer', 'responder'), '')
+    if(p IN (1, 3, 5), multiIf(q = 1, 'clasificar', q = 3, 'extraer', 'responder'), '')
                                                                       AS step_label,
     ''                                                                AS step_hint,
+    if(p IN (1, 3, 5), if(t %% 50 = 22 AND p = 1, ['length'], ['stop']), [])
+                                                                      AS finish_reasons,
+    if(t %% 50 = 44 AND p = 1, 'roto', '')                             AS output_json,
     now64(3)                                                          AS ingested_at
 FROM (
     SELECT number AS n,
            intDiv(number, {SPANS_POR_TRAZA}) AS t,
-           number %% {SPANS_POR_TRAZA} AS p
+           number %% {SPANS_POR_TRAZA} AS p,
+           -- La llamada que se rehace: en estas trazas, p = 1 también es «extraer».
+           if(t %% 50 IN (22, 44) AND p = 1, 3, p) AS q,
+           intDiv(t, 10) %% 20 = 1 AS historial
     FROM numbers(%(inicio)s, %(cuantos)s)
 )
 """
@@ -169,6 +185,18 @@ def generar(
         ritmo = hechos / (time.perf_counter() - inicio)
         print(f"  {hechos:>11,} spans · {ritmo:,.0f} spans/s", flush=True)
 
+    # Los spans entran con SQL, sin pasar por la ingesta, así que nadie apunta sus horas
+    # para los preagregados (D-177) y el Diagnóstico se leería entero en crudo: 5,5 s
+    # con un millón de spans, cuando un servidor de verdad los tiene calculados. Se
+    # calculan las del proyecto grande, que es el que se mide (D-197).
+    horas = {
+        (GRANDE, desde + timedelta(hours=h)) for h in range(int(dias * 24) + 1)
+    }
+    inicio = time.perf_counter()
+    preagregados.marcar(store._client, horas)
+    hechas = preagregados.recalcular_pendientes(store._client, len(horas), quieta_s=0)
+    print(f"  {hechas} horas de preagregados en {time.perf_counter() - inicio:.0f} s")
+
 
 def _medir(nombre: str, fn, veces: int = 3) -> float:
     tiempos = []
@@ -217,6 +245,9 @@ def medir(store: ClickHouseStore) -> dict[str, float]:
             lambda v=ventana, c=cron: insights.overview(c, GRANDE, v),
         )
         _desglose(cron)
+        # Que cada regla encontró lo suyo: si no, su lectura se midió en vacío (D-197).
+        tipos = sorted({f.kind for f in insights.detect(store, GRANDE, ventana)})
+        print(f"        hallazgos: {', '.join(tipos)}")
         resultados[f"panel {dias}d"] = _medir(
             f"Panel, proyecto grande, {dias} d",
             lambda v=ventana: panel.build(store, GRANDE, v),
@@ -294,7 +325,10 @@ def main() -> int:
         return 1
     store.migrate()
     if args.borrar:
-        store._client.command(f"DELETE FROM spans WHERE project_id LIKE '{PREFIJO}%'")
+        for tabla in ("spans", *preagregados.TABLAS, "pre_horas", "pre_sucias"):
+            store._client.command(
+                f"DELETE FROM {tabla} WHERE project_id LIKE '{PREFIJO}%'"
+            )
         print("datos de carga borrados")
         return 0
     if not args.solo_medir:
