@@ -252,7 +252,9 @@ export type FindingKind =
   /** Una salida con el JSON roto y rehecha (D-194). */
   | "json_roto"
   /** La entrada de un paso que crece en cada turno sin recortarse (D-195). */
-  | "historial";
+  | "historial"
+  /** Trabajo que podría ir por la API de lotes (D-199). */
+  | "lotes";
 export type Difficulty = "easy" | "mid" | "hard";
 
 export interface TechItem {

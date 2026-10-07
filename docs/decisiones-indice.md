@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 199 decisiones.
+final. 200 decisiones.
 
 ## Coste, precios y caché
 
@@ -37,6 +37,7 @@ final. 199 decisiones.
 - [D-190](../DECISIONS.md#d-190--cache_control-y-un-tope-de-vueltas-escritos-sobre-el-árbol-de-sintaxis) — `cache_control` y un tope de vueltas, escritos sobre el árbol de sintaxis
 - [D-195](../DECISIONS.md#d-195--historial-que-crece-sin-límite-tokens-medidos-sin-dinero) — Historial que crece sin límite: tokens medidos, sin dinero
 - [D-196](../DECISIONS.md#d-196--lecturas-de-caché-pagadas-en-openai-la-ficha-propone-lo-mismo-que-la-tarjeta) — Lecturas de caché pagadas en OpenAI: la ficha propone lo mismo que la tarjeta
+- [D-199](../DECISIONS.md#d-199--trabajo-que-podría-ir-por-lotes-con-la-marca-hay-dinero-sin-ella-una-pregunta) — Trabajo que podría ir por lotes: con la marca hay dinero, sin ella una pregunta
 
 ## Detección: reglas y hallazgos
 
@@ -641,3 +642,4 @@ final. 199 decisiones.
 - [D-196](../DECISIONS.md#d-196--lecturas-de-caché-pagadas-en-openai-la-ficha-propone-lo-mismo-que-la-tarjeta) — Lecturas de caché pagadas en OpenAI: la ficha propone lo mismo que la tarjeta
 - [D-197](../DECISIONS.md#d-197--la-carga-mide-lo-que-habrá-casos-para-las-reglas-nuevas-y-preagregados-calculados) — La carga mide lo que habrá: casos para las reglas nuevas y preagregados calculados
 - [D-198](../DECISIONS.md#d-198--el-historial-sólo-abre-las-conversaciones-que-pueden-contar) — El historial sólo abre las conversaciones que pueden contar
+- [D-199](../DECISIONS.md#d-199--trabajo-que-podría-ir-por-lotes-con-la-marca-hay-dinero-sin-ella-una-pregunta) — Trabajo que podría ir por lotes: con la marca hay dinero, sin ella una pregunta

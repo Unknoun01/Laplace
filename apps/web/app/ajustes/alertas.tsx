@@ -237,5 +237,6 @@ const REGLAS = [
   ["salida_truncada", "aj.regla.salida_truncada"],
   ["json_roto", "aj.regla.json_roto"],
   ["historial", "aj.regla.historial"],
+  ["lotes", "aj.regla.lotes"],
   ["cliente_pierde", "aj.regla.cliente_pierde"],
 ] as const;

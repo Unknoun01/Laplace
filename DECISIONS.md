@@ -4758,3 +4758,53 @@ conversaciones de la carga sin dejar fuera ninguna que cuente. Se rompió a prop
 veces: el filtro de antes, el rango contra las filas, la primera y la última sin quitar lo
 que no cuenta, las copias sólo entre las candidatas y el recuento por filas. Las cinco
 fallan.
+
+### D-199 — Trabajo que podría ir por lotes: con la marca hay dinero, sin ella una pregunta
+OpenAI y Anthropic cobran la mitad por la misma llamada si se manda por su API de lotes:
+el mismo modelo y la misma respuesta, en horas en lugar de al momento. La hoja de ruta
+lo dejó pendiente porque faltaba la señal: desde las trazas no se sabe si alguien espera
+la respuesta. La regla (`insights/lotes.py`, tipo `lotes`) no lo adivina:
+
+* **La marca.** Una etiqueta, `laplace-puede-esperar` (`semconv.PUEDE_ESPERAR_TAG`), en
+  cualquier span de la ejecución, normalmente la raíz:
+  `@laplace.observe(type="agent", tags=["laplace-puede-esperar"])`. No cambia el
+  esquema: las etiquetas ya existían, y así se excluyen ya las tiradas de evaluación.
+  Con la marca hay dinero: lo que costaron las llamadas por (1 − el descuento que publica
+  el proveedor). En lotes se escala todo el coste (entrada, salida y caché), así que la
+  cuenta es exacta.
+* **Sin la marca, una pregunta.** Ejecuciones sin usuario ni sesión en un proyecto que
+  sí los pone en al menos 20 ejecuciones: es un indicio de trabajo de fondo, no una
+  prueba. La tarjeta dice «hasta X» y no pone dinero en el total (`costs_money` falso).
+  Si el proyecto no pone usuario ni sesión nunca, no hay con qué comparar y se calla.
+  Y la consulta ni siquiera abre esas ejecuciones, que en un proyecto así serían todas.
+* **Sólo las llamadas que no esperan a otra:** las que empiezan antes de que acabe
+  ninguna llamada al modelo de su ejecución. Por lotes, cada salto de una cadena puede
+  tardar hasta un día. Las encadenadas se cuentan aparte, para decirlo en la ficha.
+* **Fuera:** lo que ya va por lotes u otro nivel de servicio (sólo tarifa estándar), las
+  tiradas de evaluación, y menos de 20 llamadas por paso y modelo.
+* **Sin descuento publicado no hay dinero.** El factor sale de la fuente de precios del
+  modelo (`Source.batch_multiplier`). Los modelos de LiteLLM no tienen fuente con
+  descuento, y no se supone la mitad: se dice que no lo sabemos.
+* **Sin contar dos veces** (D-117): va la última de todas. El descuento se aplica a lo
+  que queda de cada paso después de lo que reclaman las demás, prompts incluidos
+  (`_reclamado_por_todas`), en proporción.
+
+En la ficha: con la marca, el arreglo es mandar el lote, con el código de OpenAI o de
+Anthropic según la fuente del modelo; sin ella, primero marcarlo. La guía de usuario
+(`docs/usuario/diagnostico.md`) explica la marca, y su tabla pasa de cinco reglas a las
+diez que hay.
+
+**Escala.** Se lee en crudo. Las ejecuciones candidatas se eligen antes, sin FINAL ni
+ventanas, y la ventana por traza sólo recorre ésas. Con la carga de siete días (todas con
+usuario, ninguna marcada): 0,2–0,3 s y 86 MiB. El peor caso, muchas ejecuciones sin
+usuario en un proyecto que sí lo pone en otras, no se ha medido: la carga no tiene ese
+tráfico.
+
+Pruebas: `test_regla_lotes.py` en los dos almacenes (la mitad exacta, las encadenadas, las
+de a la vez, lo que ya va por lotes, las evaluaciones, pocas llamadas, sin descuento
+publicado, la pregunta sin dinero, la sesión, sin nadie con quien comparar, lo que ya
+reclama el modelo caro y la ficha igual que la tarjeta). Una de paridad sobre empates en
+`test_paridad.py`, y el caso en el catálogo, con sus garantías. Se rompió a propósito doce
+veces, en los dos almacenes y en la regla: las doce fallan. La de «con quién comparar» no
+fallaba al principio, porque la regla en Python repetía la comprobación; ahora la prueba
+mira también el almacén.

@@ -955,6 +955,7 @@ export const pt: Mensajes = {
   "aj.regla.salida_truncada": "Respostas cortadas",
   "aj.regla.json_roto": "JSON partido",
   "aj.regla.historial": "Histórico que cresce",
+  "aj.regla.lotes": "Trabalho que pode ir em lotes",
   "diag.ahorrado_one": "Você já deixou de pagar {coste} desde que corrigiu um problema.",
   "diag.ahorrado_other": "Você já deixou de pagar {coste} desde que corrigiu {n} problemas.",
   "diag.ahorrado.suelo": "pelo menos {coste}",

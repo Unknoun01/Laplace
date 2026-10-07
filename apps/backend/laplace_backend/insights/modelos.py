@@ -29,6 +29,7 @@ FindingKind = Literal[
     "salida_truncada",
     "json_roto",
     "historial",
+    "lotes",
 ]
 Difficulty = Literal["easy", "mid", "hard"]
 

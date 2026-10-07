@@ -103,15 +103,16 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
   (D-194) y el historial que crece sin límite (D-195, sólo tokens). Lo que queda, cada
   una con su decisión de diseño pendiente:
   - hechas en `fase-reglas-nuevas-2`: la prueba de catálogo de OpenAI, que destapó una
-    ficha que pedía `cache_control` (D-196), y la medida de las tres lecturas en crudo
-    con la carga arreglada (D-197);
+    ficha que pedía `cache_control` (D-196), la medida de las tres lecturas en crudo
+    con la carga arreglada (D-197), y la regla de la API de lotes (D-199): con la marca
+    `laplace-puede-esperar` hay dinero, sin ella una pregunta;
   - la memoria del historial, de 1,09 GiB a 188 MiB con un filtro previo que sí
     descarta (D-198); queda el tiempo, 2 s de un Diagnóstico de 7 días, que podría
     bajar con un precálculo en los preagregados;
   - caché semántica (prompts casi iguales): hace falta medir el parecido y decir con
     honradez que el ahorro no está garantizado;
-  - trabajo que podría ir a la Batch API: hace falta una señal de que la latencia no
-    importa, y no la tenemos;
+  - lotes, el peor caso sin medir: muchas ejecuciones sin usuario en un proyecto que sí
+    lo pone en otras (la carga no tiene ese tráfico) (D-199);
   - el historial con dinero: un tope que se pueda defender, sacado de un replay con
     evaluación (D-195);
 - **Lo que dejaron D-178 a D-182, por si alguien lo pide:**

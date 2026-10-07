@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from laplace.schema import Span
-from laplace.semconv import EVAL_TAG
+from laplace.semconv import EVAL_TAG, PUEDE_ESPERAR_TAG
 
 from ._rows import (
     COLUMNS,
@@ -48,6 +48,7 @@ from .base import (
     Bucket,
     CostGroup,
     CoverageFacts,
+    DeferrableGroup,
     GraphFacts,
     HistoryGroup,
     Latency,
@@ -610,6 +611,83 @@ ORDER BY historial DESC, paso_clave
 LIMIT :limit
 """
 
+#: Llamadas que podrían ir por la API de lotes (D-199). Una ejecución es candidata si
+#: alguien la marcó con `laplace-puede-esperar`, o si no lleva usuario ni sesión en un
+#: proyecto que sí los pone en al menos `min_persona` ejecuciones: si nadie los pone
+#: nunca, no hay con qué comparar. De sus llamadas al modelo sólo cuentan las que
+#: empiezan antes de que acabe ninguna otra: las demás esperan una respuesta, y por
+#: lotes cada salto puede tardar hasta un día. Y sólo las de tarifa estándar: las que ya
+#: van por lotes, o por otro nivel de servicio, no tienen nada que ganar aquí.
+_CON_PERSONA = f"""(
+    SELECT COUNT(*) FROM (
+        SELECT DISTINCT trace_id FROM spans
+        WHERE {RULES_WHERE} AND (user_id != '' OR session_id != '')
+        LIMIT :min_persona
+    )
+)"""
+
+DEFERRABLE_GROUPS_SQL = f"""
+WITH trazas AS (
+    SELECT
+        trace_id,
+        MAX(tags LIKE '%"{PUEDE_ESPERAR_TAG}"%')            AS declarada,
+        MAX(user_id != '' OR session_id != '')             AS persona
+    FROM spans
+    WHERE {RULES_WHERE}
+    GROUP BY trace_id
+),
+candidatas AS (
+    SELECT trace_id, declarada FROM trazas
+    WHERE declarada OR (NOT persona AND {_CON_PERSONA} >= :min_persona)
+),
+llamadas AS (
+    SELECT
+        CASE WHEN step_key != '' THEN step_key ELSE name END     AS paso_clave,
+        CASE WHEN step_label != '' THEN step_label ELSE name END AS etiqueta,
+        request_model, step_hint, step_site, trace_id, start_time, cost_total_usd,
+        cost_unknown, cost_rate_assumed,
+        trace_id IN (SELECT trace_id FROM candidatas WHERE declarada) AS declarada,
+        billing_tier IN ('', 'standard')                          AS estandar,
+        start_time < MIN(end_time) OVER (PARTITION BY trace_id)   AS independiente
+    FROM spans
+    WHERE {RULES_WHERE} AND span_type = 'llm'
+      AND trace_id IN (SELECT trace_id FROM candidatas)
+)
+SELECT
+    paso_clave                                                        AS paso,
+    request_model                                                     AS modelo,
+    MAX(etiqueta)                                                     AS nombre,
+    MAX(step_hint)                                                    AS pista,
+    MAX(step_site)                                                    AS sitio,
+    SUM(independiente AND estandar AND declarada)                     AS declaradas,
+    COUNT(DISTINCT CASE WHEN independiente AND estandar AND declarada
+                        THEN trace_id END)                            AS trazas_declaradas,
+    SUM(CASE WHEN independiente AND estandar AND declarada
+             THEN cost_total_usd ELSE 0 END)                          AS coste_declaradas,
+    SUM(CASE WHEN independiente AND estandar AND declarada
+             THEN cost_unknown ELSE 0 END)                            AS sin_tarifa_declaradas,
+    SUM(CASE WHEN independiente AND estandar AND declarada
+             THEN cost_rate_assumed ELSE 0 END)                       AS asumida_declaradas,
+    SUM(independiente AND estandar AND NOT declarada)                 AS abiertas,
+    COUNT(DISTINCT CASE WHEN independiente AND estandar AND NOT declarada
+                        THEN trace_id END)                            AS trazas_abiertas,
+    SUM(CASE WHEN independiente AND estandar AND NOT declarada
+             THEN cost_total_usd ELSE 0 END)                          AS coste_abiertas,
+    SUM(CASE WHEN independiente AND estandar AND NOT declarada
+             THEN cost_unknown ELSE 0 END)                            AS sin_tarifa_abiertas,
+    SUM(CASE WHEN independiente AND estandar AND NOT declarada
+             THEN cost_rate_assumed ELSE 0 END)                       AS asumida_abiertas,
+    SUM(NOT independiente)                                            AS encadenadas,
+    {_CON_PERSONA}                                                    AS con_persona,
+    MAX(CASE WHEN independiente AND estandar THEN trace_id END)       AS traza_ejemplo,
+    MAX(start_time)                                                   AS ultima
+FROM llamadas
+GROUP BY paso_clave, request_model
+HAVING declaradas >= :min_llamadas OR abiertas >= :min_llamadas
+ORDER BY coste_declaradas DESC, coste_abiertas DESC, paso_clave, modelo
+LIMIT :limit
+"""
+
 #: Reintentos por JSON mal formado (D-194). Una salida cortada es de la regla de arriba:
 #: aquí no entra aunque su JSON esté roto, y así lo que reclama aquélla no se cuenta dos
 #: veces.
@@ -1021,6 +1099,10 @@ class SQLiteStore:
         return HISTORY_GROUPS_SQL
 
     @property
+    def deferrable_groups_sql(self) -> str:
+        return DEFERRABLE_GROUPS_SQL
+
+    @property
     def model_usage_sql(self) -> str:
         return MODEL_USAGE_SQL
 
@@ -1179,6 +1261,16 @@ class SQLiteStore:
     ) -> list[RedoneGroup]:
         return self._rehechas(
             JSON_ROTO_SQL, project_id, window, min_redone, min_repeats, min_vueltas, limit
+        )
+
+    def deferrable_groups(
+        self, project_id: str, window: Window, *, min_llamadas: int = 20,
+        min_persona: int = 20, limit: int = 20,
+    ) -> list[DeferrableGroup]:
+        params = self._window_params(project_id, window)
+        params.update(min_llamadas=min_llamadas, min_persona=min_persona, limit=limit)
+        return disambiguate(
+            [_deferrable_group(r) for r in self._query(DEFERRABLE_GROUPS_SQL, params)]
         )
 
     def _rehechas(
@@ -1933,6 +2025,31 @@ class SQLiteStore:
 def _iso(value: datetime) -> str:
     return utc(value).isoformat()
 
+
+
+def _deferrable_group(r: Any) -> DeferrableGroup:
+    """Una fila de `DEFERRABLE_GROUPS_SQL`; los alias son los de los dos almacenes."""
+    return DeferrableGroup(
+        name=r["nombre"],
+        model=r["modelo"] or "",
+        step_key=r["paso"] or "",
+        site=r["sitio"] or "",
+        hint=r["pista"] or "",
+        declared_calls=int(r["declaradas"] or 0),
+        declared_traces=int(r["trazas_declaradas"] or 0),
+        declared_cost_usd=float(r["coste_declaradas"] or 0.0),
+        declared_unknown_cost_spans=int(r["sin_tarifa_declaradas"] or 0),
+        declared_assumed_rate_spans=int(r["asumida_declaradas"] or 0),
+        open_calls=int(r["abiertas"] or 0),
+        open_traces=int(r["trazas_abiertas"] or 0),
+        open_cost_usd=float(r["coste_abiertas"] or 0.0),
+        open_unknown_cost_spans=int(r["sin_tarifa_abiertas"] or 0),
+        open_assumed_rate_spans=int(r["asumida_abiertas"] or 0),
+        chained=int(r["encadenadas"] or 0),
+        traces_with_person=int(r["con_persona"] or 0),
+        sample_trace_id=r["traza_ejemplo"] or "",
+        last_seen=utc(r["ultima"]) if r["ultima"] else None,
+    )
 
 def _history_group(r: Any) -> HistoryGroup:
     """Una fila de `HISTORY_GROUPS_SQL`; los alias son los de los dos almacenes."""

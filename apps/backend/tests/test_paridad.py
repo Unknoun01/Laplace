@@ -568,3 +568,71 @@ def test_las_lecturas_de_las_reglas_nuevas_salen_iguales_con_empates(tmp_path):
             assert aqui == alli, nombre
     finally:
         nube.delete_project(project)
+
+
+def _lotes_empatados(project: str) -> list[Span]:
+    """Dos pasos que cuestan lo mismo, a la misma hora: ejecuciones marcadas como que
+    pueden esperar, otras sin usuario ni sesión y otras con usuario, con llamadas
+    encadenadas y a la vez. El orden y el ejemplo salen de empates (D-199)."""
+    from laplace.semconv import PUEDE_ESPERAR_TAG
+
+    spans = []
+    for paso in ("ordenar", "etiquetar"):
+        for e, (etiquetas, usuario) in enumerate(
+            [([PUEDE_ESPERAR_TAG], None)] * 3 + [([], None)] * 3 + [([], "ana")] * 2
+        ):
+            traza = f"{project}-{paso}-{e}"
+            raiz = Span(
+                span_id=uuid.uuid4().hex[:16], trace_id=traza, project_id=project,
+                name="agente", type="agent", status="ok", start_time=AHORA,
+                end_time=AHORA + timedelta(seconds=9), duration_ms=9_000.0,
+                tags=etiquetas, user_id=usuario,
+            )
+            spans.append(raiz)
+            for k, segundos in enumerate((0, 0, 2)):  # dos a la vez y una encadenada
+                inicio = AHORA + timedelta(seconds=segundos)
+                llamada = Span(
+                    span_id=uuid.uuid4().hex[:16], trace_id=traza, project_id=project,
+                    name="chat gpt-5.6-terra", type="llm", status="ok", start_time=inicio,
+                    end_time=inicio + timedelta(seconds=1), duration_ms=1_000.0,
+                    step_key=f"k-{paso}", step_label=paso, user_id=usuario,
+                    dedup_hash=f"{traza}-{k}",
+                )
+                llamada.llm = LLMAttributes(
+                    request_model="gpt-5.6-terra",
+                    usage=TokenUsage(input_tokens=1_000, output_tokens=100),
+                    cost=Cost(total_usd=0.003),
+                )
+                spans.append(llamada)
+    return spans
+
+
+def test_la_lectura_de_lotes_sale_igual_con_empates(tmp_path):
+    from dataclasses import asdict
+
+    nube = _nube()
+    project = f"paridad-{uuid.uuid4().hex[:8]}"
+    local = SQLiteStore(tmp_path / "l.db")
+    local.migrate()
+    spans = _lotes_empatados(project)
+    local.insert_spans(spans)
+    nube.insert_spans(spans)
+    try:
+        def leer(s):
+            return [
+                {k: round(v, 9) if isinstance(v, float) else v for k, v in d.items()}
+                for d in (
+                    asdict(g) | {"last_seen": None}
+                    for g in s.deferrable_groups(
+                        project, _ventana(), min_llamadas=1, min_persona=1
+                    )
+                )
+            ]
+
+        aqui, alli = leer(local), leer(nube)
+        assert len(aqui) == 2, "el tráfico sembrado tiene dos pasos"
+        assert aqui[0]["declared_calls"] == 6 and aqui[0]["open_calls"] == 6
+        assert aqui[0]["chained"] == 6, "las de usuario no son candidatas"
+        assert aqui == alli
+    finally:
+        nube.delete_project(project)

@@ -269,6 +269,35 @@ def almacen_con_los_cuatro_tipos(tmp_path):
                 )
             )
 
+    # Regla 10 — lotes (D-199): ejecuciones marcadas como que pueden esperar, con una
+    # llamada que no espera a ninguna otra.
+    from laplace.semconv import PUEDE_ESPERAR_TAG
+
+    for t in range(20):
+        raiz = _span(
+            f"lote-{t}",
+            paso="resumir_noche",
+            clave="k-raiz-lote",
+            entrada_tokens=0,
+            salida_tokens=0,
+            i=3000 + t * 20,
+            dedup=f"raiz-lote-{t}",
+            ms=2_000.0,
+        )
+        raiz.type, raiz.llm, raiz.tags = "agent", None, [PUEDE_ESPERAR_TAG]
+        spans.append(raiz)
+        spans.append(
+            _span(
+                f"lote-{t}",
+                paso="resumir_noche",
+                clave="k-resumir-noche",
+                entrada_tokens=800,
+                salida_tokens=300,
+                i=3000 + t * 20,
+                dedup=f"resumir-noche-{t}",
+            )
+        )
+
     store.insert_spans(spans)
     return store
 
@@ -565,6 +594,12 @@ GARANTIAS: dict[str, dict[str, str]] = {
         "descuento": "sólo tokens, nunca dinero; su consulta deja fuera lo que reclaman la "
         "repetición, los bucles y las rehechas, y mide lo que está por encima del primer "
         "turno, que no es el suelo del contexto fijo",
+    },
+    "lotes": {
+        "nombre": "`_nombrar` y `disambiguate` sobre (paso, modelo), como la truncada",
+        "descuento": "va la última de todas: el descuento por lotes se aplica, en "
+        "proporción, a lo que queda del paso después de lo que reclaman las demás, "
+        "prompts incluidos (`_reclamado_por_todas`); sin la marca no pone dinero",
     },
     "prompt_caro": {
         "nombre": "el nombre del prompt y sus dos versiones, que son únicos",

@@ -10,7 +10,7 @@ from typing import Any
 
 import clickhouse_connect
 from laplace.schema import Span
-from laplace.semconv import EVAL_TAG
+from laplace.semconv import EVAL_TAG, PUEDE_ESPERAR_TAG
 
 from ..config import Settings
 from . import preagregados
@@ -31,6 +31,7 @@ from .base import (
     Bucket,
     CostGroup,
     CoverageFacts,
+    DeferrableGroup,
     GraphFacts,
     HistoryGroup,
     Latency,
@@ -556,6 +557,73 @@ ORDER BY historial DESC, paso_clave
 LIMIT %(limit)s
 """
 
+#: Llamadas que podrían ir por la API de lotes: gemelo de `DEFERRABLE_GROUPS_SQL` de
+#: sqlite.py (D-199). Mismos alias. Las ejecuciones candidatas se eligen antes, sin
+#: FINAL y sin ventanas: en un proyecto que pone usuario en todas, no hay ninguna, y la
+#: ventana por traza de abajo sólo recorre las que hay.
+_CON_PERSONA = f"""(
+    SELECT count() FROM (
+        SELECT DISTINCT trace_id FROM spans
+        WHERE {RULES_WHERE} AND (user_id != '' OR session_id != '')
+        LIMIT %(min_persona)s
+    )
+)"""
+
+DEFERRABLE_GROUPS_SQL = f"""
+SELECT
+    paso_clave                                                      AS paso,
+    request_model                                                   AS modelo,
+    max(etiqueta)                                                   AS nombre,
+    max(step_hint)                                                  AS pista,
+    max(step_site)                                                  AS sitio,
+    countIf(independiente AND estandar AND declarada)               AS declaradas,
+    uniqExactIf(trace_id, independiente AND estandar AND declarada) AS trazas_declaradas,
+    sumIf(cost_total_usd, independiente AND estandar AND declarada) AS coste_declaradas,
+    sumIf(cost_unknown, independiente AND estandar AND declarada)   AS sin_tarifa_declaradas,
+    sumIf(cost_rate_assumed, independiente AND estandar AND declarada)
+                                                                    AS asumida_declaradas,
+    countIf(independiente AND estandar AND NOT declarada)           AS abiertas,
+    uniqExactIf(trace_id, independiente AND estandar AND NOT declarada)
+                                                                    AS trazas_abiertas,
+    sumIf(cost_total_usd, independiente AND estandar AND NOT declarada)
+                                                                    AS coste_abiertas,
+    sumIf(cost_unknown, independiente AND estandar AND NOT declarada)
+                                                                    AS sin_tarifa_abiertas,
+    sumIf(cost_rate_assumed, independiente AND estandar AND NOT declarada)
+                                                                    AS asumida_abiertas,
+    countIf(NOT independiente)                                      AS encadenadas,
+    {_CON_PERSONA}                                                  AS con_persona,
+    maxIf(trace_id, independiente AND estandar)                     AS traza_ejemplo,
+    max(start_time)                                                 AS ultima
+FROM (
+    SELECT
+        if(step_key != '', step_key, name)                          AS paso_clave,
+        if(step_label != '', step_label, name)                      AS etiqueta,
+        request_model, step_hint, step_site, trace_id, start_time, cost_total_usd,
+        cost_unknown, cost_rate_assumed,
+        trace_id IN (
+            SELECT trace_id FROM spans
+            WHERE {RULES_WHERE} AND has(tags, '{PUEDE_ESPERAR_TAG}')
+        )                                                           AS declarada,
+        billing_tier IN ('', 'standard')                            AS estandar,
+        start_time < min(end_time) OVER (PARTITION BY trace_id)     AS independiente
+    FROM spans FINAL
+    WHERE {RULES_WHERE} AND span_type = 'llm'
+      AND trace_id IN (
+          SELECT trace_id FROM spans
+          WHERE {RULES_WHERE}
+          GROUP BY trace_id
+          HAVING max(has(tags, '{PUEDE_ESPERAR_TAG}'))
+              OR (max(user_id != '' OR session_id != '') = 0
+                  AND {_CON_PERSONA} >= %(min_persona)s)
+      )
+)
+GROUP BY paso_clave, request_model
+HAVING declaradas >= %(min_llamadas)s OR abiertas >= %(min_llamadas)s
+ORDER BY coste_declaradas DESC, coste_abiertas DESC, paso_clave, modelo
+LIMIT %(limit)s
+"""
+
 #: Reintentos por JSON mal formado (D-194): sin las cortadas, que son de la de arriba.
 JSON_ROTO_SQL = _rehechas_sql(f"(output_json = 'roto' AND NOT {_CORTADA})")
 
@@ -1041,6 +1109,10 @@ class ClickHouseStore:
         return HISTORY_GROUPS_SQL
 
     @property
+    def deferrable_groups_sql(self) -> str:
+        return DEFERRABLE_GROUPS_SQL
+
+    @property
     def model_usage_sql(self) -> str:
         return MODEL_USAGE_SQL
 
@@ -1195,6 +1267,16 @@ class ClickHouseStore:
         )
         filas = _named(self._consulta(HISTORY_GROUPS_SQL, parameters=params))
         return disambiguate([_history_group(r) for r in filas])
+
+    def deferrable_groups(
+        self, project_id: str, window: Window, *, min_llamadas: int = 20,
+        min_persona: int = 20, limit: int = 20,
+    ) -> list[DeferrableGroup]:
+        """Gemelo del de sqlite.py (D-199), en crudo."""
+        params = self._window_params(project_id, window)
+        params.update(min_llamadas=min_llamadas, min_persona=min_persona, limit=limit)
+        filas = _named(self._consulta(DEFERRABLE_GROUPS_SQL, parameters=params))
+        return disambiguate([_deferrable_group(r) for r in filas])
 
     def sample_conversation(
         self, project_id: str, window: Window, step_key: str, conversation: str,
@@ -2023,6 +2105,31 @@ def _statements(sql: str) -> list[str]:
         line for line in sql.splitlines() if not line.strip().startswith("--")
     )
     return [s.strip() for s in cleaned.split(";") if s.strip()]
+
+
+def _deferrable_group(r: Any) -> DeferrableGroup:
+    """Una fila de `DEFERRABLE_GROUPS_SQL`; los alias son los de los dos almacenes."""
+    return DeferrableGroup(
+        name=r["nombre"],
+        model=r["modelo"] or "",
+        step_key=r["paso"] or "",
+        site=r["sitio"] or "",
+        hint=r["pista"] or "",
+        declared_calls=int(r["declaradas"] or 0),
+        declared_traces=int(r["trazas_declaradas"] or 0),
+        declared_cost_usd=float(r["coste_declaradas"] or 0.0),
+        declared_unknown_cost_spans=int(r["sin_tarifa_declaradas"] or 0),
+        declared_assumed_rate_spans=int(r["asumida_declaradas"] or 0),
+        open_calls=int(r["abiertas"] or 0),
+        open_traces=int(r["trazas_abiertas"] or 0),
+        open_cost_usd=float(r["coste_abiertas"] or 0.0),
+        open_unknown_cost_spans=int(r["sin_tarifa_abiertas"] or 0),
+        open_assumed_rate_spans=int(r["asumida_abiertas"] or 0),
+        chained=int(r["encadenadas"] or 0),
+        traces_with_person=int(r["con_persona"] or 0),
+        sample_trace_id=r["traza_ejemplo"] or "",
+        last_seen=_utc(r["ultima"]) if r["ultima"] else None,
+    )
 
 
 def _history_group(r: Any) -> HistoryGroup:

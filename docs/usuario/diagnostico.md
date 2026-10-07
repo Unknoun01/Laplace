@@ -1,17 +1,37 @@
 # Leer el Diagnóstico
 
-## Las cinco reglas
+## Las reglas
 
 | Regla | Qué busca | Cómo calcula lo que se puede ahorrar |
 |---|---|---|
 | Repetición | El mismo paso, con la misma entrada, 3 veces o más en una ejecución | Lo que costaron las copias de sobra |
 | Bucle | El mismo paso una y otra vez sin que su resultado avance | Lo que costaron las vueltas que no aportaron |
+| Salida truncada | Una respuesta cortada por el tope de salida que el mismo paso vuelve a pedir | Lo que costó la respuesta cortada |
+| JSON roto | Una respuesta con el JSON mal formado que el mismo paso vuelve a pedir | Lo que costó la respuesta que no se pudo leer |
+| Historial que crece | La entrada de un paso que crece en cada turno de una conversación y no se recorta | Sólo tokens: no hay un tope que se pueda defender desde las trazas |
 | Modelo caro | Un paso de respuesta corta con un modelo que tiene alternativa más barata | La diferencia de tarifa sobre los tokens reales |
-| Contexto fijo | Un prompt con un prefijo grande que se reenvía sin caché | La diferencia entre tarifa normal y de caché, menos lo que cuesta escribirla |
+| Contexto fijo | Un prompt con un prefijo grande que se reenvía sin caché, o cuya lectura de caché pesa en la factura | La diferencia entre tarifa normal y de caché, menos lo que cuesta escribirla; o lo que cuesta leerla |
+| Caché compartida | El mismo prefijo en varios pasos de una ejecución, sin compartir la caché | Las lecturas que la caché podría servir, menos una escritura por ejecución |
 | Prompt más caro | La versión de un prompt gestionado que cuesta más por ejecución que la anterior | La diferencia por ejecución, sobre el tráfico de la versión nueva |
+| Por lotes | Llamadas que no esperan a ninguna otra, en ejecuciones que pueden esperar | Lo que costaron, por el descuento por lotes que publica el proveedor (la mitad en OpenAI y Anthropic) |
 
 Dos reglas nunca reclaman el mismo dinero: lo que ya cuenta una, las demás lo
 descuentan. El total de arriba es la suma, y se puede sumar.
+
+### Marcar lo que puede esperar
+
+Desde las trazas no se puede saber si alguien espera una respuesta. Si una ejecución
+puede tardar horas —un proceso nocturno, una clasificación en masa—, márcala en su
+función raíz y la regla de lotes te dirá cuánto ahorrarías:
+
+```python
+@laplace.observe(type="agent", tags=["laplace-puede-esperar"])
+def proceso_de_fondo(...):
+    ...
+```
+
+Sin la marca, la regla sólo pregunta, y sin poner dinero en el total: lo hace con las
+ejecuciones que no llevan usuario ni sesión cuando el resto del proyecto sí los lleva.
 
 ## Qué quiere decir cada cifra
 

@@ -962,6 +962,7 @@ export const es = {
   "aj.regla.salida_truncada": "Respuestas cortadas",
   "aj.regla.json_roto": "JSON roto",
   "aj.regla.historial": "Historial que crece",
+  "aj.regla.lotes": "Trabajo que puede ir por lotes",
   "diag.ahorrado_one": "Ya has dejado de pagar {coste} desde que arreglaste un problema.",
   "diag.ahorrado_other": "Ya has dejado de pagar {coste} desde que arreglaste {n} problemas.",
   "diag.ahorrado.suelo": "al menos {coste}",
