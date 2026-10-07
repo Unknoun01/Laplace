@@ -410,12 +410,72 @@ LIMIT %(limit)s
 TRUNCATED_GROUPS_SQL = _rehechas_sql(_CORTADA)
 
 #: Historial que crece sin límite: gemelo de `HISTORY_GROUPS_SQL` de sqlite.py (D-195).
-#: Mismos alias. Primero, sin FINAL, las parejas (conversación, paso) con turnos y
-#: crecimiento de sobra; las ventanas de abajo sólo recorren ésas.
+#: Mismos alias.
 _CONVERSACION = (
     "if(session_id != '', concat('s:', session_id), concat('t:', trace_id))"
 )
 _PASO = "if(step_key != '', step_key, name)"
+_LLAMADA_CON_ENTRADA = f"{RULES_WHERE} AND span_type = 'llm' AND input_tokens > 0"
+
+
+def _pares_por_exceso(columna: str, minimo: str) -> str:
+    """Pares (traza, hash) con `minimo` filas o más, sin FINAL: cuenta de más las filas de
+    un span reenviado y aún sin fusionar, nunca de menos (D-198)."""
+    return f"""(
+        SELECT sipHash64(trace_id, {columna}) FROM spans
+        WHERE {_LLAMADA_CON_ENTRADA} AND {columna} != ''
+        GROUP BY sipHash64(trace_id, {columna})
+        HAVING count() >= %({minimo})s
+    )"""
+
+
+def _pares_excluidos(columna: str, minimo: str) -> str:
+    """Los pares (traza, hash) que la regla excluye: `minimo` spans distintos o más en
+    **toda** la traza, como en SQLite, aunque las copias sean de otro paso (`dedup_hash`
+    no lleva el paso). El recuento exacto sólo se hace sobre los que llegan por exceso."""
+    return f"""(
+        SELECT trace_id, {columna} FROM spans
+        WHERE {_LLAMADA_CON_ENTRADA} AND {columna} != ''
+          AND sipHash64(trace_id, {columna}) IN {_pares_por_exceso(columna, minimo)}
+        GROUP BY trace_id, {columna}
+        HAVING uniqExact(span_id) >= %({minimo})s
+    )"""
+
+
+#: Las conversaciones que **pueden** contar, sin FINAL y sin ventanas (D-198). Antes el
+#: filtro sólo pedía turnos y crecimiento, y con entradas que varían de una llamada a
+#: otra lo pasaban casi todas: con siete días de carga, 112.641 de 112.644, y las
+#: ventanas de abajo pedían 1 GiB. Ahora pide además lo que deja una secuencia que no
+#: baja entre las llamadas que la regla cuenta: que la primera sea la menor y la última
+#: la mayor. Las tres condiciones son cotas que nunca dejan fuera una conversación que
+#: la consulta contaría:
+#:
+#: * los turnos y el rango se miden sobre todas las filas, que son más que las que
+#:   cuentan; y el rango se compara con el mínimo de turnos, no con las filas (contar las
+#:   excluidas dejaba fuera a quien crecía justo lo pedido);
+#: * la primera y la última, sobre las filas que cuentan, quitando de más las copias y
+#:   las vueltas (`_pares_por_exceso`): quitar llamadas de una secuencia que no baja deja
+#:   otra que no baja. Un span reenviado lleva los mismos tokens, así que sus filas
+#:   repetidas no cambian nada.
+HISTORY_CANDIDATES_SQL = f"""
+    SELECT h FROM (
+        SELECT
+            sipHash64({_CONVERSACION}, {_PASO}) AS h,
+            input_tokens, start_time, span_id,
+            output_json != 'roto' AND NOT {_CORTADA}
+                AND (dedup_hash = '' OR sipHash64(trace_id, dedup_hash)
+                     NOT IN {_pares_por_exceso('dedup_hash', 'min_repeats')})
+                AND (loop_hash = '' OR sipHash64(trace_id, loop_hash)
+                     NOT IN {_pares_por_exceso('loop_hash', 'min_vueltas')}) AS cuenta
+        FROM spans
+        WHERE {_LLAMADA_CON_ENTRADA}
+    )
+    GROUP BY h
+    HAVING count() >= %(min_turnos)s
+       AND max(input_tokens) - min(input_tokens) >= %(min_crece)s * (%(min_turnos)s - 1)
+       AND argMinIf(input_tokens, (start_time, span_id), cuenta) = minIf(input_tokens, cuenta)
+       AND argMaxIf(input_tokens, (start_time, span_id), cuenta) = maxIf(input_tokens, cuenta)
+"""
 
 HISTORY_GROUPS_SQL = f"""
 SELECT
@@ -466,27 +526,19 @@ FROM (
                 FROM (
                     SELECT
                         trace_id, span_id, start_time, input_tokens, request_model,
-                        dedup_hash, loop_hash, output_json, step_hint, step_site,
+                        step_hint, step_site,
                         {_CONVERSACION}                       AS conversacion,
                         {_PASO}                               AS paso_clave,
-                        if(step_label != '', step_label, name) AS etiqueta,
-                        {_CORTADA}                            AS cortada,
-                        count() OVER (PARTITION BY trace_id, dedup_hash) AS copias,
-                        count() OVER (PARTITION BY trace_id, loop_hash)  AS vueltas
+                        if(step_label != '', step_label, name) AS etiqueta
                     FROM spans FINAL
-                    WHERE {RULES_WHERE} AND span_type = 'llm' AND input_tokens > 0
-                      AND sipHash64({_CONVERSACION}, {_PASO}) IN (
-                          SELECT sipHash64({_CONVERSACION}, {_PASO}) FROM spans
-                          WHERE {RULES_WHERE} AND span_type = 'llm' AND input_tokens > 0
-                          GROUP BY sipHash64({_CONVERSACION}, {_PASO})
-                          HAVING count() >= %(min_turnos)s
-                             AND max(input_tokens) - min(input_tokens)
-                                 >= %(min_crece)s * (count() - 1)
-                      )
+                    WHERE {_LLAMADA_CON_ENTRADA}
+                      AND output_json != 'roto' AND NOT {_CORTADA}
+                      AND sipHash64({_CONVERSACION}, {_PASO}) IN ({HISTORY_CANDIDATES_SQL})
+                      AND (dedup_hash = '' OR (trace_id, dedup_hash)
+                           NOT IN {_pares_excluidos('dedup_hash', 'min_repeats')})
+                      AND (loop_hash = '' OR (trace_id, loop_hash)
+                           NOT IN {_pares_excluidos('loop_hash', 'min_vueltas')})
                 )
-                WHERE (dedup_hash = '' OR copias < %(min_repeats)s)
-                  AND (loop_hash = '' OR vueltas < %(min_vueltas)s)
-                  AND output_json != 'roto' AND NOT cortada
                 WINDOW w AS (
                     PARTITION BY conversacion, paso_clave ORDER BY start_time, span_id
                     ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW

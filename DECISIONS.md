@@ -4700,3 +4700,61 @@ Pruebas: `test_carga.py`, en una base de ClickHouse propia, genera 40.000 spans 
 que salgan las tres reglas en el proyecto grande y que sus horas queden calculadas. Se
 rompió a propósito tres veces: con las trazas impares, con las sesiones que mezclan
 proyectos y sin calcular los preagregados. Las tres fallan.
+
+### D-198 — El historial sólo abre las conversaciones que pueden contar
+D-197 midió que la lectura del historial pedía **1,09 GiB** con siete días de 500.000
+spans al día. Su filtro previo sólo exigía turnos y crecimiento, y con entradas que varían
+de una llamada a otra lo pasaban casi todas: 112.641 de 112.644 conversaciones. Sobre
+todas ellas se abrían después `FINAL` y las ventanas. Al arreglarlo salieron dos
+diferencias de paridad con SQLite, que no tiene filtro previo:
+
+* **La cota del crecimiento contaba filas que la regla no cuenta.** Pedía crecer 200
+  tokens por cada fila menos una, incluidas una respuesta cortada o un JSON roto. Una
+  conversación que crecía justo lo pedido y traía un reintento se quedaba fuera en
+  ClickHouse y salía en SQLite.
+* **Las copias se contaban sólo entre las conversaciones que pasaban el filtro.**
+  `dedup_hash` no lleva el paso, así que una llamada puede repetirse desde otro paso de
+  la misma traza. SQLite la cuenta en toda la traza; ClickHouse, sólo si el otro paso
+  también pasaba el filtro. Con un filtro que no descartaba nada no se notaba, y con uno
+  que funciona sí.
+
+Ahora:
+
+* **Filtro previo** (`HISTORY_CANDIDATES_SQL`, sin FINAL ni ventanas). Además de los
+  turnos, pide lo que deja una secuencia que no baja: que, entre las llamadas que cuentan,
+  la primera sea la menor y la última la mayor (`argMinIf` y `argMaxIf`). Las tres
+  condiciones son cotas que nunca dejan fuera una conversación que la consulta contaría:
+  - los turnos y el rango se miden sobre todas las filas, y el rango se compara con el
+    mínimo de turnos, no con el número de filas;
+  - la primera y la última se miran quitando de más las copias y las vueltas, con un
+    recuento por filas sin FINAL: quitar llamadas de una secuencia que no baja deja otra
+    que no baja.
+
+  Se descartó comprobar la secuencia entera con arrays: es exacta, pero ordenar un array
+  por conversación costaba 1,4 s, frente a 0,6 s.
+* **Exclusiones exactas**: los pares (traza, hash) con tres copias o cuatro vueltas se
+  calculan aparte, en toda la traza y contando spans distintos (`uniqExact(span_id)`, así
+  que un lote reenviado sin fusionar no duplica las copias). El recuento exacto sólo se
+  hace sobre los pares que llegan contando filas. Sustituyen a las dos ventanas por
+  traza.
+
+**Medido** con la misma carga de siete días:
+
+| | Antes | Ahora |
+|---|---|---|
+| memoria del historial | 1,09 GiB | 188 MiB |
+| tiempo del historial | 2,84 s | 2,00 s |
+| Diagnóstico de 7 días | 8,5–9,4 s | 6,2–7,3 s |
+
+Lee más filas que antes (unas ocho pasadas por la ventana, frente a dos), pero todas son
+agregaciones estrechas. El tiempo que queda es de esas pasadas, y es lo que podría quitar
+un precálculo en los preagregados.
+
+Pruebas, en los dos almacenes (`test_regla_historial.py`): el reintento que dejaba fuera a
+quien crecía justo lo pedido, las copias desde otro paso, una respuesta cortada al final
+con menos entrada, y un lote reenviado sin fusionar (con las fusiones paradas en la base
+de prueba). Y en `test_carga.py`, que el filtro deje fuera más del 80 % de las
+conversaciones de la carga sin dejar fuera ninguna que cuente. Se rompió a propósito cinco
+veces: el filtro de antes, el rango contra las filas, la primera y la última sin quitar lo
+que no cuenta, las copias sólo entre las candidatas y el recuento por filas. Las cinco
+fallan.

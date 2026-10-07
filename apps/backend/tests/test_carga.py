@@ -35,7 +35,7 @@ def _carga():
     return modulo
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def almacen():
     """Un ClickHouse en una base propia: la carga escribe en sus proyectos fijos."""
     general = clickhouse.ClickHouseStore(Settings())
@@ -51,12 +51,21 @@ def almacen():
         general._client.command(f"DROP DATABASE IF EXISTS {base} SYNC")
 
 
-def test_la_carga_da_a_cada_regla_nueva_algo_que_encontrar_y_calcula_sus_horas(almacen):
+@pytest.fixture(scope="module")
+def cargado(almacen):
     carga = _carga()
     carga.generar(almacen, 40_000, 40_000)
+    return almacen, carga
 
+
+def _ventana() -> Window:
     ahora = datetime.now(timezone.utc)
-    ventana = Window(since=ahora - timedelta(days=1), until=ahora, days=1)
+    return Window(since=ahora - timedelta(days=1), until=ahora, days=1)
+
+
+def test_la_carga_da_a_cada_regla_nueva_algo_que_encontrar_y_calcula_sus_horas(cargado):
+    almacen, carga = cargado
+    ventana = _ventana()
     tipos = {f.kind for f in insights.detect(almacen, carga.GRANDE, ventana)}
     assert {"salida_truncada", "json_roto", "historial"} <= tipos, tipos
 
@@ -65,3 +74,37 @@ def test_la_carga_da_a_cada_regla_nueva_algo_que_encontrar_y_calcula_sus_horas(a
         parameters={"p": carga.GRANDE},
     ).result_rows[0][0]
     assert horas >= 24, "las horas del proyecto grande tienen que quedar calculadas"
+
+
+def test_el_historial_solo_abre_las_conversaciones_que_pueden_contar(cargado):
+    """Con siete días de carga el filtro previo del historial dejaba pasar 112.641 de
+    112.644 conversaciones, y las ventanas de detrás pedían 1 GiB (D-198). En la carga
+    las entradas varían al azar y sólo crecen las conversaciones elegidas: el filtro
+    tiene que dejar fuera casi todas las demás."""
+    from laplace_backend.insights import historial
+    from laplace_backend.insights.modelos import MIN_REPEATS, MIN_VUELTAS_BUCLE
+    from laplace_backend.storage.clickhouse import HISTORY_CANDIDATES_SQL
+
+    almacen, carga = cargado
+    params = almacen._window_params(carga.GRANDE, _ventana())
+    params.update(
+        min_turnos=historial.MIN_TURNOS_HISTORIAL,
+        min_crece=historial.MIN_CRECIMIENTO_POR_TURNO,
+        min_repeats=MIN_REPEATS,
+        min_vueltas=MIN_VUELTAS_BUCLE,
+    )
+    (candidatas,) = almacen._consulta(
+        f"SELECT count() FROM ({HISTORY_CANDIDATES_SQL})", parameters=params
+    ).result_rows[0]
+    (todas,) = almacen._client.query(
+        "SELECT uniqExact(session_id, step_key) FROM spans "
+        "WHERE project_id = %(p)s AND span_type = 'llm'",
+        parameters={"p": carga.GRANDE},
+    ).result_rows[0]
+    contadas = sum(
+        g.conversations
+        for g in almacen.history_groups(carga.GRANDE, _ventana())
+    )
+    assert contadas > 0, "la carga tiene conversaciones que crecen"
+    assert contadas <= candidatas, "el filtro no puede dejar fuera ninguna que cuente"
+    assert candidatas < todas * 0.2, (candidatas, todas)
