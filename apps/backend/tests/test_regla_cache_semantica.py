@@ -226,3 +226,23 @@ def test_la_ficha_cuenta_lo_mismo_que_la_tarjeta(store):
     codigo = " ".join(p.code or "" for p in ficha.fix_steps)
     assert "laplace replay" in codigo, "lo primero es validarlo"
     assert MODELO in codigo
+
+
+def test_otra_respuesta_en_medio_no_cambia_cual_fue_la_primera(store):
+    """«a», «b», «a»: la primera ejecución dijo «a», así que una repetida dio la misma
+    respuesta. Mirar la última ejecución de cada respuesta en vez de la primera hacía
+    que «b» pareciera la primera, y salían cero (D-200)."""
+    store.insert_spans(_ejecuciones("medio", ["a", "b", "a"]))
+    (g,) = store.cacheable_groups("medio", VENTANA, min_mismas=0)
+    assert (g.repeated, g.same_answer) == (2, 1)
+
+
+def test_la_traza_de_ejemplo_es_de_una_pregunta_que_repitio_respuesta(store):
+    """La ficha enseña una ejecución donde la caché habría servido, no una donde la
+    respuesta cambió, aunque esa otra tenga un identificador mayor."""
+    store.insert_spans(
+        _ejecuciones("ejemplo", ["a", "a"], pregunta="q-1")
+        + _ejecuciones("ejemplo", ["b", "c"], pregunta="q-2", desde=50)
+    )
+    (g,) = store.cacheable_groups("ejemplo", VENTANA, min_mismas=1)
+    assert g.sample_trace_id in {f"ejemplo-clasificar-{MODELO}-{e}" for e in (0, 1)}

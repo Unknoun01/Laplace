@@ -4865,7 +4865,11 @@ Pruebas: `test_regla_cache_semantica.py` en los dos almacenes (la misma respuest
 dinero, la cuenta contra la primera con su porcentaje, la primera que marca la
 respuesta, las repeticiones dentro de una ejecución, dos preguntas en un paso, otro
 modelo, las evaluaciones, los errores, pocas, sin muestra no hay porcentaje, lo que ya
-reclama el modelo caro y la ficha igual que la tarjeta). Una de paridad sobre empates en
-`test_paridad.py`, con su mitad local, y el caso en el catálogo con sus garantías. Se
-rompió a propósito catorce veces en SQLite, la regla y el motor: las catorce fallan. Las
-pruebas y las mutaciones de ClickHouse quedan por correr: estaba ocupada con la suite.
+reclama el modelo caro, la ficha igual que la tarjeta, otra respuesta en medio de dos
+iguales y la traza de ejemplo). Una de paridad sobre empates en `test_paridad.py`, con su
+mitad local, y el caso en el catálogo con sus garantías. Se rompió a propósito catorce
+veces en SQLite, la regla y el motor, y ocho en la consulta de ClickHouse. Fallan todas.
+Dos de ClickHouse no fallaban al principio: tomar la última ejecución de cada respuesta
+en lugar de la primera, y elegir la traza de ejemplo sin exigir que repitiera respuesta.
+Ninguna prueba ponía otra respuesta entre dos iguales, ni dos preguntas con trazas de
+distinto orden; ahora las dos lo hacen.
