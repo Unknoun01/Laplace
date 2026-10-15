@@ -199,8 +199,18 @@ El 5 de octubre, la fase de reglas nuevas del Diagnóstico (`fase-reglas-diagnos
 - y una prueba que exige que la web declare todos los tipos de hallazgo y deje silenciar
   sus alertas.
 
-Quedan, cada una con su decisión de diseño pendiente, la caché semántica y la Batch API
-(hoja de ruta, §3).
+Del 5 al 15 de octubre, la segunda parte (`fase-reglas-nuevas-2`):
+- la ficha del contexto fijo ya no le pide `cache_control` a OpenAI, que cachea sola, ni
+  propone cachear lo que ya se cachea (D-196);
+- la carga mide lo que habrá: casos para las reglas nuevas y preagregados calculados
+  (D-197); con ella salió que el historial pedía 1,09 GiB en siete días;
+- el historial sólo abre las conversaciones que pueden contar: 188 MiB, y dos
+  diferencias de paridad con SQLite arregladas de paso (D-198);
+- la regla de la API de lotes: con la marca `laplace-puede-esperar` hay dinero, sin ella
+  una pregunta sin dinero (D-199).
+
+Queda la caché semántica, diseñada y sin código, y el historial con dinero, que pide un
+replay con evaluación (hoja de ruta, §3).
 
 Del 1 al 2 de octubre entró el resto de la lista «siguiente»:
 - la caché compartida entre pasos (D-178);
@@ -412,11 +422,20 @@ que había que conseguir antes de enseñarlo.
 
 ## Qué hay que vigilar
 
-**Las tres lecturas de las reglas nuevas van en crudo** (D-193 a D-195), también en
-ClickHouse con preagregados: empiezan por las trazas con algún corte o JSON roto, o por
-las conversaciones con turnos de sobra, pero no se han medido con la carga grande. Si el
-Diagnóstico de siete días se pone lento, mirarlas antes que nada. Y `output_json` sólo lo
-lleva el tráfico ingerido desde D-194: lo de antes no sale en la regla del JSON.
+**Las lecturas de las reglas nuevas van en crudo** (D-193 a D-195 y D-199), también en
+ClickHouse con preagregados. Medidas con 500.000 spans al día (D-197, D-198), el
+historial es la más cara: 2 s de un Diagnóstico de siete días de 6–7 s. Si hay que
+bajarlo, el camino es precalcularlo en los preagregados. Y `output_json` sólo lo lleva
+el tráfico ingerido desde D-194: lo de antes no sale en la regla del JSON.
+
+**La carga se mide con sus casos.** Una lectura sin nada que encontrar sale más rápida de
+lo que será (D-197): una regla nueva tiene que sembrar lo suyo en `scripts/carga.py`, y
+`test_carga.py` lo exige para las tres de D-193 a D-195.
+
+**Lotes sólo pone dinero con la marca** (D-199). Sin ella, la tarjeta es una pregunta
+sin dinero, y así tiene que seguir: que nadie espere una respuesta no se ve en las
+trazas. Su peor caso, muchas ejecuciones sin usuario en un proyecto que sí lo pone, no
+se ha medido.
 
 **El historial no lleva dinero, y no hay que ponérselo a mano.** Cualquier tope sacado de
 las trazas sería inventado; el camino es un replay con evaluación (D-195). La tentación

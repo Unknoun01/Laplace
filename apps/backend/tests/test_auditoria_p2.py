@@ -23,7 +23,7 @@ from types import SimpleNamespace
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
-from test_auth import _cab, _span, cerrado  # noqa: E402,F401
+from test_auth import AHORA, _cab, _span, cerrado  # noqa: E402,F401
 from test_cuentas import (  # noqa: E402,F401
     CONTRASENA,
     H,
@@ -133,11 +133,7 @@ def test_modelos_sin_tarifa_en_una_consulta(tmp_path):
         s.llm.request_model = modelo
         s.llm.cost.unknown = True
         store.insert_spans([s])
-    ventana = Window(
-        since=datetime(2026, 9, 1, tzinfo=timezone.utc),
-        until=datetime(2026, 10, 1, tzinfo=timezone.utc),
-        days=30,
-    )
+    ventana = Window(since=AHORA - timedelta(days=15), until=AHORA + timedelta(days=15), days=30)
     assert store.unpriced_models(["a"], ventana) == ["modelo-raro"]
     assert store.unpriced_models(None, ventana) == ["modelo-raro", "otro-raro"]
     assert store.unpriced_models([], ventana) == []

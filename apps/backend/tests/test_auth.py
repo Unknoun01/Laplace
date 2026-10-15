@@ -28,7 +28,9 @@ from laplace_backend.config import Settings
 from laplace_backend.storage.metadata import SQLiteMetadataStore, new_id
 from laplace_backend.storage.sqlite import SQLiteStore
 
-AHORA = datetime(2026, 9, 12, 12, 0, tzinfo=timezone.utc)
+# Relativa a hoy: la lista de trazas mira 30 días atrás (`VENTANA_LISTA_DIAS`), y con una
+# fecha fija estas pruebas caducaron solas el 12 de octubre.
+AHORA = datetime.now(timezone.utc) - timedelta(hours=1)
 
 
 def _span(project: str, trace: str) -> Span:
