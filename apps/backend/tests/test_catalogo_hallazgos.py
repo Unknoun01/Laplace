@@ -298,6 +298,29 @@ def almacen_con_los_cuatro_tipos(tmp_path):
             )
         )
 
+    # Regla 11 — caché semántica (D-200): la misma pregunta, salvo el número, en
+    # ejecuciones distintas, y la misma respuesta.
+    salida_aviso = [{"role": "assistant", "content": "Store closed for holidays."}]
+    for t in range(6):
+        entrada = [{"role": "user", "content": f"Traduce el aviso {t}: tienda cerrada."}]
+        spans.append(
+            _span(
+                f"aviso-{t}",
+                paso="traducir_aviso",
+                clave="k-traducir-aviso",
+                entrada_tokens=60,
+                salida_tokens=8,
+                i=4000 + t * 20,
+                dedup=f"aviso-{t}",
+                entrada_msgs=entrada,
+                salida_msgs=salida_aviso,
+                bucle=(
+                    loop_hash("llm", "chat", entrada),
+                    loop_hash("llm", "chat", salida_aviso, ignorar_numeros=False),
+                ),
+            )
+        )
+
     store.insert_spans(spans)
     return store
 
@@ -600,6 +623,13 @@ GARANTIAS: dict[str, dict[str, str]] = {
         "descuento": "va la última de todas: el descuento por lotes se aplica, en "
         "proporción, a lo que queda del paso después de lo que reclaman las demás, "
         "prompts incluidos (`_reclamado_por_todas`); sin la marca no pone dinero",
+    },
+    "cache_semantica": {
+        "nombre": "`_nombrar` y `disambiguate` sobre (paso, modelo), como lotes",
+        "descuento": "nunca pone dinero en el total (`costs_money` falso); su «hasta» va "
+        "detrás de lotes y es, en proporción, lo que queda del paso después de lo que "
+        "reclaman todas (`_reclamado_por_todas`); deja fuera las repeticiones dentro de "
+        "una ejecución, que son de la repetición y los bucles",
     },
     "prompt_caro": {
         "nombre": "el nombre del prompt y sus dos versiones, que son únicos",

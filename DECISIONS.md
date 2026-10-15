@@ -4808,3 +4808,64 @@ reclama el modelo caro y la ficha igual que la tarjeta). Una de paridad sobre em
 veces, en los dos almacenes y en la regla: las doce fallan. La de «con quién comparar» no
 fallaba al principio, porque la regla en Python repetía la comprobación; ahora la prueba
 mira también el almacén.
+
+### D-200 — Caché semántica: la misma pregunta con la misma respuesta, «hasta X» y sin dinero en el total
+Un paso que recibe la misma pregunta en ejecuciones distintas y responde lo mismo podría
+servirse desde una caché de respuestas, sin pagar al modelo. La hoja de ruta lo dejó
+pendiente porque había que medir el parecido y decir con honradez que el ahorro no está
+garantizado. La regla (`insights/cache_semantica.py`, tipo `cache_semantica`) no añade
+columnas: usa lo que la ingesta ya guarda.
+
+* **La señal.** Dos llamadas `llm` del mismo paso (`step_key`, o el nombre) y modelo, en
+  **ejecuciones distintas**, con el mismo `loop_hash` (la entrada sin los números, D-109),
+  son la misma pregunta. Si además tienen el mismo `loop_out_hash` (la salida exacta,
+  números incluidos), la respuesta también fue la misma: es la prueba medible de que una
+  caché la habría servido.
+* **Lo que se cuenta**, por (paso, modelo): de cada ejecución, sólo su primera llamada con
+  esa pregunta; de cada pregunta, todas las ejecuciones menos la primera (`repetidas`), y
+  de ésas, las que dieron la misma salida que la primera (`mismas`). «La primera» se
+  decide con desempates escritos: (inicio, span) dentro de la ejecución y (inicio, traza,
+  span) entre ellas. Si la primera respondió otra cosa, no hay prueba aunque las demás
+  coincidan entre sí: no se cuenta.
+* **Porcentaje sólo con muestra.** «El 64 %, entre el 35 % y el 85 %», con el intervalo de
+  Wilson de las evaluaciones, sólo con al menos `MIN_CASES_FOR_RATE` (10) repetidas. Con
+  menos se dice la cuenta y cuántas harían falta.
+* **Honradez.** No pone dinero en el total (`window_waste_usd = 0`, `costs_money` falso),
+  como la pregunta sin marca de lotes (D-199). La tarjeta dice «una caché se habría
+  ahorrado hasta X, pero no sabemos si esas respuestas valen para todos», y
+  `cost_unavailable` explica por qué no entra. La ficha pide primero validarlo con
+  `laplace replay` al mismo modelo y el juez, y después poner la caché con la entrada
+  exacta como clave: aquí se agrupa sin los números, pero un número puede cambiar la
+  respuesta.
+* **Sin contar dos veces** (D-117). No reclama nada, así que no descuenta a nadie. Su
+  «hasta» va detrás de lotes y es el coste de las llamadas con la misma respuesta por la
+  parte del paso que no reclaman ya las demás reglas, prompts y lotes incluidos
+  (`_reclamado_por_todas`), en proporción, igual que lotes. Si las demás reclaman el paso
+  entero, se calla.
+* **Fuera:** las repeticiones dentro de una ejecución (son de la repetición y los
+  bucles), las tiradas de evaluación (`RULES_WHERE`), las llamadas con error (no hay
+  respuesta que cachear) y los grupos con menos de **5** llamadas con la misma respuesta:
+  el mismo mínimo que la salida truncada y el JSON roto, cinco veces lo mismo en la
+  ventana es un patrón del agente, no alguien que preguntó dos veces.
+* **Lo parecido pero no idéntico** (simhash, embeddings) queda fuera de esta versión:
+  pediría guardar una huella nueva en la ingesta y un umbral de parecido que habría que
+  defender con evaluaciones. Hoy sólo se afirma lo que es idéntico.
+
+**Escala.** Las dos consultas eligen antes las preguntas que salen en más de una
+ejecución, sin ventanas ni FINAL y con un estado mínimo (`min(trace_id) != max(trace_id)`
+en lugar de contar trazas distintas): con tráfico real casi ninguna pregunta se repite, y
+sólo ésas se ordenan. SQLite usa después ventanas sobre ese resto; ClickHouse no usa
+ventanas: la primera de cada ejecución y la primera de cada pregunta salen de `argMin`
+con la tupla de desempate, y «la misma respuesta que la primera» se cuenta agrupando
+también por la salida y quedándose con el grupo que contiene a la primera. El coste se
+calcula en los dos igual: el de todas las de la misma respuesta menos el de la primera.
+Sin medir con la carga: la nube estaba ocupada con la suite.
+
+Pruebas: `test_regla_cache_semantica.py` en los dos almacenes (la misma respuesta sin
+dinero, la cuenta contra la primera con su porcentaje, la primera que marca la
+respuesta, las repeticiones dentro de una ejecución, dos preguntas en un paso, otro
+modelo, las evaluaciones, los errores, pocas, sin muestra no hay porcentaje, lo que ya
+reclama el modelo caro y la ficha igual que la tarjeta). Una de paridad sobre empates en
+`test_paridad.py`, con su mitad local, y el caso en el catálogo con sus garantías. Se
+rompió a propósito catorce veces en SQLite, la regla y el motor: las catorce fallan. Las
+pruebas y las mutaciones de ClickHouse quedan por correr: estaba ocupada con la suite.

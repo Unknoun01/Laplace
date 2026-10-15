@@ -29,6 +29,7 @@ from .base import (
     _MOTIVOS_SQL,
     MARGEN_FILTROS,
     Bucket,
+    CacheableGroup,
     CostGroup,
     CoverageFacts,
     DeferrableGroup,
@@ -624,6 +625,104 @@ ORDER BY coste_declaradas DESC, coste_abiertas DESC, paso_clave, modelo
 LIMIT %(limit)s
 """
 
+#: La misma pregunta a un paso en ejecuciones distintas: gemelo de `CACHEABLE_GROUPS_SQL`
+#: de sqlite.py (D-200). Mismos alias. Las preguntas que salen en más de una ejecución
+#: se eligen antes, sin FINAL y con un estado mínimo (`min` y `max` de la traza, no un
+#: `uniqExact`): con tráfico real casi ninguna se repite. Sin ventanas: la primera
+#: llamada de cada ejecución y la primera ejecución de cada pregunta salen de `argMin`
+#: con el desempate escrito en la tupla, (inicio, span) y (inicio, traza, span), que es
+#: el orden de SQLite. «La misma respuesta que la primera» se cuenta agrupando también
+#: por la salida y quedándose con el grupo que contiene a la primera.
+_LLAMADA_CACHEABLE = (
+    "span_type = 'llm' AND status != 'error' AND loop_hash != '' AND loop_out_hash != ''"
+)
+
+CACHEABLE_GROUPS_SQL = f"""
+SELECT
+    paso_clave                                                    AS paso,
+    request_model                                                 AS modelo,
+    max(etiqueta_p)                                               AS nombre,
+    max(pista_p)                                                  AS pista,
+    max(sitio_p)                                                  AS sitio,
+    count()                                                       AS preguntas,
+    sum(repetidas_p)                                              AS repetidas,
+    sum(mismas_p)                                                 AS mismas,
+    sum(coste_p)                                                  AS coste_mismas,
+    sum(sin_tarifa_p)                                             AS sin_tarifa_mismas,
+    sum(asumida_p)                                                AS asumida_mismas,
+    maxIf(traza_p, mismas_p > 0)                                  AS traza_ejemplo,
+    max(ultima_p)                                                 AS ultima
+FROM (
+    -- Por pregunta: el grupo de salida que contiene a la primera ejecución.
+    SELECT
+        paso_clave, request_model, loop_hash,
+        max(etiqueta_s)                                           AS etiqueta_p,
+        max(pista_s)                                              AS pista_p,
+        max(sitio_s)                                              AS sitio_p,
+        max(ultima_s)                                             AS ultima_p,
+        sum(n_s) - 1                                              AS repetidas_p,
+        -- `clave_s` ya no empata (lleva traza y span); la salida va detrás igualmente.
+        argMin(n_s, (clave_s, salida_t)) - 1                      AS mismas_p,
+        argMin(coste_s - coste_primera_s, (clave_s, salida_t))    AS coste_p,
+        argMin(toInt64(sin_tarifa_s) - toInt64(sin_tarifa_primera_s), (clave_s, salida_t))
+                                                                  AS sin_tarifa_p,
+        argMin(toInt64(asumida_s) - toInt64(asumida_primera_s), (clave_s, salida_t))
+                                                                  AS asumida_p,
+        argMin(traza_s, (clave_s, salida_t))                      AS traza_p
+    FROM (
+        -- Por pregunta y salida.
+        SELECT
+            paso_clave, request_model, loop_hash, salida_t,
+            count()                                               AS n_s,
+            min((inicio_t, trace_id, span_t))                     AS clave_s,
+            sum(coste_t)                                          AS coste_s,
+            argMin(coste_t, (inicio_t, trace_id, span_t))         AS coste_primera_s,
+            sum(sin_tarifa_t)                                     AS sin_tarifa_s,
+            argMin(sin_tarifa_t, (inicio_t, trace_id, span_t))    AS sin_tarifa_primera_s,
+            sum(asumida_t)                                        AS asumida_s,
+            argMin(asumida_t, (inicio_t, trace_id, span_t))       AS asumida_primera_s,
+            max(trace_id)                                         AS traza_s,
+            max(if(rotulo_t != '', rotulo_t, nombre_t))           AS etiqueta_s,
+            max(pista_t)                                          AS pista_s,
+            max(sitio_t)                                          AS sitio_s,
+            max(inicio_t)                                         AS ultima_s
+        FROM (
+            -- La primera llamada de cada ejecución con esa pregunta.
+            SELECT
+                if(step_key != '', step_key, name)                AS paso_clave,
+                request_model, loop_hash, trace_id,
+                min(start_time)                                   AS inicio_t,
+                argMin(span_id, (start_time, span_id))            AS span_t,
+                argMin(loop_out_hash, (start_time, span_id))      AS salida_t,
+                argMin(cost_total_usd, (start_time, span_id))     AS coste_t,
+                argMin(cost_unknown, (start_time, span_id))       AS sin_tarifa_t,
+                argMin(cost_rate_assumed, (start_time, span_id))  AS asumida_t,
+                argMin(step_label, (start_time, span_id))         AS rotulo_t,
+                argMin(name, (start_time, span_id))               AS nombre_t,
+                argMin(step_hint, (start_time, span_id))          AS pista_t,
+                argMin(step_site, (start_time, span_id))          AS sitio_t
+            FROM spans FINAL
+            WHERE {RULES_WHERE} AND {_LLAMADA_CACHEABLE}
+              AND (if(step_key != '', step_key, name), request_model, loop_hash) IN (
+                  SELECT if(step_key != '', step_key, name) AS paso_c, request_model,
+                         loop_hash
+                  FROM spans
+                  WHERE {RULES_WHERE} AND {_LLAMADA_CACHEABLE}
+                  GROUP BY paso_c, request_model, loop_hash
+                  HAVING min(trace_id) != max(trace_id)
+              )
+            GROUP BY paso_clave, request_model, loop_hash, trace_id
+        )
+        GROUP BY paso_clave, request_model, loop_hash, salida_t
+    )
+    GROUP BY paso_clave, request_model, loop_hash
+)
+GROUP BY paso_clave, request_model
+HAVING mismas >= %(min_mismas)s
+ORDER BY coste_mismas DESC, paso_clave, modelo
+LIMIT %(limit)s
+"""
+
 #: Reintentos por JSON mal formado (D-194): sin las cortadas, que son de la de arriba.
 JSON_ROTO_SQL = _rehechas_sql(f"(output_json = 'roto' AND NOT {_CORTADA})")
 
@@ -1113,6 +1212,10 @@ class ClickHouseStore:
         return DEFERRABLE_GROUPS_SQL
 
     @property
+    def cacheable_groups_sql(self) -> str:
+        return CACHEABLE_GROUPS_SQL
+
+    @property
     def model_usage_sql(self) -> str:
         return MODEL_USAGE_SQL
 
@@ -1277,6 +1380,15 @@ class ClickHouseStore:
         params.update(min_llamadas=min_llamadas, min_persona=min_persona, limit=limit)
         filas = _named(self._consulta(DEFERRABLE_GROUPS_SQL, parameters=params))
         return disambiguate([_deferrable_group(r) for r in filas])
+
+    def cacheable_groups(
+        self, project_id: str, window: Window, *, min_mismas: int = 5, limit: int = 20,
+    ) -> list[CacheableGroup]:
+        """Gemelo del de sqlite.py (D-200), en crudo."""
+        params = self._window_params(project_id, window)
+        params.update(min_mismas=min_mismas, limit=limit)
+        filas = _named(self._consulta(CACHEABLE_GROUPS_SQL, parameters=params))
+        return disambiguate([_cacheable_group(r) for r in filas])
 
     def sample_conversation(
         self, project_id: str, window: Window, step_key: str, conversation: str,
@@ -2105,6 +2217,25 @@ def _statements(sql: str) -> list[str]:
         line for line in sql.splitlines() if not line.strip().startswith("--")
     )
     return [s.strip() for s in cleaned.split(";") if s.strip()]
+
+
+def _cacheable_group(r: Any) -> CacheableGroup:
+    """Una fila de `CACHEABLE_GROUPS_SQL`; los alias son los de los dos almacenes."""
+    return CacheableGroup(
+        name=r["nombre"],
+        model=r["modelo"] or "",
+        step_key=r["paso"] or "",
+        site=r["sitio"] or "",
+        hint=r["pista"] or "",
+        questions=int(r["preguntas"] or 0),
+        repeated=int(r["repetidas"] or 0),
+        same_answer=int(r["mismas"] or 0),
+        same_answer_cost_usd=float(r["coste_mismas"] or 0.0),
+        same_answer_unknown_cost_spans=int(r["sin_tarifa_mismas"] or 0),
+        same_answer_assumed_rate_spans=int(r["asumida_mismas"] or 0),
+        sample_trace_id=r["traza_ejemplo"] or "",
+        last_seen=_utc(r["ultima"]) if r["ultima"] else None,
+    )
 
 
 def _deferrable_group(r: Any) -> DeferrableGroup:

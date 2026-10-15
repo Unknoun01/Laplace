@@ -254,7 +254,9 @@ export type FindingKind =
   /** La entrada de un paso que crece en cada turno sin recortarse (D-195). */
   | "historial"
   /** Trabajo que podría ir por la API de lotes (D-199). */
-  | "lotes";
+  | "lotes"
+  /** La misma pregunta con la misma respuesta en ejecuciones distintas (D-200). */
+  | "cache_semantica";
 export type Difficulty = "easy" | "mid" | "hard";
 
 export interface TechItem {
