@@ -209,8 +209,11 @@ Del 5 al 15 de octubre, la segunda parte (`fase-reglas-nuevas-2`):
 - la regla de la API de lotes: con la marca `laplace-puede-esperar` hay dinero, sin ella
   una pregunta sin dinero (D-199).
 
-Queda la caché semántica, diseñada y sin código, y el historial con dinero, que pide un
-replay con evaluación (hoja de ruta, §3).
+- la caché semántica: la misma pregunta con la misma respuesta en ejecuciones distintas,
+  sin dinero en el total, con el porcentaje de respuestas iguales y su intervalo (D-200).
+
+Queda el historial con dinero, que pide un replay con evaluación (hoja de ruta, §3), y lo
+parecido pero no idéntico en la caché semántica.
 
 Del 1 al 2 de octubre entró el resto de la lista «siguiente»:
 - la caché compartida entre pasos (D-178);
@@ -431,6 +434,10 @@ el tráfico ingerido desde D-194: lo de antes no sale en la regla del JSON.
 **La carga se mide con sus casos.** Una lectura sin nada que encontrar sale más rápida de
 lo que será (D-197): una regla nueva tiene que sembrar lo suyo en `scripts/carga.py`, y
 `test_carga.py` lo exige para las tres de D-193 a D-195.
+
+**La caché semántica no pone dinero, y no hay que ponérselo** (D-200): que dos
+ejecuciones recibieran la misma respuesta no dice que esa respuesta valga para el segundo
+usuario. Se valida con `laplace replay` y el juez antes de cachear.
 
 **Lotes sólo pone dinero con la marca** (D-199). Sin ella, la tarjeta es una pregunta
 sin dinero, y así tiene que seguir: que nadie espere una respuesta no se ve en las

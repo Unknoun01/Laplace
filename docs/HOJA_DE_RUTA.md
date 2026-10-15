@@ -109,10 +109,8 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
   - la memoria del historial, de 1,09 GiB a 188 MiB con un filtro previo que sí
     descarta (D-198); queda el tiempo, 2 s de un Diagnóstico de 7 días, que podría
     bajar con un precálculo en los preagregados;
-  - caché semántica (D-200), hecha salvo lo de ClickHouse: la misma pregunta salvo los
-    números y la misma respuesta exacta en ejecuciones distintas, «hasta X» sin dinero
-    en el total. Falta correr en la nube `test_regla_cache_semantica.py`, la paridad
-    sobre empates y las mutaciones de su consulta, y medir su memoria con la carga. Lo
+  - caché semántica hecha (D-200): la misma pregunta salvo los números y la misma
+    respuesta exacta en ejecuciones distintas, «hasta X» sin dinero en el total. Lo
     parecido pero no idéntico (simhash, embeddings) queda para otra versión;
   - lotes, el peor caso sin medir: muchas ejecuciones sin usuario en un proyecto que sí
     lo pone en otras (la carga no tiene ese tráfico) (D-199);

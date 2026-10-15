@@ -4859,7 +4859,12 @@ ventanas: la primera de cada ejecución y la primera de cada pregunta salen de `
 con la tupla de desempate, y «la misma respuesta que la primera» se cuenta agrupando
 también por la salida y quedándose con el grupo que contiene a la primera. El coste se
 calcula en los dos igual: el de todas las de la misma respuesta menos el de la primera.
-Sin medir con la carga: la nube estaba ocupada con la suite.
+
+Medida con la carga de siete días (500.000 spans al día), donde casi ninguna pregunta se
+repite, que es el peor caso del filtro previo: agrupar por el texto de (paso, modelo,
+`loop_hash`) pedía 270 MiB; agrupar por su `sipHash64`, y comparar el hash de la traza,
+131–164 MiB, en el mismo tiempo (0,5 s con un día y 1,4 s con siete). El riesgo de una
+colisión de 64 bits es dejar fuera una pregunta, y en una ventana no se espera ninguna.
 
 Pruebas: `test_regla_cache_semantica.py` en los dos almacenes (la misma respuesta sin
 dinero, la cuenta contra la primera con su porcentaje, la primera que marca la

@@ -703,13 +703,16 @@ FROM (
                 argMin(step_site, (start_time, span_id))          AS sitio_t
             FROM spans FINAL
             WHERE {RULES_WHERE} AND {_LLAMADA_CACHEABLE}
-              AND (if(step_key != '', step_key, name), request_model, loop_hash) IN (
-                  SELECT if(step_key != '', step_key, name) AS paso_c, request_model,
-                         loop_hash
+              -- Por hash de 64 bits y no por el texto: con millones de preguntas que no se
+              -- repiten, agrupar por el texto pedía 270 MiB en siete días de carga (D-200).
+              -- shortcut: una colisión de sipHash64 entre dos trazas distintas dejaría
+              -- fuera una pregunta; con 64 bits no se espera ninguna en una ventana.
+              AND sipHash64(if(step_key != '', step_key, name), request_model, loop_hash) IN (
+                  SELECT sipHash64(if(step_key != '', step_key, name), request_model, loop_hash)
                   FROM spans
                   WHERE {RULES_WHERE} AND {_LLAMADA_CACHEABLE}
-                  GROUP BY paso_c, request_model, loop_hash
-                  HAVING min(trace_id) != max(trace_id)
+                  GROUP BY sipHash64(if(step_key != '', step_key, name), request_model, loop_hash)
+                  HAVING min(sipHash64(trace_id)) != max(sipHash64(trace_id))
               )
             GROUP BY paso_clave, request_model, loop_hash, trace_id
         )
