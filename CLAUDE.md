@@ -45,9 +45,10 @@ Paridad entre SQLite y ClickHouse. El dinero se formatea sólo en `cifras.py` y
 
 ## Comandos (Windows)
 
-- Suite: `.venv/Scripts/python.exe -m pytest apps/backend/tests -q` (unos 27 min con la
-  nube y las pantallas): en segundo plano, y sólo al cerrar. Mientras se trabaja, los
-  ficheros que toca el cambio, con `-x`.
+- Suite: `.venv/Scripts/python.exe -m pytest apps/backend/tests -q -n 2 --dist loadfile`
+  (unos 21 min con la nube y las pantallas; 27 en serie): en segundo plano, y sólo al
+  cerrar. Más de 2 procesos, no: ClickHouse y la memoria del portátil. Mientras se
+  trabaja, los ficheros que toca el cambio, con `-x`.
 - Lint: `.venv/Scripts/ruff.exe check apps/backend packages/sdk-python`.
 - PowerShell: los here-strings `@'…'@` cierran en la columna 0, y el filtro de permisos
   confunde a veces `rm` o `--` dentro de un texto con un borrado: para eso, Bash o un

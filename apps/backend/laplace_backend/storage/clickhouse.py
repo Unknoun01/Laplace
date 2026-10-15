@@ -10,7 +10,7 @@ from typing import Any
 
 import clickhouse_connect
 from laplace.schema import Span
-from laplace.semconv import EVAL_TAG
+from laplace.semconv import EVAL_TAG, PUEDE_ESPERAR_TAG
 
 from ..config import Settings
 from . import preagregados
@@ -29,8 +29,10 @@ from .base import (
     _MOTIVOS_SQL,
     MARGEN_FILTROS,
     Bucket,
+    CacheableGroup,
     CostGroup,
     CoverageFacts,
+    DeferrableGroup,
     GraphFacts,
     HistoryGroup,
     Latency,
@@ -410,12 +412,72 @@ LIMIT %(limit)s
 TRUNCATED_GROUPS_SQL = _rehechas_sql(_CORTADA)
 
 #: Historial que crece sin límite: gemelo de `HISTORY_GROUPS_SQL` de sqlite.py (D-195).
-#: Mismos alias. Primero, sin FINAL, las parejas (conversación, paso) con turnos y
-#: crecimiento de sobra; las ventanas de abajo sólo recorren ésas.
+#: Mismos alias.
 _CONVERSACION = (
     "if(session_id != '', concat('s:', session_id), concat('t:', trace_id))"
 )
 _PASO = "if(step_key != '', step_key, name)"
+_LLAMADA_CON_ENTRADA = f"{RULES_WHERE} AND span_type = 'llm' AND input_tokens > 0"
+
+
+def _pares_por_exceso(columna: str, minimo: str) -> str:
+    """Pares (traza, hash) con `minimo` filas o más, sin FINAL: cuenta de más las filas de
+    un span reenviado y aún sin fusionar, nunca de menos (D-198)."""
+    return f"""(
+        SELECT sipHash64(trace_id, {columna}) FROM spans
+        WHERE {_LLAMADA_CON_ENTRADA} AND {columna} != ''
+        GROUP BY sipHash64(trace_id, {columna})
+        HAVING count() >= %({minimo})s
+    )"""
+
+
+def _pares_excluidos(columna: str, minimo: str) -> str:
+    """Los pares (traza, hash) que la regla excluye: `minimo` spans distintos o más en
+    **toda** la traza, como en SQLite, aunque las copias sean de otro paso (`dedup_hash`
+    no lleva el paso). El recuento exacto sólo se hace sobre los que llegan por exceso."""
+    return f"""(
+        SELECT trace_id, {columna} FROM spans
+        WHERE {_LLAMADA_CON_ENTRADA} AND {columna} != ''
+          AND sipHash64(trace_id, {columna}) IN {_pares_por_exceso(columna, minimo)}
+        GROUP BY trace_id, {columna}
+        HAVING uniqExact(span_id) >= %({minimo})s
+    )"""
+
+
+#: Las conversaciones que **pueden** contar, sin FINAL y sin ventanas (D-198). Antes el
+#: filtro sólo pedía turnos y crecimiento, y con entradas que varían de una llamada a
+#: otra lo pasaban casi todas: con siete días de carga, 112.641 de 112.644, y las
+#: ventanas de abajo pedían 1 GiB. Ahora pide además lo que deja una secuencia que no
+#: baja entre las llamadas que la regla cuenta: que la primera sea la menor y la última
+#: la mayor. Las tres condiciones son cotas que nunca dejan fuera una conversación que
+#: la consulta contaría:
+#:
+#: * los turnos y el rango se miden sobre todas las filas, que son más que las que
+#:   cuentan; y el rango se compara con el mínimo de turnos, no con las filas (contar las
+#:   excluidas dejaba fuera a quien crecía justo lo pedido);
+#: * la primera y la última, sobre las filas que cuentan, quitando de más las copias y
+#:   las vueltas (`_pares_por_exceso`): quitar llamadas de una secuencia que no baja deja
+#:   otra que no baja. Un span reenviado lleva los mismos tokens, así que sus filas
+#:   repetidas no cambian nada.
+HISTORY_CANDIDATES_SQL = f"""
+    SELECT h FROM (
+        SELECT
+            sipHash64({_CONVERSACION}, {_PASO}) AS h,
+            input_tokens, start_time, span_id,
+            output_json != 'roto' AND NOT {_CORTADA}
+                AND (dedup_hash = '' OR sipHash64(trace_id, dedup_hash)
+                     NOT IN {_pares_por_exceso('dedup_hash', 'min_repeats')})
+                AND (loop_hash = '' OR sipHash64(trace_id, loop_hash)
+                     NOT IN {_pares_por_exceso('loop_hash', 'min_vueltas')}) AS cuenta
+        FROM spans
+        WHERE {_LLAMADA_CON_ENTRADA}
+    )
+    GROUP BY h
+    HAVING count() >= %(min_turnos)s
+       AND max(input_tokens) - min(input_tokens) >= %(min_crece)s * (%(min_turnos)s - 1)
+       AND argMinIf(input_tokens, (start_time, span_id), cuenta) = minIf(input_tokens, cuenta)
+       AND argMaxIf(input_tokens, (start_time, span_id), cuenta) = maxIf(input_tokens, cuenta)
+"""
 
 HISTORY_GROUPS_SQL = f"""
 SELECT
@@ -466,27 +528,19 @@ FROM (
                 FROM (
                     SELECT
                         trace_id, span_id, start_time, input_tokens, request_model,
-                        dedup_hash, loop_hash, output_json, step_hint, step_site,
+                        step_hint, step_site,
                         {_CONVERSACION}                       AS conversacion,
                         {_PASO}                               AS paso_clave,
-                        if(step_label != '', step_label, name) AS etiqueta,
-                        {_CORTADA}                            AS cortada,
-                        count() OVER (PARTITION BY trace_id, dedup_hash) AS copias,
-                        count() OVER (PARTITION BY trace_id, loop_hash)  AS vueltas
+                        if(step_label != '', step_label, name) AS etiqueta
                     FROM spans FINAL
-                    WHERE {RULES_WHERE} AND span_type = 'llm' AND input_tokens > 0
-                      AND sipHash64({_CONVERSACION}, {_PASO}) IN (
-                          SELECT sipHash64({_CONVERSACION}, {_PASO}) FROM spans
-                          WHERE {RULES_WHERE} AND span_type = 'llm' AND input_tokens > 0
-                          GROUP BY sipHash64({_CONVERSACION}, {_PASO})
-                          HAVING count() >= %(min_turnos)s
-                             AND max(input_tokens) - min(input_tokens)
-                                 >= %(min_crece)s * (count() - 1)
-                      )
+                    WHERE {_LLAMADA_CON_ENTRADA}
+                      AND output_json != 'roto' AND NOT {_CORTADA}
+                      AND sipHash64({_CONVERSACION}, {_PASO}) IN ({HISTORY_CANDIDATES_SQL})
+                      AND (dedup_hash = '' OR (trace_id, dedup_hash)
+                           NOT IN {_pares_excluidos('dedup_hash', 'min_repeats')})
+                      AND (loop_hash = '' OR (trace_id, loop_hash)
+                           NOT IN {_pares_excluidos('loop_hash', 'min_vueltas')})
                 )
-                WHERE (dedup_hash = '' OR copias < %(min_repeats)s)
-                  AND (loop_hash = '' OR vueltas < %(min_vueltas)s)
-                  AND output_json != 'roto' AND NOT cortada
                 WINDOW w AS (
                     PARTITION BY conversacion, paso_clave ORDER BY start_time, span_id
                     ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
@@ -501,6 +555,174 @@ FROM (
 GROUP BY paso_clave
 HAVING conversaciones >= %(min_conversaciones)s
 ORDER BY historial DESC, paso_clave
+LIMIT %(limit)s
+"""
+
+#: Llamadas que podrían ir por la API de lotes: gemelo de `DEFERRABLE_GROUPS_SQL` de
+#: sqlite.py (D-199). Mismos alias. Las ejecuciones candidatas se eligen antes, sin
+#: FINAL y sin ventanas: en un proyecto que pone usuario en todas, no hay ninguna, y la
+#: ventana por traza de abajo sólo recorre las que hay.
+_CON_PERSONA = f"""(
+    SELECT count() FROM (
+        SELECT DISTINCT trace_id FROM spans
+        WHERE {RULES_WHERE} AND (user_id != '' OR session_id != '')
+        LIMIT %(min_persona)s
+    )
+)"""
+
+DEFERRABLE_GROUPS_SQL = f"""
+SELECT
+    paso_clave                                                      AS paso,
+    request_model                                                   AS modelo,
+    max(etiqueta)                                                   AS nombre,
+    max(step_hint)                                                  AS pista,
+    max(step_site)                                                  AS sitio,
+    countIf(independiente AND estandar AND declarada)               AS declaradas,
+    uniqExactIf(trace_id, independiente AND estandar AND declarada) AS trazas_declaradas,
+    sumIf(cost_total_usd, independiente AND estandar AND declarada) AS coste_declaradas,
+    sumIf(cost_unknown, independiente AND estandar AND declarada)   AS sin_tarifa_declaradas,
+    sumIf(cost_rate_assumed, independiente AND estandar AND declarada)
+                                                                    AS asumida_declaradas,
+    countIf(independiente AND estandar AND NOT declarada)           AS abiertas,
+    uniqExactIf(trace_id, independiente AND estandar AND NOT declarada)
+                                                                    AS trazas_abiertas,
+    sumIf(cost_total_usd, independiente AND estandar AND NOT declarada)
+                                                                    AS coste_abiertas,
+    sumIf(cost_unknown, independiente AND estandar AND NOT declarada)
+                                                                    AS sin_tarifa_abiertas,
+    sumIf(cost_rate_assumed, independiente AND estandar AND NOT declarada)
+                                                                    AS asumida_abiertas,
+    countIf(NOT independiente)                                      AS encadenadas,
+    {_CON_PERSONA}                                                  AS con_persona,
+    maxIf(trace_id, independiente AND estandar)                     AS traza_ejemplo,
+    max(start_time)                                                 AS ultima
+FROM (
+    SELECT
+        if(step_key != '', step_key, name)                          AS paso_clave,
+        if(step_label != '', step_label, name)                      AS etiqueta,
+        request_model, step_hint, step_site, trace_id, start_time, cost_total_usd,
+        cost_unknown, cost_rate_assumed,
+        trace_id IN (
+            SELECT trace_id FROM spans
+            WHERE {RULES_WHERE} AND has(tags, '{PUEDE_ESPERAR_TAG}')
+        )                                                           AS declarada,
+        billing_tier IN ('', 'standard')                            AS estandar,
+        start_time < min(end_time) OVER (PARTITION BY trace_id)     AS independiente
+    FROM spans FINAL
+    WHERE {RULES_WHERE} AND span_type = 'llm'
+      AND trace_id IN (
+          SELECT trace_id FROM spans
+          WHERE {RULES_WHERE}
+          GROUP BY trace_id
+          HAVING max(has(tags, '{PUEDE_ESPERAR_TAG}'))
+              OR (max(user_id != '' OR session_id != '') = 0
+                  AND {_CON_PERSONA} >= %(min_persona)s)
+      )
+)
+GROUP BY paso_clave, request_model
+HAVING declaradas >= %(min_llamadas)s OR abiertas >= %(min_llamadas)s
+ORDER BY coste_declaradas DESC, coste_abiertas DESC, paso_clave, modelo
+LIMIT %(limit)s
+"""
+
+#: La misma pregunta a un paso en ejecuciones distintas: gemelo de `CACHEABLE_GROUPS_SQL`
+#: de sqlite.py (D-200). Mismos alias. Las preguntas que salen en más de una ejecución
+#: se eligen antes, sin FINAL y con un estado mínimo (`min` y `max` de la traza, no un
+#: `uniqExact`): con tráfico real casi ninguna se repite. Sin ventanas: la primera
+#: llamada de cada ejecución y la primera ejecución de cada pregunta salen de `argMin`
+#: con el desempate escrito en la tupla, (inicio, span) y (inicio, traza, span), que es
+#: el orden de SQLite. «La misma respuesta que la primera» se cuenta agrupando también
+#: por la salida y quedándose con el grupo que contiene a la primera.
+_LLAMADA_CACHEABLE = (
+    "span_type = 'llm' AND status != 'error' AND loop_hash != '' AND loop_out_hash != ''"
+)
+
+CACHEABLE_GROUPS_SQL = f"""
+SELECT
+    paso_clave                                                    AS paso,
+    request_model                                                 AS modelo,
+    max(etiqueta_p)                                               AS nombre,
+    max(pista_p)                                                  AS pista,
+    max(sitio_p)                                                  AS sitio,
+    count()                                                       AS preguntas,
+    sum(repetidas_p)                                              AS repetidas,
+    sum(mismas_p)                                                 AS mismas,
+    sum(coste_p)                                                  AS coste_mismas,
+    sum(sin_tarifa_p)                                             AS sin_tarifa_mismas,
+    sum(asumida_p)                                                AS asumida_mismas,
+    maxIf(traza_p, mismas_p > 0)                                  AS traza_ejemplo,
+    max(ultima_p)                                                 AS ultima
+FROM (
+    -- Por pregunta: el grupo de salida que contiene a la primera ejecución.
+    SELECT
+        paso_clave, request_model, loop_hash,
+        max(etiqueta_s)                                           AS etiqueta_p,
+        max(pista_s)                                              AS pista_p,
+        max(sitio_s)                                              AS sitio_p,
+        max(ultima_s)                                             AS ultima_p,
+        sum(n_s) - 1                                              AS repetidas_p,
+        -- `clave_s` ya no empata (lleva traza y span); la salida va detrás igualmente.
+        argMin(n_s, (clave_s, salida_t)) - 1                      AS mismas_p,
+        argMin(coste_s - coste_primera_s, (clave_s, salida_t))    AS coste_p,
+        argMin(toInt64(sin_tarifa_s) - toInt64(sin_tarifa_primera_s), (clave_s, salida_t))
+                                                                  AS sin_tarifa_p,
+        argMin(toInt64(asumida_s) - toInt64(asumida_primera_s), (clave_s, salida_t))
+                                                                  AS asumida_p,
+        argMin(traza_s, (clave_s, salida_t))                      AS traza_p
+    FROM (
+        -- Por pregunta y salida.
+        SELECT
+            paso_clave, request_model, loop_hash, salida_t,
+            count()                                               AS n_s,
+            min((inicio_t, trace_id, span_t))                     AS clave_s,
+            sum(coste_t)                                          AS coste_s,
+            argMin(coste_t, (inicio_t, trace_id, span_t))         AS coste_primera_s,
+            sum(sin_tarifa_t)                                     AS sin_tarifa_s,
+            argMin(sin_tarifa_t, (inicio_t, trace_id, span_t))    AS sin_tarifa_primera_s,
+            sum(asumida_t)                                        AS asumida_s,
+            argMin(asumida_t, (inicio_t, trace_id, span_t))       AS asumida_primera_s,
+            max(trace_id)                                         AS traza_s,
+            max(if(rotulo_t != '', rotulo_t, nombre_t))           AS etiqueta_s,
+            max(pista_t)                                          AS pista_s,
+            max(sitio_t)                                          AS sitio_s,
+            max(inicio_t)                                         AS ultima_s
+        FROM (
+            -- La primera llamada de cada ejecución con esa pregunta.
+            SELECT
+                if(step_key != '', step_key, name)                AS paso_clave,
+                request_model, loop_hash, trace_id,
+                min(start_time)                                   AS inicio_t,
+                argMin(span_id, (start_time, span_id))            AS span_t,
+                argMin(loop_out_hash, (start_time, span_id))      AS salida_t,
+                argMin(cost_total_usd, (start_time, span_id))     AS coste_t,
+                argMin(cost_unknown, (start_time, span_id))       AS sin_tarifa_t,
+                argMin(cost_rate_assumed, (start_time, span_id))  AS asumida_t,
+                argMin(step_label, (start_time, span_id))         AS rotulo_t,
+                argMin(name, (start_time, span_id))               AS nombre_t,
+                argMin(step_hint, (start_time, span_id))          AS pista_t,
+                argMin(step_site, (start_time, span_id))          AS sitio_t
+            FROM spans FINAL
+            WHERE {RULES_WHERE} AND {_LLAMADA_CACHEABLE}
+              -- Por hash de 64 bits y no por el texto: con millones de preguntas que no se
+              -- repiten, agrupar por el texto pedía 270 MiB en siete días de carga (D-200).
+              -- shortcut: una colisión de sipHash64 entre dos trazas distintas dejaría
+              -- fuera una pregunta; con 64 bits no se espera ninguna en una ventana.
+              AND sipHash64(if(step_key != '', step_key, name), request_model, loop_hash) IN (
+                  SELECT sipHash64(if(step_key != '', step_key, name), request_model, loop_hash)
+                  FROM spans
+                  WHERE {RULES_WHERE} AND {_LLAMADA_CACHEABLE}
+                  GROUP BY sipHash64(if(step_key != '', step_key, name), request_model, loop_hash)
+                  HAVING min(sipHash64(trace_id)) != max(sipHash64(trace_id))
+              )
+            GROUP BY paso_clave, request_model, loop_hash, trace_id
+        )
+        GROUP BY paso_clave, request_model, loop_hash, salida_t
+    )
+    GROUP BY paso_clave, request_model, loop_hash
+)
+GROUP BY paso_clave, request_model
+HAVING mismas >= %(min_mismas)s
+ORDER BY coste_mismas DESC, paso_clave, modelo
 LIMIT %(limit)s
 """
 
@@ -989,6 +1211,14 @@ class ClickHouseStore:
         return HISTORY_GROUPS_SQL
 
     @property
+    def deferrable_groups_sql(self) -> str:
+        return DEFERRABLE_GROUPS_SQL
+
+    @property
+    def cacheable_groups_sql(self) -> str:
+        return CACHEABLE_GROUPS_SQL
+
+    @property
     def model_usage_sql(self) -> str:
         return MODEL_USAGE_SQL
 
@@ -1143,6 +1373,25 @@ class ClickHouseStore:
         )
         filas = _named(self._consulta(HISTORY_GROUPS_SQL, parameters=params))
         return disambiguate([_history_group(r) for r in filas])
+
+    def deferrable_groups(
+        self, project_id: str, window: Window, *, min_llamadas: int = 20,
+        min_persona: int = 20, limit: int = 20,
+    ) -> list[DeferrableGroup]:
+        """Gemelo del de sqlite.py (D-199), en crudo."""
+        params = self._window_params(project_id, window)
+        params.update(min_llamadas=min_llamadas, min_persona=min_persona, limit=limit)
+        filas = _named(self._consulta(DEFERRABLE_GROUPS_SQL, parameters=params))
+        return disambiguate([_deferrable_group(r) for r in filas])
+
+    def cacheable_groups(
+        self, project_id: str, window: Window, *, min_mismas: int = 5, limit: int = 20,
+    ) -> list[CacheableGroup]:
+        """Gemelo del de sqlite.py (D-200), en crudo."""
+        params = self._window_params(project_id, window)
+        params.update(min_mismas=min_mismas, limit=limit)
+        filas = _named(self._consulta(CACHEABLE_GROUPS_SQL, parameters=params))
+        return disambiguate([_cacheable_group(r) for r in filas])
 
     def sample_conversation(
         self, project_id: str, window: Window, step_key: str, conversation: str,
@@ -1971,6 +2220,50 @@ def _statements(sql: str) -> list[str]:
         line for line in sql.splitlines() if not line.strip().startswith("--")
     )
     return [s.strip() for s in cleaned.split(";") if s.strip()]
+
+
+def _cacheable_group(r: Any) -> CacheableGroup:
+    """Una fila de `CACHEABLE_GROUPS_SQL`; los alias son los de los dos almacenes."""
+    return CacheableGroup(
+        name=r["nombre"],
+        model=r["modelo"] or "",
+        step_key=r["paso"] or "",
+        site=r["sitio"] or "",
+        hint=r["pista"] or "",
+        questions=int(r["preguntas"] or 0),
+        repeated=int(r["repetidas"] or 0),
+        same_answer=int(r["mismas"] or 0),
+        same_answer_cost_usd=float(r["coste_mismas"] or 0.0),
+        same_answer_unknown_cost_spans=int(r["sin_tarifa_mismas"] or 0),
+        same_answer_assumed_rate_spans=int(r["asumida_mismas"] or 0),
+        sample_trace_id=r["traza_ejemplo"] or "",
+        last_seen=_utc(r["ultima"]) if r["ultima"] else None,
+    )
+
+
+def _deferrable_group(r: Any) -> DeferrableGroup:
+    """Una fila de `DEFERRABLE_GROUPS_SQL`; los alias son los de los dos almacenes."""
+    return DeferrableGroup(
+        name=r["nombre"],
+        model=r["modelo"] or "",
+        step_key=r["paso"] or "",
+        site=r["sitio"] or "",
+        hint=r["pista"] or "",
+        declared_calls=int(r["declaradas"] or 0),
+        declared_traces=int(r["trazas_declaradas"] or 0),
+        declared_cost_usd=float(r["coste_declaradas"] or 0.0),
+        declared_unknown_cost_spans=int(r["sin_tarifa_declaradas"] or 0),
+        declared_assumed_rate_spans=int(r["asumida_declaradas"] or 0),
+        open_calls=int(r["abiertas"] or 0),
+        open_traces=int(r["trazas_abiertas"] or 0),
+        open_cost_usd=float(r["coste_abiertas"] or 0.0),
+        open_unknown_cost_spans=int(r["sin_tarifa_abiertas"] or 0),
+        open_assumed_rate_spans=int(r["asumida_abiertas"] or 0),
+        chained=int(r["encadenadas"] or 0),
+        traces_with_person=int(r["con_persona"] or 0),
+        sample_trace_id=r["traza_ejemplo"] or "",
+        last_seen=_utc(r["ultima"]) if r["ultima"] else None,
+    )
 
 
 def _history_group(r: Any) -> HistoryGroup:

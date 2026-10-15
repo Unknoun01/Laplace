@@ -4622,3 +4622,259 @@ sobre empates para las tres lecturas de esta fase (truncadas, JSON roto e histor
 la regla de los almacenes pide (D-099) y D-193 y D-194 no tenían. Se rompió a propósito:
 sin exigir que no baje, sin la sesión, contando las rehechas, poniendo dinero, y con otro
 desempate en un almacén (en cada uno); en todos falla alguna.
+
+### D-196 — Lecturas de caché pagadas en OpenAI: la ficha propone lo mismo que la tarjeta
+Quedaba pendiente de D-111 la prueba del caso de OpenAI, que cachea sola por encima de
+1.024 tokens y sin nada que marcar en el código. La tarjeta ya acertaba: el hallazgo sale,
+el dinero es sólo el de las lecturas a la tarifa de lectura, y el bot no abre un PR de
+caché (D-190). La ficha, no, y por tres sitios:
+
+* **El arreglo.** Abría siempre con «Activa la caché de prompt» y un `cache_control` de
+  Anthropic: proponía lo que ya se hacía, con una sintaxis que OpenAI no tiene. Ahora la
+  ficha decide igual que la tarjeta (`_parte_sin_cachear`, el mismo umbral). Si la caché
+  ya se lleva casi todo, el único arreglo es mandar menos. Si no, a Anthropic se le
+  enseña `cache_control`, y a los demás (OpenAI, Gemini, un servidor local, que cachean
+  solos el prefijo idéntico) «pon delante lo que no cambia», sin código.
+* **La cuenta.** Explicaba el ahorro de cachear («pasarían de 2 $/1M a 0,20 $/1M») con la
+  cifra de las lecturas. Ahora, cuando no se propone cachear, la cuenta es la de la
+  tarjeta: tokens servidos de caché por la tarifa de lectura. La nota del modelo
+  encadenado sólo sale cuando se propone cachear, porque las lecturas se cobran al modelo
+  de hoy.
+* **La detección y el porqué.** Decían «un paso que no está usando caché» y «si se la
+  marcas», ciertos antes de D-108. Ahora describen la regla de verdad, con los dos
+  umbrales, y que unos proveedores reconocen el prefijo solos y otros piden marcarlo.
+
+Fuera: cuando sí se propone cachear y además hay lecturas, la cifra neta suma las dos y
+la cuenta sólo explica la primera. No lo tocan las pruebas de OpenAI y queda anotado.
+
+Pruebas: dos en `test_catalogo_hallazgos.py`, sobre SQLite y sin red ni claves: OpenAI
+ya cacheando (dinero de las lecturas, ningún `cache_control`, «manda menos» primero, la
+cuenta de las lecturas, la detección al día) y OpenAI sin cachear (ni código de Anthropic
+ni el paso de activar, sí el del prefijo). Se rompió a propósito tres veces: el código de
+Anthropic para todos, proponer cachear aunque ya se cachee, y la cuenta de cachear en
+lugar de la de las lecturas. Las tres fallan.
+
+### D-197 — La carga mide lo que habrá: casos para las reglas nuevas y preagregados calculados
+Lo pendiente de D-193 a D-195 era medir con `scripts/carga.py` las tres lecturas que van
+en crudo. Antes de medir hubo que arreglar la carga, que daba cifras falsas por dos lados:
+
+* **Las reglas nuevas no tenían nada que encontrar.** El generador no traía ni salidas
+  cortadas ni JSON roto ni conversaciones que crecen. Una lectura que no encuentra nada
+  mide menos de lo que costará: la truncada y la del JSON salían a 0,11 s, y con casos, a
+  0,37 s. Ahora una de cada cincuenta trazas rehace «extraer» tras cortarse
+  (`finish_reasons = ['length']`), otra tras un JSON roto (`output_json = 'roto'`), y una
+  de cada veinte conversaciones crece 800 tokens por turno. Las trazas elegidas son pares,
+  porque las impares van a los proyectos pequeños, y las sesiones ya no mezclan
+  proyectos: con `intDiv(t, 5)` una sesión dejaba 2 o 3 trazas en el proyecto grande, por
+  debajo de los cuatro turnos del historial. La medida imprime qué hallazgos salen, para
+  ver que ninguna lectura se mide en vacío.
+* **Los preagregados no se calculaban.** Los spans entran con SQL, sin pasar por la
+  ingesta, y nadie apuntaba sus horas (D-177): el Diagnóstico se leía entero en crudo.
+  Ahora la carga apunta las horas del proyecto grande y las recalcula al terminar, y
+  `--borrar` limpia también los preagregados.
+
+**Medido** en este portátil (ClickHouse en Docker, 16 hilos, 9,7 GB), con 500.000 spans
+al día durante 7 días (la mitad, del proyecto grande):
+
+| | 1 día | 7 días |
+|---|---|---|
+| Diagnóstico | 3,0–3,2 s | 8,5–9,4 s |
+| historial | 0,59 s (19 %) | 2,84 s (32 %) |
+| truncada | 0,28 s (9 %) | 0,78 s (9 %) |
+| JSON roto | 0,29 s (9 %) | 0,78 s (9 %) |
+| las tres juntas | 37 % | 49 % |
+
+* **El historial es el problema.** Con 7 días pidió **1,09 GiB de memoria** para 1,75
+  millones de spans del proyecto. No se proyecta a diez millones al día, pero crece con la
+  ventana, y D-142 ya tumbó Docker con 2 GB en una sola consulta. Su filtro previo apenas
+  descarta nada cuando las entradas varían mucho de una llamada a otra, como en la carga,
+  y entonces las ventanas recorren casi todo. Es lo primero que hay que arreglar.
+* La truncada y la del JSON leen la ventana dos veces, aunque busquen pocas trazas, y se
+  quedan en 221 MiB. Cuestan, pero no son peligrosas.
+* Las cifras absolutas no se comparan con las de D-177 (1,1 s con 10 millones), que se
+  midieron en el contenedor de 4 núcleos con sólo el proyecto grande. Aquí cada lector
+  tiene un suelo de 0,2–0,3 s aunque lea de los preagregados, y no se ha averiguado por
+  qué. Lo que sí vale es el reparto entre lecturas, medido todo en la misma máquina.
+
+Pruebas: `test_carga.py`, en una base de ClickHouse propia, genera 40.000 spans y exige
+que salgan las tres reglas en el proyecto grande y que sus horas queden calculadas. Se
+rompió a propósito tres veces: con las trazas impares, con las sesiones que mezclan
+proyectos y sin calcular los preagregados. Las tres fallan.
+
+### D-198 — El historial sólo abre las conversaciones que pueden contar
+D-197 midió que la lectura del historial pedía **1,09 GiB** con siete días de 500.000
+spans al día. Su filtro previo sólo exigía turnos y crecimiento, y con entradas que varían
+de una llamada a otra lo pasaban casi todas: 112.641 de 112.644 conversaciones. Sobre
+todas ellas se abrían después `FINAL` y las ventanas. Al arreglarlo salieron dos
+diferencias de paridad con SQLite, que no tiene filtro previo:
+
+* **La cota del crecimiento contaba filas que la regla no cuenta.** Pedía crecer 200
+  tokens por cada fila menos una, incluidas una respuesta cortada o un JSON roto. Una
+  conversación que crecía justo lo pedido y traía un reintento se quedaba fuera en
+  ClickHouse y salía en SQLite.
+* **Las copias se contaban sólo entre las conversaciones que pasaban el filtro.**
+  `dedup_hash` no lleva el paso, así que una llamada puede repetirse desde otro paso de
+  la misma traza. SQLite la cuenta en toda la traza; ClickHouse, sólo si el otro paso
+  también pasaba el filtro. Con un filtro que no descartaba nada no se notaba, y con uno
+  que funciona sí.
+
+Ahora:
+
+* **Filtro previo** (`HISTORY_CANDIDATES_SQL`, sin FINAL ni ventanas). Además de los
+  turnos, pide lo que deja una secuencia que no baja: que, entre las llamadas que cuentan,
+  la primera sea la menor y la última la mayor (`argMinIf` y `argMaxIf`). Las tres
+  condiciones son cotas que nunca dejan fuera una conversación que la consulta contaría:
+  - los turnos y el rango se miden sobre todas las filas, y el rango se compara con el
+    mínimo de turnos, no con el número de filas;
+  - la primera y la última se miran quitando de más las copias y las vueltas, con un
+    recuento por filas sin FINAL: quitar llamadas de una secuencia que no baja deja otra
+    que no baja.
+
+  Se descartó comprobar la secuencia entera con arrays: es exacta, pero ordenar un array
+  por conversación costaba 1,4 s, frente a 0,6 s.
+* **Exclusiones exactas**: los pares (traza, hash) con tres copias o cuatro vueltas se
+  calculan aparte, en toda la traza y contando spans distintos (`uniqExact(span_id)`, así
+  que un lote reenviado sin fusionar no duplica las copias). El recuento exacto sólo se
+  hace sobre los pares que llegan contando filas. Sustituyen a las dos ventanas por
+  traza.
+
+**Medido** con la misma carga de siete días:
+
+| | Antes | Ahora |
+|---|---|---|
+| memoria del historial | 1,09 GiB | 188 MiB |
+| tiempo del historial | 2,84 s | 2,00 s |
+| Diagnóstico de 7 días | 8,5–9,4 s | 6,2–7,3 s |
+
+Lee más filas que antes (unas ocho pasadas por la ventana, frente a dos), pero todas son
+agregaciones estrechas. El tiempo que queda es de esas pasadas, y es lo que podría quitar
+un precálculo en los preagregados.
+
+Pruebas, en los dos almacenes (`test_regla_historial.py`): el reintento que dejaba fuera a
+quien crecía justo lo pedido, las copias desde otro paso, una respuesta cortada al final
+con menos entrada, y un lote reenviado sin fusionar (con las fusiones paradas en la base
+de prueba). Y en `test_carga.py`, que el filtro deje fuera más del 80 % de las
+conversaciones de la carga sin dejar fuera ninguna que cuente. Se rompió a propósito cinco
+veces: el filtro de antes, el rango contra las filas, la primera y la última sin quitar lo
+que no cuenta, las copias sólo entre las candidatas y el recuento por filas. Las cinco
+fallan.
+
+### D-199 — Trabajo que podría ir por lotes: con la marca hay dinero, sin ella una pregunta
+OpenAI y Anthropic cobran la mitad por la misma llamada si se manda por su API de lotes:
+el mismo modelo y la misma respuesta, en horas en lugar de al momento. La hoja de ruta
+lo dejó pendiente porque faltaba la señal: desde las trazas no se sabe si alguien espera
+la respuesta. La regla (`insights/lotes.py`, tipo `lotes`) no lo adivina:
+
+* **La marca.** Una etiqueta, `laplace-puede-esperar` (`semconv.PUEDE_ESPERAR_TAG`), en
+  cualquier span de la ejecución, normalmente la raíz:
+  `@laplace.observe(type="agent", tags=["laplace-puede-esperar"])`. No cambia el
+  esquema: las etiquetas ya existían, y así se excluyen ya las tiradas de evaluación.
+  Con la marca hay dinero: lo que costaron las llamadas por (1 − el descuento que publica
+  el proveedor). En lotes se escala todo el coste (entrada, salida y caché), así que la
+  cuenta es exacta.
+* **Sin la marca, una pregunta.** Ejecuciones sin usuario ni sesión en un proyecto que
+  sí los pone en al menos 20 ejecuciones: es un indicio de trabajo de fondo, no una
+  prueba. La tarjeta dice «hasta X» y no pone dinero en el total (`costs_money` falso).
+  Si el proyecto no pone usuario ni sesión nunca, no hay con qué comparar y se calla.
+  Y la consulta ni siquiera abre esas ejecuciones, que en un proyecto así serían todas.
+* **Sólo las llamadas que no esperan a otra:** las que empiezan antes de que acabe
+  ninguna llamada al modelo de su ejecución. Por lotes, cada salto de una cadena puede
+  tardar hasta un día. Las encadenadas se cuentan aparte, para decirlo en la ficha.
+* **Fuera:** lo que ya va por lotes u otro nivel de servicio (sólo tarifa estándar), las
+  tiradas de evaluación, y menos de 20 llamadas por paso y modelo.
+* **Sin descuento publicado no hay dinero.** El factor sale de la fuente de precios del
+  modelo (`Source.batch_multiplier`). Los modelos de LiteLLM no tienen fuente con
+  descuento, y no se supone la mitad: se dice que no lo sabemos.
+* **Sin contar dos veces** (D-117): va la última de todas. El descuento se aplica a lo
+  que queda de cada paso después de lo que reclaman las demás, prompts incluidos
+  (`_reclamado_por_todas`), en proporción.
+
+En la ficha: con la marca, el arreglo es mandar el lote, con el código de OpenAI o de
+Anthropic según la fuente del modelo; sin ella, primero marcarlo. La guía de usuario
+(`docs/usuario/diagnostico.md`) explica la marca, y su tabla pasa de cinco reglas a las
+diez que hay.
+
+**Escala.** Se lee en crudo. Las ejecuciones candidatas se eligen antes, sin FINAL ni
+ventanas, y la ventana por traza sólo recorre ésas. Con la carga de siete días (todas con
+usuario, ninguna marcada): 0,2–0,3 s y 86 MiB. El peor caso, muchas ejecuciones sin
+usuario en un proyecto que sí lo pone en otras, no se ha medido: la carga no tiene ese
+tráfico.
+
+Pruebas: `test_regla_lotes.py` en los dos almacenes (la mitad exacta, las encadenadas, las
+de a la vez, lo que ya va por lotes, las evaluaciones, pocas llamadas, sin descuento
+publicado, la pregunta sin dinero, la sesión, sin nadie con quien comparar, lo que ya
+reclama el modelo caro y la ficha igual que la tarjeta). Una de paridad sobre empates en
+`test_paridad.py`, y el caso en el catálogo, con sus garantías. Se rompió a propósito doce
+veces, en los dos almacenes y en la regla: las doce fallan. La de «con quién comparar» no
+fallaba al principio, porque la regla en Python repetía la comprobación; ahora la prueba
+mira también el almacén.
+
+### D-200 — Caché semántica: la misma pregunta con la misma respuesta, «hasta X» y sin dinero en el total
+Un paso que recibe la misma pregunta en ejecuciones distintas y responde lo mismo podría
+servirse desde una caché de respuestas, sin pagar al modelo. La hoja de ruta lo dejó
+pendiente porque había que medir el parecido y decir con honradez que el ahorro no está
+garantizado. La regla (`insights/cache_semantica.py`, tipo `cache_semantica`) no añade
+columnas: usa lo que la ingesta ya guarda.
+
+* **La señal.** Dos llamadas `llm` del mismo paso (`step_key`, o el nombre) y modelo, en
+  **ejecuciones distintas**, con el mismo `loop_hash` (la entrada sin los números, D-109),
+  son la misma pregunta. Si además tienen el mismo `loop_out_hash` (la salida exacta,
+  números incluidos), la respuesta también fue la misma: es la prueba medible de que una
+  caché la habría servido.
+* **Lo que se cuenta**, por (paso, modelo): de cada ejecución, sólo su primera llamada con
+  esa pregunta; de cada pregunta, todas las ejecuciones menos la primera (`repetidas`), y
+  de ésas, las que dieron la misma salida que la primera (`mismas`). «La primera» se
+  decide con desempates escritos: (inicio, span) dentro de la ejecución y (inicio, traza,
+  span) entre ellas. Si la primera respondió otra cosa, no hay prueba aunque las demás
+  coincidan entre sí: no se cuenta.
+* **Porcentaje sólo con muestra.** «El 64 %, entre el 35 % y el 85 %», con el intervalo de
+  Wilson de las evaluaciones, sólo con al menos `MIN_CASES_FOR_RATE` (10) repetidas. Con
+  menos se dice la cuenta y cuántas harían falta.
+* **Honradez.** No pone dinero en el total (`window_waste_usd = 0`, `costs_money` falso),
+  como la pregunta sin marca de lotes (D-199). La tarjeta dice «una caché se habría
+  ahorrado hasta X, pero no sabemos si esas respuestas valen para todos», y
+  `cost_unavailable` explica por qué no entra. La ficha pide primero validarlo con
+  `laplace replay` al mismo modelo y el juez, y después poner la caché con la entrada
+  exacta como clave: aquí se agrupa sin los números, pero un número puede cambiar la
+  respuesta.
+* **Sin contar dos veces** (D-117). No reclama nada, así que no descuenta a nadie. Su
+  «hasta» va detrás de lotes y es el coste de las llamadas con la misma respuesta por la
+  parte del paso que no reclaman ya las demás reglas, prompts y lotes incluidos
+  (`_reclamado_por_todas`), en proporción, igual que lotes. Si las demás reclaman el paso
+  entero, se calla.
+* **Fuera:** las repeticiones dentro de una ejecución (son de la repetición y los
+  bucles), las tiradas de evaluación (`RULES_WHERE`), las llamadas con error (no hay
+  respuesta que cachear) y los grupos con menos de **5** llamadas con la misma respuesta:
+  el mismo mínimo que la salida truncada y el JSON roto, cinco veces lo mismo en la
+  ventana es un patrón del agente, no alguien que preguntó dos veces.
+* **Lo parecido pero no idéntico** (simhash, embeddings) queda fuera de esta versión:
+  pediría guardar una huella nueva en la ingesta y un umbral de parecido que habría que
+  defender con evaluaciones. Hoy sólo se afirma lo que es idéntico.
+
+**Escala.** Las dos consultas eligen antes las preguntas que salen en más de una
+ejecución, sin ventanas ni FINAL y con un estado mínimo (`min(trace_id) != max(trace_id)`
+en lugar de contar trazas distintas): con tráfico real casi ninguna pregunta se repite, y
+sólo ésas se ordenan. SQLite usa después ventanas sobre ese resto; ClickHouse no usa
+ventanas: la primera de cada ejecución y la primera de cada pregunta salen de `argMin`
+con la tupla de desempate, y «la misma respuesta que la primera» se cuenta agrupando
+también por la salida y quedándose con el grupo que contiene a la primera. El coste se
+calcula en los dos igual: el de todas las de la misma respuesta menos el de la primera.
+
+Medida con la carga de siete días (500.000 spans al día), donde casi ninguna pregunta se
+repite, que es el peor caso del filtro previo: agrupar por el texto de (paso, modelo,
+`loop_hash`) pedía 270 MiB; agrupar por su `sipHash64`, y comparar el hash de la traza,
+131–164 MiB, en el mismo tiempo (0,5 s con un día y 1,4 s con siete). El riesgo de una
+colisión de 64 bits es dejar fuera una pregunta, y en una ventana no se espera ninguna.
+
+Pruebas: `test_regla_cache_semantica.py` en los dos almacenes (la misma respuesta sin
+dinero, la cuenta contra la primera con su porcentaje, la primera que marca la
+respuesta, las repeticiones dentro de una ejecución, dos preguntas en un paso, otro
+modelo, las evaluaciones, los errores, pocas, sin muestra no hay porcentaje, lo que ya
+reclama el modelo caro, la ficha igual que la tarjeta, otra respuesta en medio de dos
+iguales y la traza de ejemplo). Una de paridad sobre empates en `test_paridad.py`, con su
+mitad local, y el caso en el catálogo con sus garantías. Se rompió a propósito catorce
+veces en SQLite, la regla y el motor, y ocho en la consulta de ClickHouse. Fallan todas.
+Dos de ClickHouse no fallaban al principio: tomar la última ejecución de cada respuesta
+en lugar de la primera, y elegir la traza de ejemplo sin exigir que repitiera respuesta.
+Ninguna prueba ponía otra respuesta entre dos iguales, ni dos preguntas con trazas de
+distinto orden; ahora las dos lo hacen.

@@ -157,6 +157,11 @@ SYSTEM_COHERE = "cohere"
 #: para que un experimento hecho a propósito no salga como algo que arreglar (D-135).
 EVAL_TAG = "laplace-eval"
 
+#: Etiqueta que pone el usuario en una ejecución cuya respuesta puede esperar horas: un
+#: proceso nocturno, una clasificación en masa. Con ella, el backend propone mandar sus
+#: llamadas por la API de lotes, que cuesta la mitad (D-199). Sin ella no lo sabemos.
+PUEDE_ESPERAR_TAG = "laplace-puede-esperar"
+
 # Desde dónde del código del usuario se llama al modelo (D-185). Los nombres son los de
 # las convenciones de OpenTelemetry; la ruta, relativa al repositorio (`_sitio.py`).
 CODE_FILE_PATH = "code.file.path"

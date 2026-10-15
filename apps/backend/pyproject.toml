@@ -39,6 +39,8 @@ github = ["cryptography>=42"]
 # (docs/tests-con-modelo-local.md).
 dev = [
     "pytest>=8.0",
+    # La suite en paralelo: `-n 2 --dist loadfile` (cada fichero entero en un proceso).
+    "pytest-xdist>=3.5",
     "httpx>=0.27",
     "httpx2>=0.28",
     "ruff>=0.5",

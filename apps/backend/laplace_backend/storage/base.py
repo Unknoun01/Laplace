@@ -270,6 +270,67 @@ class HistoryGroup:
 
 
 @dataclass
+class DeferrableGroup:
+    """Las llamadas de un paso que podrían ir por la API de lotes, por (paso, modelo)
+    (D-199).
+
+    Sólo cuentan las que no esperan la respuesta de otra llamada al modelo de la misma
+    ejecución (empiezan antes de que acabe ninguna) y van a tarifa estándar. Se separan
+    en dos: las de ejecuciones que el usuario marcó con `laplace-puede-esperar`
+    (`declared_*`), de las que se sabe que pueden esperar, y las de ejecuciones sin
+    usuario ni sesión en un proyecto que sí los pone en otras (`open_*`), de las que
+    sólo se sospecha. `chained` son las que esperan otra respuesta: no cuentan.
+    """
+
+    name: str
+    model: str
+    step_key: str = ""
+    site: str = ""
+    hint: str = ""
+    declared_calls: int = 0
+    declared_traces: int = 0
+    declared_cost_usd: float = 0.0
+    declared_unknown_cost_spans: int = 0
+    declared_assumed_rate_spans: int = 0
+    open_calls: int = 0
+    open_traces: int = 0
+    open_cost_usd: float = 0.0
+    open_unknown_cost_spans: int = 0
+    open_assumed_rate_spans: int = 0
+    chained: int = 0
+    #: Ejecuciones del proyecto con usuario o sesión, hasta el mínimo que se pide.
+    traces_with_person: int = 0
+    sample_trace_id: str = ""
+    last_seen: datetime | None = None
+
+
+@dataclass
+class CacheableGroup:
+    """La misma pregunta a un paso en ejecuciones distintas, por (paso, modelo) (D-200).
+
+    «La misma pregunta» es el mismo `loop_hash` (la entrada sin los números). De cada
+    ejecución cuenta sólo su primera llamada con esa pregunta: las de dentro son de la
+    repetición y los bucles. `repeated` son todas menos la de la primera ejecución;
+    `same_answer`, las de ésas cuya salida (`loop_out_hash`) es la de la primera, y su
+    coste es `same_answer_cost_usd`. `questions`, las preguntas distintas que se repiten.
+    """
+
+    name: str
+    model: str
+    step_key: str = ""
+    site: str = ""
+    hint: str = ""
+    questions: int = 0
+    repeated: int = 0
+    same_answer: int = 0
+    same_answer_cost_usd: float = 0.0
+    same_answer_unknown_cost_spans: int = 0
+    same_answer_assumed_rate_spans: int = 0
+    sample_trace_id: str = ""
+    last_seen: datetime | None = None
+
+
+@dataclass
 class ModelUsage:
     """Uso agregado de un modelo por paso, para razonar sobre alternativas.
 
@@ -843,6 +904,16 @@ class SpanStore(Protocol):
         """La consulta de los reintentos por JSON roto, tal cual se ejecuta (D-194)."""
 
     @property
+    def deferrable_groups_sql(self) -> str:
+        """La consulta de las llamadas que podrían ir por lotes, tal cual se ejecuta
+        (D-199)."""
+
+    @property
+    def cacheable_groups_sql(self) -> str:
+        """La consulta de las preguntas repetidas entre ejecuciones, tal cual se ejecuta
+        (D-200)."""
+
+    @property
     def model_usage_sql(self) -> str:
         """La consulta que agrega el uso por paso, tal cual se ejecuta."""
 
@@ -1013,6 +1084,24 @@ class SpanStore(Protocol):
         limit: int = 20,
     ) -> list[HistoryGroup]:
         """Pasos cuya entrada crece en cada turno sin bajar nunca, por paso (D-195)."""
+
+    def deferrable_groups(
+        self,
+        project_id: str,
+        window: Window,
+        *,
+        min_llamadas: int = 20,
+        min_persona: int = 20,
+        limit: int = 20,
+    ) -> list[DeferrableGroup]:
+        """Llamadas que no esperan a otra y podrían ir por lotes, por paso y modelo
+        (D-199)."""
+
+    def cacheable_groups(
+        self, project_id: str, window: Window, *, min_mismas: int = 5, limit: int = 20,
+    ) -> list[CacheableGroup]:
+        """La misma pregunta con la misma respuesta en ejecuciones distintas, por paso y
+        modelo (D-200)."""
 
     def sample_conversation(
         self, project_id: str, window: Window, step_key: str, conversation: str,

@@ -22,7 +22,14 @@ from ..storage.base import (
     Window,
     WindowSummary,
 )
-from . import cache_compartida, historial, json_roto, salida_truncada
+from . import (
+    cache_compartida,
+    cache_semantica,
+    historial,
+    json_roto,
+    lotes,
+    salida_truncada,
+)
 from .bucle import _loop_detail, _loop_finding
 from .contexto_fijo import _fixed_context_detail, _fixed_context_finding
 from .grafico import construir as construir_grafico
@@ -331,6 +338,15 @@ def detect(store: Any, project_id: str, window: Window) -> list[Finding]:
     # las demás ya reclaman sobre las llamadas de la versión cara.
     findings += _hallazgos_de_prompts(store, project_id, window, findings, summary, dias, base)
 
+    # Trabajo que podría ir por lotes (D-199). Va la última de todas: el descuento se
+    # aplica a lo que queda de cada paso después de lo que reclaman las demás.
+    findings += _hallazgos_de_lotes(store, project_id, window, findings, usos, summary, dias, base)
+
+    # La misma pregunta con la misma respuesta en ejecuciones distintas (D-200). No pone
+    # dinero en el total, así que no descuenta a nadie; su «hasta» es sobre lo que queda
+    # de cada paso después de todas las demás, lotes incluida.
+    findings += _hallazgos_de_cache(store, project_id, window, findings, usos, summary, dias)
+
     # Primero lo que más dinero devuelve; los que sólo cuestan tiempo, al final,
     # ordenados por el tiempo que recuperan. Se ordena por el dinero YA GASTADO y no
     # por el proyectado: los dos dan el mismo orden —la proyección multiplica a todos
@@ -417,6 +433,88 @@ def _reclamado_por_paso(findings: list[Finding]) -> dict[str, float]:
             continue
         for paso, dinero in reparto(f).items():
             salida[paso] = salida.get(paso, 0.0) + dinero
+    return salida
+
+
+def _coste_por_paso(usos: list[ModelUsage]) -> dict[str, float]:
+    salida: dict[str, float] = {}
+    for uso in usos:
+        salida[uso.key] = salida.get(uso.key, 0.0) + uso.cost_usd
+    return salida
+
+
+def _reclamado_por_todas(findings: list[Finding]) -> dict[str, float]:
+    """Lo que cada paso tiene reclamado por todas las reglas, prompts incluidos."""
+    salida: dict[str, float] = {}
+    for f in findings:
+        for paso, dinero in reparto(f).items():
+            salida[paso] = salida.get(paso, 0.0) + dinero
+    return salida
+
+
+def _grupos_de_lotes(store: Any, project_id: str, window: Window, compartidos: set[str]):
+    return _nombrar(
+        store.deferrable_groups(
+            project_id,
+            window,
+            min_llamadas=lotes.MIN_LLAMADAS_LOTES,
+            min_persona=lotes.MIN_TRAZAS_CON_PERSONA,
+        ),
+        compartidos,
+    )
+
+
+def _hallazgos_de_lotes(
+    store: Any,
+    project_id: str,
+    window: Window,
+    findings: list[Finding],
+    usos: list[ModelUsage],
+    summary: WindowSummary,
+    dias: float,
+    base: float | None,
+) -> list[Finding]:
+    reclamado = _reclamado_por_todas(findings)
+    coste = _coste_por_paso(usos)
+    salida = []
+    for grupo in _grupos_de_lotes(store, project_id, window, _pasos_compartidos(usos)):
+        hallazgo = lotes.hallazgo(
+            grupo, reclamado.get(grupo.step_key, 0.0), coste.get(grupo.step_key, 0.0),
+            summary, dias, base,
+        )
+        if hallazgo is not None:
+            salida.append(_con_fecha(hallazgo, grupo))
+    return salida
+
+
+def _grupos_de_cache(store: Any, project_id: str, window: Window, compartidos: set[str]):
+    return _nombrar(
+        store.cacheable_groups(
+            project_id, window, min_mismas=cache_semantica.MIN_MISMAS_CACHE
+        ),
+        compartidos,
+    )
+
+
+def _hallazgos_de_cache(
+    store: Any,
+    project_id: str,
+    window: Window,
+    findings: list[Finding],
+    usos: list[ModelUsage],
+    summary: WindowSummary,
+    dias: float,
+) -> list[Finding]:
+    reclamado = _reclamado_por_todas(findings)
+    coste = _coste_por_paso(usos)
+    salida = []
+    for grupo in _grupos_de_cache(store, project_id, window, _pasos_compartidos(usos)):
+        hallazgo = cache_semantica.hallazgo(
+            grupo, reclamado.get(grupo.step_key, 0.0), coste.get(grupo.step_key, 0.0),
+            summary, dias,
+        )
+        if hallazgo is not None:
+            salida.append(_con_fecha(hallazgo, grupo))
     return salida
 
 
@@ -690,6 +788,44 @@ def _detalle_historial(
     return None
 
 
+def _detalle_lotes(
+    store: Any, project_id: str, window: Window, key: str, ctx: _Contexto
+) -> FindingDetail | None:
+    """Recalcula como `detect()`: su cifra es lo que queda después de las demás."""
+    otras = [f for f in detect(store, project_id, window) if f.kind != lotes.KIND]
+    reclamado = _reclamado_por_todas(otras)
+    usos = store.model_usage(project_id, window, min_calls=1)
+    coste = _coste_por_paso(usos)
+    for grupo in _grupos_de_lotes(store, project_id, window, _pasos_compartidos(usos)):
+        if f"{grupo.step_key}:{grupo.model}" != key:
+            continue
+        ya, total = reclamado.get(grupo.step_key, 0.0), coste.get(grupo.step_key, 0.0)
+        finding = lotes.hallazgo(grupo, ya, total, ctx.summary, ctx.dias, ctx.base)
+        if finding is None:
+            return None
+        return lotes.detalle(finding, grupo, ya, total, store.deferrable_groups_sql)
+    return None
+
+
+def _detalle_cache(
+    store: Any, project_id: str, window: Window, key: str, ctx: _Contexto
+) -> FindingDetail | None:
+    """Recalcula como `detect()`: su «hasta» es lo que queda después de las demás."""
+    otras = [f for f in detect(store, project_id, window) if f.kind != cache_semantica.KIND]
+    reclamado = _reclamado_por_todas(otras)
+    usos = store.model_usage(project_id, window, min_calls=1)
+    coste = _coste_por_paso(usos)
+    for grupo in _grupos_de_cache(store, project_id, window, _pasos_compartidos(usos)):
+        if f"{grupo.step_key}:{grupo.model}" != key:
+            continue
+        ya, total = reclamado.get(grupo.step_key, 0.0), coste.get(grupo.step_key, 0.0)
+        finding = cache_semantica.hallazgo(grupo, ya, total, ctx.summary, ctx.dias)
+        if finding is None:
+            return None
+        return cache_semantica.detalle(finding, grupo, ya, total, store.cacheable_groups_sql)
+    return None
+
+
 @dataclass
 class _Contexto:
     """Lo que toda ficha necesita saber de la ventana, calculado una sola vez."""
@@ -716,6 +852,8 @@ _DETALLADORES = {
     salida_truncada.KIND: _detalle_truncada,
     json_roto.KIND: _detalle_json_roto,
     historial.KIND: _detalle_historial,
+    lotes.KIND: _detalle_lotes,
+    cache_semantica.KIND: _detalle_cache,
 }
 
 #: Los tipos que `detail()` sabe reconstruir. Derivado, nunca escrito a mano: una lista

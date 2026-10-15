@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 196 decisiones.
+final. 201 decisiones.
 
 ## Coste, precios y caché
 
@@ -36,6 +36,9 @@ final. 196 decisiones.
 - [D-184](../DECISIONS.md#d-184--un-límite-de-gasto-y-de-bucles-en-el-sdk-con-la-misma-cuenta-que-la-traza) — Un límite de gasto y de bucles en el SDK, con la misma cuenta que la traza
 - [D-190](../DECISIONS.md#d-190--cache_control-y-un-tope-de-vueltas-escritos-sobre-el-árbol-de-sintaxis) — `cache_control` y un tope de vueltas, escritos sobre el árbol de sintaxis
 - [D-195](../DECISIONS.md#d-195--historial-que-crece-sin-límite-tokens-medidos-sin-dinero) — Historial que crece sin límite: tokens medidos, sin dinero
+- [D-196](../DECISIONS.md#d-196--lecturas-de-caché-pagadas-en-openai-la-ficha-propone-lo-mismo-que-la-tarjeta) — Lecturas de caché pagadas en OpenAI: la ficha propone lo mismo que la tarjeta
+- [D-199](../DECISIONS.md#d-199--trabajo-que-podría-ir-por-lotes-con-la-marca-hay-dinero-sin-ella-una-pregunta) — Trabajo que podría ir por lotes: con la marca hay dinero, sin ella una pregunta
+- [D-200](../DECISIONS.md#d-200--caché-semántica-la-misma-pregunta-con-la-misma-respuesta-hasta-x-y-sin-dinero-en-el-total) — Caché semántica: la misma pregunta con la misma respuesta, «hasta X» y sin dinero en el total
 
 ## Detección: reglas y hallazgos
 
@@ -78,6 +81,7 @@ final. 196 decisiones.
 - [D-185](../DECISIONS.md#d-185--el-arreglo-del-modelo-caro-propuesto-como-pull-request-en-el-repositorio-del-usuario) — El arreglo del modelo caro, propuesto como pull request en el repositorio del usuario
 - [D-187](../DECISIONS.md#d-187--tope-bucles-y-parada-desde-laplace-el-sdk-los-pide-cada-30-s-y-manda-el-más-estricto) — Tope, bucles y parada desde Laplace: el SDK los pide cada 30 s y manda el más estricto
 - [D-191](../DECISIONS.md#d-191--el-webhook-de-github-marca-el-hallazgo-como-arreglado-al-fusionar-su-pr) — El webhook de GitHub marca el hallazgo como arreglado al fusionar su PR
+- [D-197](../DECISIONS.md#d-197--la-carga-mide-lo-que-habrá-casos-para-las-reglas-nuevas-y-preagregados-calculados) — La carga mide lo que habrá: casos para las reglas nuevas y preagregados calculados
 
 ## Probar: evaluaciones, juez y replay
 
@@ -91,6 +95,7 @@ final. 196 decisiones.
 - [D-156](../DECISIONS.md#d-156--el-producto-alrededor-del-ciclo-detectar-probar-arreglar-verificar) — El producto alrededor del ciclo: detectar, probar, arreglar, verificar
 - [D-160](../DECISIONS.md#d-160--prompts-sin-tiradas-de-evaluación-envoltorios-con--y-el-modelo-rápido-ponderado) — Prompts sin tiradas de evaluación, envoltorios con «=» y el modelo rápido ponderado
 - [D-167](../DECISIONS.md#d-167--probar-el-modelo-barato-reenviando-las-llamadas-reales-sin-escribir-código) — Probar el modelo barato reenviando las llamadas reales, sin escribir código
+- [D-197](../DECISIONS.md#d-197--la-carga-mide-lo-que-habrá-casos-para-las-reglas-nuevas-y-preagregados-calculados) — La carga mide lo que habrá: casos para las reglas nuevas y preagregados calculados
 
 ## Prompts
 
@@ -131,6 +136,7 @@ final. 196 decisiones.
 - [D-181](../DECISIONS.md#d-181--redacción-de-datos-personales-y-muestreo-por-cola-en-el-sdk) — Redacción de datos personales y muestreo por cola, en el SDK
 - [D-184](../DECISIONS.md#d-184--un-límite-de-gasto-y-de-bucles-en-el-sdk-con-la-misma-cuenta-que-la-traza) — Un límite de gasto y de bucles en el SDK, con la misma cuenta que la traza
 - [D-187](../DECISIONS.md#d-187--tope-bucles-y-parada-desde-laplace-el-sdk-los-pide-cada-30-s-y-manda-el-más-estricto) — Tope, bucles y parada desde Laplace: el SDK los pide cada 30 s y manda el más estricto
+- [D-196](../DECISIONS.md#d-196--lecturas-de-caché-pagadas-en-openai-la-ficha-propone-lo-mismo-que-la-tarjeta) — Lecturas de caché pagadas en OpenAI: la ficha propone lo mismo que la tarjeta
 
 ## Almacenes y escala
 
@@ -154,6 +160,7 @@ final. 196 decisiones.
 - [D-169](../DECISIONS.md#d-169--health-nombra-el-almacén-que-hay-y-la-limpieza) — `/health` nombra el almacén que hay, y la limpieza
 - [D-173](../DECISIONS.md#d-173--retención-por-proyecto-y-borrar-lo-de-una-persona-o-un-cliente) — Retención por proyecto, y borrar lo de una persona o un cliente
 - [D-183](../DECISIONS.md#d-183--las-medianas-del-uso-por-paso-la-misma-cuenta-en-los-dos-almacenes-y-una-llamada-con-respuesta-y-sin-recuento-ya-no-sale-gratis) — Las medianas del uso por paso, la misma cuenta en los dos almacenes; y una llamada con respuesta y sin recuento ya no sale gratis
+- [D-197](../DECISIONS.md#d-197--la-carga-mide-lo-que-habrá-casos-para-las-reglas-nuevas-y-preagregados-calculados) — La carga mide lo que habrá: casos para las reglas nuevas y preagregados calculados
 
 ## Interfaz
 
@@ -187,6 +194,7 @@ final. 196 decisiones.
 - [D-188](../DECISIONS.md#d-188--el-grafo-del-proyecto-el-agente-entero-sumando-las-trazas) — El grafo del proyecto: el agente entero, sumando las trazas
 - [D-189](../DECISIONS.md#d-189--las-pantallas-del-plano-de-control-tope-y-parada-en-ajustes-el-agente-entero-en-el-panel) — Las pantallas del plano de control: Tope y parada en Ajustes, el agente entero en el Panel
 - [D-192](../DECISIONS.md#d-192--las-pantallas-del-bot-más-allá-el-pr-de-cada-arreglo-y-el-webhook-en-ajustes) — Las pantallas del bot, más allá: el PR de cada arreglo y el webhook en Ajustes
+- [D-196](../DECISIONS.md#d-196--lecturas-de-caché-pagadas-en-openai-la-ficha-propone-lo-mismo-que-la-tarjeta) — Lecturas de caché pagadas en OpenAI: la ficha propone lo mismo que la tarjeta
 
 ## Alertas y presupuesto
 
@@ -632,3 +640,8 @@ final. 196 decisiones.
 - [D-193](../DECISIONS.md#d-193--salida-truncada-la-respuesta-cortada-por-el-tope-de-salida-y-rehecha) — Salida truncada: la respuesta cortada por el tope de salida, y rehecha
 - [D-194](../DECISIONS.md#d-194--reintentos-por-json-mal-formado-la-salida-que-no-se-lee-y-rehecha) — Reintentos por JSON mal formado: la salida que no se lee, y rehecha
 - [D-195](../DECISIONS.md#d-195--historial-que-crece-sin-límite-tokens-medidos-sin-dinero) — Historial que crece sin límite: tokens medidos, sin dinero
+- [D-196](../DECISIONS.md#d-196--lecturas-de-caché-pagadas-en-openai-la-ficha-propone-lo-mismo-que-la-tarjeta) — Lecturas de caché pagadas en OpenAI: la ficha propone lo mismo que la tarjeta
+- [D-197](../DECISIONS.md#d-197--la-carga-mide-lo-que-habrá-casos-para-las-reglas-nuevas-y-preagregados-calculados) — La carga mide lo que habrá: casos para las reglas nuevas y preagregados calculados
+- [D-198](../DECISIONS.md#d-198--el-historial-sólo-abre-las-conversaciones-que-pueden-contar) — El historial sólo abre las conversaciones que pueden contar
+- [D-199](../DECISIONS.md#d-199--trabajo-que-podría-ir-por-lotes-con-la-marca-hay-dinero-sin-ella-una-pregunta) — Trabajo que podría ir por lotes: con la marca hay dinero, sin ella una pregunta
+- [D-200](../DECISIONS.md#d-200--caché-semántica-la-misma-pregunta-con-la-misma-respuesta-hasta-x-y-sin-dinero-en-el-total) — Caché semántica: la misma pregunta con la misma respuesta, «hasta X» y sin dinero en el total

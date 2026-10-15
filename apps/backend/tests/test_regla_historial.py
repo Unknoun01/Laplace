@@ -201,3 +201,85 @@ def test_no_cuenta_las_llamadas_que_reclaman_la_truncada_y_la_del_json(store):
     (h,) = _historiales(store, "rehecha")
     assert "500" in h.title, h.title
     assert h.window_waste_tokens == 4 * 5_000
+
+
+def test_una_llamada_excluida_no_hace_que_el_filtro_previo_la_deje_fuera(store):
+    """El filtro previo de ClickHouse pedía crecer 200 tokens por cada fila menos una,
+    contando también las que la regla no cuenta (D-198). Una conversación que crece justo
+    lo que se pide y trae un JSON roto rehecho tenía cinco filas y cuatro turnos: se
+    quedaba fuera en ClickHouse y salía en SQLite."""
+    spans = []
+    for c in range(4):
+        traza = f"justa-{c}"
+        rota = _llamada("justa", traza, c * 100, 1_200)
+        rota.output_json = "roto"
+        spans.append(rota)
+        spans += [
+            _llamada("justa", traza, c * 100 + 1 + k, entrada)
+            for k, entrada in enumerate([1_000, 1_200, 1_400, 1_600])
+        ]
+    store.insert_spans(spans)
+    (h,) = _historiales(store, "justa")
+    assert h.window_waste_tokens == 4 * (200 + 400 + 600)
+
+
+def test_las_copias_se_cuentan_en_toda_la_traza(store):
+    """Una llamada repetida tres veces en la traza es de la repetición, aunque dos de las
+    copias las haga otro paso: `dedup_hash` no lleva el paso (D-198). ClickHouse las
+    contaba sólo entre las conversaciones que pasaban su filtro previo, y si el otro
+    paso no lo pasaba, el turno repetido se quedaba en el historial."""
+    spans = []
+    for c in range(4):
+        traza = f"copias-{c}"
+        turnos = [
+            _llamada("copias", traza, c * 100 + k, entrada)
+            for k, entrada in enumerate([1_000, 1_500, 2_000, 2_500])
+        ]
+        repetida = f"rep-{c}"
+        turnos[1].dedup_hash = repetida
+        for k in range(2):
+            otra = _llamada("copias", traza, c * 100 + 10 + k, 1_500, paso="resumir")
+            otra.dedup_hash = repetida
+            spans.append(otra)
+        spans += turnos
+    store.insert_spans(spans)
+    # Sin el turno repetido quedan tres turnos por conversación: no es un historial.
+    assert _historiales(store, "copias") == []
+
+
+def test_una_llamada_que_no_cuenta_al_final_no_esconde_el_historial(store):
+    """El filtro previo de ClickHouse mira si la primera llamada es la menor y la última
+    la mayor (D-198). Tiene que mirarlo sólo entre las que cuentan: una respuesta cortada
+    al final, con la entrada recortada, no es un turno del historial."""
+    spans = []
+    for c in range(4):
+        traza = f"final-{c}"
+        spans += [
+            _llamada("final", traza, c * 100 + k, entrada) for k, entrada in enumerate(CRECE)
+        ]
+        cortada = _llamada("final", traza, c * 100 + 50, 500)
+        cortada.llm.finish_reasons = ["length"]
+        spans.append(cortada)
+    store.insert_spans(spans)
+    (h,) = _historiales(store, "final")
+    assert h.window_waste_tokens == 4 * 5_000
+
+
+def test_un_lote_reenviado_no_convierte_dos_llamadas_en_tres_copias(store):
+    """Las copias son spans distintos, no filas: un lote reenviado y aún sin fusionar
+    duplica las filas en ClickHouse, y dos llamadas iguales parecían cuatro (D-198)."""
+    if hasattr(store, "_client"):
+        store._client.command("SYSTEM STOP MERGES spans")
+    spans = []
+    for c in range(4):
+        traza = f"reenvio-{c}"
+        turnos = [
+            _llamada("reenvio", traza, c * 100 + k, entrada)
+            for k, entrada in enumerate([1_000, 1_500, 1_500, 2_000, 2_500])
+        ]
+        turnos[1].dedup_hash = turnos[2].dedup_hash = f"dos-{c}"
+        spans += turnos
+    store.insert_spans(spans)
+    store.insert_spans(spans)
+    (h,) = _historiales(store, "reenvio")
+    assert h.window_waste_tokens == 4 * (500 + 500 + 1_000 + 1_500)
