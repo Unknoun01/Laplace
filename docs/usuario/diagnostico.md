@@ -14,6 +14,7 @@
 | Caché compartida | El mismo prefijo en varios pasos de una ejecución, sin compartir la caché | Las lecturas que la caché podría servir, menos una escritura por ejecución |
 | Prompt más caro | La versión de un prompt gestionado que cuesta más por ejecución que la anterior | La diferencia por ejecución, sobre el tráfico de la versión nueva |
 | Por lotes | Llamadas que no esperan a ninguna otra, en ejecuciones que pueden esperar | Lo que costaron, por el descuento por lotes que publica el proveedor (la mitad en OpenAI y Anthropic) |
+| Caché de respuestas | El mismo paso recibe la misma pregunta (salvo los números) en ejecuciones distintas y responde exactamente lo mismo | No entra en el total: dice «hasta» lo que costaron esas respuestas repetidas, porque no sabemos si la misma respuesta vale para el siguiente usuario. Compruébalo con `laplace replay` y una evaluación antes de cachear |
 
 Dos reglas nunca reclaman el mismo dinero: lo que ya cuenta una, las demás lo
 descuentan. El total de arriba es la suma, y se puede sumar.

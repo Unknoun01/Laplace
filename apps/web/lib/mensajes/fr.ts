@@ -958,6 +958,7 @@ export const fr: Mensajes = {
   "aj.regla.json_roto": "JSON cassé",
   "aj.regla.historial": "Historique qui grossit",
   "aj.regla.lotes": "Travail qui peut passer par lots",
+  "aj.regla.cache_semantica": "Réponses qui pourraient être mises en cache",
   "diag.ahorrado_one": "Vous avez déjà cessé de payer {coste} depuis que vous avez corrigé un problème.",
   "diag.ahorrado_other": "Vous avez déjà cessé de payer {coste} depuis que vous avez corrigé {n} problèmes.",
   "diag.ahorrado.suelo": "au moins {coste}",
