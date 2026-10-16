@@ -12,6 +12,10 @@ Lo que se exige, en los dos almacenes:
 * que las tiradas de evaluación no cuenten;
 * que no reclame tokens que ya reclama el contexto fijo;
 * y que su ficha cuente lo mismo que su tarjeta.
+
+Y en ClickHouse, dos veces: en crudo y con las horas calculadas en los preagregados
+(D-207), que tienen que dar lo mismo. Las conversaciones que cruzan horas, las copias en
+otra hora y los bordes de la ventana tienen sus propias pruebas al final.
 """
 
 from __future__ import annotations
@@ -34,7 +38,7 @@ VENTANA = Window(since=AHORA - timedelta(hours=1), until=AHORA + timedelta(hours
 KIND = "historial"
 
 
-@pytest.fixture(params=["sqlite", "clickhouse"])
+@pytest.fixture(params=["sqlite", "clickhouse", "clickhouse-calculado"])
 def store(request, tmp_path):
     if request.param == "sqlite":
         local = SQLiteStore(tmp_path / "h.db")
@@ -48,7 +52,20 @@ def store(request, tmp_path):
         pytest.skip("no hay ClickHouse escuchando")
     base = f"prueba_d195_{uuid.uuid4().hex[:8]}"
     general._client.command(f"CREATE DATABASE {base}")
-    nube = ClickHouseStore(Settings(clickhouse_database=base))
+    if request.param == "clickhouse-calculado":
+
+        class Calculado(ClickHouseStore):
+            """Calcula los preagregados de lo que escribe, como haría el bucle de fondo."""
+
+            def insert_spans(self, spans):
+                hechos = super().insert_spans(spans)
+                while self.recalcular_preagregados(limite=500, quieta_s=0):
+                    pass
+                return hechos
+
+        nube = Calculado(Settings(clickhouse_database=base))
+    else:
+        nube = ClickHouseStore(Settings(clickhouse_database=base))
     nube.migrate()
     try:
         yield nube
@@ -283,3 +300,196 @@ def test_un_lote_reenviado_no_convierte_dos_llamadas_en_tres_copias(store):
     store.insert_spans(spans)
     (h,) = _historiales(store, "reenvio")
     assert h.window_waste_tokens == 4 * (500 + 500 + 1_000 + 1_500)
+
+
+# ---------------------------------------------------------------------------------
+# Lo que cruza horas (D-207): con las horas calculadas, la conversación sale de juntar
+# las filas de cada hora, y lo que la hora no ve entero se calcula en crudo.
+# ---------------------------------------------------------------------------------
+
+BASE = datetime(2026, 9, 20, 10, 0, tzinfo=timezone.utc)
+#: De 9:30 a 14:00: la hora de las 9 la corta la ventana; de 10 a 13, enteras.
+FIJA = Window(since=BASE - timedelta(minutes=30), until=BASE + timedelta(hours=4), days=1)
+
+
+def _turno(proyecto, traza, cuando, entrada, *, sesion=None, paso="conversar", copia=None):
+    span = _llamada(proyecto, traza, 0, entrada, sesion=sesion, paso=paso)
+    span.start_time, span.end_time = cuando, cuando + timedelta(milliseconds=600)
+    if copia:
+        span.dedup_hash = copia
+    return span
+
+
+def _cruces(proyecto: str) -> list[Span]:
+    spans = []
+    turnos = [timedelta(seconds=40 * k) for k in range(5)]
+    # Sesiones de 10:58 a 11:00:40, un turno por ejecución: tres turnos en la hora de
+    # las 10 y dos en la de las 11. La cuarta baja justo en el borde de las dos horas.
+    for c in range(4):
+        entradas = [1_000, 1_500, 2_600, 2_500, 3_000] if c == 3 else CRECE
+        for k, entrada in enumerate(entradas):
+            cuando = BASE + timedelta(minutes=58) + turnos[k]
+            spans.append(_turno(proyecto, f"s{c}-{k}", cuando, entrada, sesion=f"ses-{c}"))
+    # Ejecuciones sin sesión que cruzan de las 11 a las 12, con dos turnos en cada hora:
+    # ninguna hora tiene sola una conversación de cuatro turnos.
+    for c in range(3):
+        for k, entrada in enumerate([1_000, 1_500, 2_000, 2_500]):
+            cuando = BASE + timedelta(hours=1, minutes=59) + turnos[k]
+            spans.append(_turno(proyecto, f"r{c}", cuando, entrada, paso="resumir"))
+    # A las 13, cuatro ejecuciones de cuatro turnos. En la última, el segundo turno se
+    # repite dos veces más a las 12:50 desde otro paso: tres copias en la ventana, y fuera
+    # del historial, aunque en su hora sólo haya una.
+    for c in range(4):
+        for k, entrada in enumerate([1_000, 1_500, 2_000, 2_500]):
+            cuando = BASE + timedelta(hours=3, minutes=10) + turnos[k]
+            copia = "rep-x3" if c == 3 and k == 1 else None
+            spans.append(_turno(proyecto, f"x{c}", cuando, entrada, paso="extraer", copia=copia))
+    for k in range(2):
+        cuando = BASE + timedelta(hours=2, minutes=50, seconds=k)
+        spans.append(_turno(proyecto, "x3", cuando, 1_500, paso="otro", copia="rep-x3"))
+    # Sesiones a las 12:20, un turno por ejecución. En la cuarta, el tercer turno se
+    # repite dos veces más a las 13:30 desde otro paso: fuera del historial, aunque en su
+    # hora cuente. Su ejecución cruza la hora y no trae ninguna otra llamada de la sesión,
+    # así que en crudo la fila ya no tiene ninguna traza que cruce: lo que decide de dónde
+    # sale es la tabla, o la sesión se perdería.
+    for c in range(4):
+        entradas = CRECE if c == 3 else [1_000, 1_500, 2_000, 2_500]
+        for k, entrada in enumerate(entradas):
+            cuando = BASE + timedelta(hours=2, minutes=20) + turnos[k]
+            copia = "rep-v3" if c == 3 and k == 2 else None
+            spans.append(_turno(proyecto, f"v{c}-{k}", cuando, entrada, sesion=f"rev-{c}",
+                                paso="revisar", copia=copia))
+    for k in range(2):
+        cuando = BASE + timedelta(hours=3, minutes=30, seconds=k)
+        spans.append(_turno(proyecto, "v3-2", cuando, 2_000, paso="otro", copia="rep-v3"))
+    # A las 9:35, tres ejecuciones de cuatro turnos cuyo segundo turno se repite dos veces
+    # a las 9:20, antes de que empiece la ventana: en ella hay una copia sola y cuenta.
+    for c in range(3):
+        for k, entrada in enumerate([1_000, 1_500, 2_000, 2_500]):
+            cuando = BASE - timedelta(minutes=25) + turnos[k]
+            copia = f"rep-b{c}" if k == 1 else None
+            spans.append(_turno(proyecto, f"b{c}", cuando, entrada, paso="borde", copia=copia))
+        for k in range(2):
+            cuando = BASE - timedelta(minutes=40, seconds=-k)
+            spans.append(_turno(proyecto, f"b{c}", cuando, 1_500, paso="otro", copia=f"rep-b{c}"))
+    return spans
+
+
+#: (conversaciones, llamadas, trazas, tokens de historial, turnos de la más larga)
+CRUCES = {
+    "k-conversar": (3, 15, 15, 3 * 5_000, 5),
+    "k-resumir": (3, 12, 3, 3 * 3_000, 4),
+    "k-extraer": (3, 12, 3, 3 * 3_000, 4),
+    "k-borde": (3, 12, 3, 3 * 3_000, 4),
+    # La cuarta, sin el turno repetido: 1.000, 1.500, 2.500 y 3.000.
+    "k-revisar": (4, 16, 16, 3 * 3_000 + 4_000, 4),
+}
+
+
+def _grupos(store, proyecto: str, ventana: Window = FIJA):
+    return store.history_groups(
+        proyecto, ventana,
+        min_turnos=insights.historial.MIN_TURNOS_HISTORIAL,
+        min_crece=insights.historial.MIN_CRECIMIENTO_POR_TURNO,
+        min_conversaciones=insights.historial.MIN_CONVERSACIONES_HISTORIAL,
+        min_repeats=insights.MIN_REPEATS,
+        min_vueltas=insights.MIN_VUELTAS_BUCLE,
+    )
+
+
+def _de_los_preagregados(store, proyecto: str, ventana: Window = FIJA) -> bool:
+    """Si la lectura de ClickHouse sale de los preagregados y no entera en crudo."""
+    from laplace_backend.storage import preagregados
+
+    umbrales = dict(preagregados.UMBRALES_HISTORIAL)
+    return preagregados.historial(
+        store._client, proyecto, ventana.since, ventana.until, umbrales
+    ) is not None
+
+
+def test_lo_que_cruza_horas_sale_igual_en_los_tres_caminos(store):
+    store.insert_spans(_cruces("cruces"))
+    grupos = _grupos(store, "cruces")
+    vistos = {
+        g.step_key: (g.conversations, g.calls, g.traces, g.history_tokens, g.max_turns)
+        for g in grupos
+    }
+    assert vistos == CRUCES
+    conversar = next(g for g in grupos if g.step_key == "k-conversar")
+    assert conversar.growth_per_turn == 500
+    assert (conversar.sample_first_input, conversar.sample_last_input) == (1_000, 3_000)
+    assert conversar.sample_conversation in {"s:ses-0", "s:ses-1", "s:ses-2"}
+    assert conversar.last_seen == BASE + timedelta(minutes=58, seconds=160)
+    if type(store).__name__ == "Calculado":
+        assert _de_los_preagregados(store, "cruces")
+
+
+def test_una_hora_sucia_en_medio_se_lee_en_crudo_y_se_junta(store):
+    """Llega tarde un turno de las 11 de una sesión: esa hora está sucia, y la sesión sale
+    de juntar su fila de las 10, de la tabla, con su hora de las 11, en crudo."""
+    store.insert_spans(_cruces("tarde"))
+    tarde = _turno("tarde", "s0-5", BASE + timedelta(minutes=61), 3_500, sesion="ses-0")
+    if hasattr(store, "_client"):
+        from laplace_backend.storage.clickhouse import ClickHouseStore
+
+        # Sin recalcular: como un lote que llega entre dos vueltas del bucle de fondo.
+        ClickHouseStore.insert_spans(store, [tarde])
+    else:
+        store.insert_spans([tarde])
+    grupos = _grupos(store, "tarde")
+    vistos = {g.step_key: (g.conversations, g.calls, g.history_tokens) for g in grupos}
+    assert vistos["k-conversar"] == (3, 16, 3 * 5_000 + 2_500)
+    if type(store).__name__ == "Calculado":
+        assert _de_los_preagregados(store, "tarde")
+
+
+def test_los_umbrales_de_los_preagregados_son_los_de_la_regla():
+    from laplace_backend.storage import preagregados
+
+    assert preagregados.UMBRALES_HISTORIAL == {
+        "min_repeats": insights.MIN_REPEATS,
+        "min_vueltas": insights.MIN_VUELTAS_BUCLE,
+        "min_turnos": insights.historial.MIN_TURNOS_HISTORIAL,
+        "min_crece": insights.historial.MIN_CRECIMIENTO_POR_TURNO,
+    }
+
+
+def test_una_instalacion_de_antes_recalcula_sus_horas(store):
+    """Una instalación con horas ya calculadas y sin `pre_historial`: `migrate` crea la
+    tabla vacía, y esas horas se leerían limpias y sin historial. Tienen que quedar sucias
+    hasta recalcularlas, y mientras tanto leerse en crudo (D-207)."""
+    if type(store).__name__ != "Calculado":
+        pytest.skip("sólo con preagregados calculados")
+    from laplace_backend.storage import preagregados
+
+    store.insert_spans(_cruces("antes"))
+    store._client.command("DROP TABLE pre_historial SYNC")
+    store.migrate()
+    assert preagregados.pendientes(store._client, quieta_s=0), "las horas, sucias otra vez"
+    vistos = {g.step_key: (g.conversations, g.calls, g.traces, g.history_tokens, g.max_turns)
+              for g in _grupos(store, "antes")}
+    assert vistos == CRUCES
+    while store.recalcular_preagregados(limite=500, quieta_s=0):
+        pass
+    assert _de_los_preagregados(store, "antes")
+    vistos = {g.step_key: (g.conversations, g.calls, g.traces, g.history_tokens, g.max_turns)
+              for g in _grupos(store, "antes")}
+    assert vistos == CRUCES
+
+
+def test_un_lote_reenviado_de_lo_que_cruza_no_cuenta_dos_veces(store):
+    """Lo crudo pide sin `FINAL` las trazas que cruzan (D-207): un lote reenviado y aún
+    sin fusionar duplica sus filas, y cada turno contaría dos veces."""
+    if hasattr(store, "_client"):
+        store._client.command("SYSTEM STOP MERGES spans")
+    spans = _cruces("reenviado")
+    store.insert_spans(spans)
+    store.insert_spans(spans)
+    grupos = _grupos(store, "reenviado")
+    vistos = {
+        g.step_key: (g.conversations, g.calls, g.traces, g.history_tokens, g.max_turns)
+        for g in grupos
+    }
+    assert vistos == CRUCES
+    if type(store).__name__ == "Calculado":
+        assert _de_los_preagregados(store, "reenviado")

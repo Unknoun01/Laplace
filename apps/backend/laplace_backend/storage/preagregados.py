@@ -12,7 +12,9 @@ núcleos con uno solo. Hacía falta leer menos.
   suma, estados de ClickHouse (trazas distintas, medianas, el mínimo de entrada);
 * `pre_trazas`: por traza, su primer inicio y su último fin en el minuto;
 * `pre_repes` y `pre_bucles`: por pareja (traza, entrada), sólo las que pueden llegar a
-  repetirse (ver `_CANDIDATAS`).
+  repetirse (ver `_CANDIDATAS`);
+* `pre_historial`: por hora, una fila por (conversación, paso) con sus llamadas que
+  cuentan para el historial que crece (D-207, ver `historial`).
 
 **Cómo se calculan.** Por horas enteras, desde `spans FINAL`, y sustituyendo al cálculo
 anterior de la hora: nunca se suman al insertar. Un lote reenviado y `recalcular_coste`
@@ -38,12 +40,16 @@ el borde de la ventana.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from clickhouse_connect.driver.external import ExternalData
 from laplace.semconv import EVAL_TAG
+
+from .base import _MOTIVOS_SQL
 
 logger = logging.getLogger("laplace.preagregados")
 
@@ -55,7 +61,18 @@ MARGEN = timedelta(hours=1)
 #: Horas recalculadas como mucho por vuelta del bucle de fondo.
 POR_VUELTA = 48
 
-TABLAS = ("pre_pasos", "pre_trazas", "pre_repes", "pre_bucles")
+TABLAS = ("pre_pasos", "pre_trazas", "pre_repes", "pre_bucles", "pre_historial")
+
+#: Una llamada cortada por el tope de salida (D-193), y la conversación y el paso del
+#: historial (D-195). Las usan clickhouse.py y el cálculo del historial (D-207).
+CORTADA = f"arrayExists(m -> lower(m) IN ({_MOTIVOS_SQL}), finish_reasons)"
+CONVERSACION = "if(session_id != '', concat('s:', session_id), concat('t:', trace_id))"
+PASO = "if(step_key != '', step_key, name)"
+
+#: Los umbrales con que se calcula `pre_historial`: deciden qué copias y vueltas quedan
+#: fuera y qué ejecuciones sin sesión no se guardan. Con otros, la lectura va en crudo.
+#: Son los de `insights` (lo comprueba `test_regla_historial.py`).
+UMBRALES_HISTORIAL = {"min_repeats": 3, "min_vueltas": 4, "min_turnos": 4, "min_crece": 200}
 
 
 # ---------------------------------------------------------------------------------
@@ -87,6 +104,10 @@ COLUMNAS = {
         "project_id, minuto, es_eval, trace_id, loop_hash, etiqueta, pista, sitio, tipo, "
         "modelo, paso, ultima, n, entradas, salidas, coste, coste_min, duracion, "
         "duracion_min, tok_in, tok_in_min, tok_out, tok_out_min, sin_tarifa"
+    ),
+    "pre_historial": (
+        "project_id, minuto, conversacion, paso, etiqueta, pista, sitio, modelo, turnos, "
+        "suma, primera, ultima, maxima, bajadas_hora, ids, traza, ultima_vez"
     ),
 }
 
@@ -200,6 +221,83 @@ _PARCIAL = {
     """,
 }
 
+#: El historial de cada (conversación, paso) dentro de cada hora (D-207), con los
+#: criterios de `HISTORY_GROUPS_SQL`: las llamadas con entrada, sin cortar ni el JSON
+#: roto, y sin las copias ni las vueltas, contadas en `{rango}` y no en la ventana. Por
+#: eso lo que se lee en crudo tiene que traer las trazas enteras (ver `historial`). Las
+#: bajadas son las de dentro de la hora; las de un borde las suma quien compone.
+_HISTORIAL_PARCIAL = f"""
+    SELECT
+        project_id,
+        toStartOfHour(start_time)                  AS minuto,
+        conversacion,
+        paso_clave                                 AS paso,
+        max(etiqueta)                              AS etiqueta,
+        max(step_hint)                             AS pista,
+        max(step_site)                             AS sitio,
+        max(toString(request_model))               AS modelo,
+        count()                                    AS turnos,
+        sum(input_tokens)                          AS suma,
+        min(primera_turno)                         AS primera,
+        argMax(input_tokens, (start_time, span_id)) AS ultima,
+        max(input_tokens)                          AS maxima,
+        countIf(crece < 0)                         AS bajadas_hora,
+        groupUniqArray(trace_id)                   AS ids,
+        max(trace_id)                              AS traza,
+        max(start_time)                            AS ultima_vez
+    FROM (
+        SELECT
+            *,
+            toInt64(input_tokens) - lagInFrame(toInt64(input_tokens), 1,
+                toInt64(input_tokens)) OVER w     AS crece,
+            first_value(input_tokens) OVER w      AS primera_turno
+        FROM (
+            SELECT
+                project_id, trace_id, span_id, start_time, input_tokens, request_model,
+                step_hint, step_site, output_json, finish_reasons, dedup_hash, loop_hash,
+                {CONVERSACION}                         AS conversacion,
+                {PASO}                                 AS paso_clave,
+                if(step_label != '', step_label, name) AS etiqueta,
+                count() OVER (PARTITION BY trace_id, dedup_hash) AS copias,
+                count() OVER (PARTITION BY trace_id, loop_hash)  AS vueltas
+            FROM {{origen}}
+            WHERE project_id = %(project_id)s AND {{rango}}
+              AND span_type = 'llm' AND input_tokens > 0
+              AND trace_id NOT IN %(evaluaciones)s
+        )
+        WHERE (dedup_hash = '' OR copias < {UMBRALES_HISTORIAL["min_repeats"]})
+          AND (loop_hash = '' OR vueltas < {UMBRALES_HISTORIAL["min_vueltas"]})
+          AND output_json != 'roto' AND NOT {CORTADA}
+        WINDOW w AS (
+            PARTITION BY conversacion, paso_clave, toStartOfHour(start_time)
+            ORDER BY start_time, span_id
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        )
+    )
+    GROUP BY project_id, minuto, conversacion, paso
+    {{poda}}
+"""
+
+#: Lo que no se guarda: una ejecución sin sesión que no llega a historial en su hora.
+#: Si no cruza la hora es la conversación entera y no cuenta en ninguna ventana; si la
+#: cruza, la lectura la calcula en crudo de todos modos.
+_PODA_HISTORIAL = f"""HAVING startsWith(conversacion, 's:')
+        OR (turnos >= {UMBRALES_HISTORIAL["min_turnos"]} AND bajadas_hora = 0
+            AND maxima - primera >= {UMBRALES_HISTORIAL["min_crece"]} * (turnos - 1))"""
+
+
+#: Lo que la selección del historial lee de `spans`.
+_FUENTE_HISTORIAL = (
+    "project_id, trace_id, span_id, start_time, input_tokens, request_model, step_hint, "
+    "step_site, output_json, finish_reasons, dedup_hash, loop_hash, session_id, step_key, "
+    "name, step_label, span_type"
+)
+
+
+def _historial_parcial(rango: str, poda: str = "", origen: str = "spans FINAL") -> str:
+    return _HISTORIAL_PARCIAL.format(rango=rango, poda=poda, origen=origen)
+
+
 #: Cómo se nombra cada grupo en `pre_trazas`, a partir de las columnas de un span. Los
 #: lectores calculan el mismo hash a partir de sus claves agregadas, y así cruzan cada
 #: grupo con sus ejecuciones distintas.
@@ -243,6 +341,13 @@ def _seleccion(tabla: str, rango: str, ambito: str) -> str:
     if tabla == "pre_trazas":
         return sql.format(rango=rango, g_uso=G_USO, g_cob=G_COB, g_prompt=G_PROMPT)
     return sql.format(rango=rango)
+
+
+def _seleccion_calculo(tabla: str, rango: str) -> str:
+    """Lo que se guarda de una hora: la selección de siempre, y el historial podado."""
+    if tabla == "pre_historial":
+        return _historial_parcial(rango, _PODA_HISTORIAL)
+    return _seleccion(tabla, rango, rango)
 
 
 # ---------------------------------------------------------------------------------
@@ -318,7 +423,7 @@ def recalcular(client: Any, project_id: str, hora: datetime) -> None:
         client.command(
             f"""INSERT INTO {tabla} ({COLUMNAS[tabla]}, calculado)
                 SELECT {COLUMNAS[tabla]}, toDateTime64('{_texto_ms(calculado)}', 3, 'UTC')
-                FROM ({_seleccion(tabla, rango, rango)})""",
+                FROM ({_seleccion_calculo(tabla, rango)})""",
             parameters=params,
         )
     # Lo último: hasta aquí se sigue leyendo el cálculo anterior, entero.
@@ -388,14 +493,25 @@ COLUMNAS_TARDIAS = (
 )
 
 
-def actualizar_esquema(client: Any) -> None:
+def faltan_tablas(client: Any, database: str) -> bool:
+    """Si falta alguna tabla de preagregados. Se mira antes de crearlas (D-207)."""
+    hay = client.query(
+        "SELECT count() FROM system.tables WHERE database = %(d)s AND name IN %(t)s",
+        parameters={"d": database, "t": list(TABLAS)},
+    ).result_rows[0][0]
+    return hay < len(TABLAS)
+
+
+def actualizar_esquema(client: Any, tablas_nuevas: bool = False) -> None:
     """Las columnas nuevas, y las horas ya calculadas sin ellas, sucias otra vez.
 
     `CREATE TABLE IF NOT EXISTS` no toca una tabla que ya existe. Una columna añadida a
     unos preagregados ya calculados trae su valor por defecto en las filas viejas, que
-    no es el de verdad: hasta recalcularlas, esas horas se leen en crudo (D-178).
+    no es el de verdad: hasta recalcularlas, esas horas se leen en crudo (D-178). Una
+    tabla nueva (`pre_historial`, D-207) nace vacía, y las horas ya calculadas se
+    leerían limpias y sin nada: también se ensucian.
     """
-    faltan = False
+    faltan = tablas_nuevas
     for tabla, columna, tipo in COLUMNAS_TARDIAS:
         existe = client.query(
             "SELECT count() FROM system.columns WHERE database = currentDatabase() "
@@ -509,6 +625,23 @@ class Ventana:
         return "(" + "\n UNION ALL\n".join(partes) + ")"
 
 
+def _resto(
+    since: datetime, until: datetime, cubiertos: list[tuple[datetime, datetime]]
+) -> list[tuple[datetime, datetime]]:
+    """Lo que se lee en crudo: la ventana menos lo cubierto, en tramos de `start_time`."""
+    crudos, cursor = [], since
+    for desde, hasta in cubiertos:
+        if cursor < desde:
+            crudos.append((cursor, desde))
+        cursor = max(cursor, hasta)
+    if cursor < until or (cursor == until and not cubiertos):
+        crudos.append((cursor, until))
+    elif cursor == until:
+        # El instante final va incluido (`<=`), y ningún minuto cubierto lo lleva.
+        crudos.append((until, until))
+    return crudos
+
+
 def ventana(client: Any, project_id: str, since: datetime, until: datetime) -> Ventana:
     since, until = _utc(since), _utc(until)
     h_desde, h_hasta = hora_de(since), hora_de(until)
@@ -524,17 +657,7 @@ def ventana(client: Any, project_id: str, since: datetime, until: datetime) -> V
     cubiertos = _unir(
         [(max(h, a), min(h + HORA, b)) for h, _ in limpias if max(h, a) < min(h + HORA, b)]
     )
-    # Lo que no, en crudo: la ventana menos lo cubierto.
-    crudos, cursor = [], since
-    for desde, hasta in cubiertos:
-        if cursor < desde:
-            crudos.append((cursor, desde))
-        cursor = max(cursor, hasta)
-    if cursor < until or (cursor == until and not cubiertos):
-        crudos.append((cursor, until))
-    elif cursor == until:
-        # El instante final va incluido (`<=`), y ningún minuto cubierto lo lleva.
-        crudos.append((until, until))
+    crudos = _resto(since, until, cubiertos)
     ambito = _unir([(hora_de(d), hora_de(h) + HORA) for d, h in crudos])
     return Ventana(
         params={
@@ -819,3 +942,155 @@ def sql(v: Ventana, plantilla: str, **extra: str) -> str:
         **{tabla: v.parciales(tabla) for tabla in TABLAS if "{" + tabla + "}" in plantilla},
         **extra,
     )
+
+
+# ---------------------------------------------------------------------------------
+# El historial que crece (D-207)
+# ---------------------------------------------------------------------------------
+
+#: Con más horas que leer en crudo (recién migrado, sin calcular) va la consulta de
+#: D-198: las ventanas de lo crudo sobre muchos días volverían al 1 GiB de D-197.
+MAX_HORAS_EN_CRUDO = 6
+
+#: Las trazas con spans en más de una hora de la ventana. Mira todos los spans, que son
+#: más que las llamadas que cuentan: sobran algunas, nunca falta ninguna. Se buscan
+#: antes y van a la consulta como tabla externa, `cruzan`: como lista no cabrían con
+#: diez millones de spans al día (unas 6.000 en siete días), con `IN [lista]` se comparan
+#: una a una en cada fila, y como subconsulta ClickHouse la repetía en cada sitio.
+_CRUZAN = """
+    SELECT trace_id FROM {pre_trazas}
+    GROUP BY trace_id
+    HAVING toStartOfHour(min(minuto)) != toStartOfHour(max(minuto))
+"""
+
+#: Una conversación entera a partir de sus horas, con los alias de las conversaciones de
+#: `HISTORY_GROUPS_SQL`. Las horas no se solapan y el orden de la regla las respeta: la
+#: primera entrada es la de la primera hora, y las bajadas son las de dentro de cada hora
+#: más la de cada borde en que la primera de una hora es menor que la última de la
+#: anterior.
+_CONVERSACIONES = """
+    SELECT
+        conversacion,
+        paso                                          AS paso_clave,
+        max(etiqueta)                                 AS etiqueta,
+        max(pista)                                    AS pista,
+        max(sitio)                                    AS sitio,
+        max(modelo)                                   AS modelo,
+        sum(turnos)                                   AS n,
+        argMin(primera, minuto)                       AS entrada_primera,
+        max(maxima)                                   AS entrada_ultima,
+        toInt64(sum(suma)) - toInt64(sum(turnos)) * toInt64(argMin(primera, minuto))
+                                                      AS historial,
+        sum(bajadas_hora) + arrayCount(
+            (x, y) -> x.2 < y.3, arrayPopFront(horas), arrayPopBack(horas)
+        )                                             AS bajadas,
+        -- Una traza que no cruza está en una sola hora: sólo las que cruzan pueden salir
+        -- en dos filas. Con un conjunto por conversación eran 180 MiB más (D-207).
+        sum(length(ids)) - sum(length(arrayFilter(t -> t IN cruzan, ids)))
+            + length(groupUniqArrayArray(arrayFilter(t -> t IN cruzan, ids)))
+                                                      AS trazas,
+        max(traza)                                    AS traza,
+        max(ultima_vez)                               AS ultima_vez,
+        -- (hora, primera, última) en orden: casi siempre una o dos horas. Con una función
+        -- de ventana sobre las filas eran 0,3 s y 200 MiB más (D-207).
+        arraySort(groupArray((minuto, primera, ultima))) AS horas
+    FROM ({partes})
+    GROUP BY conversacion, paso
+    HAVING n >= %(min_turnos)s AND bajadas = 0
+       AND entrada_ultima - entrada_primera >= %(min_crece)s * (n - 1)
+"""
+
+
+def _externa(externas: ExternalData, nombre: str, estructura: str, filas: list[dict]) -> None:
+    """Una tabla que va con la consulta. En JSON, que escapa lo que traiga un id."""
+    datos = "".join(json.dumps(fila) + "\n" for fila in filas).encode()
+    externas.add_file(file_name=nombre, data=datos, fmt="JSONEachRow", structure=estructura)
+
+
+def _horas_de(tramos: list[tuple[datetime, datetime]]) -> int:
+    return sum(int((hora_de(h) - hora_de(d)) / HORA) + 1 for d, h in tramos)
+
+
+def historial(
+    client: Any, project_id: str, since: datetime, until: datetime, umbrales: dict[str, int]
+) -> tuple[str, dict[str, Any], ExternalData] | None:
+    """Las conversaciones del historial, de `pre_historial` donde se puede y en crudo
+    donde no, o None si hay que leerlo entero en crudo. Exacto (D-207):
+
+    * de la tabla sólo salen horas calculadas y enteras dentro de la ventana, y de ellas
+      sólo las filas sin ninguna traza que cruce la hora: sus copias y vueltas son las de
+      la ventana, porque todos sus spans están en esa hora;
+    * lo crudo trae trazas enteras (los tramos sin tabla y, por traza, las que cruzan y
+      las de las filas que no se leen), así que sus copias son las de la ventana;
+    * y cada (conversación, paso, hora) sale de un sitio solo, decidido con la tabla:
+      con lo que sale en crudo, una copia en otra hora podía dejar fuera la llamada por
+      la que la fila no se leía, y no saldría de ninguna parte.
+    """
+    if any(umbrales.get(k) != v for k, v in UMBRALES_HISTORIAL.items()):
+        return None
+    since, until = _utc(since), _utc(until)
+    v = ventana(client, project_id, since, until)
+    enteras = sorted((h, c) for h, c in v.limpias if h >= since and h + HORA <= until)
+    crudos = _resto(since, until, _unir([(h, h + HORA) for h, _ in enteras]))
+    if not enteras or _horas_de(crudos) > MAX_HORAS_EN_CRUDO:
+        return None
+
+    params = {**v.params, **umbrales}
+    cruzan = [
+        traza
+        for (traza,) in client.query(
+            _CRUZAN.format(pre_trazas=v.parciales("pre_trazas")), parameters=params
+        ).result_rows
+    ]
+    externas = ExternalData()
+    _externa(externas, "cruzan", "trace_id String", [{"trace_id": x} for x in cruzan])
+    tocada = "arrayExists(t -> t IN cruzan, ids)"
+    calculos = ", ".join(f"({_literal(h, 0)}, {_literal(c, 3)})" for h, c in enteras)
+    de_tabla = f"""
+        FROM pre_historial
+        WHERE project_id = %(project_id)s AND (minuto, calculado) IN ({calculos})"""
+    # Las filas que no se leen, y las trazas que hay que pedir enteras en crudo. Se
+    # buscan aquí y van como tablas externas: como subconsultas, ClickHouse las preparaba
+    # una detrás de otra, leyendo la tabla cada vez, antes de empezar la consulta.
+    tocadas = client.query(
+        f"SELECT minuto, conversacion, paso, ids {de_tabla} AND {tocada}",
+        parameters=params, external_data=externas,
+    ).result_rows
+    pedir = set(cruzan) | {x for *_, ids in tocadas for x in ids}
+    _externa(externas, "pedir", "trace_id String", [{"trace_id": x} for x in sorted(pedir)])
+    _externa(
+        externas, "tocadas", "minuto DateTime('UTC'), conversacion String, paso String",
+        [
+            {"minuto": _utc(h).strftime("%Y-%m-%d %H:%M:%S"), "conversacion": cv, "paso": pa}
+            for h, cv, pa, _ in tocadas
+        ],
+    )
+
+    # Los tramos crudos, con `FINAL`; las trazas pedidas, sin él y con la última versión
+    # de cada span, como al abrir una traza: con `FINAL` se fusionaba la ventana entera
+    # para quedarse con unos pocos miles de spans. El índice de `trace_id` las encuentra.
+    tramos = _rangos("start_time", crudos, until)
+    origen = f"""(
+        SELECT {_FUENTE_HISTORIAL} FROM spans FINAL
+        WHERE project_id = %(project_id)s AND {tramos}
+        UNION ALL
+        SELECT * FROM (
+            SELECT {_FUENTE_HISTORIAL} FROM spans
+            WHERE project_id = %(project_id)s AND NOT {tramos} AND trace_id IN pedir
+            ORDER BY trace_id, span_id, ingested_at DESC
+            LIMIT 1 BY trace_id, span_id
+        )
+    )"""
+    rango = "start_time >= %(since)s AND start_time <= %(until)s"
+    horas = ", ".join(_literal(h, 0) for h, _ in enteras)
+    columnas = COLUMNAS["pre_historial"]
+    # De lo crudo salen las horas sin tabla, las filas que no se leen y las ejecuciones
+    # sin sesión que cruzan, que pueden no tener fila.
+    partes = f"""
+        SELECT {columnas} {de_tabla} AND NOT {tocada}
+        UNION ALL
+        SELECT {columnas} FROM ({_historial_parcial(rango, origen=origen)})
+        WHERE minuto NOT IN ({horas})
+           OR (startsWith(conversacion, 't:') AND substring(conversacion, 3) IN cruzan)
+           OR (minuto, conversacion, paso) IN tocadas"""
+    return _CONVERSACIONES.format(partes=partes), params, externas

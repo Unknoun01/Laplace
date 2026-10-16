@@ -26,7 +26,6 @@ from ._rows import (
 )
 from ._rows import utc as _utc
 from .base import (
-    _MOTIVOS_SQL,
     MARGEN_FILTROS,
     Bucket,
     CacheableGroup,
@@ -350,7 +349,8 @@ LIMIT %(limit)s
 """
 
 #: Una llamada cortada por el tope de salida (D-193). Gemelo de `_CORTADA` de sqlite.py.
-_CORTADA = f"arrayExists(m -> lower(m) IN ({_MOTIVOS_SQL}), finish_reasons)"
+#: Vive en preagregados.py, que la usa también para el historial (D-207).
+_CORTADA = preagregados.CORTADA
 
 def _rehechas_sql(fallida: str) -> str:
     """Gemelo de `_rehechas_sql` de sqlite.py (D-193, D-194). Mismo criterio y mismos
@@ -413,10 +413,8 @@ TRUNCATED_GROUPS_SQL = _rehechas_sql(_CORTADA)
 
 #: Historial que crece sin límite: gemelo de `HISTORY_GROUPS_SQL` de sqlite.py (D-195).
 #: Mismos alias.
-_CONVERSACION = (
-    "if(session_id != '', concat('s:', session_id), concat('t:', trace_id))"
-)
-_PASO = "if(step_key != '', step_key, name)"
+_CONVERSACION = preagregados.CONVERSACION
+_PASO = preagregados.PASO
 _LLAMADA_CON_ENTRADA = f"{RULES_WHERE} AND span_type = 'llm' AND input_tokens > 0"
 
 
@@ -479,7 +477,9 @@ HISTORY_CANDIDATES_SQL = f"""
        AND argMaxIf(input_tokens, (start_time, span_id), cuenta) = maxIf(input_tokens, cuenta)
 """
 
-HISTORY_GROUPS_SQL = f"""
+#: Lo de fuera del historial, sobre sus conversaciones: en crudo (`_CONVERSACIONES_CRUDO`)
+#: o compuestas a partir de los preagregados (`preagregados.historial`, D-207).
+_HISTORIAL_FUERA = """
 SELECT
     paso_clave                                             AS paso,
     max(etiqueta)                                          AS nombre,
@@ -504,7 +504,16 @@ FROM (
         max(if(n = max_n, conversacion, '')) OVER (PARTITION BY paso_clave) AS ejemplo
     FROM (
         SELECT *, max(n) OVER (PARTITION BY paso_clave) AS max_n
-        FROM (
+        FROM ({conversaciones})
+    )
+)
+GROUP BY paso_clave
+HAVING conversaciones >= %(min_conversaciones)s
+ORDER BY historial DESC, paso_clave
+LIMIT %(limit)s
+"""
+
+_CONVERSACIONES_CRUDO = f"""
             SELECT
                 conversacion, paso_clave,
                 max(etiqueta)                         AS etiqueta,
@@ -549,14 +558,9 @@ FROM (
             GROUP BY conversacion, paso_clave
             HAVING n >= %(min_turnos)s AND bajadas = 0
                AND entrada_ultima - entrada_primera >= %(min_crece)s * (n - 1)
-        )
-    )
-)
-GROUP BY paso_clave
-HAVING conversaciones >= %(min_conversaciones)s
-ORDER BY historial DESC, paso_clave
-LIMIT %(limit)s
 """
+
+HISTORY_GROUPS_SQL = _HISTORIAL_FUERA.format(conversaciones=_CONVERSACIONES_CRUDO)
 
 #: Llamadas que podrían ir por la API de lotes: gemelo de `DEFERRABLE_GROUPS_SQL` de
 #: sqlite.py (D-199). Mismos alias. Las ejecuciones candidatas se eligen antes, sin
@@ -815,10 +819,11 @@ class ClickHouseStore:
     def migrate(self) -> None:
         database = self._settings.clickhouse_database
         self._client.command(f"CREATE DATABASE IF NOT EXISTS {database}")
+        tablas_nuevas = preagregados.faltan_tablas(self._client, database)
         for statement in _statements(_SCHEMA.read_text(encoding="utf-8")):
             self._client.command(statement)
         logger.info("esquema de clickhouse aplicado")
-        preagregados.actualizar_esquema(self._client)
+        preagregados.actualizar_esquema(self._client, tablas_nuevas)
         preagregados.marcar_todo_si_nuevo(self._client)
         # `CREATE TABLE IF NOT EXISTS` no cambia la clave de una tabla que ya existe, y
         # migrarla es una copia entera: no se hace sola al arrancar, se avisa (D-168).
@@ -1364,14 +1369,29 @@ class ClickHouseStore:
         min_crece: int = 200, min_conversaciones: int = 3, min_repeats: int = 3,
         min_vueltas: int = 4, limit: int = 20,
     ) -> list[HistoryGroup]:
-        """Gemelo del de sqlite.py (D-195), en crudo."""
-        params = self._window_params(project_id, window)
-        params.update(
-            min_turnos=min_turnos, min_crece=min_crece,
-            min_conversaciones=min_conversaciones, min_repeats=min_repeats,
-            min_vueltas=min_vueltas, limit=limit,
+        """Gemelo del de sqlite.py (D-195): de los preagregados donde se puede (D-207) y
+        en crudo donde no, con la misma cuenta."""
+        umbrales = {
+            "min_turnos": min_turnos, "min_crece": min_crece,
+            "min_repeats": min_repeats, "min_vueltas": min_vueltas,
+        }
+        pre = (
+            preagregados.historial(
+                self._client, project_id, window.since, window.until, umbrales
+            )
+            if self._pre
+            else None
         )
-        filas = _named(self._consulta(HISTORY_GROUPS_SQL, parameters=params))
+        fuera = {"min_conversaciones": min_conversaciones, "limit": limit}
+        if pre is None:
+            params = {**self._window_params(project_id, window), **umbrales, **fuera}
+            filas = _named(self._consulta(HISTORY_GROUPS_SQL, parameters=params))
+        else:
+            conversaciones, params, cruzan = pre
+            filas = _named(self._client.query(
+                _HISTORIAL_FUERA.format(conversaciones=conversaciones),
+                parameters={**params, **fuera}, external_data=cruzan,
+            ))
         return disambiguate([_history_group(r) for r in filas])
 
     def deferrable_groups(

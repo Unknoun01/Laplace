@@ -371,6 +371,35 @@ ENGINE = ReplacingMergeTree(calculado)
 PARTITION BY toYYYYMM(minuto)
 ORDER BY (project_id, minuto, trace_id, loop_hash);
 
+-- El historial que crece (D-207): por hora entera, una fila por (conversación, paso)
+-- con lo que la regla necesita de sus llamadas que cuentan en la hora. `minuto` es el
+-- comienzo de la hora, con el nombre de las otras tablas para borrarla y caducarla igual.
+-- Las ejecuciones sin sesión que no llegan a historial en su hora no se guardan.
+CREATE TABLE IF NOT EXISTS pre_historial
+(
+    project_id   String,
+    minuto       DateTime('UTC'),
+    conversacion String,
+    paso         String,
+    etiqueta     String,
+    pista        String,
+    sitio        String,
+    modelo       String,
+    turnos       UInt64,
+    suma         UInt64,
+    primera      UInt32,
+    ultima       UInt32,
+    maxima       UInt32,
+    bajadas_hora UInt64,
+    ids          Array(String),
+    traza        String,
+    ultima_vez   DateTime64(6, 'UTC'),
+    calculado    DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(calculado)
+PARTITION BY toYYYYMM(minuto)
+ORDER BY (project_id, minuto, conversacion, paso);
+
 -- Cuándo se calculó por última vez cada hora. Se escribe al final del cálculo: hasta
 -- entonces se sigue leyendo el anterior, entero.
 CREATE TABLE IF NOT EXISTS pre_horas

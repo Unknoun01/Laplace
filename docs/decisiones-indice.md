@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 204 decisiones.
+final. 205 decisiones.
 
 ## Coste, precios y caché
 
@@ -84,6 +84,7 @@ final. 204 decisiones.
 - [D-197](../DECISIONS.md#d-197--la-carga-mide-lo-que-habrá-casos-para-las-reglas-nuevas-y-preagregados-calculados) — La carga mide lo que habrá: casos para las reglas nuevas y preagregados calculados
 - [D-203](../DECISIONS.md#d-203--el-grafo-del-proyecto-marca-los-pasos-con-hallazgos-por-step_key-y-sin-adivinar) — El grafo del proyecto marca los pasos con hallazgos, por `step_key` y sin adivinar
 - [D-204](../DECISIONS.md#d-204--la-señal-de-despliegue-el-aviso-deployment_status-de-github-mueve-la-frontera-del-arreglado) — La señal de despliegue: el aviso `deployment_status` de GitHub mueve la frontera del arreglado
+- [D-207](../DECISIONS.md#d-207--el-historial-de-los-preagregados-una-fila-por-conversación-paso-y-hora) — El historial, de los preagregados: una fila por conversación, paso y hora
 
 ## Probar: evaluaciones, juez y replay
 
@@ -654,3 +655,4 @@ final. 204 decisiones.
 - [D-202](../DECISIONS.md#d-202--sin-ciclos-de-imports-en-el-sdk-init-sale-de-_tracer) — Sin ciclos de imports en el SDK: `init()` sale de `_tracer`
 - [D-203](../DECISIONS.md#d-203--el-grafo-del-proyecto-marca-los-pasos-con-hallazgos-por-step_key-y-sin-adivinar) — El grafo del proyecto marca los pasos con hallazgos, por `step_key` y sin adivinar
 - [D-204](../DECISIONS.md#d-204--la-señal-de-despliegue-el-aviso-deployment_status-de-github-mueve-la-frontera-del-arreglado) — La señal de despliegue: el aviso `deployment_status` de GitHub mueve la frontera del arreglado
+- [D-207](../DECISIONS.md#d-207--el-historial-de-los-preagregados-una-fila-por-conversación-paso-y-hora) — El historial, de los preagregados: una fila por conversación, paso y hora

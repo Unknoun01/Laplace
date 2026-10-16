@@ -5006,3 +5006,168 @@ fusión, el último gana, pisar lo de la persona, cualquier estado del despliegu
 de llegada, sin guardar el commit de la fusión) y en todos falla alguna. Una undécima,
 dejar pasar los PR cerrados sin fusionar, no mordía porque la comprobación sobraba: esos
 PR guardan `merge_sha` vacío, y se quitó. No toca los almacenes: todo va en los ajustes.
+
+### D-207 — El historial, de los preagregados: una fila por conversación, paso y hora
+D-198 dejó la lectura del historial (D-195) en 2,0 s de un Diagnóstico de siete días de
+6–7 s, con 500.000 spans al día: unas ocho pasadas estrechas por la ventana, y una con
+`FINAL` y ventanas. Lo que podía quitarlas era precalcularla, como las otras lecturas de
+D-177. Se diseñó antes de tocar código, y la condición era que no cambiara ningún
+hallazgo ni ninguna cifra.
+
+**Qué se precalcula.** `pre_historial`: por hora entera, una fila por (conversación,
+paso) con lo que la regla necesita de sus llamadas que cuentan en esa hora: cuántas, la
+suma de la entrada, la primera y la última (por `(start_time, span_id)`, el orden de la
+regla), la mayor, las bajadas dentro de la hora, las trazas, la última traza y la última
+vez, y las etiquetas. Las llamadas que cuentan son las de la regla: con entrada, sin
+cortar, sin el JSON roto, y fuera las copias y las vueltas, contadas **dentro de la
+hora**. La columna de la hora se llama `minuto`, como en las otras tablas, para que el
+borrado, la retención y el olvido de lo viejo la traten igual.
+
+Una conversación que cruza horas se compone sumando sus filas en orden de hora: la
+primera entrada es la de su primera hora, la mayor es la mayor, y las bajadas son las de
+dentro de cada hora más un borde donde la primera de una hora es menor que la última de
+la anterior. El historial reenviado es la suma de la entrada menos las llamadas por la
+primera. Es exacto: las horas no se solapan, y el orden de la regla las respeta.
+
+**Por qué sale exacto, y dónde no se puede usar.** La regla es de toda la ventana, no de
+cada hora, por tres cosas:
+
+* **Las copias y las vueltas** se cuentan en la ventana, y una hora sólo ve las suyas. Si
+  todos los spans de una traza caen en la misma hora y la hora está entera dentro de la
+  ventana, contar en la hora es contar en la ventana. Si la traza cruza la hora, no. Las
+  trazas que cruzan se buscan en cada lectura en `pre_trazas` (las que tienen minutos en
+  dos horas de la ventana; mira todos los spans, que son más que los que cuentan). Una
+  fila con alguna de ellas entre sus trazas no se lee: esa (conversación, paso, hora) se
+  calcula en crudo, con las copias contadas en la ventana. Sirve mirar sólo las trazas
+  de las llamadas que cuentan: lo que la hora ya deja fuera, la ventana también (más
+  spans sólo dan más copias; una tirada de evaluación a menos de una hora de la hora
+  está dentro de la ventana).
+* **Los bordes de la ventana.** Las horas de los bordes, que la ventana corta, se leen
+  en crudo enteras, igual que las sucias o sin calcular y la hora en curso. Aquí no
+  sirven los minutos sueltos de las otras tablas: una pareja con copias a los dos lados
+  del borde cambia de cuenta.
+* **Lo crudo tiene que ver las trazas enteras.** Lo que se calcula en crudo es: los
+  tramos de la ventana fuera de las horas que se leen, y, enteras en la ventana, las
+  trazas que cruzan y las de las filas que no se leen. Una traza que no cruza está en una
+  sola hora, así que queda entera; una que cruza se pide en todas sus horas. Con eso las
+  copias de lo crudo son las de la ventana.
+* **Cada (conversación, paso, hora) sale de un sitio y de uno solo**, y eso se decide
+  una vez, con lo que dice la tabla: de lo crudo se quedan las de los tramos crudos, las
+  de las filas que no se leen y las de las ejecuciones sin sesión que cruzan; de la
+  tabla, el resto. No se decide con lo que sale en crudo: una copia en otra hora puede
+  dejar fuera, en crudo, justo la llamada por la que la fila no se leía, y con dos
+  criterios esa (conversación, paso, hora) no saldría de ninguna parte.
+
+**Un tope, para no pagar lo de antes multiplicado.** Lo crudo usa ventanas de
+ClickHouse, como SQLite, sobre poco: los bordes y alguna hora sucia. Con más de seis
+horas que leer en crudo (una instalación recién migrada, o sin calcular), la lectura es
+la de D-198 entera: con ventanas sobre siete días volvería al 1 GiB de D-197.
+
+**Cómo se lee, y lo que enseñó medirlo.** Una consulta para las trazas que cruzan (de
+`pre_trazas`), otra para las filas que tocan, y la principal. La primera versión tardaba
+**más** que la de D-198 (3,05 s frente a 1,85), y se fue bajando pieza a pieza:
+
+* las trazas que cruzan y las filas que no se leen van a la consulta como **tablas
+  externas** de `clickhouse-connect`. Como lista, `hasAny(ids, lista)` comparaba una a
+  una en cada fila (0,98 s para 131.000 filas, frente a 0,09 con un conjunto), y con
+  diez millones de spans al día no cabrían en la consulta (unas 6.000 trazas que cruzan
+  en siete días). Como subconsultas, ClickHouse las preparaba una detrás de otra,
+  leyendo la tabla cada vez (3,2 s);
+* las trazas pedidas se leen **sin `FINAL`** y con la última versión de cada span
+  (`LIMIT 1 BY` sobre `ingested_at DESC`, como al abrir una traza): con `FINAL` se
+  fusionaba la ventana entera para quedarse con unos miles de spans. `FINAL` queda para
+  los tramos crudos. Las encuentra el índice de saltos de `trace_id`; la clave de
+  `spans` no sirve, porque dentro de cada hora va por traza;
+* las bajadas entre horas, con un array ordenado de (hora, primera, última) por
+  conversación y no con una función de ventana sobre las filas, que guardaba cada fila
+  entera con su array de trazas (80 MiB menos);
+* y las trazas distintas, sumando las de cada fila y quitando sólo las repetidas de las
+  que cruzan, que son las únicas que pueden salir en dos filas de la misma conversación.
+  Con un conjunto por conversación eran 180 MiB más.
+
+**Lo que no se guarda.** Una ejecución sin sesión que no cruza la hora es una
+conversación entera dentro de la hora; si no llega a los turnos o al crecimiento, no
+cuenta en ninguna ventana y no se guarda. Si cruza, se calcula en crudo de todos modos.
+Las de las sesiones se guardan todas, porque una sesión sigue en otra hora.
+
+**Los umbrales quedan dentro.** Las copias (3), las vueltas (4), los turnos (4) y el
+crecimiento (200) de la regla deciden lo que se guarda. Con otros umbrales la lectura va
+en crudo entera, como antes; `test_regla_historial.py` comprueba que los de los
+preagregados son los de `insights`.
+
+**Las tiradas de evaluación**, como en D-177: en lo calculado son las que llevan la
+etiqueta a menos de una hora de su hora, y en lo crudo las de la ventana con una hora de
+margen. Sólo difiere en una tirada de más de una hora que cruce el borde de la ventana.
+
+**Migración.** `CREATE TABLE IF NOT EXISTS` crea la tabla vacía en una instalación que ya
+tenía horas calculadas, y esas horas se leerían limpias y sin historial. `migrate` mira
+antes si la tabla existía; si no, apunta como sucias todas las horas calculadas, como
+D-178 con las columnas nuevas. Hasta que el bucle de fondo las recalcula, se leen en
+crudo, que es correcto y más lento. `migrar_orden` no se toca: copia `spans`, no los
+preagregados, y no cambia ninguna hora.
+
+**SQLite** sigue en crudo: no tiene preagregados, y su lectura es la misma regla. La
+paridad se prueba con los mismos casos en los tres caminos: SQLite, ClickHouse en crudo
+y ClickHouse con las horas calculadas.
+
+**La ficha** enseña la consulta en crudo, como las demás lecturas de D-177: es la misma
+cuenta.
+
+**Medido** con la carga de D-197 (`scripts/carga.py --spans 500000 --dias 7`, en este
+portátil), con `master` y con esto sobre **los mismos datos**, uno detrás de otro. La
+memoria es la mayor de las consultas de la lectura, de `system.query_log`:
+
+| | Antes (D-198) | Con esto |
+|---|---|---|
+| Diagnóstico, 7 días | 6,49–6,90 s | **6,06–6,49 s** |
+| historial, 7 días, dentro del Diagnóstico | 1,77 s (27 %) | **1,28 s** (21 %) |
+| historial, 7 días, solo | 1,78–1,87 s | 1,31–1,35 s |
+| memoria del historial, 7 días | 211–225 MiB | 230–263 MiB |
+| filas leídas por el historial, 7 días | 14,3 millones | 3,6 millones |
+| historial, 1 día | 0,54–0,60 s | 0,57–0,58 s |
+| recalcular las horas de la carga | 57 s (169) | 64 s (172) |
+
+`pre_historial` tiene 131.656 filas (todas de sesiones) para 638.750 llamadas, y ocupa
+9,7 MiB. Con y sin preagregados, en el mismo instante, el historial sale **idéntico campo
+a campo** en ventanas de 1 y 7 días y en una a destiempo.
+
+**Lo que no se ganó, dicho.** Baja medio segundo en siete días, no el segundo y medio
+que costaba, y en un día no gana nada. La memoria no baja: son los estados de agregación
+de unas 45.000 conversaciones, y no dependen de los hilos. Lo que queda son tres piezas
+de un tercio cada una:
+
+* las trazas que cruzan, 0,2 s: leer `pre_trazas` de toda la ventana;
+* componer las 131.000 filas de la tabla, unos 0,3 s;
+* y lo crudo de las trazas que cruzan, 0,3 s. Con esta carga hay alguna en cada borde
+  de hora, cada hora del proyecto ocupa uno o dos gránulos, y pedirlas lee casi la
+  ventana entera (3 millones de filas para 9.000 spans).
+
+Lo último es lo que crecería con el volumen. Si hace falta más, el paso siguiente es
+guardar en la tabla, por traza, las llamadas de las trazas que tocan los bordes de la
+hora, y leer en crudo sólo las que tengan un hueco de más de una hora. No se ha hecho:
+es otra tabla, y aquí no se puede medir a diez millones al día (D-142).
+
+
+**Pruebas** (`test_regla_historial.py`). Todas las del historial corren ahora en tres
+almacenes: SQLite, ClickHouse sin calcular (la lectura de D-198) y ClickHouse con las
+horas calculadas después de cada escritura, como haría el bucle de fondo. Y unos datos
+nuevos con lo que cruza horas, con sus cifras exactas en los tres:
+
+* sesiones que pasan de una hora a otra, una con la bajada justo en el borde;
+* ejecuciones sin sesión con dos turnos en cada hora, que ninguna hora guarda sola;
+* una copia que se repite en otra hora desde otro paso, y otra fuera del borde de la
+  ventana, que en su hora sí cuenta;
+* una sesión en que la única llamada de una ejecución que cruza queda fuera por copias
+  en otra hora (el caso por el que se decide con la tabla);
+* una hora sucia en medio, un lote reenviado sin fusionar, y la migración de una
+  instalación sin la tabla.
+
+Con las horas calculadas exigen además que la lectura salga de los preagregados, y otra
+prueba, que sus umbrales sean los de `insights`. Contra `master` fallan cinco. Se rompió
+el código a propósito once veces, y en todas falla alguna: leer de la tabla las filas con
+trazas que cruzan, las horas de los bordes de la tabla, sin la bajada entre horas, sin
+las ejecuciones sin sesión que cruzan, lo crudo sin las trazas enteras, podar también las
+sesiones, contar dos veces las trazas que cruzan, decidir con lo que sale en crudo, las
+copias contadas por hora, no ensuciar las horas al crear la tabla y pedir las trazas sin
+la última versión de cada span. Esta última no mordía hasta añadir la prueba del lote
+reenviado.
