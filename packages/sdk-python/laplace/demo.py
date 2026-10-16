@@ -36,7 +36,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 from . import decorators, manual, semconv
-from ._tracer import flush, init
+from ._arranque import init
+from ._tracer import flush
 from .decorators import get_current_trace_id, set_context
 
 MODELO_CARO = "gpt-5.6-terra"
