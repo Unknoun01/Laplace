@@ -83,7 +83,7 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
 - **Escala: el día, en el objetivo (D-177).** Con la clave por hora y los preagregados por minuto, el Diagnóstico de un día de un proyecto con diez millones de spans al día tarda 1,1 s en el contenedor de 4 núcleos (antes 6,5 s); el de 7 días, 6 s (antes casi un minuto). Si hace falta bajar la semana: los recuentos exactos de ejecuciones distintas y las medianas son lo que pesa; una idea es guardar por hora, además de por minuto, lo de las horas enteras. Las instalaciones que ya existen se migran a mano con `python -m laplace_backend.storage.migrar_orden`.
 
 ### Siguiente: funciones diferenciales (confirmar el orden con el usuario)
-- **Replay contrafactual, más allá** (lo básico está hecho, D-167): llamadas con herramientas (habría que simular sus resultados con los grabados, sin ejecutarlas), imágenes y bloques entre proveedores, y un botón en la versión local que lo lance sin copiar la orden.
+- **Replay contrafactual, más allá** (lo básico está hecho, D-167; las llamadas con herramientas, con los resultados grabados y cortando lo que no se grabó, D-205): imágenes y bloques entre proveedores (incluida la API Responses), y un botón en la versión local que lo lance sin copiar la orden.
 - **Bot de pull requests, más allá** (hecho: el cambio de modelo, D-185; `cache_control` y el tope de vueltas sobre el árbol de sintaxis, D-190; el webhook que marca el hallazgo arreglado al fusionar, D-191; sus pantallas, D-192; la
   frontera en el despliegue a producción por el aviso `deployment_status`, D-204). Lo que queda:
   - arreglos que no se derivan del código (acortar un contexto, cambiar un prompt): harían falta un modelo que los escriba y una persona que los mire, y por eso no se hicieron (D-190);
@@ -96,8 +96,11 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
   parada desde Ajustes, y el grafo del proyecto en el Panel):
   - Modelo por paso desde la interfaz y repartos A/B: **fuera por decisión del usuario**;
     no empezar sin que lo pida.
-  - La parada sólo alcanza lo que instrumenta el SDK de Python: no las llamadas por
-    OpenInference u OpenLLMetry ni los agentes en Node (`STATUS.md`, «Qué hay que vigilar»).
+  - La parada alcanza ya las llamadas a OpenAI y Anthropic que traza OpenInference u
+    OpenLLMetry en un proceso Python con `laplace.init()` (D-206), y la pantalla dice a
+    qué no llega: Node y otros lenguajes (espera el SDK de TypeScript) y los procesos sin
+    el SDK. Queda decir con un número qué parte del tráfico queda fuera, que pide guardar
+    el lenguaje o la convención de cada span en los dos almacenes.
   - El grafo del proyecto marca ya los pasos con hallazgos de la misma ventana (D-203),
     pero sigue siendo de sólo lectura: no se cambia nada desde él.
 - **Reglas nuevas** (cada una entra por `detect()` y `detail()`, con su prueba de catálogo;
@@ -110,8 +113,9 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
     con la carga arreglada (D-197), y la regla de la API de lotes (D-199): con la marca
     `laplace-puede-esperar` hay dinero, sin ella una pregunta;
   - la memoria del historial, de 1,09 GiB a 188 MiB con un filtro previo que sí
-    descarta (D-198); queda el tiempo, 2 s de un Diagnóstico de 7 días, que podría
-    bajar con un precálculo en los preagregados;
+    descarta (D-198), y el tiempo, de 1,77 s a 1,28 s en 7 días con la tabla
+    `pre_historial` (D-207). Lo que queda son las trazas que cruzan las horas y
+    componer las filas, unos 0,3 s cada una; en un día no gana nada;
   - caché semántica hecha (D-200): la misma pregunta salvo los números y la misma
     respuesta exacta en ejecuciones distintas, «hasta X» sin dinero en el total. Lo
     parecido pero no idéntico (simhash, embeddings) queda para otra versión;

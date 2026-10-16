@@ -223,6 +223,14 @@ El 16 de octubre, tres arreglos sueltos, cada uno en su rama:
 - el aviso `deployment_status` de GitHub mueve la frontera del «arreglado» al despliegue
   a producción que lleva la fusión; sin él, se queda en la fusión (D-204).
 
+El 16 de octubre por la tarde, otras tres:
+- `laplace replay` con herramientas: cada resultado sale del grabado, y si el modelo
+  nuevo pide algo que no se grabó, el caso se corta como fallido con su motivo (D-205);
+- la parada alcanza las llamadas a OpenAI y Anthropic que traza otro instrumentador en
+  Python, y la pantalla dice a qué no llega (D-206);
+- el historial, de los preagregados (`pre_historial`): de 1,77 s a 1,28 s en un
+  Diagnóstico de 7 días, idéntico campo a campo al crudo (D-207).
+
 Del 1 al 2 de octubre entró el resto de la lista «siguiente»:
 - la caché compartida entre pasos (D-178);
 - lo evitable de cada cliente, ingresos en otras monedas y la columna de cliente en las
@@ -433,10 +441,12 @@ que había que conseguir antes de enseñarlo.
 
 ## Qué hay que vigilar
 
-**Las lecturas de las reglas nuevas van en crudo** (D-193 a D-195 y D-199), también en
-ClickHouse con preagregados. Medidas con 500.000 spans al día (D-197, D-198), el
-historial es la más cara: 2 s de un Diagnóstico de siete días de 6–7 s. Si hay que
-bajarlo, el camino es precalcularlo en los preagregados. Y `output_json` sólo lo lleva
+**Las lecturas de las reglas nuevas van en crudo** (D-193, D-194 y D-199), también en
+ClickHouse con preagregados. El historial ya no: sale de `pre_historial` (D-207), con
+las horas de los bordes y las trazas que las cruzan en crudo, y tiene que dar lo mismo
+campo a campo que lo crudo; la prueba de paridad de D-207 lo vigila. Sigue siendo la
+lectura más cara (1,28 s de un Diagnóstico de siete días de unos 6 s). Una instalación
+recién migrada lee en crudo hasta que se recalculan sus horas. Y `output_json` sólo lo lleva
 el tráfico ingerido desde D-194: lo de antes no sale en la regla del JSON.
 
 **La carga se mide con sus casos.** Una lectura sin nada que encontrar sale más rápida de
@@ -472,12 +482,12 @@ mismo que `/api/overview` con la caché vacía. Los dos comparten `CACHE_DIAGNOS
 cierra sólo la firma HMAC. Si alguien toca esa ruta, la prueba de la firma de otro cuerpo
 y la de sin firma tienen que seguir en rojo con cualquier atajo.
 
-**La parada no alcanza lo que el SDK de Python no ve.** Llamadas instrumentadas por
-OpenInference u OpenLLMetry en vez de por las integraciones de Laplace, agentes en Node
-(no hay SDK) y lo que corre en otro hilo sin copiar el contexto siguen gastando aunque el
-proyecto esté parado. La pantalla dice «ninguna llamada al modelo ni ningún paso se
-ejecuta»: es verdad para lo instrumentado con el SDK de Python, y si alguien pregunta por
-lo demás, la respuesta es ésa. Y tarda hasta 30 s en llegar (D-187).
+**La parada no alcanza lo que el SDK de Python no ve.** Desde D-206 corta también las
+llamadas a OpenAI y Anthropic que traza OpenInference u OpenLLMetry en un proceso con
+`laplace.init()`. Siguen gastando aunque el proyecto esté parado: los agentes en Node (no
+hay SDK), los procesos sin el SDK, otros proveedores fuera de un paso y lo que corre en
+otro hilo sin copiar el contexto. La pantalla dice a qué llega y a qué no; no hay que
+volver a prometer que «no se ejecuta nada». Y tarda hasta 30 s en llegar (D-187).
 
 **El coste de una arista del grafo del proyecto es el de las llamadas que lleva**, no el
 del subárbol: la flecha hacia una herramienta o un subpaso no lleva dinero. Si alguien
