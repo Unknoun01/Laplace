@@ -235,7 +235,25 @@ RESPUESTA = (
     "por 18 € por trayecto, o por 25 € en el aeropuerto. Las medidas máximas son "
     "55 × 40 × 20 cm. (Condiciones de la tarifa, apartado 4.2)."
 )
+VEREDICTO = (
+    "La respuesta coincide con el manual de condiciones: las cifras y los plazos citados "
+    "salen del apartado 4.2 y no promete nada que la tarifa del cliente no incluya."
+)
 CATEGORIAS = "Categorías posibles: " + ", ".join(INTENCIONES) + ". " + "Definición. " * 300
+
+
+@decorators.observe(type="chain")
+def verificar_politica(sistema: str, pregunta: str, tokens: int) -> str:
+    """Segunda lectura del manual, desde otro sitio del código y con las mismas
+    instrucciones que `responder`: es lo que la caché compartida (D-178) tiene que ver."""
+    _llamada(
+        sistema,
+        f"{pregunta}\nRespuesta dada: {RESPUESTA}\n¿Respeta la política del manual?",
+        VEREDICTO,
+        entrada=tokens + 160,
+        segundos=2.0,  # fijo: no mueve el generador de números aleatorios (D-072)
+    )
+    return VEREDICTO
 
 
 @decorators.observe(type="agent")
@@ -294,6 +312,12 @@ def responder(pregunta: str, escenario: Escenario | None = None) -> str:
         # prompt cambiaba con la hora.
         prompt=None if esc.modelo_respuesta == MODELO_PICO else (PROMPT, version),
     )
+    # 5. Con la v2 se añadió un paso que comprueba cada respuesta contra el mismo manual.
+    #    Sin azar propio: las cifras de todo lo demás se quedan donde estaban. Sólo
+    #    con la v2 para que el prefijo compartido sea uno solo y salga una tarjeta, no
+    #    una por versión.
+    if version == 2:
+        verificar_politica(sistema, pregunta, tokens_sistema)
     return RESPUESTA
 
 

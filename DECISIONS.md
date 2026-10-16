@@ -5321,3 +5321,37 @@ sesiones, contar dos veces las trazas que cruzan, decidir con lo que sale en cru
 copias contadas por hora, no ensuciar las horas al crear la tabla y pedir las trazas sin
 la última versión de cada span. Esta última no mordía hasta añadir la prueba del lote
 reenviado.
+
+### D-209 — La demo enseña la caché compartida entre pasos
+D-178 dejó la regla sin ejemplo en la demo: ninguno de sus pasos compartía instrucciones
+con otro, y añadirlo movía cifras. Ahora sí.
+
+* **El tráfico nuevo** (`verificar_politica` en `laplace/demo.py`): con la v2 del prompt
+  `atencion`, cada ejecución termina con un paso aparte que comprueba la respuesta contra
+  el mismo manual. Es otro sitio del código con las mismas instrucciones y el mismo
+  modelo que `responder`, que es lo que la regla busca. Una llamada más por ejecución v2
+  (unas 308 en el mes), sin etiqueta de prompt gestionado.
+  - Sólo con la v2: con las dos versiones salían dos prefijos y dos tarjetas por lo mismo.
+  - Todas las ejecuciones v2 y no una parte: la escritura de caché es una por ejecución y
+    la lectura sólo compensa si el paso nuevo corre en más de ~28 % de ellas; con las
+    preguntas de dinero (el 23 %) la regla, con razón, no decía nada.
+  - Sin azar propio (duración fija): no mueve el generador y nada de lo demás cambia.
+* **Cifras que cambian.** Ninguna de las fijadas por pruebas. Las que vigilaban la demo
+  (`test_demo_estable`, `test_demo_hoy`, el título del problema del prompt, la regla de
+  prompts y que ninguna regla reclame más de lo que costó el paso) siguen cumpliéndose
+  tal cual. Lo que se mueve es lo que ninguna prueba fija: aparece la tarjeta
+  `cache_compartida` (1,00 $ en el mes, repartidos 0,66 $ a `responder` v2 y 0,34 $ al
+  paso nuevo) y una de modelo caro para `verificar_politica` (14,22 $; otra respuesta
+  corta con el modelo caro, honesta), y el gasto de la demo sube unos 16 $.
+* **Sin cobrar dos veces.** Sobre `responder` v2 caen modelo caro (28,06 $), contexto fijo
+  (0,93 $) y caché compartida (0,66 $): suman 29,65 $ de los 31,18 $ que costó el paso. La
+  compartida sólo cuenta las lecturas del paso nuevo, porque las segundas llamadas de
+  `responder` ya son del contexto fijo y se descuentan (D-178). La caché semántica de la
+  demo está a 0 $ en todos los pasos y no se pisa con nada.
+
+Pruebas en `test_demo_cache_compartida.py`: que sale una tarjeta con los dos pasos y
+dinero; y que las lecturas que cuenta son exactamente las del paso nuevo, con `ya` mayor
+que cero. Se rompió a propósito: no descontar lo del contexto fijo (falla la segunda),
+verificar en las dos versiones (fallan las dos) y quitar la llamada (fallan las dos).
+No se han corrido las pruebas de ClickHouse ni las de pantalla (se saltan sin la interfaz
+exportada).
