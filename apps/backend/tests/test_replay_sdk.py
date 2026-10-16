@@ -27,13 +27,17 @@ from laplace.schema import Span
 from laplace.semconv import EVAL_TAG
 from test_replay import (
     FINAL,
+    FOTO,
     HERRAMIENTAS,
     PASO,
     PASO_H,
+    PASO_I,
     RESULTADO,
     SISTEMA,
     SISTEMA_H,
     _bucle,
+    _imagenes,
+    _mira,
     _traza,
 )
 
@@ -452,12 +456,24 @@ def test_con_herramientas_cada_resultado_es_el_grabado(backend):
     recibidas: list[dict] = []
     resultado = _replay(backend, _openai_con(recibidas, _busca_y_contesta), conjunto="resolver")
 
-    # Los dos bucles de OpenAI, dos vueltas cada uno. El de Anthropic no se reenvía a
-    # un modelo de OpenAI: sus bloques van en otro formato.
-    assert resultado.plan.excluded == {"herramientas_formato": 2}
-    assert resultado.plan.chains == 2
-    assert resultado.calls_done == 4 and resultado.cases_failed == 0
-    assert len(recibidas) == 4
+    # Los tres bucles, dos vueltas cada uno: el de Anthropic también, con sus bloques
+    # convertidos a los de OpenAI (D-213).
+    assert resultado.plan.excluded == {}
+    assert resultado.plan.chains == 3
+    assert resultado.calls_done == 6 and resultado.cases_failed == 0
+    assert len(recibidas) == 6
+    # El de Anthropic, en el formato de OpenAI: herramientas, petición y resultado.
+    de_anthropic = [r for r in recibidas if "th02" in str(r["messages"][1])]
+    assert de_anthropic[0]["tools"] == HERRAMIENTAS["openai"]
+    assert de_anthropic[0]["messages"] == [
+        {"role": "system", "content": SISTEMA_H},
+        {"role": "user", "content": "Ticket th02: ¿está pagada la factura 42?"},
+    ]
+    assert de_anthropic[1]["messages"][-1] == {
+        "role": "tool",
+        "tool_call_id": "call_nuevo",
+        "content": RESULTADO,
+    }
     primera, segunda = recibidas[0], recibidas[1]
     assert primera["tools"] == HERRAMIENTAS["openai"]
     assert primera["messages"][0] == {"role": "system", "content": SISTEMA_H}
@@ -481,8 +497,8 @@ def test_con_herramientas_cada_resultado_es_el_grabado(backend):
             "b": resultado.replay_run_id,
         },
     ).json()
-    assert cuerpo["a"]["cost_usd"] == pytest.approx(0.0044)
-    assert cuerpo["b"]["cases"] == 2 and cuerpo["b"]["crashed"] == 0
+    assert cuerpo["a"]["cost_usd"] == pytest.approx(0.0066)
+    assert cuerpo["b"]["cases"] == 3 and cuerpo["b"]["crashed"] == 0
     reenviada = backend.store.get_trace_spans(resultado.trace_ids[0], "local")
     raiz = next(s for s in reenviada if s.parent_span_id is None)
     assert raiz.metadata["replay.turns"] == 2
@@ -495,9 +511,10 @@ def test_lo_que_no_se_grabo_corta_el_caso_sin_inventar(backend):
     resultado = _replay(
         backend, _openai_con(recibidas, lambda c: _pide('{"numero": 7}')), conjunto="resolver"
     )
-    # Una vuelta por caso y ninguna más: no hay resultado que darle.
-    assert len(recibidas) == 2
-    assert resultado.cases_cut == 2 and resultado.cases_failed == 2
+    # Una vuelta por caso y ninguna más: no hay resultado que darle. Los tres bucles,
+    # también el de Anthropic convertido (D-213).
+    assert len(recibidas) == 3
+    assert resultado.cases_cut == 3 and resultado.cases_failed == 3
     backend.guardar()
     cuerpo = backend.get(
         "/api/experiments/compare",
@@ -509,7 +526,7 @@ def test_lo_que_no_se_grabo_corta_el_caso_sin_inventar(backend):
     ).json()
     # Cuenta como fallo, no se descarta: descartarlo dejaría fuera justo los casos en
     # que el modelo nuevo se aparta del original.
-    assert cuerpo["b"]["cases"] == 2 and cuerpo["b"]["crashed"] == 2
+    assert cuerpo["b"]["cases"] == 3 and cuerpo["b"]["crashed"] == 3
     tirada = backend.app.state.metadata.get_run(resultado.replay_run_id)
     assert "buscar_factura" in tirada.items[0].error
     assert "no grabó" in tirada.items[0].error
@@ -522,8 +539,8 @@ def test_si_contesta_sin_pedir_la_herramienta_vale(backend):
         _openai_con(recibidas, lambda c: {"role": "assistant", "content": FINAL}),
         conjunto="resolver",
     )
-    assert len(recibidas) == 2
-    assert resultado.calls_done == 2 and resultado.cases_failed == 0
+    assert len(recibidas) == 3
+    assert resultado.calls_done == 3 and resultado.cases_failed == 0
 
 
 def test_con_herramientas_a_anthropic(backend):
@@ -565,16 +582,23 @@ def test_con_herramientas_a_anthropic(backend):
         http_client=httpx2.Client(transport=httpx2.MockTransport(responder)),
     )
     resultado = _replay(backend, cliente, model="claude-haiku-4-5", conjunto="resolver")
-    assert resultado.plan.excluded == {"herramientas_formato": 4}
-    assert resultado.calls_done == 2 and resultado.cases_failed == 0
-    primera, segunda = recibidas
-    assert primera["system"] == SISTEMA_H
-    assert primera["tools"] == HERRAMIENTAS["anthropic"]
-    assert segunda["messages"][-2]["content"][0]["id"] == "toolu_nuevo"
-    assert segunda["messages"][-1] == {
-        "role": "user",
-        "content": [{"type": "tool_result", "tool_use_id": "toolu_nuevo", "content": RESULTADO}],
-    }
+    # Las tres: las dos de OpenAI, convertidas a bloques de Anthropic (D-213).
+    assert resultado.plan.excluded == {}
+    assert resultado.calls_done == 6 and resultado.cases_failed == 0
+    for traza in ("th00", "th02"):
+        primera, segunda = [r for r in recibidas if traza in str(r["messages"][0])]
+        assert primera["system"] == SISTEMA_H
+        assert primera["messages"] == [
+            {"role": "user", "content": f"Ticket {traza}: ¿está pagada la factura 42?"}
+        ]
+        assert primera["tools"] == HERRAMIENTAS["anthropic"]
+        assert segunda["messages"][-2]["content"][0]["id"] == "toolu_nuevo"
+        assert segunda["messages"][-1] == {
+            "role": "user",
+            "content": [
+                {"type": "tool_result", "tool_use_id": "toolu_nuevo", "content": RESULTADO}
+            ],
+        }
 
 
 def test_con_herramientas_no_se_pasa_del_tope(backend):
@@ -596,7 +620,7 @@ def test_con_herramientas_no_se_pasa_del_tope(backend):
         max_usd=una * 1.5,
     )
     assert len(recibidas) == 2
-    assert resultado.calls_skipped_by_cap == 2
+    assert resultado.calls_skipped_by_cap == 4
 
 
 def test_lo_peor_de_una_conversacion():
@@ -662,7 +686,7 @@ def test_la_linea_de_ordenes_dice_los_cortados(backend, monkeypatch, capsys):
     assert cli.main(argumentos) == 0
     salida = capsys.readouterr().out
     assert "usan herramientas" in salida
-    assert "2 se han cortado" in salida
+    assert "3 se han cortado" in salida
 
 
 def test_repetir_una_peticion_mas_veces_de_las_grabadas_corta(backend):
@@ -674,8 +698,8 @@ def test_repetir_una_peticion_mas_veces_de_las_grabadas_corta(backend):
 
     recibidas: list[dict] = []
     resultado = _replay(backend, _openai_con(recibidas, dos_veces), conjunto="resolver")
-    assert resultado.cases_cut == 2
-    assert len(recibidas) == 4
+    assert resultado.cases_cut == 3
+    assert len(recibidas) == 6
 
 
 def test_el_plan_cuenta_las_conversaciones_enteras(backend):
@@ -686,12 +710,12 @@ def test_el_plan_cuenta_las_conversaciones_enteras(backend):
         backend, _openai_con([], _busca_y_contesta), conjunto="resolver", confirm=lambda p: False
     )
     plan = resultado.plan
-    assert plan.calls == 4 and plan.cases == 2
-    assert plan.original_usd == pytest.approx(0.0044)
-    assert plan.estimated_usd == pytest.approx(2 * sdk_replay._coste(1100, 18, tarifa))
+    assert plan.calls == 6 and plan.cases == 3
+    assert plan.original_usd == pytest.approx(0.0066)
+    assert plan.estimated_usd == pytest.approx(3 * sdk_replay._coste(1100, 18, tarifa))
     cadena = {"input_tokens": 600, "output_tokens": 10, "params": {"max_tokens": 20},
               "recorded": [{}]}
-    assert plan.worst_usd == pytest.approx(2 * sdk_replay._peor_cadena(cadena, tarifa))
+    assert plan.worst_usd == pytest.approx(3 * sdk_replay._peor_cadena(cadena, tarifa))
 
 
 def test_el_juez_compara_la_conversacion_con_la_respuesta_final(backend, monkeypatch):
@@ -717,4 +741,258 @@ def test_el_juez_compara_la_conversacion_con_la_respuesta_final(backend, monkeyp
     monkeypatch.setattr(api_evals, "judge_trace", juez)
     backend.app.state.judge = JudgeConfig(enabled=True, model="juez", api_key="x")
     _replay(backend, _openai_con([], _busca_y_contesta), conjunto="resolver")
-    assert referencias == [FINAL, FINAL]
+    assert referencias == [FINAL, FINAL, FINAL]
+
+
+# ---------------------------------------------------------------------------------
+# Imágenes, otros proveedores y la API Responses (D-213)
+# ---------------------------------------------------------------------------------
+
+
+def _anthropic_con(recibidas: list[dict]):
+    """Un Anthropic falso que contesta siempre lo mismo."""
+
+    def responder(request):
+        cuerpo = json.loads(request.content)
+        recibidas.append(cuerpo)
+        return httpx2.Response(
+            200,
+            json={
+                "id": "msg_r",
+                "type": "message",
+                "role": "assistant",
+                "model": cuerpo["model"],
+                "content": [{"type": "text", "text": "facturación"}],
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 950, "output_tokens": 3},
+            },
+        )
+
+    return anthropic.Anthropic(
+        api_key="sk-de-mentira",
+        http_client=httpx2.Client(transport=httpx2.MockTransport(responder)),
+    )
+
+
+def _conjunto_de(backend, spans: list[Span], paso: str) -> str:
+    backend.store.insert_spans(spans)
+    backend.post(
+        "/api/datasets",
+        json={"project_id": "local", "name": paso, "filter": {"step_key": paso}, "limit": 10},
+    )
+    return paso
+
+
+def test_las_imagenes_se_convierten_al_formato_de_destino(backend):
+    nombre = _conjunto_de(
+        backend, _mira("ti00") + _mira("ti01", "anthropic") + _mira("ti02", "responses"), PASO_I
+    )
+    recibidas: list[dict] = []
+    resultado = _replay(
+        backend, _anthropic_con(recibidas), model="claude-haiku-4-5", conjunto=nombre
+    )
+    assert resultado.plan.excluded == {} and resultado.calls_done == 3
+    assert resultado.plan.images == 6
+    # Las tres, en bloques de Anthropic: la de base64 con su tipo, la otra por URL.
+    for cuerpo in recibidas:
+        assert cuerpo["system"] == SISTEMA
+        assert cuerpo["messages"] == [{"role": "user", "content": _imagenes("anthropic")}]
+
+    recibidas = []
+    _replay(backend, _openai(recibidas), conjunto=nombre)
+    # A OpenAI: la de Chat, tal cual; las otras dos, convertidas y sin `detail`, que
+    # Anthropic no tiene y Responses lleva en otro sitio.
+    sin_detalle = [
+        {**b, "image_url": {"url": b["image_url"]["url"]}} if "image_url" in b else b
+        for b in _imagenes("openai")
+    ]
+    assert sorted(json.dumps(r["messages"][1]["content"]) for r in recibidas) == sorted(
+        json.dumps(c) for c in (_imagenes("openai"), sin_detalle, sin_detalle)
+    )
+
+
+def test_el_plan_dice_que_no_sabe_lo_que_cuestan_las_imagenes(backend):
+    nombre = _conjunto_de(backend, _mira("ti00"), PASO_I)
+    resultado = _replay(backend, None, conjunto=nombre, confirm=lambda plan: False)
+    texto = resultado.plan.describe()
+    assert "2 imágenes" in texto and "no se sabe" in texto
+    assert "6000 tokens por imagen" in texto
+
+
+def test_lo_peor_reserva_tokens_por_imagen():
+    tarifa = {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 10.0}
+    llamada = {"input_tokens": 1000, "params": {"max_tokens": 100}, "images": 2}
+    assert sdk_replay._peor(llamada, tarifa) == pytest.approx((1300 + 12000 + 1000) / 1e6)
+    # En una conversación, en cada vuelta: las imágenes van en todas.
+    cadena = {**llamada, "recorded": [{}]}
+    entrada = (1300 + 12000) + (1300 + 12000 + 100)
+    assert sdk_replay._peor_cadena(cadena, tarifa) == pytest.approx((entrada + 2000) / 1e6)
+
+
+def test_una_conversacion_de_la_api_responses_va_por_chat_completions(backend):
+    nombre = _conjunto_de(backend, _bucle("thr0", "responses", paso="resolver_r"), "resolver_r")
+    recibidas: list[dict] = []
+    resultado = _replay(backend, _openai_con(recibidas, _busca_y_contesta), conjunto=nombre)
+    assert resultado.plan.excluded == {}
+    assert resultado.calls_done == 2 and resultado.cases_failed == 0
+    primera, segunda = recibidas
+    assert primera["tools"] == HERRAMIENTAS["openai"]
+    assert primera["messages"] == [
+        {"role": "system", "content": SISTEMA_H},
+        {"role": "user", "content": "Ticket thr0: ¿está pagada la factura 42?"},
+    ]
+    assert segunda["messages"][-1] == {
+        "role": "tool",
+        "tool_call_id": "call_nuevo",
+        "content": RESULTADO,
+    }
+
+
+def test_lo_que_no_tiene_equivalente_no_se_reenvia_y_se_dice(backend):
+    """Un resultado marcado como error y un razonamiento en la historia: Chat
+    Completions no tiene dónde ponerlos. A Anthropic, que los grabó, sí van."""
+    error = {
+        "type": "tool_result",
+        "tool_use_id": "call_a",
+        "content": "no existe",
+        "is_error": True,
+    }
+    con_error = _bucle(
+        "tq00", "anthropic", paso="pensar", entre=[{"role": "user", "content": [error]}]
+    )
+    pensada = _bucle("tq01", "anthropic", paso="pensar")
+    for span in pensada[1:]:
+        assert span.llm is not None
+        span.llm.input_messages[1:1] = [
+            {"role": "user", "content": "Antes de nada."},
+            {
+                "role": "assistant",
+                "content": [{"type": "thinking", "thinking": "…", "signature": "x"}],
+            },
+        ]
+    normal = _bucle("tq02", "anthropic", paso="pensar")
+    nombre = _conjunto_de(backend, con_error + pensada + normal, "pensar")
+
+    plan = _replay(backend, None, conjunto=nombre, confirm=lambda p: False).plan
+    assert plan.excluded == {"sin_equivalente": 4} and plan.chains == 1
+    texto = plan.describe()
+    assert "`thinking`" in texto and "`is_error`" in texto
+
+    plan = _replay(
+        backend, None, conjunto=nombre, model="claude-haiku-4-5", confirm=lambda p: False
+    ).plan
+    assert plan.excluded == {} and plan.chains == 3
+
+
+def test_la_tabla_de_conversion():
+    convertir = sdk_replay._convertir
+    pide = [
+        {"id": i, "type": "function", "function": {"name": "f", "arguments": f'{{"x": {n}}}'}}
+        for i, n in (("a", 1), ("b", 2))
+    ]
+    chat = [
+        {"role": "developer", "content": "S"},
+        {"role": "user", "content": "u"},
+        {"role": "assistant", "content": "miro", "tool_calls": pide},
+        {"role": "tool", "tool_call_id": "a", "content": "ra"},
+        {"role": "tool", "tool_call_id": "b", "content": [{"type": "text", "text": "rb"}]},
+        {"role": "user", "content": "¿y?"},
+    ]
+    # A Anthropic: los resultados seguidos, en un solo mensaje y delante del texto.
+    assert convertir(chat, "openai", "anthropic") == [
+        {"role": "system", "content": "S"},
+        {"role": "user", "content": "u"},
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": "miro"},
+                {"type": "tool_use", "id": "a", "name": "f", "input": {"x": 1}},
+                {"type": "tool_use", "id": "b", "name": "f", "input": {"x": 2}},
+            ],
+        },
+        {
+            "role": "user",
+            "content": [
+                {"type": "tool_result", "tool_use_id": "a", "content": "ra"},
+                {"type": "tool_result", "tool_use_id": "b", "content": "rb"},
+                {"type": "text", "text": "¿y?"},
+            ],
+        },
+    ]
+    # Y de vuelta, lo que había.
+    assert convertir(convertir(chat, "openai", "anthropic"), "anthropic", "openai") == [
+        {"role": "system", "content": "S"},
+        *chat[1:4],
+        {"role": "tool", "tool_call_id": "b", "content": "rb"},
+        chat[5],
+    ]
+    # Responses: cada petición y cada resultado, un elemento; en Chat, juntos.
+    responses = [
+        {"role": "system", "content": "S"},
+        {
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "mira"},
+                {"type": "input_image", "image_url": FOTO},
+            ],
+        },
+        *({"type": "function_call", "call_id": t["id"], **t["function"]} for t in pide),
+        {"type": "function_call_output", "call_id": "a", "output": "ra"},
+        {"type": "function_call_output", "call_id": "b", "output": "rb"},
+    ]
+    assert convertir(responses, "responses", "openai") == [
+        {"role": "system", "content": "S"},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "mira"},
+                {"type": "image_url", "image_url": {"url": FOTO}},
+            ],
+        },
+        {"role": "assistant", "content": None, "tool_calls": pide},
+        {"role": "tool", "tool_call_id": "a", "content": "ra"},
+        {"role": "tool", "tool_call_id": "b", "content": "rb"},
+    ]
+    # Las herramientas declaradas, en los tres formatos.
+    for desde in ("openai", "anthropic", "responses"):
+        for hacia in ("openai", "anthropic"):
+            convertidas = sdk_replay._convertir_herramientas(HERRAMIENTAS[desde], desde, hacia)
+            assert convertidas == HERRAMIENTAS[hacia]
+
+
+_IMAGEN_EN_RESULTADO = {
+    "type": "tool_result",
+    "tool_use_id": "a",
+    "content": [{"type": "image", "source": {"type": "url", "url": FOTO}}],
+}
+_ARGUMENTOS_ROTOS = {"id": "a", "type": "function", "function": {"name": "f", "arguments": "{x"}}
+
+
+@pytest.mark.parametrize(
+    ("mensajes", "desde", "hacia", "dice"),
+    [
+        (
+            [{"role": "user", "content": "a"}, {"role": "system", "content": "b"}],
+            "openai",
+            "anthropic",
+            "mitad",
+        ),
+        (
+            [{"role": "assistant", "content": None, "tool_calls": [_ARGUMENTOS_ROTOS]}],
+            "openai",
+            "anthropic",
+            "JSON",
+        ),
+        (
+            [{"role": "user", "content": [_IMAGEN_EN_RESULTADO]}],
+            "anthropic",
+            "openai",
+            "imagen",
+        ),
+        ([{"type": "reasoning", "id": "rs_1", "summary": []}], "responses", "openai", "reasoning"),
+        ([{"role": "user", "content": "a", "name": "ana"}], "openai", "anthropic", "`name`"),
+    ],
+)
+def test_lo_que_no_tiene_equivalente_no_se_convierte(mensajes, desde, hacia, dice):
+    with pytest.raises(sdk_replay._SinEquivalente, match=dice):
+        sdk_replay._convertir(mensajes, desde, hacia)

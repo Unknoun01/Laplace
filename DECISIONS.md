@@ -5718,3 +5718,101 @@ botón no las pide, no las guarda y no pasan por la API.
   de los proveedores, tope, 409 por segunda tirada y por lo peor que cambió, 404 en la
   nube, falta de clave, y el protocolo del proceso hijo. En pantalla, el botón con SQLite
   (`test_pantallas.py`).
+
+### D-213 — El replay con imágenes, entre proveedores y desde la API Responses: los bloques se convierten; lo que no tiene equivalente no se reenvía
+
+`laplace replay` (D-167, D-205) dejaba fuera las llamadas con imágenes
+(`mensajes_no_texto`), las conversaciones con herramientas de un proveedor reenviadas a
+otro y las grabadas con la API Responses de OpenAI (`herramientas_formato`). Las tres
+se reenvían ahora convirtiendo los bloques al formato del modelo de destino. Lo que no
+tiene equivalente no se convierte a medias: se dice qué es y no se reenvía.
+
+* **Tres formatos de origen, dos de destino.** El backend entrega cada llamada y cada
+  conversación con su `format`: `openai` (Chat Completions), `anthropic` (Messages) o
+  `responses`. Responses se reconoce por lo que sólo ella graba: elementos sin rol
+  (`function_call`, `function_call_output`, `reasoning`), partes `input_*`/`output_*`
+  o herramientas declaradas sin `function`. El SDK reenvía siempre por Chat Completions
+  o por Messages: lo grabado con Responses se convierte a Chat Completions si el destino
+  es de OpenAI. Si el formato de origen es el de destino no se toca nada, como hasta
+  ahora; y una llamada sólo de texto sigue como en D-167, que ya valía para los dos.
+* **La tabla de conversión.** Se lee el origen en una forma común y se escribe en la del
+  destino:
+
+  | Bloque | Chat Completions | Messages (Anthropic) | Responses |
+  |---|---|---|---|
+  | instrucciones | `system`/`developer` | `system` (va fuera de `messages`) | `instructions`, `system`/`developer` |
+  | texto | `content` cadena o partes `text` | bloque `text` | `input_text`/`output_text` |
+  | imagen por URL | `image_url.url` | `image` con `source.type: url` | `input_image.image_url` |
+  | imagen en base64 | `image_url.url` con `data:…;base64,…` | `image` con `source.type: base64` | `input_image.image_url` con `data:` |
+  | petición de herramienta | `tool_calls[].function` (argumentos en texto JSON) | `tool_use` (`input` objeto) | `function_call` (`call_id`, argumentos en texto) |
+  | resultado | mensaje `tool` con `tool_call_id` | `tool_result` dentro de un mensaje `user` | `function_call_output` |
+  | herramienta declarada | `{type: function, function: {name, parameters}}` | `{name, input_schema}` | `{type: function, name, parameters}` |
+
+  `developer` se trata como `system`. Los mensajes seguidos del mismo rol se juntan
+  (Messages los exige alternos, y Chat lleva en un solo mensaje el texto y las
+  peticiones que Responses graba por separado); los resultados que van en un mensaje
+  `user` de Anthropic salen en Chat como mensajes `tool` delante del resto. Los
+  argumentos se parsean como JSON al ir a Messages. Los resultados grabados de cada
+  petición (D-205) se convierten igual, y llevan el id de la petición nueva como antes.
+* **Lo que se cae sin cambiar lo que el modelo lee, y se dice aquí:** `cache_control`
+  (cambia lo que se cobra, que mide el proveedor, no lo que se responde) y `detail` de
+  las imágenes de OpenAI, que Anthropic no tiene (cada proveedor elige su resolución).
+  En el sentido contrario no hay nada que inventar.
+* **Lo que no se convierte sin perder algo no se reenvía**, con su motivo:
+  - **una imagen que no se grabó** (`imagen_sin_grabar`, en el backend, para cualquier
+    destino): una referencia a un fichero del proveedor (`file_id`, `source.type: file`)
+    o una URL que no es `http(s)` ni `data:` con los datos. No se manda nada en su lugar;
+  - **un bloque sin equivalente en el destino** (`sin_equivalente`, en el SDK, que es el
+    que sabe a qué proveedor va): razonamiento (`thinking`, `reasoning`), herramientas
+    del proveedor (búsqueda web…), ficheros, una imagen en un resultado de herramienta
+    hacia Chat Completions, un resultado marcado como error (`is_error`), unos argumentos
+    que no son JSON, unas instrucciones a mitad de conversación hacia Messages, o
+    cualquier campo de un mensaje que la conversión no sabe llevar (`name`, `refusal`…).
+    El plan dice cuáles («`thinking` no tiene equivalente en openai»).
+
+  El encargo pedía cortarlo como fallido, como en D-205. Se ha decidido **no
+  reenviarlo y contarlo por motivo**, como el resto de exclusiones de D-167: en D-205 el
+  corte depende de lo que pide el modelo nuevo, y descartarlo inflaría su acierto; aquí
+  se sabe antes de gastar nada, por lo que grabó la traza, y no depende del modelo nuevo.
+  Contarlo como fallo le apuntaría un fallo que no ha tenido ocasión de tener, que es
+  afirmar lo que no se sabe; dejarlo fuera no sesga hacia ningún lado, y se ve en el
+  recuento de lo que no se reenvía.
+* **El coste de las imágenes no se sabe antes, y se dice.** Cada proveedor las cuenta a
+  su manera (por teselas, por parches, por píxeles) y con sus propios límites de
+  resolución, y la traza sólo tiene lo que contó el original. Así que:
+  - «si responde lo mismo» las cuenta como las contó el original, y el plan dice que con
+    el modelo nuevo no se sabe;
+  - lo peor reserva **6.000 tokens por imagen** en cada vuelta, encima de la entrada con
+    margen (que ya las lleva contadas por el original): es más de lo que cuenta por
+    imagen cualquier modelo de los dos proveedores que conocemos. Es una reserva y no una
+    cota: un modelo que cuente más puede pasar el tope en ese caso, y el plan lo dice;
+  - lo gastado sale de los tokens que devuelve el proveedor, que ya las incluyen.
+  El backend entrega cuántas imágenes lleva cada llamada o conversación (`images`).
+
+**Lo que no hace:** no reenvía por la API Responses (lo grabado con ella va por Chat
+Completions); no convierte audio, ficheros ni documentos (siguen en `mensajes_no_texto`
+o `sin_equivalente`); no lleva `tool_choice` (D-205); no se ha probado contra las API
+reales: espera la clave. La interfaz no cambia: los motivos los escribe el SDK, en
+español, como los de D-167.
+
+Pruebas:
+- `test_replay.py` (4 nuevas): las llamadas con imágenes se entregan en su formato y con
+  cuántas llevan, en los tres; una imagen sin grabar no se reenvía, ni en una llamada ni
+  en una conversación; una conversación de Responses se entrega entera, con las dos
+  peticiones a la vez en la misma vuelta y el razonamiento saltado. La de motivos cuenta
+  ahora la imagen de `data:…` como `imagen_sin_grabar`, y la de un formato que no se lee
+  usa otro instrumentador.
+- `test_replay_sdk.py` (10 nuevas, con los clientes reales y el transporte falso): las
+  imágenes llegan a Anthropic y a OpenAI en su formato; el plan dice que no sabe lo que
+  cuestan; lo peor con la reserva por imagen, con cifras a mano; Responses va por Chat
+  Completions; lo que no tiene equivalente no se reenvía y el plan dice qué es; la tabla
+  de conversión de ida y vuelta y la de herramientas en los tres formatos; y cinco
+  bloques que no se convierten. Las de D-205 cuentan ahora tres bucles en lugar de dos:
+  el de Anthropic va también a OpenAI.
+
+Se rompió el código a propósito 18 veces (toda imagen grabada, sin formato Responses,
+imágenes fuera de las llamadas, el razonamiento que corta, cada petición una vuelta, sin
+contar imágenes, no convertir, lo peor sin imágenes, base64 como URL, perder `is_error`,
+instrucciones a mitad, imagen en un resultado hacia Chat, sin juntar roles, resultados y
+herramientas sin convertir, campos de más que se pierden, y el plan sin detalle o sin
+imágenes) y en todas falla alguna.

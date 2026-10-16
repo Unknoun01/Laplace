@@ -26,7 +26,8 @@ Tres garantías, por este orden:
    costarán como mucho, y se pregunta. `yes=True` (o `--si`) es para quien ya lo sabe.
 
 Sólo se reenvía lo que no puede tener efectos: llamadas hoja del paso, con los mensajes
-en texto. Lo demás se cuenta por motivo.
+en texto o con imágenes, convertidas al formato del destino si hace falta (D-213). Lo
+demás se cuenta por motivo.
 
 Las que usan herramientas se repiten como la conversación entera (D-205): el modelo
 nuevo pide herramientas y recibe, como resultado, el que quedó grabado en la traza. La
@@ -65,13 +66,20 @@ MARGEN_ENTRADA = 1.3
 SALIDA_MINIMA = 256
 SALIDA_MAXIMA = 4096
 
+#: Lo que se reserva del tope por cada imagen, en cada llamada: con el modelo nuevo no se
+#: sabe cuánto cuesta, y es más de lo que cuenta por imagen cualquier modelo de OpenAI o
+#: Anthropic que conocemos (D-213). Es una reserva, no una cota.
+TOKENS_POR_IMAGEN = 6000
+
 #: Por qué no se reenvía una llamada, dicho para una persona.
 MOTIVOS = {
     "herramientas": "usa herramientas",
     "herramientas_sin_cadena": "sus vueltas con herramientas no son una sola conversación",
     "herramientas_sin_grabar": "la traza no grabó lo que hace falta para simular sus herramientas",
-    "herramientas_formato": "sus herramientas van en un formato que no es el del modelo de destino",
-    "mensajes_no_texto": "sus mensajes no son sólo texto (o se guardaron recortados)",
+    "herramientas_formato": "sus herramientas van en un formato que Laplace no sabe leer",
+    "mensajes_no_texto": "sus mensajes no son sólo texto e imágenes (o se guardaron recortados)",
+    "imagen_sin_grabar": "lleva una imagen que la traza no grabó, sólo una referencia",
+    "sin_equivalente": "lleva algo que no tiene equivalente en el formato del modelo de destino",
     "fallo": "falló",
     "sin_respuesta": "no dejó respuesta con la que comparar",
     "tirada_de_evaluacion": "es de una tirada de evaluación",
@@ -101,6 +109,10 @@ class Plan:
     rate_verified: bool = True
     #: Ejecuciones que se repiten como conversación con herramientas (D-205).
     chains: int = 0
+    #: Imágenes que se reenvían: lo que cuestan con el modelo nuevo no se sabe (D-213).
+    images: int = 0
+    #: Lo que no tiene equivalente en el destino, y cuántas llamadas deja fuera.
+    unconvertible: dict[str, int] = field(default_factory=dict)
 
     def describe(self) -> str:
         lineas = [
@@ -118,6 +130,13 @@ class Plan:
                 "y ninguna herramienta se ejecuta. Si el modelo pide otra cosa, ese caso se "
                 "corta y cuenta como fallo."
             )
+        if self.images:
+            lineas.append(
+                f"  Llevan {self.images} imágenes: cada proveedor las cuenta a su manera y no "
+                f"se sabe cuánto costarán con {self.model}. «Si responde lo mismo» las cuenta "
+                f"como el original; para lo peor y el tope se reservan {TOKENS_POR_IMAGEN} "
+                "tokens por imagen, y un modelo que cuente más puede pasarse en ese caso."
+            )
         if self.worst_usd > self.max_usd:
             lineas.append(
                 "  Lo peor pasa del tope: puede que no se reenvíen todas y la prueba "
@@ -130,6 +149,8 @@ class Plan:
             )
         for motivo, n in sorted(self.excluded.items(), key=lambda kv: -kv[1]):
             lineas.append(f"  No se reenvían {n}: {MOTIVOS.get(motivo, motivo)}.")
+        for que, n in self.unconvertible.items():
+            lineas.append(f"    {n} por {que}, que no tiene equivalente en {self.provider}.")
         return "\n".join(lineas)
 
 
@@ -180,10 +201,16 @@ def _coste(tokens_in: float, tokens_out: float, tarifa: dict[str, Any]) -> float
     ) / 1_000_000
 
 
-def _peor(llamada: dict[str, Any], tarifa: dict[str, Any]) -> float:
-    return _coste(
-        int(llamada.get("input_tokens") or 0) * MARGEN_ENTRADA, _salida_maxima(llamada), tarifa
+def _entrada_peor(llamada: dict[str, Any]) -> float:
+    """La entrada original con margen, más la reserva de sus imágenes (D-213)."""
+    return (
+        int(llamada.get("input_tokens") or 0) * MARGEN_ENTRADA
+        + int(llamada.get("images") or 0) * TOKENS_POR_IMAGEN
     )
+
+
+def _peor(llamada: dict[str, Any], tarifa: dict[str, Any]) -> float:
+    return _coste(_entrada_peor(llamada), _salida_maxima(llamada), tarifa)
 
 
 def _peor_cadena(cadena: dict[str, Any], tarifa: dict[str, Any]) -> float:
@@ -195,7 +222,7 @@ def _peor_cadena(cadena: dict[str, Any], tarifa: dict[str, Any]) -> float:
     el modelo nuevo respondió en las anteriores, que es como mucho la salida máxima.
     """
     maximo = _salida_maxima(cadena)
-    entrada = int(cadena.get("input_tokens") or 0) * MARGEN_ENTRADA
+    entrada = _entrada_peor(cadena)
     vueltas = len(cadena.get("recorded") or []) + 1
     return sum(_coste(entrada + k * maximo, maximo, tarifa) for k in range(vueltas))
 
@@ -401,6 +428,241 @@ def _conversar(
 
 
 # ---------------------------------------------------------------------------------
+# De un formato a otro (D-213)
+# ---------------------------------------------------------------------------------
+#
+# Se lee el origen —Chat Completions (`openai`), Messages (`anthropic`) o Responses— en
+# una forma común, (rol, bloques), y se escribe en la del destino. Los bloques comunes:
+# texto, imagen (una URL, `data:` si va en base64), petición y resultado. Lo que no tiene
+# equivalente no se convierte a medias: se dice qué es y la llamada no se reenvía.
+
+
+class _SinEquivalente(Exception):
+    """Lo grabado lleva algo que el formato de destino no tiene: no se reenvía."""
+
+
+def _peticion(id_: Any, nombre: Any, argumentos: Any) -> dict[str, Any]:
+    if isinstance(argumentos, str):
+        try:
+            argumentos = json.loads(argumentos)
+        except ValueError:
+            raise _SinEquivalente("unos argumentos que no son JSON") from None
+    return {"tipo": "peticion", "id": str(id_), "nombre": str(nombre), "argumentos": argumentos}
+
+
+def _leer_bloques(contenido: Any) -> list[dict[str, Any]]:
+    """Los bloques comunes de un contenido. Los tipos no chocan entre formatos."""
+    if contenido is None or contenido == "":
+        return []
+    if isinstance(contenido, str):
+        return [{"tipo": "texto", "texto": contenido}]
+    if not isinstance(contenido, list):
+        raise _SinEquivalente("un contenido que no es texto ni bloques")
+    bloques = []
+    for b in contenido:
+        tipo = b.get("type") if isinstance(b, dict) else None
+        if tipo in ("text", "input_text", "output_text"):
+            bloques.append({"tipo": "texto", "texto": str(b.get("text", ""))})
+        elif tipo in ("image_url", "input_image"):
+            url = b.get("image_url")
+            bloques.append({"tipo": "imagen", "url": url.get("url") if isinstance(url, dict)
+                            else url})
+        elif tipo == "image":
+            fuente = b.get("source") or {}
+            url = fuente.get("url") if fuente.get("type") == "url" else (
+                f"data:{fuente.get('media_type')};base64,{fuente.get('data')}"
+            )
+            bloques.append({"tipo": "imagen", "url": url})
+        elif tipo == "tool_use":
+            bloques.append(_peticion(b.get("id"), b.get("name"), b.get("input")))
+        elif tipo == "tool_result":
+            if b.get("is_error"):
+                raise _SinEquivalente("un resultado de herramienta marcado como error (`is_error`)")
+            bloques.append({"tipo": "resultado", "id": str(b.get("tool_use_id", "")),
+                            "contenido": _leer_bloques(b.get("content"))})
+        else:
+            raise _SinEquivalente(f"un bloque `{tipo}`")
+    return bloques
+
+
+#: Lo que la conversión sabe llevar de un mensaje. Lo demás (`name`, `refusal`…) no.
+_CAMPOS = frozenset({"role", "content", "tool_calls", "tool_call_id", "type"})
+
+
+def _leer(mensajes: list[dict[str, Any]]) -> list[tuple[str, list[dict[str, Any]]]]:
+    """Los mensajes en la forma común, con los del mismo rol seguidos juntos."""
+    comun: list[tuple[str, list[dict[str, Any]]]] = []
+    for m in mensajes:
+        tipo = m.get("type")
+        if tipo == "function_call":
+            rol, bloques = "assistant", [_peticion(m.get("call_id"), m.get("name"),
+                                                   m.get("arguments"))]
+        elif tipo == "function_call_output":
+            rol, bloques = "user", [{"tipo": "resultado", "id": str(m.get("call_id", "")),
+                                     "contenido": _leer_bloques(m.get("output"))}]
+        elif "role" not in m:
+            raise _SinEquivalente(f"un elemento `{tipo}`")
+        else:
+            sobra = sorted(k for k, v in m.items() if v not in (None, "", []) and k not in _CAMPOS)
+            if sobra:
+                raise _SinEquivalente(f"el campo `{sobra[0]}` de un mensaje")
+            rol = {"developer": "system", "tool": "user"}.get(m["role"], m["role"])
+            if rol not in ("system", "user", "assistant"):
+                raise _SinEquivalente(f"un mensaje con el rol `{rol}`")
+            if m["role"] == "tool":
+                bloques = [{"tipo": "resultado", "id": str(m.get("tool_call_id", "")),
+                            "contenido": _leer_bloques(m.get("content"))}]
+            else:
+                bloques = _leer_bloques(m.get("content"))
+                for t in m.get("tool_calls") or []:
+                    if t.get("type", "function") != "function":
+                        raise _SinEquivalente(f"una petición `{t.get('type')}`")
+                    funcion = t.get("function") or {}
+                    bloques.append(_peticion(t.get("id"), funcion.get("name"),
+                                             funcion.get("arguments")))
+        if comun and comun[-1][0] == rol:
+            comun[-1][1].extend(bloques)
+        else:
+            comun.append((rol, bloques))
+    return comun
+
+
+def _textos(bloques: list[dict[str, Any]], donde: str) -> str:
+    if any(b["tipo"] != "texto" for b in bloques):
+        raise _SinEquivalente(f"una imagen en {donde}")
+    return "".join(b["texto"] for b in bloques)
+
+
+def _a_anthropic(b: dict[str, Any]) -> dict[str, Any]:
+    if b["tipo"] == "texto":
+        return {"type": "text", "text": b["texto"]}
+    if b["tipo"] == "imagen":
+        if b["url"].startswith("data:"):
+            tipo, _, datos = b["url"][5:].partition(";base64,")
+            return {"type": "image",
+                    "source": {"type": "base64", "media_type": tipo, "data": datos}}
+        return {"type": "image", "source": {"type": "url", "url": b["url"]}}
+    if b["tipo"] == "peticion":
+        if not isinstance(b["argumentos"], dict):
+            raise _SinEquivalente("unos argumentos que no son un objeto JSON")
+        return {"type": "tool_use", "id": b["id"], "name": b["nombre"], "input": b["argumentos"]}
+    contenido = b["contenido"]
+    return {
+        "type": "tool_result",
+        "tool_use_id": b["id"],
+        "content": _textos(contenido, "")
+        if all(x["tipo"] == "texto" for x in contenido)
+        else [_a_anthropic(x) for x in contenido],
+    }
+
+
+def _a_chat(rol: str, bloques: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Un mensaje común en Chat Completions: los resultados, cada uno en su mensaje
+    `tool` y delante; las peticiones, en `tool_calls` del mensaje del modelo."""
+    salida: list[dict[str, Any]] = [
+        {"role": "tool", "tool_call_id": b["id"],
+         "content": _textos(b["contenido"], "el resultado de una herramienta")}
+        for b in bloques
+        if b["tipo"] == "resultado"
+    ]
+    resto = [b for b in bloques if b["tipo"] in ("texto", "imagen")]
+    if rol == "assistant":
+        pedidas = [
+            {"id": b["id"], "type": "function",
+             "function": {"name": b["nombre"],
+                          "arguments": json.dumps(b["argumentos"], ensure_ascii=False)}}
+            for b in bloques
+            if b["tipo"] == "peticion"
+        ]
+        mensaje: dict[str, Any] = {"role": "assistant",
+                                   "content": _textos(resto, "una respuesta") or None}
+        if pedidas:
+            mensaje["tool_calls"] = pedidas
+        return [*salida, mensaje]
+    if not resto:
+        return salida
+    if len(resto) == 1 and resto[0]["tipo"] == "texto":
+        return [*salida, {"role": rol, "content": resto[0]["texto"]}]
+    partes = [
+        {"type": "text", "text": b["texto"]}
+        if b["tipo"] == "texto"
+        else {"type": "image_url", "image_url": {"url": b["url"]}}
+        for b in resto
+    ]
+    return [*salida, {"role": rol, "content": partes}]
+
+
+def _convertir(mensajes: list[dict[str, Any]], desde: str, hacia: str) -> list[dict[str, Any]]:
+    """Los mensajes de `desde` en el formato de `hacia` (`openai` o `anthropic`)."""
+    if desde == hacia:
+        return mensajes
+    salida: list[dict[str, Any]] = []
+    for i, (rol, bloques) in enumerate(_leer(mensajes)):
+        if rol == "system":
+            if hacia == "anthropic" and i > 0:
+                raise _SinEquivalente("unas instrucciones a mitad de conversación")
+            salida.append({"role": "system", "content": _textos(bloques, "las instrucciones")})
+        elif hacia == "anthropic":
+            contenido = [_a_anthropic(b) for b in bloques]
+            if len(contenido) == 1 and contenido[0]["type"] == "text":
+                salida.append({"role": rol, "content": contenido[0]["text"]})
+            else:
+                salida.append({"role": rol, "content": contenido})
+        else:
+            salida += _a_chat(rol, bloques)
+    return salida
+
+
+def _convertir_herramientas(tools: list[Any], desde: str, hacia: str) -> list[Any]:
+    """Las herramientas declaradas, en el formato de `hacia`. Las del proveedor (búsqueda
+    web, ficheros…) no tienen equivalente."""
+    if desde == hacia:
+        return tools
+    salida = []
+    for t in tools:
+        de_anthropic = desde == "anthropic"
+        if t.get("type") not in ((None, "custom") if de_anthropic else ("function",)):
+            raise _SinEquivalente(f"la herramienta `{t.get('type')}` del proveedor")
+        f = t.get("function") or t
+        esquema = f.get("input_schema" if de_anthropic else "parameters") or {
+            "type": "object", "properties": {}}
+        comun = {"name": f.get("name"), "description": f.get("description"),
+                 "strict": f.get("strict")}
+        if hacia == "anthropic":
+            nueva = {**comun, "input_schema": esquema}
+        else:
+            nueva = {"type": "function", "function": {**comun, "parameters": esquema}}
+            nueva["function"] = {k: v for k, v in nueva["function"].items() if v is not None}
+        salida.append({k: v for k, v in nueva.items() if v is not None})
+    return salida
+
+
+def _convertir_resultado(resultado: dict[str, Any], desde: str, hacia: str) -> dict[str, Any]:
+    """Un resultado grabado (D-205) en el formato de `hacia`: el mensaje `tool` de Chat o
+    el bloque `tool_result` de Anthropic."""
+    mensaje = {"role": "user", "content": [resultado]} if desde == "anthropic" else resultado
+    escrito = _convertir([mensaje], desde, hacia)
+    return escrito[0]["content"][0] if hacia == "anthropic" else escrito[0]
+
+
+def _adaptar(x: dict[str, Any], proveedor: str) -> dict[str, Any]:
+    """Una llamada o una conversación, en el formato del proveedor de destino."""
+    desde = x.get("format") or x.get("system") or proveedor
+    if desde == proveedor:
+        return x
+    if "recorded" not in x and all(isinstance(m.get("content"), str) for m in x["messages"]):
+        return x  # sólo texto: vale para los dos, como en D-167
+    adaptada = {**x, "messages": _convertir(x["messages"], desde, proveedor)}
+    if "recorded" in x:
+        adaptada["tools"] = _convertir_herramientas(x.get("tools") or [], desde, proveedor)
+        adaptada["recorded"] = [
+            {**g, "result": _convertir_resultado(g["result"], desde, proveedor)}
+            for g in x["recorded"]
+        ]
+    return adaptada
+
+
+# ---------------------------------------------------------------------------------
 # El replay
 # ---------------------------------------------------------------------------------
 
@@ -443,17 +705,24 @@ def replay_dataset(
             "así que no se reenvía nada. Ponle tarifa en Ajustes o elige otro modelo."
         )
     proveedor = provider or provider_for(model)
-    llamadas: list[dict[str, Any]] = datos.get("calls") or []
     excluidas = dict(datos.get("excluded") or {})
-    # Los mensajes de herramientas van en el formato de quien los grabó (D-205).
-    cadenas: list[dict[str, Any]] = []
-    for cadena in datos.get("chains") or []:
-        if cadena.get("system") == proveedor:
-            cadenas.append(cadena)
-        else:
-            excluidas["herramientas_formato"] = excluidas.get(
-                "herramientas_formato", 0
-            ) + len(cadena["span_ids"])
+    # Cada una, en el formato del destino; lo que no tiene equivalente se queda fuera,
+    # contado y dicho (D-213).
+    sin_equivalente: dict[str, int] = {}
+
+    def adaptadas(lista: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        salida = []
+        for x in lista:
+            try:
+                salida.append(_adaptar(x, proveedor))
+            except _SinEquivalente as exc:
+                n = len(x.get("span_ids") or [x])
+                excluidas["sin_equivalente"] = excluidas.get("sin_equivalente", 0) + n
+                sin_equivalente[str(exc)] = sin_equivalente.get(str(exc), 0) + n
+        return salida
+
+    llamadas = adaptadas(datos.get("calls") or [])
+    cadenas = adaptadas(datos.get("chains") or [])
     if not llamadas and not cadenas:
         motivos = ", ".join(f"{n} {MOTIVOS.get(m, m)}" for m, n in excluidas.items())
         raise EvalError(
@@ -483,6 +752,8 @@ def replay_dataset(
         excluded=excluidas,
         rate_verified=bool(tarifa.get("verified", True)),
         chains=len(cadenas),
+        images=sum(int(ll.get("images") or 0) for ll in [*llamadas, *cadenas]),
+        unconvertible=sin_equivalente,
     )
     resultado = ReplayResult(plan=plan)
     if confirm is not None and not confirm(plan):

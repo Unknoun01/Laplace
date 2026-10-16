@@ -256,7 +256,10 @@ def test_lo_que_no_se_reenvia_se_cuenta_por_motivo(local):
         # Las tres con herramientas de tr00 no son una conversación: ninguna continúa
         # a otra (D-205).
         "herramientas_sin_cadena": 3,
-        "mensajes_no_texto": 2,
+        "mensajes_no_texto": 1,
+        # La de la imagen guardó un `data:` sin los datos: no hay imagen que mandar
+        # (D-213).
+        "imagen_sin_grabar": 1,
         "fallo": 1,
         "sin_respuesta": 1,
         "tirada_de_evaluacion": 1,
@@ -443,11 +446,26 @@ HERRAMIENTAS = {
             "input_schema": {"type": "object", "properties": {"numero": {"type": "integer"}}},
         }
     ],
+    # La API Responses declara las funciones sin anidar (D-213).
+    "responses": [
+        {
+            "type": "function",
+            "name": "buscar_factura",
+            "parameters": {"type": "object", "properties": {"numero": {"type": "integer"}}},
+        }
+    ],
 }
 
 
 def _peticion(proveedor: str, id_: str = "call_a", numero: int = 42) -> dict:
     """Lo que el original pidió: una búsqueda de factura, en el formato de cada uno."""
+    if proveedor == "responses":
+        return {
+            "type": "function_call",
+            "call_id": id_,
+            "name": "buscar_factura",
+            "arguments": f'{{"numero": {numero}}}',
+        }
     if proveedor == "anthropic":
         return {
             "role": "assistant",
@@ -474,6 +492,8 @@ def _peticion(proveedor: str, id_: str = "call_a", numero: int = 42) -> dict:
 
 
 def _resultado(proveedor: str, id_: str = "call_a", texto: str = RESULTADO) -> dict:
+    if proveedor == "responses":
+        return {"type": "function_call_output", "call_id": id_, "output": texto}
     if proveedor == "anthropic":
         return {
             "role": "user",
@@ -482,11 +502,21 @@ def _resultado(proveedor: str, id_: str = "call_a", texto: str = RESULTADO) -> d
     return {"role": "tool", "tool_call_id": id_, "content": texto}
 
 
-def _bucle(trace_id: str, proveedor: str = "openai", *, entre: list | None = None) -> list[Span]:
+def _bucle(
+    trace_id: str,
+    proveedor: str = "openai",
+    *,
+    entre: list | None = None,
+    paso: str = PASO_H,
+    peticion: list | None = None,
+) -> list[Span]:
     """Un agente que busca la factura y contesta: dos vueltas del paso «resolver».
 
     `entre` es lo que el agente mete entre la petición y la segunda vuelta; por
-    defecto, sólo el resultado de la herramienta."""
+    defecto, sólo el resultado de la herramienta. `peticion`, lo que respondió la
+    primera vuelta; por defecto, la petición. `proveedor` puede ser `responses`: la API
+    Responses de OpenAI (D-213)."""
+    pedida = peticion or [_peticion(proveedor)]
     raiz = Span(
         span_id=_id(),
         trace_id=trace_id,
@@ -504,14 +534,12 @@ def _bucle(trace_id: str, proveedor: str = "openai", *, entre: list | None = Non
         {"role": "system", "content": SISTEMA_H},
         {"role": "user", "content": f"Ticket {trace_id}: ¿está pagada la factura 42?"},
     ]
-    primera = _llm(
-        trace_id, raiz.span_id, paso=PASO_H, mensajes=inicio, salida=[_peticion(proveedor)]
-    )
+    primera = _llm(trace_id, raiz.span_id, paso=paso, mensajes=inicio, salida=pedida)
     segunda = _llm(
         trace_id,
         raiz.span_id,
-        paso=PASO_H,
-        mensajes=[*inicio, _peticion(proveedor), *(entre or [_resultado(proveedor)])],
+        paso=paso,
+        mensajes=[*inicio, *pedida, *(entre or [_resultado(proveedor)])],
         salida=[{"role": "assistant", "content": FINAL}],
         start_time=AHORA + timedelta(seconds=1),
     )
@@ -519,7 +547,7 @@ def _bucle(trace_id: str, proveedor: str = "openai", *, entre: list | None = Non
         (primera, segunda), ((500, 10, 0.001), (600, 8, 0.0012)), strict=True
     ):
         assert span.llm is not None
-        span.llm.system = proveedor
+        span.llm.system = "openai" if proveedor == "responses" else proveedor
         span.llm.usage = TokenUsage(input_tokens=ent, output_tokens=sal)
         span.llm.cost = Cost(total_usd=coste)
         span.attributes["laplace.request.tools"] = json.dumps(HERRAMIENTAS[proveedor])
@@ -558,7 +586,7 @@ def test_una_conversacion_con_herramientas_se_entrega_entera(con_herramientas):
     # El punto de partida es la entrada de la primera vuelta, tal cual.
     assert [m["role"] for m in cadena["messages"]] == ["system", "user"]
     assert cadena["tools"] == HERRAMIENTAS["openai"]
-    assert cadena["system"] == "openai"
+    assert cadena["system"] == "openai" and cadena["format"] == "openai"
     # Lo que pidió el original, con lo que le devolvió la herramienta.
     assert cadena["recorded"] == [
         {
@@ -578,7 +606,8 @@ def test_una_conversacion_con_herramientas_se_entrega_entera(con_herramientas):
     assert cadena["params"] == {"temperature": 0, "max_tokens": 20}
 
     anthropic = por_traza["th01"]
-    assert anthropic["system"] == "anthropic"
+    assert anthropic["system"] == "anthropic" and anthropic["format"] == "anthropic"
+    assert cadena["images"] == anthropic["images"] == 0
     assert anthropic["recorded"][0]["arguments"] == {"numero": 42}
     assert anthropic["recorded"][0]["result"] == _resultado("anthropic")["content"][0]
 
@@ -631,10 +660,11 @@ def test_si_el_original_no_llego_a_contestar_no_hay_referencia(con_herramientas)
 
 
 def test_un_formato_que_no_se_lee_no_se_reenvia(con_herramientas):
-    """La API Responses guarda los resultados como elementos sin rol."""
-    spans = _bucle(
-        "th02", entre=[{"type": "function_call_output", "call_id": "call_a", "output": "x"}]
-    )
+    """Otro instrumentador, con mensajes que no son de ningún formato conocido."""
+    spans = _bucle("th02")
+    for span in spans[1:]:
+        assert span.llm is not None
+        span.llm.system = "vertex_ai"
     assert _motivo(con_herramientas, spans)["excluded"] == {"herramientas_formato": 2}
 
 
@@ -653,3 +683,149 @@ def test_cada_peticion_sabe_en_que_vuelta_la_pidio_el_original(con_herramientas)
     cadena = next(c for c in cuerpo["chains"] if c["trace_id"] == "th02")
     assert [(g["id"], g["turn"]) for g in cadena["recorded"]] == [("call_a", 0), ("call_b", 1)]
     assert cadena["recorded"][1]["result"]["content"] == "factura 43: pendiente"
+
+
+# ---------------------------------------------------------------------------------
+# Imágenes, otros proveedores y la API Responses (D-213)
+# ---------------------------------------------------------------------------------
+
+PASO_I = "mirar"
+PNG = "iVBORw0KGgo="
+FOTO = "https://ejemplo.test/ticket.png"
+
+
+def _imagenes(proveedor: str) -> list[dict]:
+    """Una pregunta con dos imágenes, una en base64 y otra por URL, en cada formato."""
+    if proveedor == "anthropic":
+        return [
+            {"type": "text", "text": "¿Qué pone?"},
+            {"type": "image", "source": {"type": "base64", "media_type": "image/png",
+                                         "data": PNG}},
+            {"type": "image", "source": {"type": "url", "url": FOTO}},
+        ]
+    if proveedor == "responses":
+        return [
+            {"type": "input_text", "text": "¿Qué pone?"},
+            {"type": "input_image", "image_url": f"data:image/png;base64,{PNG}"},
+            {"type": "input_image", "image_url": FOTO, "detail": "high"},
+        ]
+    return [
+        {"type": "text", "text": "¿Qué pone?"},
+        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{PNG}"}},
+        {"type": "image_url", "image_url": {"url": FOTO, "detail": "high"}},
+    ]
+
+
+def _mira(trace_id: str, proveedor: str = "openai", contenido: list | None = None) -> list[Span]:
+    """Un paso que lee una foto del ticket: una llamada sin herramientas, con imágenes."""
+    raiz = Span(
+        span_id=_id(),
+        trace_id=trace_id,
+        project_id="local",
+        name="atender_ticket",
+        type="agent",
+        status="ok",
+        start_time=AHORA,
+        end_time=AHORA + timedelta(seconds=1),
+        duration_ms=1000.0,
+    )
+    llamada = _llm(
+        trace_id,
+        raiz.span_id,
+        paso=PASO_I,
+        mensajes=[
+            {"role": "system", "content": SISTEMA},
+            {"role": "user", "content": contenido or _imagenes(proveedor)},
+        ],
+    )
+    assert llamada.llm is not None
+    llamada.llm.system = "openai" if proveedor == "responses" else proveedor
+    return [raiz, llamada]
+
+
+def _del_paso(client, spans: list[Span], paso: str) -> dict:
+    client.store.insert_spans(spans)
+    conjunto = client.post(
+        "/api/datasets",
+        json={"project_id": "local", "name": paso, "filter": {"step_key": paso}, "limit": 10},
+    ).json()
+    return client.get(f"/api/datasets/{conjunto['id']}/replay").json()
+
+
+def test_una_llamada_con_imagenes_se_entrega_con_sus_bloques(con_herramientas):
+    cuerpo = _del_paso(
+        con_herramientas,
+        _mira("ti00") + _mira("ti01", "anthropic") + _mira("ti02", "responses"),
+        PASO_I,
+    )
+    assert cuerpo["excluded"] == {}
+    por_traza = {c["trace_id"]: c for c in cuerpo["calls"]}
+    for traza, formato in (("ti00", "openai"), ("ti01", "anthropic"), ("ti02", "responses")):
+        llamada = por_traza[traza]
+        assert llamada["format"] == formato
+        assert llamada["images"] == 2
+        # Tal cual, en su formato: lo convierte el SDK, que sabe a quién va.
+        assert llamada["messages"][1]["content"] == _imagenes(formato)
+        assert llamada["messages"][0] == {"role": "system", "content": SISTEMA}
+
+
+def test_una_imagen_que_no_se_grabo_no_se_reenvia(con_herramientas):
+    """Una referencia a un fichero del proveedor no es la imagen: no hay qué mandar."""
+    cuerpo = _del_paso(
+        con_herramientas,
+        _mira("ti00", "anthropic", [{"type": "image", "source": {"type": "file",
+                                                                 "file_id": "file_1"}}])
+        + _mira("ti01", "responses", [{"type": "input_image", "file_id": "file_2"}])
+        + _mira("ti02", contenido=[{"type": "image_url", "image_url": {"url": "data:…"}}]),
+        PASO_I,
+    )
+    assert cuerpo["calls"] == []
+    assert cuerpo["excluded"] == {"imagen_sin_grabar": 3}
+
+
+def test_una_imagen_sin_grabar_en_una_conversacion_tampoco(con_herramientas):
+    resultado = {
+        "role": "user",
+        "content": [
+            {
+                "type": "tool_result",
+                "tool_use_id": "call_a",
+                "content": [{"type": "image", "source": {"type": "file", "file_id": "f"}}],
+            }
+        ],
+    }
+    cuerpo = _motivo(con_herramientas, _bucle("th02", "anthropic", entre=[resultado]))
+    assert cuerpo["excluded"] == {"imagen_sin_grabar": 2}
+
+
+def test_una_conversacion_de_la_api_responses_se_entrega_entera(con_herramientas):
+    """Responses graba cada petición y cada resultado como un elemento sin rol, y el
+    razonamiento del modelo entre medias: es salida del original, que el modelo nuevo
+    rehace, no algo que el agente meta entre vueltas."""
+    razonamiento = {"type": "reasoning", "id": "rs_1", "summary": []}
+    pedidas = [
+        razonamiento,
+        _peticion("responses", "call_a"),
+        _peticion("responses", "call_b", numero=43),
+    ]
+    spans = _bucle(
+        "thr0",
+        "responses",
+        peticion=pedidas,
+        entre=[
+            _resultado("responses", "call_a"),
+            _resultado("responses", "call_b", texto="factura 43: pendiente"),
+        ],
+    )
+    cuerpo = _motivo(con_herramientas, spans)
+    assert cuerpo["excluded"] == {}
+    cadena = next(c for c in cuerpo["chains"] if c["trace_id"] == "thr0")
+    assert cadena["format"] == "responses" and cadena["system"] == "openai"
+    assert cadena["tools"] == HERRAMIENTAS["responses"]
+    # Las dos pedidas a la vez, en la misma vuelta: se pueden reordenar (D-205).
+    assert [(g["id"], g["turn"]) for g in cadena["recorded"]] == [("call_a", 0), ("call_b", 0)]
+    assert cadena["recorded"][0]["arguments"] == '{"numero": 42}'
+    assert cadena["recorded"][1]["result"] == _resultado(
+        "responses", "call_b", texto="factura 43: pendiente"
+    )
+    assert cadena["output"] == FINAL

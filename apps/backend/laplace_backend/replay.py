@@ -16,8 +16,10 @@ Se reenvía sólo lo que no puede tener efectos ni cambiar de sentido al reenvia
   herramienta entre los mensajes. Las que sí las usan van aparte, como una
   **conversación** entera (D-205): el SDK la repite con el modelo nuevo y le da como
   resultado de cada herramienta el que quedó grabado; la de verdad no se ejecuta;
-* con **todos sus mensajes en texto** y con rol: un mensaje recortado por el tamaño, una
-  imagen o un bloque que no es texto no se puede reenviar tal cual a otro proveedor;
+* con **todos sus mensajes en texto o imágenes** y con rol: un mensaje recortado por el
+  tamaño o un bloque de otra cosa no se puede reenviar. Las imágenes van tal cual, en
+  el formato de quien las grabó, y el SDK las convierte si el destino es otro (D-213);
+  una imagen de la que sólo quedó una referencia no se reenvía;
 * que salió **bien** y dejó una **respuesta** con la que comparar;
 * que es **tráfico real**, no de una tirada de evaluación.
 
@@ -37,6 +39,9 @@ from pydantic import BaseModel, Field
 
 from .pricing import get_price_table
 
+#: Los bloques de imagen de cada formato: Chat Completions, Messages y Responses.
+IMAGENES = frozenset({"image_url", "image", "input_image"})
+
 #: Los roles que se pueden reenviar. `tool` no: es el resultado de una herramienta.
 ROLES = frozenset({"system", "developer", "user", "assistant"})
 
@@ -54,6 +59,7 @@ MOTIVOS = (
     "herramientas_sin_cadena",
     "herramientas_sin_grabar",
     "herramientas_formato",
+    "imagen_sin_grabar",
     "sin_mensajes",
     "mensajes_no_texto",
     "sin_respuesta",
@@ -81,8 +87,13 @@ class Llamada(BaseModel):
     span_id: str
     system: str = ""
     model: str = ""
-    messages: list[dict[str, str]] = Field(default_factory=list)
+    #: El formato de los bloques: `openai` (Chat Completions), `anthropic` o `responses`.
+    format: str = ""
+    #: En texto, o con las imágenes tal cual en su formato (D-213).
+    messages: list[dict[str, Any]] = Field(default_factory=list)
     params: dict[str, Any] = Field(default_factory=dict)
+    #: Cuántas imágenes lleva: lo que cuestan con el modelo nuevo no se sabe antes.
+    images: int = 0
     #: Lo que respondió el modelo original: la referencia para el juez.
     output: str = ""
     input_tokens: int = 0
@@ -111,14 +122,17 @@ class Cadena(BaseModel):
     trace_id: str
     #: Todas sus vueltas: la tirada original cuesta el bucle entero.
     span_ids: list[str] = Field(default_factory=list)
-    #: El proveedor que la grabó; sus mensajes van en su formato.
+    #: El proveedor que la grabó y el formato de sus mensajes (D-213).
     system: str = ""
+    format: str = ""
     model: str = ""
     #: El punto de partida: la entrada de la primera vuelta, en crudo.
     messages: list[dict[str, Any]] = Field(default_factory=list)
     tools: list[Any] = Field(default_factory=list)
     params: dict[str, Any] = Field(default_factory=dict)
     recorded: list[Grabada] = Field(default_factory=list)
+    #: Cuántas imágenes lleva la última vuelta, que las contiene todas.
+    images: int = 0
     #: La respuesta final del original: la referencia para el juez.
     output: str = ""
     #: De la última vuelta, que contiene todas las anteriores: la base de lo peor.
@@ -141,6 +155,55 @@ class Reenviables(BaseModel):
     target: Tarifa | None = None
 
 
+def _imagenes(valor: Any) -> list[dict[str, Any]]:
+    """Los bloques de imagen que hay dentro de `valor`, a cualquier profundidad."""
+    if isinstance(valor, list):
+        return [b for v in valor for b in _imagenes(v)]
+    if not isinstance(valor, dict):
+        return []
+    propios = [valor] if valor.get("type") in IMAGENES else []
+    return propios + [b for v in valor.values() for b in _imagenes(v)]
+
+
+def _grabada(imagen: dict[str, Any]) -> bool:
+    """Si quedó la imagen y no sólo una referencia: una URL o los datos en base64."""
+    fuente = imagen.get("source") if imagen.get("type") == "image" else None
+    if isinstance(fuente, dict):
+        if fuente.get("type") == "base64":
+            return bool(fuente.get("data"))
+        url = fuente.get("url") if fuente.get("type") == "url" else None
+    else:
+        url = imagen.get("image_url")
+        url = url.get("url") if isinstance(url, dict) else url
+    if not isinstance(url, str):
+        return False
+    if url.startswith("data:"):
+        return ";base64," in url and not url.endswith(";base64,")
+    return url.startswith(("https://", "http://"))
+
+
+def _formato(system: str, mensajes: list[Any], herramientas: list[Any]) -> str:
+    """`responses` si lleva algo que sólo graba la API Responses; si no, el proveedor."""
+    if system != "openai":
+        return system
+    partes = [
+        p
+        for m in mensajes
+        if isinstance(m, dict) and isinstance(m.get("content"), list)
+        for p in m["content"]
+    ]
+    if (
+        any(not isinstance(m, dict) or "role" not in m for m in mensajes)
+        or any(
+            isinstance(p, dict) and str(p.get("type", "")).startswith(("input_", "output_"))
+            for p in partes
+        )
+        or any(isinstance(h, dict) and "function" not in h for h in herramientas)
+    ):
+        return "responses"
+    return "openai"
+
+
 def _texto(contenido: Any) -> str | None:
     """El texto de un contenido, si es sólo texto; `None` si lleva otra cosa."""
     if isinstance(contenido, str):
@@ -156,8 +219,9 @@ def _texto(contenido: Any) -> str | None:
     return None
 
 
-def _mensajes(span: Span) -> tuple[list[dict[str, str]] | None, str]:
-    """Los mensajes en texto, o `None` y el motivo por el que no se pueden reenviar."""
+def _mensajes(span: Span) -> tuple[list[dict[str, Any]] | None, str]:
+    """Los mensajes en texto, o con sus imágenes tal cual; o `None` y el motivo por el
+    que no se pueden reenviar."""
     crudos = span.llm.input_messages if span.llm else []
     if not crudos:
         return None, "sin_mensajes"
@@ -166,10 +230,18 @@ def _mensajes(span: Span) -> tuple[list[dict[str, str]] | None, str]:
         rol = str(mensaje.get("role", "")).lower()
         if rol == "tool" or mensaje.get("tool_calls") or mensaje.get("tool_call_id"):
             return None, "herramientas"
-        texto = _texto(mensaje.get("content"))
+        contenido = mensaje.get("content")
+        texto: Any = _texto(contenido)
+        if texto is None and isinstance(contenido, list) and contenido and all(
+            isinstance(b, dict) and (b.get("type") in IMAGENES or _texto([b]) is not None)
+            for b in contenido
+        ):
+            texto = contenido  # con imágenes: tal cual, en su formato (D-213)
         if rol not in ROLES or texto is None:
             return None, "mensajes_no_texto"
         mensajes.append({"role": rol, "content": texto})
+    if not all(_grabada(b) for b in _imagenes(mensajes)):
+        return None, "imagen_sin_grabar"
     return mensajes, ""
 
 
@@ -220,14 +292,17 @@ def llamada(span: Span, case_id: str) -> Llamada:
     mensajes, _ = _mensajes(span)
     salida, _ = _salida(span)
     params = {k: span.llm.params[k] for k in PARAMETROS if span.llm.params.get(k) is not None}
+    system = span.llm.system or ""
     return Llamada(
         case_id=case_id,
         trace_id=span.trace_id,
         span_id=span.span_id,
-        system=span.llm.system or "",
+        system=system,
         model=span.llm.response_model or span.llm.request_model or "",
+        format=_formato(system, span.llm.input_messages, []),
         messages=mensajes or [],
         params=params,
+        images=len(_imagenes(mensajes)),
         output=salida or "",
         input_tokens=span.llm.usage.input_tokens,
         output_tokens=span.llm.usage.output_tokens,
@@ -250,6 +325,13 @@ def _herramientas(span: Span) -> list[Any] | None:
 
 def _peticiones(mensaje: dict[str, Any], system: str) -> list[tuple[str, str, Any]]:
     """Las peticiones de herramienta de un mensaje del modelo: (id, nombre, argumentos)."""
+    if system == "responses":
+        if mensaje.get("type") != "function_call":
+            return []
+        return [
+            (str(mensaje.get("call_id", "")), str(mensaje.get("name", "")),
+             mensaje.get("arguments"))
+        ]
     if mensaje.get("role") != "assistant":
         return []
     if system == "anthropic":
@@ -268,6 +350,10 @@ def _peticiones(mensaje: dict[str, Any], system: str) -> list[tuple[str, str, An
 
 def _resultados(mensaje: dict[str, Any], system: str) -> list[tuple[str, dict[str, Any]]]:
     """Los resultados de herramienta de un mensaje, si no lleva otra cosa: (id, crudo)."""
+    if system == "responses":
+        if mensaje.get("type") != "function_call_output":
+            return []
+        return [(str(mensaje.get("call_id", "")), mensaje)]
     if system == "anthropic":
         bloques = mensaje.get("content")
         if mensaje.get("role") != "user" or not isinstance(bloques, list):
@@ -289,13 +375,19 @@ def cadena(spans: list[Span], case_id: str) -> tuple[Cadena | None, str]:
     llms = [s.llm for s in vueltas if s.llm is not None]
     system = str(llms[0].system or "")
     entradas = [llm.input_messages for llm in llms]
+    herramientas = [_herramientas(s) for s in vueltas]
+    formato = _formato(system, entradas[-1], herramientas[0] or [])
     if system not in ("openai", "anthropic") or any(
-        str(m.get("role", "")).lower() not in ROLES | {"tool"} for e in entradas for m in e
+        str(m.get("role", "")).lower() not in ROLES | {"tool"}
+        for e in entradas
+        for m in e
+        if formato != "responses" or "role" in m  # en Responses hay elementos sin rol
     ):
         return None, "herramientas_formato"
-    herramientas = [_herramientas(s) for s in vueltas]
     if any(h is None for h in herramientas):
         return None, "herramientas_sin_grabar"
+    if not all(_grabada(b) for b in _imagenes(entradas[-1])):
+        return None, "imagen_sin_grabar"
     if any(h != herramientas[0] for h in herramientas) or any(
         llm.system != system for llm in llms
     ):
@@ -304,18 +396,25 @@ def cadena(spans: list[Span], case_id: str) -> tuple[Cadena | None, str]:
         if len(despues) <= len(antes) or despues[: len(antes)] != antes:
             return None, "herramientas_sin_cadena"
 
-    # Lo que pasó entre la primera vuelta y la última: peticiones y sus resultados.
+    # Lo que pasó entre la primera vuelta y la última: peticiones y sus resultados. Las
+    # peticiones seguidas son de la misma vuelta: Responses graba cada una aparte.
     pedidas: list[Grabada] = []
     devueltos: dict[str, dict[str, Any]] = {}
-    turno = 0
+    turno, abierta = 0, False
     for mensaje in entradas[-1][len(entradas[0]) :]:
-        peticiones = _peticiones(mensaje, system)
-        resultados = _resultados(mensaje, system)
+        peticiones = _peticiones(mensaje, formato)
         if peticiones:
             pedidas += [Grabada(id=i, name=n, arguments=a, turn=turno) for i, n, a in peticiones]
-            turno += 1
-        elif resultados:
+            abierta = True
+            continue
+        turno, abierta = turno + abierta, False
+        resultados = _resultados(mensaje, formato)
+        if resultados:
             devueltos.update(resultados)
+        elif formato == "responses" and (
+            mensaje.get("type") == "reasoning" or mensaje.get("role") == "assistant"
+        ):
+            continue  # lo que dijo el original en su vuelta: el modelo nuevo lo rehace
         else:
             return None, "herramientas_sin_cadena"
     if sorted(g.id for g in pedidas) != sorted(devueltos):
@@ -332,11 +431,13 @@ def cadena(spans: list[Span], case_id: str) -> tuple[Cadena | None, str]:
         trace_id=vueltas[0].trace_id,
         span_ids=[s.span_id for s in vueltas],
         system=system,
+        format=formato,
         model=ultima.response_model or ultima.request_model or "",
         messages=entradas[0],
         tools=herramientas[0] or [],
         params={k: ultima.params[k] for k in PARAMETROS if ultima.params.get(k) is not None},
         recorded=pedidas,
+        images=len(_imagenes(entradas[-1])),
         output=salida,
         input_tokens=ultima.usage.input_tokens,
         output_tokens=max(llm.usage.output_tokens for llm in llms),
