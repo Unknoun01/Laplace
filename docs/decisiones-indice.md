@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 208 decisiones.
+final. 209 decisiones.
 
 ## Coste, precios y caché
 
@@ -40,6 +40,7 @@ final. 208 decisiones.
 - [D-199](../DECISIONS.md#d-199--trabajo-que-podría-ir-por-lotes-con-la-marca-hay-dinero-sin-ella-una-pregunta) — Trabajo que podría ir por lotes: con la marca hay dinero, sin ella una pregunta
 - [D-200](../DECISIONS.md#d-200--caché-semántica-la-misma-pregunta-con-la-misma-respuesta-hasta-x-y-sin-dinero-en-el-total) — Caché semántica: la misma pregunta con la misma respuesta, «hasta X» y sin dinero en el total
 - [D-208](../DECISIONS.md#d-208--los-diagnósticos-con-modelo-se-van-con-su-sujeto-y-el-rechazado-deja-su-coste) — Los diagnósticos con modelo se van con su sujeto, y el rechazado deja su coste
+- [D-209](../DECISIONS.md#d-209--la-demo-enseña-la-caché-compartida-entre-pasos) — La demo enseña la caché compartida entre pasos
 
 ## Detección: reglas y hallazgos
 
@@ -87,6 +88,7 @@ final. 208 decisiones.
 - [D-204](../DECISIONS.md#d-204--la-señal-de-despliegue-el-aviso-deployment_status-de-github-mueve-la-frontera-del-arreglado) — La señal de despliegue: el aviso `deployment_status` de GitHub mueve la frontera del arreglado
 - [D-207](../DECISIONS.md#d-207--el-historial-de-los-preagregados-una-fila-por-conversación-paso-y-hora) — El historial, de los preagregados: una fila por conversación, paso y hora
 - [D-208](../DECISIONS.md#d-208--los-diagnósticos-con-modelo-se-van-con-su-sujeto-y-el-rechazado-deja-su-coste) — Los diagnósticos con modelo se van con su sujeto, y el rechazado deja su coste
+- [D-209](../DECISIONS.md#d-209--la-demo-enseña-la-caché-compartida-entre-pasos) — La demo enseña la caché compartida entre pasos
 
 ## Probar: evaluaciones, juez y replay
 
@@ -263,6 +265,7 @@ final. 208 decisiones.
 - [D-100](../DECISIONS.md#d-100--los-nombres-de-modelo-de-los-tests-y-los-ejemplos-también-caducan) — Los nombres de modelo de los tests y los ejemplos también caducan
 - [D-135](../DECISIONS.md#d-135--lo-que-la-demo-de-un-mes-destapó-en-el-motor-y-las-pantallas-con-red) — Lo que la demo de un mes destapó en el motor, y las pantallas con red
 - [D-146](../DECISIONS.md#d-146--la-demo-llega-hasta-ahora) — La demo llega hasta ahora
+- [D-209](../DECISIONS.md#d-209--la-demo-enseña-la-caché-compartida-entre-pasos) — La demo enseña la caché compartida entre pasos
 
 ## Datos, trazas y API
 
@@ -666,3 +669,4 @@ final. 208 decisiones.
 - [D-206](../DECISIONS.md#d-206--la-parada-alcanza-lo-que-otro-instrumentador-traza-en-python-lo-que-no-alcanza-se-dice) — La parada alcanza lo que otro instrumentador traza en Python; lo que no alcanza, se dice
 - [D-207](../DECISIONS.md#d-207--el-historial-de-los-preagregados-una-fila-por-conversación-paso-y-hora) — El historial, de los preagregados: una fila por conversación, paso y hora
 - [D-208](../DECISIONS.md#d-208--los-diagnósticos-con-modelo-se-van-con-su-sujeto-y-el-rechazado-deja-su-coste) — Los diagnósticos con modelo se van con su sujeto, y el rechazado deja su coste
+- [D-209](../DECISIONS.md#d-209--la-demo-enseña-la-caché-compartida-entre-pasos) — La demo enseña la caché compartida entre pasos
