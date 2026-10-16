@@ -1951,9 +1951,12 @@ class SQLiteStore:
         return self._query(
             f"""
             SELECT COUNT(*) AS trazas, SUM(rate) AS representadas,
-                   SUM(coste * (rate - 1)) AS no_visto
+                   SUM(coste * (rate - 1)) AS no_visto,
+                   SUM(rate * (rate - 1) * coste * coste) AS varianza,
+                   SUM(sin_tarifa) AS sin_tarifa
             FROM (
-                SELECT trace_id, MAX(sample_rate) AS rate, SUM(cost_total_usd) AS coste
+                SELECT trace_id, MAX(sample_rate) AS rate, SUM(cost_total_usd) AS coste,
+                       MAX(cost_unknown) AS sin_tarifa
                 FROM spans
                 WHERE {WINDOW_WHERE} AND sample_rate > 1
                 GROUP BY trace_id

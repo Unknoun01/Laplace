@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 207 decisiones.
+final. 208 decisiones.
 
 ## Coste, precios y caché
 
@@ -39,6 +39,7 @@ final. 207 decisiones.
 - [D-196](../DECISIONS.md#d-196--lecturas-de-caché-pagadas-en-openai-la-ficha-propone-lo-mismo-que-la-tarjeta) — Lecturas de caché pagadas en OpenAI: la ficha propone lo mismo que la tarjeta
 - [D-199](../DECISIONS.md#d-199--trabajo-que-podría-ir-por-lotes-con-la-marca-hay-dinero-sin-ella-una-pregunta) — Trabajo que podría ir por lotes: con la marca hay dinero, sin ella una pregunta
 - [D-200](../DECISIONS.md#d-200--caché-semántica-la-misma-pregunta-con-la-misma-respuesta-hasta-x-y-sin-dinero-en-el-total) — Caché semántica: la misma pregunta con la misma respuesta, «hasta X» y sin dinero en el total
+- [D-210](../DECISIONS.md#d-210--con-muestreo-se-estima-lo-que-falta-del-gasto-con-margen-nada-más) — Con muestreo, se estima lo que falta del gasto, con margen; nada más
 
 ## Detección: reglas y hallazgos
 
@@ -240,6 +241,7 @@ final. 207 decisiones.
 - [D-163](../DECISIONS.md#d-163--stripe-se-trae-solo-cada-día-y-el-cliente-desde-node-sin-sdk) — Stripe se trae solo cada día, y el cliente desde Node sin SDK
 - [D-173](../DECISIONS.md#d-173--retención-por-proyecto-y-borrar-lo-de-una-persona-o-un-cliente) — Retención por proyecto, y borrar lo de una persona o un cliente
 - [D-179](../DECISIONS.md#d-179--margen-por-cliente-lo-evitable-de-cada-uno-otras-monedas-y-su-columna) — Margen por cliente: lo evitable de cada uno, otras monedas y su columna
+- [D-210](../DECISIONS.md#d-210--con-muestreo-se-estima-lo-que-falta-del-gasto-con-margen-nada-más) — Con muestreo, se estima lo que falta del gasto, con margen; nada más
 
 ## Idiomas y textos
 
@@ -663,3 +665,4 @@ final. 207 decisiones.
 - [D-205](../DECISIONS.md#d-205--el-replay-con-herramientas-cada-resultado-el-que-grabó-la-traza-lo-que-no-se-grabó-corta-el-caso) — El replay con herramientas: cada resultado, el que grabó la traza; lo que no se grabó corta el caso
 - [D-206](../DECISIONS.md#d-206--la-parada-alcanza-lo-que-otro-instrumentador-traza-en-python-lo-que-no-alcanza-se-dice) — La parada alcanza lo que otro instrumentador traza en Python; lo que no alcanza, se dice
 - [D-207](../DECISIONS.md#d-207--el-historial-de-los-preagregados-una-fila-por-conversación-paso-y-hora) — El historial, de los preagregados: una fila por conversación, paso y hora
+- [D-210](../DECISIONS.md#d-210--con-muestreo-se-estima-lo-que-falta-del-gasto-con-margen-nada-más) — Con muestreo, se estima lo que falta del gasto, con margen; nada más

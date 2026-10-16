@@ -16,6 +16,7 @@ Se exige:
 from __future__ import annotations
 
 import json
+import math
 import re
 import uuid
 from datetime import timedelta
@@ -34,8 +35,10 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from opentelemetry.trace import Status, StatusCode
 from test_margen import AHORA, VENTANA, almacen  # noqa: F401
 
-from laplace_backend import coverage
+from laplace_backend import cifras, coverage
+from laplace_backend.evals import Z_95
 from laplace_backend.ingest.otlp import parse_spans
+from laplace_backend.storage.base import CoverageFacts
 
 CORREO = "ana.garcia@example.com"
 
@@ -254,7 +257,9 @@ def test_la_ingesta_lee_a_cuantas_representa():
     assert spans and {s.sample_rate for s in spans} == {2.0}
 
 
-def _traza(proyecto: str, coste: float, rate: float) -> list[Span]:
+def _traza(
+    proyecto: str, coste: float, rate: float, *, sin_tarifa: bool = False
+) -> list[Span]:
     traza = uuid.uuid4().hex
     inicio = AHORA - timedelta(hours=1)
     raiz = Span(
@@ -270,7 +275,7 @@ def _traza(proyecto: str, coste: float, rate: float) -> list[Span]:
     llm.llm = LLMAttributes(
         request_model="gpt-5.6-luna",
         usage=TokenUsage(input_tokens=100, output_tokens=100),
-        cost=Cost(total_usd=coste, input_usd=coste),
+        cost=Cost(total_usd=coste, input_usd=coste, unknown=sin_tarifa),
     )
     return [raiz, llm]
 
@@ -287,8 +292,65 @@ def test_el_servidor_dice_lo_que_falta_por_el_muestreo(almacen):  # noqa: F811
     assert hechos.unseen_cost_usd == pytest.approx((0.02 + 0.04) * 9)
     leido = store.get_trace_spans(spans[2].trace_id, proyecto)
     assert {s.sample_rate for s in leido} == {10.0}
+    assert hechos.unseen_cost_var == pytest.approx((0.02**2 + 0.04**2) * 90)
+    assert hechos.sampled_unpriced == 0
     texto = coverage.build(hechos).sampling
     assert "2" in texto and "20" in texto, texto
+
+
+def test_una_traza_al_azar_sin_tarifa_se_cuenta(almacen):  # noqa: F811
+    """D-210: su coste es un suelo, y escalarlo daría un suelo disfrazado."""
+    store, proyecto = almacen
+    store.insert_spans(
+        _traza(proyecto, 0.02, 10.0)
+        + _traza(proyecto, 0.0, 10.0, sin_tarifa=True)
+        + _traza(proyecto, 0.0, 1.0, sin_tarifa=True)
+    )
+    hechos = store.coverage(proyecto, VENTANA)
+    assert hechos.sampled_traces == 2 and hechos.sampled_unpriced == 1
+
+
+def _hechos(costes: list[float], rate: float = 10.0, **otros) -> CoverageFacts:
+    return CoverageFacts(
+        llm_calls=100,
+        sampled_traces=len(costes),
+        represented_traces=len(costes) * rate,
+        unseen_cost_usd=sum(c * (rate - 1) for c in costes),
+        unseen_cost_var=sum(rate * (rate - 1) * c * c for c in costes),
+        **otros,
+    )
+
+
+def test_lo_que_falta_se_estima_con_su_margen():
+    """D-210: Horvitz-Thompson con su intervalo al 95 %, nunca la cifra sola."""
+    costes = [0.01 * (1 + i % 5) for i in range(coverage.MIN_TRAZAS_PARA_ESTIMAR)]
+    hechos = _hechos(costes)
+    margen = Z_95 * math.sqrt(hechos.unseen_cost_var)
+    texto = coverage.build(hechos).sampling
+    assert cifras.dinero(hechos.unseen_cost_usd - margen) in texto, texto
+    assert cifras.dinero(hechos.unseen_cost_usd + margen) in texto, texto
+    assert cifras.dinero(hechos.unseen_cost_usd) not in texto, texto
+
+
+def test_el_margen_no_baja_de_cero():
+    costes = [0.0] * (coverage.MIN_TRAZAS_PARA_ESTIMAR - 1) + [5.0]
+    hechos = _hechos(costes)
+    assert hechos.unseen_cost_usd < Z_95 * math.sqrt(hechos.unseen_cost_var)
+    assert cifras.dinero(0) in coverage.build(hechos).sampling
+
+
+@pytest.mark.parametrize(
+    "costes, otros",
+    [
+        ([0.02] * (coverage.MIN_TRAZAS_PARA_ESTIMAR - 1), {}),
+        ([0.02] * coverage.MIN_TRAZAS_PARA_ESTIMAR, {"sampled_unpriced": 1}),
+    ],
+    ids=["pocas", "sin-tarifa"],
+)
+def test_sin_muestra_o_sin_tarifa_no_hay_cifra(costes, otros):
+    hechos = _hechos(costes, **otros)
+    texto = coverage.build(hechos).sampling
+    assert texto and "$" not in texto, texto
 
 
 def test_sin_muestreo_no_se_dice_nada(almacen):  # noqa: F811

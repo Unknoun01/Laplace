@@ -255,6 +255,8 @@ def coverage_from_rows(fila: Any, pasos: Any, muestreo: Any = None) -> Any:
         sampled_traces=int(muestreo["trazas"] or 0) if muestreo else 0,
         represented_traces=float(muestreo["representadas"] or 0) if muestreo else 0.0,
         unseen_cost_usd=float(muestreo["no_visto"] or 0) if muestreo else 0.0,
+        unseen_cost_var=float(muestreo["varianza"] or 0) if muestreo else 0.0,
+        sampled_unpriced=int(muestreo["sin_tarifa"] or 0) if muestreo else 0,
     )
 
 
