@@ -1042,6 +1042,10 @@ class SpanStore(Protocol):
     def origen_llamadas(self, project_id: str, window: Window) -> list[OrigenLlamadas]:
         """Las llamadas a modelos de la ventana por origen, sin evaluaciones (D-215)."""
 
+    def primeras_versiones(self, project_id: str, window: Window) -> dict[str, datetime]:
+        """La primera ejecución de cada `service.version` de la ventana, sin
+        evaluaciones (D-216)."""
+
     def project_graph(self, project_id: str, window: Window) -> GraphFacts:
         """El agente entero en la ventana: pasos y quién llama a quién (D-188).
 

@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 208 decisiones.
+final. 209 decisiones.
 
 ## Coste, precios y caché
 
@@ -114,6 +114,7 @@ final. 208 decisiones.
 - [D-144](../DECISIONS.md#d-144--buscar-dentro-de-prompts-respuestas-y-herramientas) — Buscar dentro de prompts, respuestas y herramientas
 - [D-157](../DECISIONS.md#d-157--prompts-como-fuente-de-hallazgos) — Prompts como fuente de hallazgos
 - [D-160](../DECISIONS.md#d-160--prompts-sin-tiradas-de-evaluación-envoltorios-con--y-el-modelo-rápido-ponderado) — Prompts sin tiradas de evaluación, envoltorios con «=» y el modelo rápido ponderado
+- [D-216](../DECISIONS.md#d-216--serviceversion-como-segunda-señal-de-despliegue-si-se-puede-atar-a-un-commit) — `service.version` como segunda señal de despliegue, si se puede atar a un commit
 
 ## Instrumentación: SDK e integraciones
 
@@ -665,3 +666,4 @@ final. 208 decisiones.
 - [D-206](../DECISIONS.md#d-206--la-parada-alcanza-lo-que-otro-instrumentador-traza-en-python-lo-que-no-alcanza-se-dice) — La parada alcanza lo que otro instrumentador traza en Python; lo que no alcanza, se dice
 - [D-207](../DECISIONS.md#d-207--el-historial-de-los-preagregados-una-fila-por-conversación-paso-y-hora) — El historial, de los preagregados: una fila por conversación, paso y hora
 - [D-215](../DECISIONS.md#d-215--de-dónde-viene-cada-span-y-qué-parte-del-tráfico-se-queda-fuera-de-la-parada) — De dónde viene cada span, y qué parte del tráfico se queda fuera de la parada
+- [D-216](../DECISIONS.md#d-216--serviceversion-como-segunda-señal-de-despliegue-si-se-puede-atar-a-un-commit) — `service.version` como segunda señal de despliegue, si se puede atar a un commit

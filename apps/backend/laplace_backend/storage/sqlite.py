@@ -181,6 +181,7 @@ CREATE TABLE IF NOT EXISTS spans (
     sdk_language          TEXT NOT NULL DEFAULT '',
     sdk_name              TEXT NOT NULL DEFAULT '',
     instrumentor          TEXT NOT NULL DEFAULT '',
+    service_version       TEXT NOT NULL DEFAULT '',
 
     events                TEXT NOT NULL DEFAULT '',
     attributes            TEXT NOT NULL DEFAULT '',
@@ -219,6 +220,8 @@ COLUMNAS_TARDIAS = (
     ("sdk_language", "TEXT NOT NULL DEFAULT ''"),
     ("sdk_name", "TEXT NOT NULL DEFAULT ''"),
     ("instrumentor", "TEXT NOT NULL DEFAULT ''"),
+    # La versión del servicio, señal de despliegue del bot de PR (D-216).
+    ("service_version", "TEXT NOT NULL DEFAULT ''"),
 )
 
 #: Índices sobre columnas tardías. Van aquí y **no** en `SCHEMA` por un motivo que costó
@@ -1917,6 +1920,18 @@ class SQLiteStore:
             self._window_params(project_id, window),
         )
         return [origen_from_row(f) for f in filas]
+
+    def primeras_versiones(self, project_id: str, window: Window) -> dict[str, datetime]:
+        filas = self._query(
+            f"""
+            SELECT service_version AS version, MIN(start_time) AS primera
+            FROM spans
+            WHERE {RULES_WHERE} AND service_version != ''
+            GROUP BY service_version
+            """,
+            self._window_params(project_id, window),
+        )
+        return {f["version"]: utc(f["primera"]) for f in filas}
 
     def coverage(self, project_id: str, window: Window) -> CoverageFacts:
         """Una sola consulta de cuentas sobre las llamadas a modelos de la ventana.

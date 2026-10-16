@@ -117,6 +117,8 @@ CREATE TABLE IF NOT EXISTS spans
     sdk_language        LowCardinality(String) DEFAULT '',
     sdk_name            LowCardinality(String) DEFAULT '',
     instrumentor        LowCardinality(String) DEFAULT '',
+    -- `service.version` del recurso: señal de despliegue del bot de PR (D-216).
+    service_version     LowCardinality(String) DEFAULT '',
 
     events              String CODEC(ZSTD(3)),
     attributes          String CODEC(ZSTD(3)),
@@ -213,6 +215,9 @@ ALTER TABLE spans ADD COLUMN IF NOT EXISTS output_json LowCardinality(String) DE
 ALTER TABLE spans ADD COLUMN IF NOT EXISTS sdk_language LowCardinality(String) DEFAULT '';
 ALTER TABLE spans ADD COLUMN IF NOT EXISTS sdk_name LowCardinality(String) DEFAULT '';
 ALTER TABLE spans ADD COLUMN IF NOT EXISTS instrumentor LowCardinality(String) DEFAULT '';
+
+-- Instalaciones anteriores a la versión como señal de despliegue (D-216).
+ALTER TABLE spans ADD COLUMN IF NOT EXISTS service_version LowCardinality(String) DEFAULT '';
 
 -- Instalaciones anteriores a D-142. Los payloads son casi todo el disco, y con ZSTD(3)
 -- ocupan menos de la mitad que con el LZ4 por defecto (medido con la prueba de carga).

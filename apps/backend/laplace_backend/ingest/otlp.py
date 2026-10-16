@@ -637,6 +637,7 @@ def _build_span(
         sdk_language=str(resource.get("telemetry.sdk.language") or ""),
         sdk_name=str(resource.get("telemetry.sdk.name") or ""),
         instrumentor=instrumentor,
+        service_version=str(resource.get(semconv.SERVICE_VERSION) or ""),
         events=events,
         attributes={
             k: v

@@ -110,6 +110,8 @@ COLUMNS = (
     "sdk_language",
     "sdk_name",
     "instrumentor",
+    # La versión del servicio, señal de despliegue para el bot de PR (D-216).
+    "service_version",
 )
 
 
@@ -390,6 +392,7 @@ def row_to_span(r: dict[str, Any]) -> Span:
         sdk_language=(r["sdk_language"] or "") if "sdk_language" in r.keys() else "",
         sdk_name=(r["sdk_name"] or "") if "sdk_name" in r.keys() else "",
         instrumentor=(r["instrumentor"] or "") if "instrumentor" in r.keys() else "",
+        service_version=(r["service_version"] or "") if "service_version" in r.keys() else "",
         prompt_name=r["prompt_name"] or "",
         prompt_version=int(r["prompt_version"] or 0),
         events=events,
@@ -571,4 +574,5 @@ def span_to_row(span: Span) -> list[Any]:
         span.sdk_language,
         span.sdk_name,
         span.instrumentor,
+        span.service_version,
     ]

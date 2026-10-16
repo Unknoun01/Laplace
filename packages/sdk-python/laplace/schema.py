@@ -253,6 +253,9 @@ class Span(_Model):
     sdk_language: str = ""
     sdk_name: str = ""
     instrumentor: str = ""
+    #: `service.version` del recurso, tal cual (`LAPLACE_SERVICE_VERSION`). El bot de
+    #: PR la usa como señal de despliegue si es un commit o una etiqueta (D-216).
+    service_version: str = ""
 
     #: Prompt **gestionado** con el que se hizo esta llamada, si lo hubo. Lo escribe el
     #: SDK sólo cuando el texto de esa versión aparece de verdad en los mensajes

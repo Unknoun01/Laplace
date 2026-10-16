@@ -211,7 +211,7 @@ def test_una_base_sqlite_de_antes_gana_las_columnas_y_sus_filas_quedan_sin_orige
     store._conn.close()  # noqa: SLF001
     # La base de antes de D-215: sin las tres columnas.
     con = sqlite3.connect(ruta)
-    for columna in ("sdk_language", "sdk_name", "instrumentor"):
+    for columna in ("sdk_language", "sdk_name", "instrumentor", "service_version"):
         con.execute(f"ALTER TABLE spans DROP COLUMN {columna}")
     con.commit()
     con.close()
@@ -220,6 +220,7 @@ def test_una_base_sqlite_de_antes_gana_las_columnas_y_sus_filas_quedan_sin_orige
     store.migrate()
     (leido,) = store.get_trace_spans("viejo-t1")
     assert (leido.sdk_name, leido.sdk_language, leido.instrumentor) == ("", "", "")
+    assert leido.service_version == ""  # D-216
     assert _cuentas(store, "viejo") == [("", "", "", 1, 1.0)]
 
 

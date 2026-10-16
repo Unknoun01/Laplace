@@ -5357,3 +5357,46 @@ y sus filas quedan sin origen; el alcance pesa por muestreo, deja fuera evaluaci
 spans viejos, y sin muestra no da porcentaje; la API lo sirve. En `test_pantallas.py`,
 Ajustes enseña la línea. Se rompieron a propósito contar los spans viejos como con
 origen y no reconocer OpenInference, y en los dos falla alguna.
+
+### D-216 — `service.version` como segunda señal de despliegue, si se puede atar a un commit
+D-204 movía la frontera del «arreglado» de la fusión al aviso `deployment_status`, y
+descartó la versión del tráfico porque la ingesta no la guardaba y porque un texto libre
+no dice qué commits lleva. Con D-215 la ingesta ya lee el recurso: ahora guarda también
+`service.version`, y la usa cuando se puede atar a la fusión, y sólo entonces.
+
+* **La columna.** `service_version` en `spans`, en los dos almacenes, copiada tal cual del
+  recurso (el SDK la pone con `LAPLACE_SERVICE_VERSION`). Los spans de antes, vacíos.
+* **Qué versión vale.** Un SHA (7 a 40 caracteres hexadecimales), o el nombre exacto de
+  una etiqueta del repositorio, que GitHub resuelve a su commit
+  (`GET /repos/{repo}/commits/tags/{versión}`). Una rama no vale: se mueve. Después, como
+  en D-204, el commit tiene que llevar la fusión (`compare`: `ahead` o `identical`).
+* **La frontera pasa a la primera ejecución con esa versión**, la más temprana de las
+  versiones que llevan la fusión, sin evaluaciones y nunca antes de la fusión. Si ya la
+  movió un despliegue, se queda la más temprana de las dos: las dos dicen que el arreglo
+  estaba en producción, como «de varios despliegues, el primero» en D-204.
+* **Un texto libre no vale, y se dice.** Si GitHub contesta que no es una etiqueta, la
+  versión se apunta como no atable y no se vuelve a preguntar. Si después de la fusión
+  sólo hay versiones así, la nota del estado lo añade: el tráfico trae
+  `service.version`, pero no es un commit ni una etiqueta, y se sigue midiendo desde la
+  fusión. Si GitHub no contesta, no se sabe: no se apunta nada y se vuelve a mirar.
+* **Cuándo se mira.** La versión llega con el tráfico, después de la fusión, así que no
+  basta el webhook. Se mira al leer el Diagnóstico y la ficha de un hallazgo, y en cada
+  aviso firmado del repositorio; como mucho una vez cada 5 minutos por proyecto, sólo
+  para los PR fusionados en los últimos 30 días cuya frontera no movió ya una versión, y
+  con las 20 primeras versiones. Lo resuelto se guarda en el PR (`versiones`), así que a
+  GitHub sólo se le pregunta por versiones nuevas y por `compare`.
+* **Lo que decidió una persona manda**, como en D-204: sólo se mueve el estado que puso
+  GitHub (`by: github`, arreglado).
+
+Pruebas en `test_bot_version.py` (13): la ingesta guarda `service.version`; la primera
+ejecución de cada versión, en SQLite y en paridad con ClickHouse; un SHA que es la
+fusión mueve la frontera a su primera ejecución; una etiqueta que la lleva cuenta y una
+vieja no; un texto libre no vale, la nota lo dice y no se vuelve a preguntar; si GitHub
+no contesta no se apunta nada; antes de la fusión o en evaluaciones no cuenta; con
+despliegue y versión vale la más temprana, lleguen en el orden que lleguen; lo marcado
+por la persona no se toca; y al llegar el aviso de la fusión ya se mira. En
+`test_origen_spans.py`, una base SQLite de antes gana también la columna. Se rompieron a
+propósito nueve sitios (el texto libre como desconocido, cualquier commit vale, versiones
+de antes de la fusión, pisar lo de la persona, el despliegue retrasa la versión y al
+revés, GitHub caído apuntado como texto libre, el webhook sin mirar y la ingesta sin
+guardar la versión) y en todos falla alguna.

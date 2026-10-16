@@ -1943,6 +1943,20 @@ class ClickHouseStore:
         )
         return [origen_from_row(f) for f in filas]
 
+    def primeras_versiones(self, project_id: str, window: Window) -> dict[str, datetime]:
+        filas = _named(
+            self._consulta(
+                f"""
+                SELECT service_version AS version, min(start_time) AS primera
+                FROM spans FINAL
+                WHERE {RULES_WHERE} AND service_version != ''
+                GROUP BY service_version
+                """,
+                parameters=self._window_params(project_id, window),
+            )
+        )
+        return {f["version"]: _utc(f["primera"]) for f in filas}
+
     def coverage(self, project_id: str, window: Window) -> CoverageFacts:
         """La misma cuenta que en local, con los mismos alias (D-066).
 

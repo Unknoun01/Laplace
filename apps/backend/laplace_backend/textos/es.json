@@ -515,6 +515,8 @@
   "github.webhook_firma": "La firma del aviso no casa con ningún repositorio conectado en este Laplace. Revisa el secreto del webhook en GitHub.",
   "github.fusionado": "Arreglado al fusionar el pull request #{numero} ({url}). No ha llegado aviso de despliegue (deployment_status), así que se mide desde la fusión: si se desplegó más tarde, vuelve a marcarlo al desplegar o manda ese evento.",
   "github.desplegado": "Arreglado: el pull request #{numero} ({url}) se desplegó en «{entorno}» con el commit {sha}. Se mide desde el despliegue, no desde la fusión.",
+  "github.version": "Arreglado: el pull request #{numero} ({url}) está en el tráfico desde la primera ejecución con la versión «{version}» (service.version, commit {sha}). Se mide desde ahí, no desde la fusión.",
+  "github.version_libre": "El tráfico trae service.version ({versiones}), pero no es un commit ni una etiqueta del repositorio: no sirve para saber cuándo se desplegó.",
   "pr.sin_cambio": "Este problema todavía no tiene un arreglo que se pueda proponer en el código.",
   "pr.sin_sitio": "No se sabe desde qué línea se hace la llamada: hace falta que el agente use una versión del SDK que la anote (laplace-trace con D-185).",
   "pr.no_esta_en_repo": "{ruta} no está en el repositorio conectado. ¿Es el repositorio de este agente?",
