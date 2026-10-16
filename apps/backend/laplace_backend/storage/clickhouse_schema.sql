@@ -113,6 +113,12 @@ CREATE TABLE IF NOT EXISTS spans
     sample_rate         Float32 DEFAULT 1,
     -- ok, roto o vacio: si la salida del modelo es JSON que se lee (D-194).
     output_json         LowCardinality(String) DEFAULT '',
+    -- De dónde viene: lenguaje y SDK del recurso OTLP, y la familia de atributos (D-215).
+    sdk_language        LowCardinality(String) DEFAULT '',
+    sdk_name            LowCardinality(String) DEFAULT '',
+    instrumentor        LowCardinality(String) DEFAULT '',
+    -- `service.version` del recurso: señal de despliegue del bot de PR (D-216).
+    service_version     LowCardinality(String) DEFAULT '',
 
     events              String CODEC(ZSTD(3)),
     attributes          String CODEC(ZSTD(3)),
@@ -204,6 +210,14 @@ ALTER TABLE spans ADD COLUMN IF NOT EXISTS sample_rate Float32 DEFAULT 1;
 
 -- Instalaciones anteriores a los reintentos por JSON roto (D-194).
 ALTER TABLE spans ADD COLUMN IF NOT EXISTS output_json LowCardinality(String) DEFAULT '';
+
+-- Instalaciones anteriores al origen de cada span (D-215): los de antes quedan vacíos.
+ALTER TABLE spans ADD COLUMN IF NOT EXISTS sdk_language LowCardinality(String) DEFAULT '';
+ALTER TABLE spans ADD COLUMN IF NOT EXISTS sdk_name LowCardinality(String) DEFAULT '';
+ALTER TABLE spans ADD COLUMN IF NOT EXISTS instrumentor LowCardinality(String) DEFAULT '';
+
+-- Instalaciones anteriores a la versión como señal de despliegue (D-216).
+ALTER TABLE spans ADD COLUMN IF NOT EXISTS service_version LowCardinality(String) DEFAULT '';
 
 -- Instalaciones anteriores a D-142. Los payloads son casi todo el disco, y con ZSTD(3)
 -- ocupan menos de la mitad que con el LZ4 por defecto (medido con la prueba de carga).

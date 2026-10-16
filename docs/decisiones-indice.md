@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 216 decisiones.
+final. 218 decisiones.
 
 ## Coste, precios y caché
 
@@ -123,6 +123,7 @@ final. 216 decisiones.
 - [D-144](../DECISIONS.md#d-144--buscar-dentro-de-prompts-respuestas-y-herramientas) — Buscar dentro de prompts, respuestas y herramientas
 - [D-157](../DECISIONS.md#d-157--prompts-como-fuente-de-hallazgos) — Prompts como fuente de hallazgos
 - [D-160](../DECISIONS.md#d-160--prompts-sin-tiradas-de-evaluación-envoltorios-con--y-el-modelo-rápido-ponderado) — Prompts sin tiradas de evaluación, envoltorios con «=» y el modelo rápido ponderado
+- [D-216](../DECISIONS.md#d-216--serviceversion-como-segunda-señal-de-despliegue-si-se-puede-atar-a-un-commit) — `service.version` como segunda señal de despliegue, si se puede atar a un commit
 
 ## Instrumentación: SDK e integraciones
 
@@ -320,6 +321,7 @@ final. 216 decisiones.
 - [D-212](../DECISIONS.md#d-212--el-diagnóstico-de-siete-días-a-diez-millones-de-spans-al-día-medido-no-arreglado) — El Diagnóstico de siete días a diez millones de spans al día: medido, no arreglado
 - [D-217](../DECISIONS.md#d-217--el-grafo-del-proyecto-deja-de-ser-sólo-de-lectura-pulsar-un-paso-lleva-a-sus-trazas-y-a-sus-fichas) — El grafo del proyecto deja de ser sólo de lectura: pulsar un paso lleva a sus trazas y a sus fichas
 - [D-213](../DECISIONS.md#d-213--el-replay-con-imágenes-entre-proveedores-y-desde-la-api-responses-los-bloques-se-convierten-lo-que-no-tiene-equivalente-no-se-reenvía) — El replay con imágenes, entre proveedores y desde la API Responses: los bloques se convierten; lo que no tiene equivalente no se reenvía
+- [D-215](../DECISIONS.md#d-215--de-dónde-viene-cada-span-y-qué-parte-del-tráfico-se-queda-fuera-de-la-parada) — De dónde viene cada span, y qué parte del tráfico se queda fuera de la parada
 
 ## Pruebas y método
 
@@ -692,3 +694,5 @@ final. 216 decisiones.
 - [D-218](../DECISIONS.md#d-218--el-bot-de-pr-encuentra-la-llamada-con-los-atributos-estándar-sólo-escribe-python) — El bot de PR encuentra la llamada con los atributos estándar; sólo escribe Python
 - [D-214](../DECISIONS.md#d-214--lanzar-el-replay-desde-la-interfaz-local-con-un-botón) — Lanzar el replay desde la interfaz local, con un botón
 - [D-213](../DECISIONS.md#d-213--el-replay-con-imágenes-entre-proveedores-y-desde-la-api-responses-los-bloques-se-convierten-lo-que-no-tiene-equivalente-no-se-reenvía) — El replay con imágenes, entre proveedores y desde la API Responses: los bloques se convierten; lo que no tiene equivalente no se reenvía
+- [D-215](../DECISIONS.md#d-215--de-dónde-viene-cada-span-y-qué-parte-del-tráfico-se-queda-fuera-de-la-parada) — De dónde viene cada span, y qué parte del tráfico se queda fuera de la parada
+- [D-216](../DECISIONS.md#d-216--serviceversion-como-segunda-señal-de-despliegue-si-se-puede-atar-a-un-commit) — `service.version` como segunda señal de despliegue, si se puede atar a un commit

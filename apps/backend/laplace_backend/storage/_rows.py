@@ -106,6 +106,12 @@ COLUMNS = (
     "sample_rate",
     # Si la salida es JSON que se lee, para los reintentos por JSON roto (D-194).
     "output_json",
+    # De dónde viene: lenguaje y SDK del recurso, y la familia de atributos (D-215).
+    "sdk_language",
+    "sdk_name",
+    "instrumentor",
+    # La versión del servicio, señal de despliegue para el bot de PR (D-216).
+    "service_version",
 )
 
 
@@ -220,6 +226,19 @@ def row_to_observed_prompt(f: Any) -> Any:
         output_tokens=int(f["tok_out"] or 0),
         first_seen=_instante(f["primero"]),
         last_seen=_instante(f["ultimo"]),
+    )
+
+
+def origen_from_row(f: Any) -> Any:
+    """Una fila de `origen_llamadas`, igual en los dos almacenes (D-215)."""
+    from .base import OrigenLlamadas
+
+    return OrigenLlamadas(
+        sdk_name=str(f["sdk_name"] or ""),
+        sdk_language=str(f["sdk_language"] or ""),
+        instrumentor=str(f["instrumentor"] or ""),
+        llamadas=int(f["llamadas"] or 0),
+        peso=float(f["peso"] or 0),
     )
 
 
@@ -372,6 +391,10 @@ def row_to_span(r: dict[str, Any]) -> Span:
         prefix_hash=(r["prefix_hash"] if "prefix_hash" in r.keys() else ""),
         sample_rate=float(r["sample_rate"] or 1) if "sample_rate" in r.keys() else 1.0,
         output_json=(r["output_json"] or "") if "output_json" in r.keys() else "",
+        sdk_language=(r["sdk_language"] or "") if "sdk_language" in r.keys() else "",
+        sdk_name=(r["sdk_name"] or "") if "sdk_name" in r.keys() else "",
+        instrumentor=(r["instrumentor"] or "") if "instrumentor" in r.keys() else "",
+        service_version=(r["service_version"] or "") if "service_version" in r.keys() else "",
         prompt_name=r["prompt_name"] or "",
         prompt_version=int(r["prompt_version"] or 0),
         events=events,
@@ -550,4 +573,8 @@ def span_to_row(span: Span) -> list[Any]:
         span.prefix_hash,
         float(span.sample_rate or 1.0),
         span.output_json,
+        span.sdk_language,
+        span.sdk_name,
+        span.instrumentor,
+        span.service_version,
     ]

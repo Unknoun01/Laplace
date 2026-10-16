@@ -36,7 +36,13 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTrace
 
 from ..pricing import get_price_table
 from ..textos import t
-from .convenciones import ENTRADAS_DEL_PADRE, TRADUCIDOS, mensajes_del_padre, normalizar
+from .convenciones import (
+    ENTRADAS_DEL_PADRE,
+    TRADUCIDOS,
+    familia,
+    mensajes_del_padre,
+    normalizar,
+)
 
 logger = logging.getLogger("laplace.ingest")
 
@@ -513,6 +519,7 @@ def _build_span(
     # Lo que venga de OpenInference u OpenLLMetry se traduce aquí, antes de clasificar:
     # a partir de esta línea el span habla nuestro idioma (D-136).
     crudos = _attributes(proto_span.attributes)
+    instrumentor = familia(crudos)
     if entrada_heredada and not crudos.get(semconv.GEN_AI_INPUT_MESSAGES):
         crudos[semconv.GEN_AI_INPUT_MESSAGES] = entrada_heredada
     attrs = normalizar(crudos)
@@ -626,6 +633,11 @@ def _build_span(
         # versión que el emisor no haya afirmado (D-090).
         prompt_name=str(attrs.get(semconv.LAPLACE_PROMPT_NAME) or ""),
         prompt_version=_entero(attrs.get(semconv.LAPLACE_PROMPT_VERSION)),
+        # De dónde viene, copiado del recurso sin deducir nada (D-215).
+        sdk_language=str(resource.get("telemetry.sdk.language") or ""),
+        sdk_name=str(resource.get("telemetry.sdk.name") or ""),
+        instrumentor=instrumentor,
+        service_version=str(resource.get(semconv.SERVICE_VERSION) or ""),
         events=events,
         attributes={
             k: v

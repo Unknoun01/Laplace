@@ -857,6 +857,17 @@ export interface CustomerMargin {
 
 /** La conexión con Stripe de un proyecto (D-162). La clave nunca viene entera. */
 /** Tope, bucles y parada del proyecto (D-187). El SDK los pide cada 30 s. */
+/** Qué parte de las llamadas queda fuera de la parada (D-215). */
+export interface ControlAlcance {
+  project_id: string;
+  days: number;
+  llamadas: number;
+  sin_origen: number;
+  fuera: number | null;
+  lenguajes: string[];
+  minimo: number;
+}
+
 export interface ControlRules {
   project_id: string;
   max_usd_per_run: number | null;

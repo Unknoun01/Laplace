@@ -211,6 +211,32 @@ def lleva_la_fusion(
     return (respuesta or {}).get("status") in ("ahead", "identical")
 
 
+def version_a_commit(
+    ajustes: dict[str, Any], version: str, pedir: Pedir | None = None
+) -> str | None:
+    """El commit de una `service.version` (D-216): ella misma si es un SHA, o el de la
+    etiqueta con ese nombre. `""` si GitHub dice que no hay tal etiqueta (un texto libre,
+    que no vale como señal); `None` si no contesta, que no se sabe."""
+    if _SHA.match(version.lower()):
+        return version.lower()
+    pedir = pedir or _pedir
+    try:
+        commit = pedir(
+            "GET",
+            f"{API}/repos/{ajustes.get('repo')}/commits/tags/"
+            f"{urllib.parse.quote(version, safe='')}",
+            token_de(ajustes, pedir),
+            None,
+        )
+    except GitHubError as exc:
+        if exc.clave in ("github.no_encontrado", "github.rechazado"):
+            return ""
+        logger.warning("github: no se sabe qué commit es la versión %s (%s)", version, exc.clave)
+        return None
+    sha = str((commit or {}).get("sha") or "")
+    return sha if _SHA.match(sha) else ""
+
+
 # ---------------------------------------------------------------------------------
 # Hablar con GitHub
 # ---------------------------------------------------------------------------------

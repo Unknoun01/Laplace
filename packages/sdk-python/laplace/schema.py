@@ -246,6 +246,16 @@ class Span(_Model):
     #: cuando no lo intenta (texto, herramientas, sin salida). Lo calcula la ingesta;
     #: es la señal de los reintentos por JSON mal formado (D-194).
     output_json: str = ""
+    #: De dónde viene (D-215): `telemetry.sdk.language` y `telemetry.sdk.name` del
+    #: recurso OTLP, tal cual (`laplace` lo pone `laplace.init()`), y la familia de
+    #: atributos del span: `laplace`, `openinference`, `openllmetry`, `genai` u `otro`.
+    #: Los tres vacíos en lo ingerido antes: no se sabe, y no se rellena.
+    sdk_language: str = ""
+    sdk_name: str = ""
+    instrumentor: str = ""
+    #: `service.version` del recurso, tal cual (`LAPLACE_SERVICE_VERSION`). El bot de
+    #: PR la usa como señal de despliegue si es un commit o una etiqueta (D-216).
+    service_version: str = ""
 
     #: Prompt **gestionado** con el que se hizo esta llamada, si lo hubo. Lo escribe el
     #: SDK sólo cuando el texto de esa versión aparece de verdad en los mensajes

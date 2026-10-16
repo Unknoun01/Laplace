@@ -941,6 +941,9 @@ def test_ajustes_para_reanuda_y_pone_topes(servidor, navegador):
         # D-206: la parada la aplica el SDK de Python; la pantalla no promete más.
         assert "SDK de Python" in seccion.locator(".parada.parado").inner_text()
         assert "Node" in seccion.locator(".alcance").inner_text()
+        # D-215: y dice, con número o diciendo que no lo hay, qué parte queda fuera.
+        seccion.locator(".fuera").wait_for(timeout=15_000)
+        assert "parada" in seccion.locator(".fuera").inner_text()
         seccion.get_by_role("button", name="Reanudar").click()
         seccion.get_by_role("button", name="Parar todo").wait_for(timeout=15_000)
         assert reglas()["stopped"] is False

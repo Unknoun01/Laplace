@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getControl, setControl } from "@/lib/api";
-import { dayHour } from "@/lib/format";
+import { getControl, getControlAlcance, setControl } from "@/lib/api";
+import { dayHour, miles, porcentaje } from "@/lib/format";
 import { Euros } from "@/lib/moneda";
-import type { ControlRules } from "@/lib/types";
+import type { ControlAlcance, ControlRules } from "@/lib/types";
 import { t } from "@/lib/textos";
 import { Aviso } from "./aviso";
 
@@ -19,6 +19,7 @@ export function Control({ project }: { project: string }) {
   const [tope, setTope] = useState("");
   const [bucles, setBucles] = useState("");
   const [msg, setMsg] = useState({ ok: true, texto: "" });
+  const [alcance, setAlcance] = useState<ControlAlcance | null>(null);
 
   useEffect(() => {
     getControl(project)
@@ -28,6 +29,9 @@ export function Control({ project }: { project: string }) {
         setBucles(r.max_loop === null ? "" : String(r.max_loop));
       })
       .catch(() => setReglas(null));
+    getControlAlcance(project)
+      .then(setAlcance)
+      .catch(() => setAlcance(null));
   }, [project]);
 
   async function guardar(cambios: Partial<{ max_usd_per_run: number | null; max_loop: number | null; stopped: boolean }>, texto: string) {
@@ -113,6 +117,18 @@ export function Control({ project }: { project: string }) {
       </div>
       <p className="muted">{t("aj.control.como")}</p>
       <p className="muted alcance">{t("aj.control.alcance")}</p>
+      {alcance && (
+        <p className="muted fuera">
+          {alcance.fuera === null
+            ? t("aj.control.fuera_sin_muestra", { llamadas: miles(alcance.llamadas), minimo: miles(alcance.minimo) })
+            : t("aj.control.fuera", {
+                dias: alcance.days,
+                pct: porcentaje(alcance.fuera),
+                lenguajes: alcance.lenguajes.length ? ` (${alcance.lenguajes.join(", ")})` : "",
+              })}
+          {alcance.sin_origen > 0 && <> {t("aj.control.sin_origen", { n: miles(alcance.sin_origen) })}</>}
+        </p>
+      )}
       <Aviso {...msg} />
     </section>
   );

@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -766,6 +767,13 @@ async def get_control(request: Request, project_id: str) -> control.Control:
     return await run_in_threadpool(_guard, control.leer, _meta(request), project_id)
 
 
+@router.get("/control/alcance", response_model=control.Alcance)
+async def get_alcance(request: Request, project_id: str) -> control.Alcance:
+    """Qué parte del tráfico queda fuera de la parada (D-215). Aparte del GET de arriba,
+    que el SDK pide cada 30 s: esto lee los spans y sólo lo pide la pantalla."""
+    return await run_in_threadpool(control.alcance, _store(request), project_id)
+
+
 @router.put("/control", response_model=control.Control)
 async def put_control(request: Request, body: control.ControlIn) -> control.Control:
     meta = _meta(request)
@@ -875,6 +883,9 @@ async def github_webhook(request: Request) -> dict[str, Any]:
             desplegados += await run_in_threadpool(
                 _desplegado, _meta(request), project_id, ajustes_de[project_id], datos
             )
+            await run_in_threadpool(
+                revisar_versiones, _meta(request), _store(request), project_id, forzar=True
+            )
         return {"deployed": desplegados}
     if evento != "pull_request" or datos.get("action") != "closed":
         return {"ignored": evento or "?", "fixed": []}
@@ -882,6 +893,9 @@ async def github_webhook(request: Request) -> dict[str, Any]:
     arreglados = []
     for project_id in validos:
         arreglados += await run_in_threadpool(_pr_cerrado, _meta(request), project_id, pr)
+        await run_in_threadpool(
+            revisar_versiones, _meta(request), _store(request), project_id, forzar=True
+        )
     return {"fixed": arreglados}
 
 
@@ -1006,6 +1020,9 @@ def _desplegado(
             clave_pr,
             {**guardado, "deployed_at": cuando, "deployed_sha": sha, "environment": entorno},
         )
+        por_version = _hora(guardado.get("version_at"))
+        if por_version is not None and por_version <= momento:
+            continue  # la versión ya lo vio en el tráfico antes (D-216)
         _guard(
             meta.set_setting,
             project_id,
@@ -1025,6 +1042,103 @@ def _desplegado(
         logger.info("hallazgo %s: se mide desde el despliegue %s — %s", finding_id, sha[:7],
                     project_id)
         movidos.append(finding_id)
+    return movidos
+
+
+# La versión del tráfico como señal de despliegue (D-216).
+
+#: Proyectos y cuándo se miraron sus versiones por última vez (reloj monótono).
+_VERSIONES_REVISADAS: dict[str, float] = {}
+#: Como mucho una vez cada tanto por proyecto: se mira al leer el Diagnóstico.
+REVISAR_VERSIONES_S = 300
+#: Sólo los PR fusionados en estos días, y sólo estas versiones, las primeras.
+VERSIONES_DIAS = 30
+MAX_VERSIONES = 20
+
+
+def revisar_versiones(meta: Any, store: Any, project_id: str, *, forzar: bool = False) -> list[str]:
+    """Mueve la frontera a la primera ejecución con una versión que lleva la fusión.
+
+    Nunca rompe quien la llama: es un extra de la lectura del Diagnóstico y del webhook.
+    """
+    ahora = time.monotonic()
+    ultima = _VERSIONES_REVISADAS.get(project_id)
+    if not forzar and ultima is not None and ahora - ultima < REVISAR_VERSIONES_S:
+        return []
+    _VERSIONES_REVISADAS[project_id] = ahora
+    try:
+        ajustes = github_bot.leer(meta, project_id)
+        if not ajustes.get("repo"):
+            return []
+        return _por_version(meta, store, project_id, ajustes)
+    except Exception:  # noqa: BLE001
+        logger.warning("no se pudieron mirar las versiones de %s", project_id, exc_info=True)
+        return []
+
+
+def _por_version(
+    meta: Any, store: Any, project_id: str, ajustes: dict[str, Any],
+    ahora: datetime | None = None,
+) -> list[str]:
+    ahora = ahora or datetime.now(timezone.utc)
+    movidos = []
+    for clave_pr, guardado in meta.list_settings(project_id, github_bot.PREFIJO_PR).items():
+        fusion = str(guardado.get("merge_sha") or "")
+        fusionado = _hora(guardado.get("closed_at"))
+        if not fusion or fusionado is None or guardado.get("version_at"):
+            continue
+        if fusionado < ahora - timedelta(days=VERSIONES_DIAS):
+            continue
+        finding_id = clave_pr[len(github_bot.PREFIJO_PR) :]
+        actual = meta.get_setting(project_id, clave(finding_id)) or {}
+        if actual.get("status") != "arreglado" or actual.get("by") != "github":
+            continue
+        vistas = store.primeras_versiones(
+            project_id, Window(since=fusionado, until=ahora, days=VERSIONES_DIAS)
+        )
+        versiones = dict(guardado.get("versiones") or {})
+        elegida = None
+        for version, primera in sorted(vistas.items(), key=lambda v: (v[1], v[0]))[:MAX_VERSIONES]:
+            if version not in versiones:
+                sha = github_bot.version_a_commit(ajustes, version)
+                if sha is None:
+                    continue  # GitHub no contesta: no se sabe, y se vuelve a mirar
+                versiones[version] = sha
+            sha = versiones[version]
+            if sha and (fusion.startswith(sha) or github_bot.lleva_la_fusion(ajustes, fusion, sha)):
+                elegida = (primera, version, sha)
+                break  # van por orden: la primera que lleva la fusión es la más temprana
+        nuevo = {**guardado, "versiones": versiones}
+        if elegida:
+            nuevo.update(version_at=elegida[0].isoformat(), version=elegida[1],
+                         version_sha=elegida[2])
+        if nuevo != guardado:
+            meta.set_setting(project_id, clave_pr, nuevo)
+        numero, url = guardado.get("number"), guardado.get("url") or ""
+        if elegida:
+            primera, version, sha = elegida
+            antes = _hora(actual.get("at"))
+            # Con un despliegue anterior, se queda el despliegue: vale el más temprano.
+            if antes is not None and antes <= primera and guardado.get("deployed_at"):
+                continue
+            meta.set_setting(project_id, clave(finding_id), {
+                **actual,
+                "at": primera.isoformat(),
+                "note": t("github.version", numero=numero, url=url, version=version,
+                          sha=sha[:7]),
+            })
+            logger.info("hallazgo %s: se mide desde la versión %s — %s", finding_id, version,
+                        project_id)
+            movidos.append(finding_id)
+            continue
+        libres = sorted(v for v in vistas if versiones.get(v) == "")
+        if libres and not guardado.get("deployed_at"):
+            nota = " ".join([
+                t("github.fusionado", numero=numero, url=url),
+                t("github.version_libre", versiones=", ".join(libres)),
+            ])
+            if actual.get("note") != nota:
+                meta.set_setting(project_id, clave(finding_id), {**actual, "note": nota})
     return movidos
 
 

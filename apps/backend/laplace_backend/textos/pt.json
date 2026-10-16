@@ -521,6 +521,8 @@
   "github.webhook_firma": "A assinatura do aviso não corresponde a nenhum repositório conectado a este Laplace. Verifique o segredo do webhook no GitHub.",
   "github.fusionado": "Corrigido ao fundir o pull request #{numero} ({url}). Não chegou aviso de implantação (deployment_status), por isso mede-se desde o merge: se foi implantado mais tarde, marque-o de novo ao implantar ou envie esse evento.",
   "github.desplegado": "Corrigido: o pull request #{numero} ({url}) foi implantado em «{entorno}» com o commit {sha}. Mede-se desde a implantação, não desde o merge.",
+  "github.version": "Corrigido: o pull request #{numero} ({url}) está no tráfego desde a primeira execução com a versão «{version}» (service.version, commit {sha}). Mede-se a partir daí, não da fusão.",
+  "github.version_libre": "O tráfego traz service.version ({versiones}), mas não é um commit nem uma etiqueta do repositório: não serve para saber quando foi implantado.",
   "pr.sin_cambio": "Este problema ainda não tem uma correção que possa ser proposta no código.",
   "pr.sin_sitio": "Não se sabe de que linha a chamada é feita: seus spans precisam ter code.file.path e code.line.number (ou code.filepath e code.lineno). O SDK da Laplace os registra (laplace-trace com D-185), assim como qualquer SDK do OpenTelemetry que os defina.",
   "pr.no_esta_en_repo": "{ruta} não está no repositório conectado. É o repositório deste agente?",

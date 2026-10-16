@@ -13,6 +13,7 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTrace
 from starlette.concurrency import run_in_threadpool
 
 from . import grafo, idioma
+from .api_ajustes import revisar_versiones
 from .auth import ALL_PROJECTS, identity_of
 from .cache_diagnostico import CacheDiagnostico
 from .config import get_settings
@@ -288,6 +289,8 @@ async def _diagnostico(request: Request, project_id: str, days: int) -> Overview
     # defecto suyo: es que no usa esa parte. La señal se enseña igual pero no pinta de
     # rojo ni cuenta para el veredicto, y eso hay que saberlo aquí (D-096).
     gestiona = bool(await run_in_threadpool(_metadata(request).list_prompts, project_id))
+    # La versión del tráfico puede mover la frontera de un arreglado (D-216).
+    await run_in_threadpool(revisar_versiones, _metadata(request), _store(request), project_id)
     estados = await run_in_threadpool(leer_estados, _metadata(request), project_id)
     segundos = get_settings().cache_diagnostico_s
     # El idioma va en la clave: el Diagnóstico lleva frases redactadas, y el de quien lo
@@ -335,6 +338,7 @@ async def get_finding(
         raise HTTPException(status_code=404, detail=t("error.problema_no_aparece"))
     # El estado que le haya puesto el usuario, con su comprobación si lo marcó como
     # arreglado: la ficha es donde se lee si el arreglo ha servido (D-123).
+    await run_in_threadpool(revisar_versiones, _metadata(request), _store(request), project_id)
     estados = await run_in_threadpool(leer_estados, _metadata(request), project_id)
     if finding_id in estados:
         await run_in_threadpool(
