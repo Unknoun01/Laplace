@@ -452,13 +452,20 @@ def _recorrido(cuentas, sufijo: str) -> dict:
     nora, ya = cuentas.scim_alta(org, f"nora-{sufijo}@ej{sufijo}.com", "N", "e1", "miembro",
                                  True)
     cuentas.scim_activar(org, nora.id, False, "miembro")
+    luis_rol = cuentas.rol_en(org, luis.id)
+    # D-211: un grupo con rol manda sobre quien gestiona el proveedor.
+    grupo = cuentas.scim_crear_grupo(org, "Devs", "g1")
+    cuentas.scim_editar_grupo(org, grupo, "Devs", "g1", {luis.id})
+    cuentas.rol_de_grupo(org, grupo, "admin")
+    rol_grupo = cuentas.sincronizar_rol(org, luis.id)
     return {
+        "rol_grupo": rol_grupo,
         "org": org,
         "antes": antes,
         "verificado": verificado,
         "estado": estado,
         "gastado": gastado,
-        "luis_rol": cuentas.rol_en(org, luis.id),
+        "luis_rol": luis_rol,
         "motivo": motivo,
         "obligado": cuentas.sso_obligado(u.id, u.email),
         "scim_org": cuentas.org_de_token_scim(token_scim) == org,
@@ -486,14 +493,17 @@ def test_lo_mismo_en_postgres_y_en_sqlite(tmp_path):
     a, b = _recorrido(nube, sufijo), _recorrido(local, sufijo + "l")
     try:
         for clave in ("antes", "verificado", "gastado", "luis_rol", "motivo", "obligado",
-                      "scim_org", "ya"):
+                      "scim_org", "ya", "rol_grupo"):
             assert a[clave] == b[clave], clave
         assert a["estado"]["next"] == "/x" and a["gastado"] is None and a["verificado"]
         assert a["luis_rol"] == "lector" and a["obligado"] is True
+        assert a["rol_grupo"] == "admin"
         assert a["nora"] == [(f"nora-{sufijo}@ej{sufijo}.com", False)]
     finally:
+        nube._ejecutar("DELETE FROM scim_group_members WHERE group_id IN "
+                       "(SELECT id FROM scim_groups WHERE org_id = ?)", (a["org"],))
         for tabla in ("sso_configs", "sso_domains", "sso_identities", "scim_tokens",
-                      "scim_users", "memberships"):
+                      "scim_users", "scim_groups", "memberships"):
             nube._ejecutar(f"DELETE FROM {tabla} WHERE org_id = ?", (a["org"],))
         nube._ejecutar("DELETE FROM orgs WHERE id = ?", (a["org"],))
         nube._ejecutar("DELETE FROM users WHERE email LIKE ?", (f"%-{sufijo}@ej{sufijo}.com",))

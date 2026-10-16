@@ -498,6 +498,7 @@
   "error.sso_sin_dominios": "Pour imposer le SSO, l'organisation a besoin de ses domaines de messagerie, définis par l'administrateur de l'installation.",
   "error.dominios_solo_instalacion": "Les domaines d'une organisation sont définis par l'administrateur de l'installation : ils disent à qui appartiennent ces adresses.",
   "error.token_scim": "Ce jeton SCIM n'existe pas ou était déjà révoqué.",
+  "error.grupo_scim": "Ce groupe SCIM n'existe pas dans cette organisation.",
   "error.sso_obligado": "Votre organisation se connecte par authentification unique : utilisez « Se connecter avec SSO ».",
   "org.invitar_sin_verificar": "Il n'a pas été envoyé par e-mail car votre adresse n'est pas vérifiée : envoyez le lien vous-même ou vérifiez votre adresse.",
   "github.sin_permiso": "GitHub refuse cet identifiant pour ce dépôt. Vérifiez que le jeton (ou l'App) peut écrire du contenu et ouvrir des pull requests.",

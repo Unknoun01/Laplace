@@ -498,6 +498,7 @@
   "error.sso_sin_dominios": "Para obligar a entrar por SSO, la organización necesita sus dominios de correo, y los pone quien administra la instalación.",
   "error.dominios_solo_instalacion": "Los dominios de una organización los pone quien administra la instalación: dicen de quién son esos correos.",
   "error.token_scim": "Esa clave de SCIM no existe o ya estaba revocada.",
+  "error.grupo_scim": "Ese grupo de SCIM no existe en esta organización.",
   "error.sso_obligado": "Tu organización entra con su inicio de sesión único: usa «Entrar con SSO».",
   "org.invitar_sin_verificar": "No se ha mandado por correo porque el tuyo no está verificado: manda el enlace a mano o verifica tu correo.",
   "github.sin_permiso": "GitHub no acepta esa credencial para este repositorio. Revisa que el token (o la App) pueda escribir contenido y abrir pull requests.",

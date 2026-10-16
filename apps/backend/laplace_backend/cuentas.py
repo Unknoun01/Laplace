@@ -377,6 +377,22 @@ CREATE TABLE IF NOT EXISTS scim_users (
     created_at   TEXT NOT NULL,
     PRIMARY KEY (org_id, user_id)
 );
+-- Grupos de SCIM (D-211): los crea el proveedor, y el rol que dan lo pone la organización
+-- ('' es ninguno).
+CREATE TABLE IF NOT EXISTS scim_groups (
+    id            TEXT PRIMARY KEY,
+    org_id        TEXT NOT NULL,
+    display_name  TEXT NOT NULL,
+    external_id   TEXT NOT NULL DEFAULT '',
+    role          TEXT NOT NULL DEFAULT '',
+    created_at    TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS scim_group_members (
+    group_id  TEXT NOT NULL,
+    user_id   TEXT NOT NULL,
+    PRIMARY KEY (group_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS scim_groups_org_idx ON scim_groups (org_id);
 CREATE INDEX IF NOT EXISTS login_failures_idx ON login_failures (clave, at);
 CREATE INDEX IF NOT EXISTS audit_org_idx ON audit_log (org_id, at);
 CREATE INDEX IF NOT EXISTS sessions_user_idx ON sessions (user_id);
@@ -1129,7 +1145,114 @@ class CuentasStore:
         self._ejecutar(
             "DELETE FROM scim_users WHERE org_id = ? AND user_id = ?", (org_id, user_id)
         )
+        self._ejecutar(
+            "DELETE FROM scim_group_members WHERE user_id = ? AND group_id IN "
+            "(SELECT id FROM scim_groups WHERE org_id = ?)",
+            (user_id, org_id),
+        )
         return True
+
+    # -- Grupos de SCIM (D-211) ----------------------------------------------------
+
+    def scim_grupos(self, org_id: str) -> list[dict[str, Any]]:
+        miembros: dict[str, list[str]] = {}
+        for gid, uid in self._filas(
+            "SELECT m.group_id, m.user_id FROM scim_group_members m "
+            "JOIN scim_groups g ON g.id = m.group_id WHERE g.org_id = ? ORDER BY m.user_id",
+            (org_id,),
+        ):
+            miembros.setdefault(gid, []).append(uid)
+        return [
+            {"id": f[0], "display_name": f[1], "external_id": f[2], "role": f[3],
+             "created_at": f[4], "members": miembros.get(f[0], [])}
+            for f in self._filas(
+                "SELECT id, display_name, external_id, role, created_at FROM scim_groups "
+                "WHERE org_id = ? ORDER BY created_at, id",
+                (org_id,),
+            )
+        ]
+
+    def scim_grupo(self, org_id: str, group_id: str) -> dict[str, Any] | None:
+        return next((g for g in self.scim_grupos(org_id) if g["id"] == group_id), None)
+
+    def scim_crear_grupo(self, org_id: str, nombre: str, external_id: str) -> str:
+        group_id = _id("grp")
+        self._ejecutar(
+            "INSERT INTO scim_groups (id, org_id, display_name, external_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (group_id, org_id, nombre, external_id, _iso(_ahora())),
+        )
+        return group_id
+
+    def scim_editar_grupo(
+        self, org_id: str, group_id: str, nombre: str, external_id: str, miembros: set[str]
+    ) -> set[str]:
+        """Pone nombre y miembros. Devuelve a quién le cambió el grupo."""
+        antes = set(self.scim_grupo(org_id, group_id)["members"])
+        self._ejecutar(
+            "UPDATE scim_groups SET display_name = ?, external_id = ? WHERE id = ? AND org_id = ?",
+            (nombre, external_id, group_id, org_id),
+        )
+        for uid in antes - miembros:
+            self._ejecutar(
+                "DELETE FROM scim_group_members WHERE group_id = ? AND user_id = ?",
+                (group_id, uid),
+            )
+        for uid in miembros - antes:
+            self._ejecutar(
+                "INSERT INTO scim_group_members (group_id, user_id) VALUES (?, ?)",
+                (group_id, uid),
+            )
+        return antes ^ miembros
+
+    def scim_borrar_grupo(self, org_id: str, group_id: str) -> set[str]:
+        antes = set(self.scim_grupo(org_id, group_id)["members"])
+        self._ejecutar("DELETE FROM scim_group_members WHERE group_id = ?", (group_id,))
+        self._ejecutar(
+            "DELETE FROM scim_groups WHERE id = ? AND org_id = ?", (group_id, org_id)
+        )
+        return antes
+
+    def rol_de_grupo(self, org_id: str, group_id: str, rol: str) -> set[str] | None:
+        """El rol que da un grupo, o '' para ninguno. `None` si el grupo no es de la
+        organización; si no, sus miembros. Nunca propietario (D-211)."""
+        if rol not in ("", "lector", "miembro", "admin"):
+            raise ValueError("un grupo da lector, miembro o admin")
+        if not self._ejecutar(
+            "UPDATE scim_groups SET role = ? WHERE id = ? AND org_id = ?", (rol, group_id, org_id)
+        ):
+            return None
+        return set(self.scim_grupo(org_id, group_id)["members"])
+
+    def sincronizar_rol(self, org_id: str, user_id: str) -> str | None:
+        """Pone el rol que dan los grupos (D-211). Devuelve el nuevo si cambió.
+
+        Nunca a un propietario, y sólo si la organización tiene algún grupo con rol. El
+        mayor de sus grupos; en ninguno, el rol por defecto del SSO. Sólo se llama para
+        quien gestiona el proveedor: lo que dio de alta SCIM o metió en un grupo."""
+        actual = self.rol_en(org_id, user_id)
+        if actual is None or actual == "propietario":
+            return None
+        if not self._filas(
+            "SELECT 1 FROM scim_groups WHERE org_id = ? AND role <> '' LIMIT 1", (org_id,)
+        ):
+            return None
+        roles = [
+            f[0]
+            for f in self._filas(
+                "SELECT g.role FROM scim_groups g JOIN scim_group_members m ON m.group_id = g.id "
+                "WHERE g.org_id = ? AND m.user_id = ? AND g.role <> ''",
+                (org_id, user_id),
+            )
+        ]
+        config = self.config_sso(org_id)
+        nuevo = max(roles, key=ROLES.index) if roles else (
+            config.default_role if config else "miembro"
+        )
+        if nuevo == actual:
+            return None
+        self.poner_miembro(org_id, user_id, nuevo)
+        return nuevo
 
     def renombrar(self, user_id: str, nombre: str) -> None:
         self._ejecutar("UPDATE users SET name = ? WHERE id = ?", (nombre.strip()[:120], user_id))

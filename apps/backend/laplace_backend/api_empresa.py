@@ -20,6 +20,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import sso
 from .api_cuentas import _cuentas, _exigir_org, _ip, _local, _poner_cookie, _usuario
+from .scim import sincronizar_roles
 from .textos import t
 
 logger = logging.getLogger("laplace.api.empresa")
@@ -318,6 +319,45 @@ async def create_scim_token(request: Request, body: ScimTokenIn) -> dict[str, An
     )
     # Sólo sale en esta respuesta: se guarda su hash.
     return {"id": token_id, "token": token}
+
+
+def _grupos(request: Request, org_id: str) -> dict[str, Any]:
+    return {"groups": [
+        {"id": g["id"], "display_name": g["display_name"], "role": g["role"],
+         "members": len(g["members"])}
+        for g in _cuentas(request).scim_grupos(org_id)
+    ]}
+
+
+@router.get("/org/scim-groups")
+async def get_scim_groups(request: Request, org_id: str) -> dict[str, Any]:
+    await run_in_threadpool(_exigir_org, request, org_id, "admin")
+    return await run_in_threadpool(_grupos, request, org_id)
+
+
+class ScimGroupIn(BaseModel):
+    org_id: str
+    group_id: str
+    #: '' es ninguno. Nunca propietario (D-211).
+    role: str = Field(pattern="^(|lector|miembro|admin)$")
+
+
+@router.put("/org/scim-groups")
+async def put_scim_group(request: Request, body: ScimGroupIn) -> dict[str, Any]:
+    """El rol que da un grupo del proveedor. Lo decide la organización, no el proveedor."""
+    usuario = await run_in_threadpool(_exigir_org, request, body.org_id, "admin")
+    cuentas = _cuentas(request)
+    miembros = await run_in_threadpool(
+        cuentas.rol_de_grupo, body.org_id, body.group_id, body.role
+    )
+    if miembros is None:
+        raise HTTPException(status_code=404, detail=t("error.grupo_scim"))
+    await run_in_threadpool(
+        cuentas.anotar, body.org_id, usuario.id, "rol_grupo_scim",
+        f"{body.group_id}: {body.role or '-'}", _ip(request),
+    )
+    await sincronizar_roles(cuentas, body.org_id, miembros)
+    return await run_in_threadpool(_grupos, request, body.org_id)
 
 
 @router.delete("/org/scim-tokens")

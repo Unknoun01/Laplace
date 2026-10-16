@@ -4,9 +4,10 @@ Lo que un proveedor (Okta, Entra ID, OneLogin, JumpCloud) necesita para mantener
 organización al día sin que nadie la toque a mano: buscar a alguien por su correo, darlo
 de alta, cambiarle el nombre, desactivarlo y borrarlo. Nada más:
 
-* **Sólo `Users`**, sin `Groups`. El rol de quien entra por SCIM es el rol por defecto
-  del SSO de la organización, y se cambia en Laplace. Mapear grupos a roles es lo
-  siguiente si alguien lo pide.
+* **`Users` y `Groups`.** El rol de quien entra por SCIM es el rol por defecto del SSO
+  de la organización. Los grupos los mete y saca el proveedor, pero el rol que da cada
+  uno lo pone un admin en Laplace (D-211): en varios, el mayor; en ninguno, el de por
+  defecto; nunca propietario.
 * **Desactivar es quitar la pertenencia**, no borrar la cuenta. La persona puede ser de
   otras organizaciones, y lo que pasa en una no puede tocar las demás. Sus datos de
   auditoría se quedan. Su sesión sigue abierta, pero ya no ve nada de esta organización:
@@ -29,6 +30,7 @@ from starlette.concurrency import run_in_threadpool
 router = APIRouter(prefix="/scim/v2")
 
 ESQUEMA_USUARIO = "urn:ietf:params:scim:schemas:core:2.0:User"
+ESQUEMA_GRUPO = "urn:ietf:params:scim:schemas:core:2.0:Group"
 ESQUEMA_LISTA = "urn:ietf:params:scim:api:messages:2.0:ListResponse"
 ESQUEMA_ERROR = "urn:ietf:params:scim:api:messages:2.0:Error"
 ESQUEMA_PATCH = "urn:ietf:params:scim:api:messages:2.0:PatchOp"
@@ -92,7 +94,17 @@ def _recurso(request: Request, u: dict[str, Any]) -> dict[str, Any]:
     return recurso
 
 
-_FILTRO = re.compile(r'^\s*(userName|externalId)\s+eq\s+"([^"]*)"\s*$', re.IGNORECASE)
+_FILTRO = re.compile(r'^\s*(\w+)\s+eq\s+"([^"]*)"\s*$', re.IGNORECASE)
+
+
+def _filtro(filtro: str, campos: dict[str, str]) -> tuple[str, str] | None:
+    """`campo eq "valor"` con un campo de `campos` (en minúsculas → clave), o 400."""
+    if not filtro:
+        return None
+    m = _FILTRO.match(filtro)
+    if not m or m.group(1).lower() not in campos:
+        raise _Error(400, f"sólo se filtra con eq por {', '.join(campos)}", "invalidFilter")
+    return campos[m.group(1).lower()], m.group(2)
 
 
 def _nombre(datos: dict[str, Any]) -> str:
@@ -118,6 +130,16 @@ def _activo(valor: Any) -> bool:
     if isinstance(valor, str):
         return valor.strip().lower() != "false"
     return bool(valor)
+
+
+async def sincronizar_roles(cuentas: Any, org_id: str, user_ids: set[str]) -> None:
+    """El rol que dan los grupos, a quien le cambiaron (D-211), con su apunte."""
+    for uid in sorted(user_ids):
+        nuevo = await run_in_threadpool(cuentas.sincronizar_rol, org_id, uid)
+        if nuevo:
+            await run_in_threadpool(
+                cuentas.anotar, org_id, "", "scim_rol_grupo", f"{uid}: {nuevo}", ""
+            )
 
 
 async def _con(request: Request, hacer) -> Response:
@@ -157,10 +179,10 @@ async def service_provider_config(request: Request) -> JSONResponse:
 async def resource_types(request: Request) -> JSONResponse:
     async def hacer(cuentas: Any, org_id: str) -> JSONResponse:
         return _respuesta({
-            "schemas": [ESQUEMA_LISTA], "totalResults": 1, "Resources": [{
+            "schemas": [ESQUEMA_LISTA], "totalResults": 2, "Resources": [{
                 "schemas": ["urn:ietf:params:scim:schemas:core:2.0:ResourceType"],
-                "id": "User", "name": "User", "endpoint": "/Users", "schema": ESQUEMA_USUARIO,
-            }],
+                "id": tipo, "name": tipo, "endpoint": f"/{tipo}s", "schema": esquema,
+            } for tipo, esquema in (("User", ESQUEMA_USUARIO), ("Group", ESQUEMA_GRUPO))],
         })
 
     return await _con(request, hacer)
@@ -177,28 +199,26 @@ async def list_users(
 ) -> JSONResponse:
     async def hacer(cuentas: Any, org_id: str) -> JSONResponse:
         usuarios = await run_in_threadpool(cuentas.scim_usuarios, org_id)
-        if filter:
-            m = _FILTRO.match(filter)
-            if not m:
-                raise _Error(400, "sólo se filtra por userName o externalId con eq",
-                             "invalidFilter")
-            campo, valor = m.group(1).lower(), m.group(2)
-            if campo == "username":
-                usuarios = [u for u in usuarios if u["email"] == valor.strip().lower()]
-            else:
-                usuarios = [u for u in usuarios if u["external_id"] == valor]
-        inicio = max(startIndex, 1)
-        cuantos = min(max(count, 0), MAX_POR_PAGINA)
-        pagina = usuarios[inicio - 1 : inicio - 1 + cuantos]
-        return _respuesta({
-            "schemas": [ESQUEMA_LISTA],
-            "totalResults": len(usuarios),
-            "startIndex": inicio,
-            "itemsPerPage": len(pagina),
-            "Resources": [_recurso(request, u) for u in pagina],
-        })
+        filtro = _filtro(filter, {"username": "email", "externalid": "external_id"})
+        if filtro:
+            campo, valor = filtro
+            valor = valor.strip().lower() if campo == "email" else valor
+            usuarios = [u for u in usuarios if u[campo] == valor]
+        return _lista(usuarios, startIndex, count, lambda u: _recurso(request, u))
 
     return await _con(request, hacer)
+
+
+def _lista(todos: list, inicio: int, cuantos: int, recurso) -> JSONResponse:
+    inicio = max(inicio, 1)
+    pagina = todos[inicio - 1 : inicio - 1 + min(max(cuantos, 0), MAX_POR_PAGINA)]
+    return _respuesta({
+        "schemas": [ESQUEMA_LISTA],
+        "totalResults": len(todos),
+        "startIndex": inicio,
+        "itemsPerPage": len(pagina),
+        "Resources": [recurso(x) for x in pagina],
+    })
 
 
 async def _uno(cuentas: Any, org_id: str, user_id: str) -> dict[str, Any]:
@@ -241,6 +261,7 @@ async def create_user(request: Request) -> JSONResponse:
         if ya:
             raise _Error(409, f"{email} ya está en la organización", "uniqueness")
         await run_in_threadpool(cuentas.anotar, org_id, "", "scim_alta", email, "")
+        await sincronizar_roles(cuentas, org_id, {usuario.id})
         return _respuesta(_recurso(request, await _uno(cuentas, org_id, usuario.id)), 201)
 
     return await _con(request, hacer)
@@ -255,6 +276,7 @@ async def _poner_activo(cuentas: Any, org_id: str, user_id: str, activo: bool) -
     await run_in_threadpool(
         cuentas.anotar, org_id, "", "scim_activar" if activo else "scim_desactivar", user_id, ""
     )
+    await sincronizar_roles(cuentas, org_id, {user_id})
 
 
 @router.put("/Users/{user_id}")
@@ -320,6 +342,185 @@ async def delete_user(request: Request, user_id: str) -> Any:
         if not await run_in_threadpool(cuentas.scim_baja, org_id, user_id):
             raise _Error(409, "es el último propietario de la organización", "mutability")
         await run_in_threadpool(cuentas.anotar, org_id, "", "scim_baja", user_id, "")
+        return Response(status_code=204)
+
+    return await _con(request, hacer)
+
+
+# ---------------------------------------------------------------------------------
+# Groups (D-211): el proveedor dice quién está en cada uno; el rol, Laplace.
+# ---------------------------------------------------------------------------------
+
+
+def _recurso_grupo(request: Request, g: dict[str, Any]) -> dict[str, Any]:
+    base = str(request.base_url).rstrip("/")
+    recurso: dict[str, Any] = {
+        "schemas": [ESQUEMA_GRUPO],
+        "id": g["id"],
+        "displayName": g["display_name"],
+        "members": [
+            {"value": uid, "$ref": f"{base}/scim/v2/Users/{uid}"} for uid in g["members"]
+        ],
+        "meta": {
+            "resourceType": "Group",
+            "created": g["created_at"],
+            "location": f"{base}/scim/v2/Groups/{g['id']}",
+        },
+    }
+    if g["external_id"]:
+        recurso["externalId"] = g["external_id"]
+    return recurso
+
+
+async def _grupo(cuentas: Any, org_id: str, group_id: str) -> dict[str, Any]:
+    g = await run_in_threadpool(cuentas.scim_grupo, org_id, group_id)
+    if g is None:
+        raise _Error(404, "no existe en esta organización")
+    return g
+
+
+def _ids(valor: Any) -> set[str]:
+    if not isinstance(valor, list):
+        raise _Error(400, "members tiene que ser una lista", "invalidValue")
+    return {str(m["value"]) for m in valor if isinstance(m, dict) and m.get("value")}
+
+
+async def _de_la_org(cuentas: Any, org_id: str, nuevos: set[str]) -> None:
+    """Sólo gente de la organización: un `id` de otra es un 400 (D-211)."""
+    if nuevos:
+        suyos = {u["id"] for u in await run_in_threadpool(cuentas.scim_usuarios, org_id)}
+        if nuevos - suyos:
+            raise _Error(400, "un miembro no es de esta organización", "invalidValue")
+
+
+async def _guardar_grupo(
+    request: Request, cuentas: Any, org_id: str, group_id: str, nombre: str,
+    external_id: str, miembros: set[str], antes: set[str],
+) -> dict[str, Any]:
+    if not nombre.strip():
+        raise _Error(400, "falta el displayName", "invalidValue")
+    await _de_la_org(cuentas, org_id, miembros - antes)
+    cambiados = await run_in_threadpool(
+        cuentas.scim_editar_grupo, org_id, group_id, nombre.strip(), external_id, miembros
+    )
+    await sincronizar_roles(cuentas, org_id, cambiados)
+    return _recurso_grupo(request, await _grupo(cuentas, org_id, group_id))
+
+
+@router.get("/Groups")
+async def list_groups(
+    request: Request, filter: str = "", startIndex: int = 1, count: int = 100  # noqa: A002, N803
+) -> JSONResponse:
+    async def hacer(cuentas: Any, org_id: str) -> JSONResponse:
+        grupos = await run_in_threadpool(cuentas.scim_grupos, org_id)
+        filtro = _filtro(filter, {"displayname": "display_name", "externalid": "external_id"})
+        if filtro:
+            grupos = [g for g in grupos if g[filtro[0]] == filtro[1]]
+        return _lista(grupos, startIndex, count, lambda g: _recurso_grupo(request, g))
+
+    return await _con(request, hacer)
+
+
+@router.get("/Groups/{group_id}")
+async def get_group(request: Request, group_id: str) -> JSONResponse:
+    async def hacer(cuentas: Any, org_id: str) -> JSONResponse:
+        return _respuesta(_recurso_grupo(request, await _grupo(cuentas, org_id, group_id)))
+
+    return await _con(request, hacer)
+
+
+@router.post("/Groups")
+async def create_group(request: Request) -> JSONResponse:
+    """Lo que el proveedor mande sobre roles se ignora: el rol lo pone Laplace."""
+
+    async def hacer(cuentas: Any, org_id: str) -> JSONResponse:
+        datos = await _cuerpo(request)
+        nombre = str(datos.get("displayName") or "").strip()
+        if not nombre:
+            raise _Error(400, "falta el displayName", "invalidValue")
+        miembros = _ids(datos.get("members", []))
+        external_id = str(datos.get("externalId") or "")
+        # Antes de crearlo, para no dejar un grupo a medias.
+        await _de_la_org(cuentas, org_id, miembros)
+        group_id = await run_in_threadpool(cuentas.scim_crear_grupo, org_id, nombre, external_id)
+        await run_in_threadpool(cuentas.anotar, org_id, "", "scim_grupo_alta", nombre, "")
+        recurso = await _guardar_grupo(
+            request, cuentas, org_id, group_id, nombre, external_id, miembros, set()
+        )
+        return _respuesta(recurso, 201)
+
+    return await _con(request, hacer)
+
+
+@router.put("/Groups/{group_id}")
+async def replace_group(request: Request, group_id: str) -> JSONResponse:
+    async def hacer(cuentas: Any, org_id: str) -> JSONResponse:
+        actual = await _grupo(cuentas, org_id, group_id)
+        datos = await _cuerpo(request)
+        return _respuesta(await _guardar_grupo(
+            request, cuentas, org_id, group_id,
+            str(datos.get("displayName") or actual["display_name"]),
+            str(datos.get("externalId") or actual["external_id"]),
+            _ids(datos.get("members", [])), set(actual["members"]),
+        ))
+
+    return await _con(request, hacer)
+
+
+_MIEMBRO = re.compile(r'^members\[\s*value\s+eq\s+"([^"]*)"\s*\]$', re.IGNORECASE)
+
+
+@router.patch("/Groups/{group_id}")
+async def patch_group(request: Request, group_id: str) -> JSONResponse:
+    """Okta añade y quita con `path` (`members[value eq "…"]` para quitar); Entra ID quita
+    con una lista de valores, y cambia con un objeto de valores sin `path`."""
+
+    async def hacer(cuentas: Any, org_id: str) -> JSONResponse:
+        actual = await _grupo(cuentas, org_id, group_id)
+        datos = await _cuerpo(request)
+        operaciones = datos.get("Operations")
+        if not isinstance(operaciones, list):
+            raise _Error(400, "faltan las Operations", "invalidSyntax")
+        nombre, external_id = actual["display_name"], actual["external_id"]
+        miembros = set(actual["members"])
+        for op in operaciones:
+            if not isinstance(op, dict):
+                continue
+            tipo, ruta, valor = str(op.get("op", "")).lower(), str(op.get("path") or ""), op.get(
+                "value")
+            pares = valor.items() if not ruta and isinstance(valor, dict) else [(ruta, valor)]
+            for campo, v in pares:
+                quitar = _MIEMBRO.match(campo)
+                if quitar and tipo == "remove":
+                    miembros.discard(quitar.group(1))
+                elif campo.lower() == "members":
+                    if tipo == "remove":
+                        miembros -= _ids(v) if v is not None else set(miembros)
+                    elif tipo == "replace":
+                        miembros = _ids(v)
+                    elif tipo == "add":
+                        miembros |= _ids(v)
+                elif campo.lower() == "displayname" and tipo in ("replace", "add"):
+                    nombre = str(v or "")
+                elif campo.lower() == "externalid" and tipo in ("replace", "add"):
+                    external_id = str(v or "")
+        return _respuesta(await _guardar_grupo(
+            request, cuentas, org_id, group_id, nombre, external_id, miembros,
+            set(actual["members"]),
+        ))
+
+    return await _con(request, hacer)
+
+
+@router.delete("/Groups/{group_id}")
+async def delete_group(request: Request, group_id: str) -> Any:
+    async def hacer(cuentas: Any, org_id: str) -> Response:
+        g = await _grupo(cuentas, org_id, group_id)
+        antes = await run_in_threadpool(cuentas.scim_borrar_grupo, org_id, group_id)
+        await run_in_threadpool(
+            cuentas.anotar, org_id, "", "scim_grupo_baja", g["display_name"], ""
+        )
+        await sincronizar_roles(cuentas, org_id, antes)
         return Response(status_code=204)
 
     return await _con(request, hacer)
