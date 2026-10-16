@@ -5397,3 +5397,25 @@ Completions); no convierte audio, ficheros ni documentos (siguen en `mensajes_no
 o `sin_equivalente`); no lleva `tool_choice` (D-205); no se ha probado contra las API
 reales: espera la clave. La interfaz no cambia: los motivos los escribe el SDK, en
 español, como los de D-167.
+
+Pruebas:
+- `test_replay.py` (4 nuevas): las llamadas con imágenes se entregan en su formato y con
+  cuántas llevan, en los tres; una imagen sin grabar no se reenvía, ni en una llamada ni
+  en una conversación; una conversación de Responses se entrega entera, con las dos
+  peticiones a la vez en la misma vuelta y el razonamiento saltado. La de motivos cuenta
+  ahora la imagen de `data:…` como `imagen_sin_grabar`, y la de un formato que no se lee
+  usa otro instrumentador.
+- `test_replay_sdk.py` (10 nuevas, con los clientes reales y el transporte falso): las
+  imágenes llegan a Anthropic y a OpenAI en su formato; el plan dice que no sabe lo que
+  cuestan; lo peor con la reserva por imagen, con cifras a mano; Responses va por Chat
+  Completions; lo que no tiene equivalente no se reenvía y el plan dice qué es; la tabla
+  de conversión de ida y vuelta y la de herramientas en los tres formatos; y cinco
+  bloques que no se convierten. Las de D-205 cuentan ahora tres bucles en lugar de dos:
+  el de Anthropic va también a OpenAI.
+
+Se rompió el código a propósito 18 veces (toda imagen grabada, sin formato Responses,
+imágenes fuera de las llamadas, el razonamiento que corta, cada petición una vuelta, sin
+contar imágenes, no convertir, lo peor sin imágenes, base64 como URL, perder `is_error`,
+instrucciones a mitad, imagen en un resultado hacia Chat, sin juntar roles, resultados y
+herramientas sin convertir, campos de más que se pierden, y el plan sin detalle o sin
+imágenes) y en todas falla alguna.
