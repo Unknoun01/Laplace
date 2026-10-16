@@ -5375,3 +5375,21 @@ clave (los embeddings quedan fuera). Antes de escribir código se midió qué se
   los pasos con huella y entre 2 y 20.000 preguntas; el agrupado es una sola función de
   Python (`storage/_parecido.py`) que usan los dos almacenes, así que la paridad es la de
   las filas, no la de dos implementaciones de un agrupado.
+
+**Medida (SQLite, 100.000 llamadas de 5 pasos, 20.000 preguntas por paso: el tope).**
+Lectura 5,4 s y agrupado 3,8 s, 9,4 s en total, frente a 1,5 s de la caché exacta con los
+mismos datos; con 5.000 llamadas, menos de 1 s. La primera versión usaba 8 bandas de 8 bits
+y 5.000 preguntas tardaban 7 s de agrupado (~n/256 candidatas por pregunta): ahora son 5
+bandas de 13 bits (4 bits no pueden tocar las 5), `int.bit_count` y el mismo resultado.
+En un portátil con tráfico real las preguntas casi nunca llegan al tope; en ClickHouse
+la lectura (sin probar) devuelve las mismas filas y el agrupado sigue siendo Python.
+
+**Mutaciones (ocho, en SQLite; fallan todas):** umbral 5, umbral 3, contar los miembros de
+la ejecución de la cabeza, ignorar la salida, no excluir las llamadas sin huella, ignorar
+el tope de preguntas, poner dinero en el total y `costs_money` verdadero.
+
+**Pendiente en ClickHouse (sin ejecutar nada):** la consulta `SIMILAR_QUESTIONS_SQL`, el
+`ALTER TABLE spans ADD COLUMN IF NOT EXISTS sim_hash`, la variante `clickhouse` de
+`test_regla_cache_parecida.py`, `test_carga.py` (espera `cache_parecida`; `scripts/carga.py`
+siembra el caso sin ejecutarse) y la prueba de paridad sobre empates en `test_paridad.py`.
+

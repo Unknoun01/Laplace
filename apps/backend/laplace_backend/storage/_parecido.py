@@ -19,19 +19,20 @@ UMBRAL_BITS = 4
 #: Preguntas distintas por (paso, modelo) por encima de las cuales no se compara: con las
 #: bandas de 16 bits harían falta ~n²/65.000 comparaciones. Callar no es afirmar.
 MAX_PREGUNTAS_PASO = 20_000
-#: Ocho bandas de 8 bits: dos huellas a `UMBRAL_BITS` (4) o menos tienen al menos una
-#: banda entera igual (4 bits tocan como mucho 4 de las 8), así que sólo se comparan las
-#: que comparten alguna. Con bandas de 16 bits no valdría: 4 bits podrían tocar las 4.
-_BANDAS = 8
+#: Cinco bandas de 13 bits (la última de 12): dos huellas a `UMBRAL_BITS` (4) o menos
+#: tienen al menos una banda entera igual (4 bits tocan como mucho 4 de las 5), así que
+#: sólo se comparan las que comparten alguna. Con 8 bandas de 8 bits eran ~n/256
+#: candidatas por pregunta, y 5.000 preguntas tardaban 7 s.
+_BANDAS = ((0, 13), (13, 13), (26, 13), (39, 13), (52, 12))
 
 
 def _bandas(huella: int) -> list[tuple[int, int]]:
     sin_signo = huella & 0xFFFF_FFFF_FFFF_FFFF
-    return [(i, (sin_signo >> (8 * i)) & 0xFF) for i in range(_BANDAS)]
+    return [(i, (sin_signo >> ini) & ((1 << ancho) - 1)) for i, (ini, ancho) in enumerate(_BANDAS)]
 
 
 def _distancia(a: int, b: int) -> int:
-    return bin((a ^ b) & 0xFFFF_FFFF_FFFF_FFFF).count("1")
+    return ((a ^ b) & 0xFFFF_FFFF_FFFF_FFFF).bit_count()
 
 
 def agrupar(
