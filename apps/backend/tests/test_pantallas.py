@@ -979,3 +979,39 @@ def test_el_bucle_ofrece_un_pr_con_tope_y_ajustes_ensena_el_webhook(servidor, na
         # El servidor es de todo el módulo: se deja como estaba.
         poner_github({"repo": ""})
         pagina.close()
+
+
+def test_el_grafo_del_panel_lleva_de_un_paso_a_sus_trazas_y_fichas(servidor, navegador):
+    """D-217: pulsar un paso saca sus atajos; cada uno lleva donde dice."""
+    url = servidor + "/panel/?project=demo&days=30"
+    pagina, errores = _abrir(navegador, url, "escritorio")
+    try:
+        grafo = pagina.locator("section.grafo-proyecto")
+        grafo.wait_for(timeout=15_000)
+        assert grafo.locator(".paso-acciones").count() == 0
+        # Un paso sin `step_key` (una herramienta): ficha sin atajo a las trazas.
+        sin_clave = grafo.locator("g.nodo:not(.llm)").first
+        sin_clave.click()
+        acciones = grafo.locator(".paso-acciones")
+        acciones.wait_for(timeout=5_000)
+        assert acciones.locator("a[href*='/trazas']").count() == 0
+        # Un paso con problema: las trazas filtradas y la ficha de cada problema.
+        grafo.locator("g.nodo.problema").first.press("Enter")
+        trazas = acciones.locator("a[href*='/trazas']")
+        trazas.wait_for(timeout=5_000)
+        fichas = acciones.locator("a[href*='/problema']")
+        assert fichas.count() >= 1
+        ficha = fichas.first.get_attribute("href")
+        trazas.click()
+        pagina.wait_for_url("**/trazas/**step=*", timeout=10_000)
+        assert "step_label=" in pagina.url and "project=demo" in pagina.url, pagina.url
+        pagina.locator("p.filtro-paso").first.wait_for(timeout=10_000)
+        pagina.goto(url)
+        grafo.wait_for(timeout=15_000)
+        grafo.locator("g.nodo.problema").first.click()
+        acciones.locator("a[href*='/problema']").first.click()
+        pagina.wait_for_url("**/problema/**id=*", timeout=10_000)
+        assert ficha.split("id=")[1] in pagina.url
+        assert errores == [], errores
+    finally:
+        pagina.close()

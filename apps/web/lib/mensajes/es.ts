@@ -953,6 +953,8 @@ export const es = {
   "grafo.tipo.retrieval": "búsqueda",
   "grafo.tipo.chain": "paso",
   "grafo.tipo.otro": "otro",
+  "grafo.paso.trazas": "Ver las trazas de este paso →",
+  "grafo.paso.ficha": "Ficha del problema {n} →",
   "grafo.sin_tarifa": "sin tarifa",
   "grafo.al_menos": "≥ {coste}",
   "grafo.aprox": "≈ {coste}",

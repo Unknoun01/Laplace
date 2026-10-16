@@ -946,6 +946,8 @@ export const pt: Mensajes = {
   "grafo.tipo.retrieval": "busca",
   "grafo.tipo.chain": "etapa",
   "grafo.tipo.otro": "outro",
+  "grafo.paso.trazas": "Ver os traces deste passo →",
+  "grafo.paso.ficha": "Ficha do problema {n} →",
   "grafo.sin_tarifa": "sem tarifa",
   "grafo.al_menos": "≥ {coste}",
   "grafo.aprox": "≈ {coste}",
