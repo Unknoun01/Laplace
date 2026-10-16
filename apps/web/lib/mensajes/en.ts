@@ -771,6 +771,7 @@ export const en: Mensajes = {
   "ent.sso_error.proveedor": "The identity provider isn't responding.",
   "ent.sso_error.sin_invitacion": "You already have an account with that email, but not in this organization: ask for an invitation, then sign in with SSO.",
   "ent.sso_error.fuera": "You're no longer in that organization.",
+  "ent.sso_error.saml": "SAML isn't available on this installation. Tell its administrator.",
   "ent.sso_error.otro": "Couldn't sign in with SSO.",
   "verif.ok": "Email verified",
   "verif.mal": "Couldn't verify",

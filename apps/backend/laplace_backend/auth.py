@@ -58,6 +58,10 @@ PUBLIC_PATHS = frozenset({
     # Lo llama GitHub al cerrar un PR, sin clave de Laplace: la ruta exige la firma HMAC
     # del cuerpo con el secreto del repositorio o de la App (D-191).
     "/api/github/webhook",
+    # La vuelta de SAML: un formulario que llega desde el proveedor, sin la cabecera
+    # propia. La protegen la firma, el `state` atado a este navegador, el `InResponseTo`
+    # y el `ID` de la aserción gastado (D-211).
+    "/api/auth/sso/saml/acs",
 })
 
 #: Las rutas de entrar: tienen que atender a quien todavía no tiene sesión. Cada una

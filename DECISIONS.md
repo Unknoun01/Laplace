@@ -5321,3 +5321,88 @@ sesiones, contar dos veces las trazas que cruzan, decidir con lo que sale en cru
 copias contadas por hora, no ensuciar las horas al crear la tabla y pedir las trazas sin
 la última versión de cada span. Esta última no mordía hasta añadir la prueba del lote
 reenviado.
+
+### D-211 — SAML con `xmlsec` opcional, y los grupos de SCIM dan los roles
+D-182 dejó fuera dos cosas que piden las empresas: SAML (hay proveedores y políticas que
+no hablan OIDC) y que los grupos del proveedor de identidad den los roles. Se diseñó
+antes de tocar código. Es una frontera de confianza: cada ataque tiene su prueba.
+
+**SAML, con `python3-saml` (OneLogin) y no a mano.** D-182 lo dejó fuera porque verificar
+una firma XML a mano es justo donde se rompe (*signature wrapping*). `python3-saml` es
+la biblioteca que usa medio mundo, encima de `xmlsec`, y ya trae lo difícil: una sola
+aserción, sólo `Response` y `Assertion` pueden ir firmadas, la referencia de la firma
+tiene que ser el `ID` del elemento firmado, nada de `ID` repetidos, y los datos se leen
+del elemento que se validó. Va como extra, `pip install laplace-backend[saml]`, porque
+`xmlsec` es nativo y no lo queremos en cada instalación. En Windows con Python 3.11 hay
+ruedas, y `lxml` y `xmlsec` tienen que llevar la misma `libxml2` (si no, importar
+`xmlsec` falla, y eso cuenta como no tenerlo).
+* **Sin `xmlsec`, SAML está apagado, y se dice.** Guardar una configuración SAML es un
+  400 que explica qué instalar; empezar un inicio de sesión SAML, un 503; la vuelta, un
+  rechazo. Nunca se lee una respuesta sin validar su firma.
+* **La aserción tiene que ir firmada, siempre**, con el certificado que puso el
+  administrador de la organización (el certificado entero, no la huella, que es SHA-1).
+  Si además la respuesta va firmada, esa firma también tiene que valer. Una respuesta
+  firmada con la aserción sin firmar se rechaza: lo que se lee es la aserción. Fuera
+  los algoritmos viejos (SHA-1), y las aserciones cifradas: no hay clave del lado de
+  Laplace y TLS ya protege el viaje.
+* **Audiencia, destino y emisor.** La audiencia es el `entityID` de Laplace
+  (`{base}/api/auth/sso/saml`); el `Destination` y el `Recipient`, la URL de vuelta
+  (`…/saml/acs`), construidas desde la URL pública configurada y no desde la cabecera
+  `Host`, que pone quien llama. El emisor tiene que ser el `entityID` del proveedor.
+* **Caducidad**: `NotBefore`/`NotOnOrAfter` de las condiciones y de la confirmación del
+  sujeto, con la holgura de la biblioteca (5 minutos).
+* **Repeticiones, dos veces.** Sólo se aceptan respuestas a una petición nuestra: el
+  `InResponseTo` tiene que ser el `ID` de la `AuthnRequest`, que va en el mismo `state`
+  de un solo uso y atado al navegador de D-182 (el `RelayState`). Sin petición (lo que
+  el proveedor manda por su cuenta, *IdP-initiated*) no se entra: es la puerta del
+  *login CSRF*; el icono de Okta se configura para ir a la pantalla de entrar. Y además
+  el `ID` de cada aserción se gasta en `saml_assertions` hasta que caduca: la segunda
+  vez no entra aunque algo de lo anterior fallara. La vuelta llega por un POST desde
+  el proveedor, otro sitio: la cookie del navegador va con `SameSite=None` (y `Secure`)
+  cuando la instalación es `https`, o el navegador no la mandaría.
+* **Quién es**: el `NameID` es el sujeto (`saml:` delante, para no chocar con un `sub`
+  de OIDC si la organización cambia de protocolo), y el correo sale del atributo de
+  correo de siempre, o del `NameID` si es un correo. Lo demás es D-182 tal cual: el
+  dominio aprobado por la instalación, y nadie entra en la cuenta de otra organización.
+* Una organización tiene **un** SSO: OIDC o SAML (`protocol` en `sso_configs`). El rol
+  por defecto, los dominios y la obligación son los mismos. El botón de entrar no
+  cambia: `/api/auth/sso/start` manda al proveedor que toque.
+
+**`Groups` en SCIM, y el rol que dan.**
+* El proveedor crea los grupos y mete y saca gente (`/scim/v2/Groups`: listar con
+  `displayName eq` o `externalId eq`, leer, crear, `PUT`, `PATCH` de miembros y nombre en
+  las formas de Okta y de Entra ID, y `DELETE`). **El proveedor no dice qué rol da un
+  grupo: lo dice un admin de la organización en Laplace** (`PUT /api/org/scim-groups`).
+  El proveedor es quien sabe quién está en «Ingeniería»; qué puede hacer «Ingeniería»
+  en Laplace se decide en Laplace, y el proveedor no puede inventarse permisos.
+* Un grupo da `lector`, `miembro` o `admin`, o nada. **Nunca `propietario`**, y a un
+  propietario los grupos no lo tocan: no se puede quedar una organización sin dueño
+  porque alguien cambió un grupo en otro sitio.
+* **En varios grupos, el rol mayor.** Los grupos suman permisos, no los restan.
+* **En ningún grupo con rol, el rol por defecto del SSO.** Así sacar a alguien del grupo
+  de admins le quita el admin, que es para lo que se quiere esto.
+* **Mandan sobre quien gestiona el proveedor** (los que dio de alta SCIM, o metió en un
+  grupo), y **sólo si la organización tiene algún grupo con rol**. Sin ninguno, todo
+  sigue como en D-182: el rol se cambia en Laplace. Con alguno, un cambio a mano a
+  alguien gestionado dura hasta el siguiente cambio de sus grupos. Quitar el último rol
+  de grupo deja los roles como están.
+* Un miembro de un grupo tiene que ser de la organización: un `id` de otra es un 400, y
+  una clave de SCIM sólo ve los grupos de la suya.
+* Cada cambio de rol por un grupo va a la auditoría.
+
+`xmlsec` 1.3.17 y `lxml` 6.1.3 (las dos con `libxml2` 2.11.9) se instalan en Windows con
+Python 3.11 desde ruedas; se instalaron en el `.venv` de desarrollo.
+
+Pruebas: `test_scim_grupos.py` (el rol mayor, salir del grupo, Okta y Entra ID, el
+propietario, quien entró por invitación, sólo un admin pone el rol, otra organización),
+`test_saml.py` (el viaje entero y catorce ataques: sin firma, otro certificado, sólo la
+respuesta firmada, la respuesta firmada por otro, SHA-1, envuelta al lado y por dentro,
+otra audiencia, sin audiencia, otro destino, otro emisor, caducada, a otra petición y
+otro dominio; repetida en el mismo navegador, con otra petición y con el `state`
+falseado; la cookie `SameSite=None` en https; SAML apagado sin `xmlsec`) y el recorrido
+de SQLite y Postgres con grupos, SAML y aserciones. Se rompió el código a propósito 31
+veces (16 en grupos, 15 en SAML) y todas muerden. Cuatro no mordían al principio: el rol
+de un grupo se guardaba aunque quien lo pedía no fuera admin (la respuesta, que sí lo
+comprobaba, daba 403 después de guardar: arreglado), dos comprobaciones de «quien
+gestiona el proveedor» que ningún camino alcanzaba (quitadas), y la cookie en https y el
+motivo del 400 sin `xmlsec`, que ahora tienen prueba.

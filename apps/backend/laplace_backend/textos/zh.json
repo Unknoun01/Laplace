@@ -499,6 +499,8 @@
   "error.dominios_solo_instalacion": "组织的域名由安装管理员设置：它们表明这些邮箱归谁所有。",
   "error.token_scim": "该 SCIM 令牌不存在或已被撤销。",
   "error.grupo_scim": "该 SCIM 组在此组织中不存在。",
+  "error.saml_sin_xmlsec": "此安装不支持 SAML：未安装 laplace-backend[saml]（xmlsec）。",
+  "error.saml_config": "SAML 配置无效：{detalle}",
   "error.sso_obligado": "你的组织使用单点登录：请使用“使用 SSO 登录”。",
   "org.invitar_sin_verificar": "未通过邮件发送，因为你的邮箱尚未验证：请手动发送链接或验证你的邮箱。",
   "github.sin_permiso": "GitHub 不接受该凭据访问此仓库。请确认令牌（或 App）有写入内容和创建拉取请求的权限。",

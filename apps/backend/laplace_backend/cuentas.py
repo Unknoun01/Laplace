@@ -74,6 +74,11 @@ COLUMNAS_TARDIAS = (
     # D-182: cuándo se verificó el correo, y si la invitación llegó por correo.
     ("users", "email_verified_at", "TEXT"),
     ("invitations", "emailed", "INTEGER NOT NULL DEFAULT 0"),
+    # D-211: SAML. `issuer` es el entityID del proveedor; éstas, adónde mandar y con qué
+    # certificado se firma.
+    ("sso_configs", "protocol", "TEXT NOT NULL DEFAULT 'oidc'"),
+    ("sso_configs", "sso_url", "TEXT NOT NULL DEFAULT ''"),
+    ("sso_configs", "idp_cert", "TEXT NOT NULL DEFAULT ''"),
 )
 MIN_CONTRASENA = 10
 
@@ -391,6 +396,13 @@ CREATE TABLE IF NOT EXISTS scim_group_members (
     group_id  TEXT NOT NULL,
     user_id   TEXT NOT NULL,
     PRIMARY KEY (group_id, user_id)
+);
+-- Aserciones SAML ya usadas (D-211), hasta que caducan: la misma no entra dos veces.
+CREATE TABLE IF NOT EXISTS saml_assertions (
+    org_id        TEXT NOT NULL,
+    assertion_id  TEXT NOT NULL,
+    expires_at    TEXT NOT NULL,
+    PRIMARY KEY (org_id, assertion_id)
 );
 CREATE INDEX IF NOT EXISTS scim_groups_org_idx ON scim_groups (org_id);
 CREATE INDEX IF NOT EXISTS login_failures_idx ON login_failures (clave, at);
@@ -871,8 +883,8 @@ class CuentasStore:
         from .sso import ConfigSSO
 
         filas = self._filas(
-            "SELECT issuer, client_id, client_secret, default_role, enforce FROM sso_configs "
-            "WHERE org_id = ?",
+            "SELECT issuer, client_id, client_secret, default_role, enforce, protocol, sso_url, "
+            "idp_cert FROM sso_configs WHERE org_id = ?",
             (org_id,),
         )
         if not filas:
@@ -881,13 +893,16 @@ class CuentasStore:
         return ConfigSSO(
             org_id=org_id, issuer=f[0], client_id=f[1], client_secret=f[2],
             default_role=f[3], enforce=bool(f[4]), domains=self.dominios(org_id),
+            protocol=f[5], sso_url=f[6], idp_cert=f[7],
         )
 
     def guardar_sso(
         self, org_id: str, issuer: str, client_id: str, secreto: str | None,
-        rol: str, obligar: bool,
+        rol: str, obligar: bool, *, protocolo: str = "oidc", sso_url: str = "", cert: str = "",
     ) -> None:
         """`secreto=None` conserva el que había: la interfaz nunca lo recibe de vuelta."""
+        if protocolo not in ("oidc", "saml"):
+            raise ValueError("el protocolo es oidc o saml")
         if rol not in ROLES or rol == "propietario":
             raise ValueError("el rol por defecto es lector, miembro o admin")
         actual = self.config_sso(org_id)
@@ -896,14 +911,18 @@ class CuentasStore:
         if actual is None:
             self._ejecutar(
                 "INSERT INTO sso_configs (org_id, issuer, client_id, client_secret, "
-                "default_role, enforce, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (org_id, issuer, client_id, secreto, rol, 1 if obligar else 0, _iso(_ahora())),
+                "default_role, enforce, updated_at, protocol, sso_url, idp_cert) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (org_id, issuer, client_id, secreto, rol, 1 if obligar else 0, _iso(_ahora()),
+                 protocolo, sso_url, cert),
             )
         else:
             self._ejecutar(
                 "UPDATE sso_configs SET issuer = ?, client_id = ?, client_secret = ?, "
-                "default_role = ?, enforce = ?, updated_at = ? WHERE org_id = ?",
-                (issuer, client_id, secreto, rol, 1 if obligar else 0, _iso(_ahora()), org_id),
+                "default_role = ?, enforce = ?, updated_at = ?, protocol = ?, sso_url = ?, "
+                "idp_cert = ? WHERE org_id = ?",
+                (issuer, client_id, secreto, rol, 1 if obligar else 0, _iso(_ahora()),
+                 protocolo, sso_url, cert, org_id),
             )
 
     def borrar_sso(self, org_id: str) -> None:
@@ -1008,6 +1027,19 @@ class CuentasStore:
         # El proveedor de la organización y un dominio aprobado: el correo es suyo.
         self.marcar_verificado(usuario.id)
         return usuario, ""
+
+    def gastar_asercion(self, org_id: str, assertion_id: str, caduca: float) -> bool:
+        """Falso si esa aserción SAML ya se usó (D-211). Se guarda hasta que caduca."""
+        self._ejecutar("DELETE FROM saml_assertions WHERE expires_at <= ?", (_iso(_ahora()),))
+        return (
+            self._ejecutar(
+                "INSERT INTO saml_assertions (org_id, assertion_id, expires_at) VALUES (?, ?, ?) "
+                "ON CONFLICT (org_id, assertion_id) DO NOTHING",
+                (org_id, assertion_id,
+                 _iso(datetime.fromtimestamp(caduca, timezone.utc) + timedelta(minutes=10))),
+            )
+            > 0
+        )
 
     def sso_obligado(self, user_id: str, email: str) -> bool:
         """Si una organización suya obliga a entrar por SSO con ese correo."""

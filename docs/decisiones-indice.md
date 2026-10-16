@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 207 decisiones.
+final. 208 decisiones.
 
 ## Coste, precios y caché
 
@@ -228,6 +228,7 @@ final. 207 decisiones.
 - [D-184](../DECISIONS.md#d-184--un-límite-de-gasto-y-de-bucles-en-el-sdk-con-la-misma-cuenta-que-la-traza) — Un límite de gasto y de bucles en el SDK, con la misma cuenta que la traza
 - [D-189](../DECISIONS.md#d-189--las-pantallas-del-plano-de-control-tope-y-parada-en-ajustes-el-agente-entero-en-el-panel) — Las pantallas del plano de control: Tope y parada en Ajustes, el agente entero en el Panel
 - [D-190](../DECISIONS.md#d-190--cache_control-y-un-tope-de-vueltas-escritos-sobre-el-árbol-de-sintaxis) — `cache_control` y un tope de vueltas, escritos sobre el árbol de sintaxis
+- [D-211](../DECISIONS.md#d-211--saml-con-xmlsec-opcional-y-los-grupos-de-scim-dan-los-roles) — SAML con `xmlsec` opcional, y los grupos de SCIM dan los roles
 
 ## Margen por cliente
 
@@ -663,3 +664,4 @@ final. 207 decisiones.
 - [D-205](../DECISIONS.md#d-205--el-replay-con-herramientas-cada-resultado-el-que-grabó-la-traza-lo-que-no-se-grabó-corta-el-caso) — El replay con herramientas: cada resultado, el que grabó la traza; lo que no se grabó corta el caso
 - [D-206](../DECISIONS.md#d-206--la-parada-alcanza-lo-que-otro-instrumentador-traza-en-python-lo-que-no-alcanza-se-dice) — La parada alcanza lo que otro instrumentador traza en Python; lo que no alcanza, se dice
 - [D-207](../DECISIONS.md#d-207--el-historial-de-los-preagregados-una-fila-por-conversación-paso-y-hora) — El historial, de los preagregados: una fila por conversación, paso y hora
+- [D-211](../DECISIONS.md#d-211--saml-con-xmlsec-opcional-y-los-grupos-de-scim-dan-los-roles) — SAML con `xmlsec` opcional, y los grupos de SCIM dan los roles

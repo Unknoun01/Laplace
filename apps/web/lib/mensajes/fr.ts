@@ -773,6 +773,7 @@ export const fr: Mensajes = {
   "ent.sso_error.proveedor": "Le fournisseur d'identité ne répond pas.",
   "ent.sso_error.sin_invitacion": "Vous avez déjà un compte avec cette adresse, mais pas dans cette organisation : demandez une invitation puis connectez-vous avec SSO.",
   "ent.sso_error.fuera": "Vous ne faites plus partie de cette organisation.",
+  "ent.sso_error.saml": "SAML n'est pas disponible sur cette installation. Prévenez son administrateur.",
   "ent.sso_error.otro": "Impossible de se connecter avec SSO.",
   "verif.ok": "Adresse vérifiée",
   "verif.mal": "Vérification impossible",

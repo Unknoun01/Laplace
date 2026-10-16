@@ -499,6 +499,8 @@
   "error.dominios_solo_instalacion": "Os domínios de uma organização são definidos por quem administra a instalação: dizem de quem são esses e-mails.",
   "error.token_scim": "Esse token SCIM não existe ou já estava revogado.",
   "error.grupo_scim": "Esse grupo SCIM não existe nesta organização.",
+  "error.saml_sin_xmlsec": "O SAML não está disponível nesta instalação: falta instalar laplace-backend[saml] (xmlsec).",
+  "error.saml_config": "A configuração SAML não é válida: {detalle}",
   "error.sso_obligado": "Sua organização entra com login único: use “Entrar com SSO”.",
   "org.invitar_sin_verificar": "Não foi enviado por e-mail porque o seu não está verificado: envie o link manualmente ou verifique seu e-mail.",
   "github.sin_permiso": "O GitHub não aceita essa credencial para este repositório. Verifique se o token (ou a App) pode escrever conteúdo e abrir pull requests.",

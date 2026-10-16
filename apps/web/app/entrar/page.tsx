@@ -162,6 +162,7 @@ const ERRORES_SSO = {
   proveedor: "ent.sso_error.proveedor",
   sin_invitacion: "ent.sso_error.sin_invitacion",
   fuera: "ent.sso_error.fuera",
+  saml: "ent.sso_error.saml",
 } as const;
 
 function errorSso(codigo: string) {

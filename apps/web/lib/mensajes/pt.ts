@@ -771,6 +771,7 @@ export const pt: Mensajes = {
   "ent.sso_error.proveedor": "O provedor de identidade não responde.",
   "ent.sso_error.sin_invitacion": "Você já tem conta com esse e-mail, mas não nesta organização: peça um convite e depois entre com SSO.",
   "ent.sso_error.fuera": "Você não faz mais parte dessa organização.",
+  "ent.sso_error.saml": "O SAML não está disponível nesta instalação. Avise quem a administra.",
   "ent.sso_error.otro": "Não foi possível entrar com SSO.",
   "verif.ok": "E-mail verificado",
   "verif.mal": "Não foi possível verificar",
