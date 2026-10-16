@@ -5006,3 +5006,106 @@ fusión, el último gana, pisar lo de la persona, cualquier estado del despliegu
 de llegada, sin guardar el commit de la fusión) y en todos falla alguna. Una undécima,
 dejar pasar los PR cerrados sin fusionar, no mordía porque la comprobación sobraba: esos
 PR guardan `merge_sha` vacío, y se quitó. No toca los almacenes: todo va en los ajustes.
+
+### D-205 — El replay con herramientas: cada resultado, el que grabó la traza; lo que no se grabó corta el caso
+
+`laplace replay` (D-167) dejaba fuera todas las llamadas con herramientas, y casi todos
+los agentes de verdad las usan. Reenviarlas no exige ejecutar las herramientas: la traza
+ya guarda lo que devolvió cada una. El modelo nuevo conversa con las herramientas
+**grabadas**; la de verdad no se ejecuta nunca, ni en la máquina del usuario ni en
+Laplace. Lo que el modelo nuevo pida y no esté grabado no se inventa: el caso se corta y
+lo dice.
+
+* **Qué graban ya las trazas, y basta.** Los mensajes de entrada en crudo (con las
+  `tool_calls` de OpenAI y los bloques `tool_use`/`tool_result` de Anthropic) y la
+  declaración de herramientas (`laplace.request.tools`). En un bucle de agente, cada
+  vuelta repite la conversación anterior y añade la respuesta y los resultados, así que
+  la entrada de la última llamada contiene todo lo que pasó. No hace falta grabar nada
+  nuevo.
+* **Una conversación por ejecución.** Si alguna llamada del paso en una ejecución usa
+  herramientas, las que las usan tienen que ser **una sola conversación**: ordenadas por
+  hora, la entrada de cada una empieza por la entrada entera de la anterior, todas
+  declaran las mismas herramientas, y lo que se añade entre la primera y la última son
+  sólo peticiones de herramienta del modelo y sus resultados. Si el agente mete otra
+  cosa entre vueltas (un mensaje de usuario, un recordatorio, herramientas que cambian),
+  el replay no sabría reproducirla, y esas llamadas se cuentan aparte
+  (`herramientas_sin_cadena`). Las llamadas del paso sin herramientas siguen como en
+  D-167.
+* **Lo que se lleva el SDK.** La entrada de la primera llamada (el punto de partida, tal
+  cual, con su historia anterior si la había), las herramientas declaradas, la lista
+  **ordenada** de peticiones grabadas —nombre, argumentos, resultado y en qué vuelta las
+  pidió el original— y la respuesta final de la última llamada, que es la referencia
+  del juez. Si falta algo (una petición sin su resultado, un resultado sin su petición,
+  la declaración recortada por tamaño, mensajes recortados), no se reenvía
+  (`herramientas_sin_grabar`). Si el original nunca dio respuesta final, `sin_respuesta`.
+* **Cómo se casan las peticiones: por nombre y argumentos, y en orden.** Las peticiones
+  del modelo nuevo, en el orden en que las hace, tienen que reproducir las grabadas en
+  el mismo orden; los argumentos se comparan como JSON (sin mirar espacios ni el orden
+  de las claves). Una herramienta puede depender de lo que hizo otra antes (crear y
+  luego leer), y un resultado grabado sólo vale para la misma petición en el mismo
+  punto. Dos excepciones que no cambian lo que se sabe:
+  - pedir en una sola respuesta lo que el original pidió en varias, o al revés, vale:
+    lo que se compara es la secuencia;
+  - dentro de una respuesta, el modelo nuevo puede reordenar peticiones que el
+    original también pidió **a la vez** en una sola respuesta: el propio original las
+    trató como independientes. Las que el original pidió en vueltas distintas, no.
+  La misma petición repetida consume los resultados grabados en su orden.
+* **Lo que no se grabó corta el caso.** Una herramienta, unos argumentos o una petición
+  de más que no están grabados en ese punto: el caso se para ahí, sin inventar un
+  resultado, y queda en la tirada nueva como **fallido** con el motivo («pidió
+  `buscar(…)` y la traza no grabó qué devuelve»). Fallido y no descartado, como un caso
+  que revienta (`EvalRunItem.failed`): descartarlo dejaría fuera justo los casos en que
+  el modelo nuevo se apartó del original, y el acierto saldría mejor por apartarse más.
+  Contarlo como fallo es la cuenta prudente: un corte sólo puede bajar el acierto del
+  modelo nuevo, nunca darle la victoria. El modelo nuevo que contesta **sin** pedir
+  alguna de las herramientas grabadas no se corta: su respuesta se juzga como cualquier
+  otra.
+* **Proveedor.** Los mensajes de herramientas van en el formato del proveedor que los
+  grabó. Si el modelo de destino es de otro proveedor, o el formato no es el de Chat
+  Completions de OpenAI ni el de Messages de Anthropic (la API Responses, otro
+  instrumentador), esa conversación no se reenvía (`herramientas_formato`); convertir
+  bloques entre proveedores queda fuera, como en D-167.
+* **Coste y vueltas.** Cada vuelta del modelo nuevo es una llamada, se paga con los
+  tokens que devuelve el proveedor y cuenta en `calls_done`; el caso guarda sus vueltas
+  en `replay.turns`. Con N peticiones grabadas, el modelo nuevo hace como mucho N + 1
+  vueltas: cada vuelta con peticiones consume al menos una grabada o corta. Lo peor de
+  una conversación, antes de empezarla, es la suma de esas N + 1 vueltas, cada una con
+  la entrada de la última llamada original con el 30 % de margen (contiene la de
+  partida y todos los resultados) más la salida máxima de cada vuelta anterior, y la
+  salida máxima; la salida máxima es la de D-167 sobre la mayor respuesta del original.
+  Si no cabe en el tope, el caso no se empieza. La tirada original apunta a todas las
+  llamadas de la conversación (`span_ids`), así que los dos lados comparan el mismo
+  trabajo: un bucle entero contra otro bucle entero. Lo de un caso cortado ya se gastó
+  y cuenta, como lo de un caso que revienta.
+
+**Lo que no hace:**
+- no ejecuta herramientas, ni para lo que no se grabó;
+- no lleva `tool_choice` ni `parallel_tool_calls`, porque el SDK no los graba: si el
+  original obligaba a usar una herramienta, el modelo nuevo no lo sabe;
+- no convierte entre proveedores ni lee la API Responses;
+- una ejecución que invoca el paso dos veces con herramientas son dos conversaciones,
+  y no se reenvía (`herramientas_sin_cadena`);
+- no se ha probado contra las API reales: espera la clave.
+
+Pruebas:
+- `test_replay.py` (9 nuevas): la conversación se entrega entera con sus peticiones,
+  resultados, vueltas, `span_ids` y costes, en OpenAI y en Anthropic; y no se entrega,
+  con su motivo, si el agente mete otra cosa entre vueltas, si cambian las herramientas,
+  si una vuelta no continúa la anterior, si falta un resultado, si la declaración está
+  recortada, si el original no llegó a contestar o si el formato no se lee. La prueba de
+  motivos de D-167 cuenta ahora `herramientas_sin_cadena` donde contaba `herramientas`.
+- `test_replay_sdk.py` (12 nuevas), con los clientes reales y el transporte falso: cada
+  resultado es el grabado y llega con el id de la petición nueva, en OpenAI y en
+  Anthropic; lo no grabado corta sin una vuelta más y cuenta como fallo; repetir de más
+  una petición corta; contestar sin herramientas vale; el tope, lo peor con cifras a
+  mano, el plan, el casado por nombre, argumentos y orden, el juez contra la respuesta
+  final y la línea de órdenes.
+
+Se rompieron a propósito 25 sitios (reordenar entre vueltas, argumentos sin normalizar,
+inventar en lugar de cortar, N vueltas en vez de N + 1, lo peor sin margen o sin las
+salidas anteriores, el corte que no es fallo, cualquier proveedor, sin el id nuevo en
+cada proveedor, sin declarar herramientas, no avanzar las usadas, la tirada original sin
+la conversación, el plan y el tope sin ella, la referencia sin la respuesta final, y en
+el backend cada comprobación de la conversación, las vueltas, los `span_ids` y la
+entrada de la última vuelta) y en todos falla alguna. La de la referencia no mordía al
+principio y tiene ahora su prueba. No toca los almacenes ni la interfaz.

@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 204 decisiones.
+final. 205 decisiones.
 
 ## Coste, precios y caché
 
@@ -98,6 +98,7 @@ final. 204 decisiones.
 - [D-160](../DECISIONS.md#d-160--prompts-sin-tiradas-de-evaluación-envoltorios-con--y-el-modelo-rápido-ponderado) — Prompts sin tiradas de evaluación, envoltorios con «=» y el modelo rápido ponderado
 - [D-167](../DECISIONS.md#d-167--probar-el-modelo-barato-reenviando-las-llamadas-reales-sin-escribir-código) — Probar el modelo barato reenviando las llamadas reales, sin escribir código
 - [D-197](../DECISIONS.md#d-197--la-carga-mide-lo-que-habrá-casos-para-las-reglas-nuevas-y-preagregados-calculados) — La carga mide lo que habrá: casos para las reglas nuevas y preagregados calculados
+- [D-205](../DECISIONS.md#d-205--el-replay-con-herramientas-cada-resultado-el-que-grabó-la-traza-lo-que-no-se-grabó-corta-el-caso) — El replay con herramientas: cada resultado, el que grabó la traza; lo que no se grabó corta el caso
 
 ## Prompts
 
@@ -297,6 +298,7 @@ final. 204 decisiones.
 - [D-184](../DECISIONS.md#d-184--un-límite-de-gasto-y-de-bucles-en-el-sdk-con-la-misma-cuenta-que-la-traza) — Un límite de gasto y de bucles en el SDK, con la misma cuenta que la traza
 - [D-188](../DECISIONS.md#d-188--el-grafo-del-proyecto-el-agente-entero-sumando-las-trazas) — El grafo del proyecto: el agente entero, sumando las trazas
 - [D-203](../DECISIONS.md#d-203--el-grafo-del-proyecto-marca-los-pasos-con-hallazgos-por-step_key-y-sin-adivinar) — El grafo del proyecto marca los pasos con hallazgos, por `step_key` y sin adivinar
+- [D-205](../DECISIONS.md#d-205--el-replay-con-herramientas-cada-resultado-el-que-grabó-la-traza-lo-que-no-se-grabó-corta-el-caso) — El replay con herramientas: cada resultado, el que grabó la traza; lo que no se grabó corta el caso
 
 ## Pruebas y método
 
@@ -654,3 +656,4 @@ final. 204 decisiones.
 - [D-202](../DECISIONS.md#d-202--sin-ciclos-de-imports-en-el-sdk-init-sale-de-_tracer) — Sin ciclos de imports en el SDK: `init()` sale de `_tracer`
 - [D-203](../DECISIONS.md#d-203--el-grafo-del-proyecto-marca-los-pasos-con-hallazgos-por-step_key-y-sin-adivinar) — El grafo del proyecto marca los pasos con hallazgos, por `step_key` y sin adivinar
 - [D-204](../DECISIONS.md#d-204--la-señal-de-despliegue-el-aviso-deployment_status-de-github-mueve-la-frontera-del-arreglado) — La señal de despliegue: el aviso `deployment_status` de GitHub mueve la frontera del arreglado
+- [D-205](../DECISIONS.md#d-205--el-replay-con-herramientas-cada-resultado-el-que-grabó-la-traza-lo-que-no-se-grabó-corta-el-caso) — El replay con herramientas: cada resultado, el que grabó la traza; lo que no se grabó corta el caso
