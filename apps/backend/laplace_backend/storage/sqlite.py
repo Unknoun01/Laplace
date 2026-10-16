@@ -34,6 +34,7 @@ from laplace.semconv import EVAL_TAG, PUEDE_ESPERAR_TAG
 from ._rows import (
     COLUMNS,
     coverage_from_rows,
+    origen_from_row,
     row_to_observed_prompt,
     row_to_prompt_usage,
     row_to_span,
@@ -56,6 +57,7 @@ from .base import (
     LoopGroup,
     ModelUsage,
     ObservedPrompt,
+    OrigenLlamadas,
     ProjectStats,
     PromptUsage,
     RedoneGroup,
@@ -176,6 +178,9 @@ CREATE TABLE IF NOT EXISTS spans (
     prefix_hash           TEXT NOT NULL DEFAULT '',
     sample_rate           REAL NOT NULL DEFAULT 1,
     output_json           TEXT NOT NULL DEFAULT '',
+    sdk_language          TEXT NOT NULL DEFAULT '',
+    sdk_name              TEXT NOT NULL DEFAULT '',
+    instrumentor          TEXT NOT NULL DEFAULT '',
 
     events                TEXT NOT NULL DEFAULT '',
     attributes            TEXT NOT NULL DEFAULT '',
@@ -210,6 +215,10 @@ COLUMNAS_TARDIAS = (
     ("sample_rate", "REAL NOT NULL DEFAULT 1"),
     # Si la salida es JSON que se lee (D-194).
     ("output_json", "TEXT NOT NULL DEFAULT ''"),
+    # De dónde viene cada span (D-215). Los de antes, vacíos: no se sabe.
+    ("sdk_language", "TEXT NOT NULL DEFAULT ''"),
+    ("sdk_name", "TEXT NOT NULL DEFAULT ''"),
+    ("instrumentor", "TEXT NOT NULL DEFAULT ''"),
 )
 
 #: Índices sobre columnas tardías. Van aquí y **no** en `SCHEMA` por un motivo que costó
@@ -1895,6 +1904,19 @@ class SQLiteStore:
             f"SELECT COUNT(DISTINCT trace_id) AS n FROM spans WHERE {RULES_WHERE}", params
         )
         return graph_facts(pasos, aristas, trazas[0]["n"] if trazas else 0)
+
+    def origen_llamadas(self, project_id: str, window: Window) -> list[OrigenLlamadas]:
+        filas = self._query(
+            f"""
+            SELECT sdk_name, sdk_language, instrumentor,
+                   COUNT(*) AS llamadas, SUM(sample_rate) AS peso
+            FROM spans
+            WHERE {RULES_WHERE} AND span_type = 'llm'
+            GROUP BY sdk_name, sdk_language, instrumentor
+            """,
+            self._window_params(project_id, window),
+        )
+        return [origen_from_row(f) for f in filas]
 
     def coverage(self, project_id: str, window: Window) -> CoverageFacts:
         """Una sola consulta de cuentas sobre las llamadas a modelos de la ventana.

@@ -5321,3 +5321,39 @@ sesiones, contar dos veces las trazas que cruzan, decidir con lo que sale en cru
 copias contadas por hora, no ensuciar las horas al crear la tabla y pedir las trazas sin
 la última versión de cada span. Esta última no mordía hasta añadir la prueba del lote
 reenviado.
+
+### D-215 — De dónde viene cada span, y qué parte del tráfico se queda fuera de la parada
+D-206 dejó escrito a qué llega la parada (agentes en Python con `laplace.init()`) y a qué
+no (Node, procesos sin el SDK), pero no cuánto pesa lo segundo: la ingesta sólo leía del
+recurso OTLP el proyecto. Ahora guarda en cada span de dónde viene, en los dos almacenes.
+
+* **Tres columnas nuevas** en `spans`: `sdk_language` (`telemetry.sdk.language` del
+  recurso: `python`, `nodejs`…), `sdk_name` (`telemetry.sdk.name`: `laplace` lo pone
+  `laplace.init()`; el SDK de OpenTelemetry pone `opentelemetry`) e `instrumentor`, la
+  familia de atributos que trae el span: `laplace`, `openinference`, `openllmetry`,
+  `genai` (las convenciones de OTel) u `otro`. Se copian tal cual, sin deducir nada.
+* **Los spans viejos no lo tienen, y se dice.** Las instalaciones se migran con las
+  columnas vacías (`COLUMNAS_TARDIAS` en SQLite, `ALTER … ADD COLUMN` en ClickHouse; no
+  hace falta `migrar_orden`). No se rellenan a ojo. `instrumentor` siempre lleva algo
+  desde aquí (como poco `otro`), así que vacío quiere decir «de antes»: esos spans no
+  entran en la cuenta y la pantalla dice cuántos son.
+* **La cuenta** (`GET /api/control/alcance`, aparte del `GET /api/control` que el SDK pide
+  cada 30 s): de las llamadas a modelos de los últimos 7 días, sin las tiradas de
+  evaluación, qué parte viene de procesos que no dicen llevar el SDK de Laplace
+  (`sdk_name != 'laplace'`), con los lenguajes de esos procesos. Pesa por `sample_rate`
+  (D-181), que es tráfico, no spans. Con menos de `MIN_CALLS_FOR_COVERAGE` llamadas con
+  origen, no hay porcentaje: `None` y el motivo.
+* **Lo que el número no cuenta, dicho.** Las llamadas a otros proveedores (Bedrock,
+  Gemini…) dentro de un proceso con el SDK sólo se paran en su paso de `@observe`, y eso
+  no se ve en el span: no entran en el número, y la frase lo dice. Y un proceso con el SDK
+  cuyo otro instrumentador exporta con su propio `TracerProvider` llega como
+  `opentelemetry`: cuenta como fuera aunque la parada le llegue. Por eso la frase dice
+  «procesos que no dicen llevar el SDK», no «sin el SDK».
+
+Pruebas en `test_origen_spans.py` (15): la ingesta guarda lenguaje y SDK del recurso y
+la familia de cada span (seis casos); el origen va y vuelve en SQLite; las cuentas por
+origen, en SQLite y en paridad con ClickHouse; una base SQLite sin las columnas las gana
+y sus filas quedan sin origen; el alcance pesa por muestreo, deja fuera evaluaciones y
+spans viejos, y sin muestra no da porcentaje; la API lo sirve. En `test_pantallas.py`,
+Ajustes enseña la línea. Se rompieron a propósito contar los spans viejos como con
+origen y no reconocer OpenInference, y en los dos falla alguna.

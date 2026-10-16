@@ -7,6 +7,7 @@ import type {
   Breakdown,
   Budget,
   Comparison,
+  ControlAlcance,
   ControlRules,
   CustomPrices,
   Dataset,
@@ -532,6 +533,11 @@ export function setExchangeRates(
 
 export function getControl(projectId: string): Promise<ControlRules> {
   return get<ControlRules>("/api/control", { project_id: projectId });
+}
+
+/** Qué parte de las llamadas de la semana viene de procesos sin el SDK (D-215). */
+export function getControlAlcance(projectId: string): Promise<ControlAlcance> {
+  return get<ControlAlcance>("/api/control/alcance", { project_id: projectId });
 }
 
 /** Pone el tope, los bucles y la parada. `null` quita un límite. */

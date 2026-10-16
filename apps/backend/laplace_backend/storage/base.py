@@ -591,6 +591,20 @@ class ObservedPrompt:
 
 
 @dataclass
+class OrigenLlamadas:
+    """Llamadas a modelos de un mismo origen (D-215): SDK, lenguaje y familia.
+
+    `peso` las cuenta por las trazas que representan si el SDK muestrea (D-181).
+    """
+
+    sdk_name: str
+    sdk_language: str
+    instrumentor: str
+    llamadas: int
+    peso: float
+
+
+@dataclass
 class CoverageFacts:
     """Cuántas de las llamadas de un proyecto entiende Laplace, y cuántas no.
 
@@ -1024,6 +1038,9 @@ class SpanStore(Protocol):
 
     def coverage(self, project_id: str, window: Window) -> CoverageFacts:
         """Cuántas llamadas de la ventana entiende Laplace, y cuántas no."""
+
+    def origen_llamadas(self, project_id: str, window: Window) -> list[OrigenLlamadas]:
+        """Las llamadas a modelos de la ventana por origen, sin evaluaciones (D-215)."""
 
     def project_graph(self, project_id: str, window: Window) -> GraphFacts:
         """El agente entero en la ventana: pasos y quién llama a quién (D-188).

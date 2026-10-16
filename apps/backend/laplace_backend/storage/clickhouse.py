@@ -17,6 +17,7 @@ from . import preagregados
 from ._rows import (
     COLUMNS,
     coverage_from_rows,
+    origen_from_row,
     row_to_observed_prompt,
     row_to_prompt_usage,
     row_to_span,
@@ -38,6 +39,7 @@ from .base import (
     LoopGroup,
     ModelUsage,
     ObservedPrompt,
+    OrigenLlamadas,
     ProjectStats,
     PromptUsage,
     RedoneGroup,
@@ -1925,6 +1927,21 @@ class ClickHouseStore:
             )
         )
         return graph_facts(pasos, aristas, trazas[0]["n"] if trazas else 0)
+
+    def origen_llamadas(self, project_id: str, window: Window) -> list[OrigenLlamadas]:
+        filas = _named(
+            self._consulta(
+                f"""
+                SELECT sdk_name, sdk_language, instrumentor,
+                       count() AS llamadas, sum(toFloat64(sample_rate)) AS peso
+                FROM spans FINAL
+                WHERE {RULES_WHERE} AND span_type = 'llm'
+                GROUP BY sdk_name, sdk_language, instrumentor
+                """,
+                parameters=self._window_params(project_id, window),
+            )
+        )
+        return [origen_from_row(f) for f in filas]
 
     def coverage(self, project_id: str, window: Window) -> CoverageFacts:
         """La misma cuenta que en local, con los mismos alias (D-066).

@@ -92,6 +92,23 @@ def normalizar(attrs: dict[str, Any]) -> dict[str, Any]:
     return salida
 
 
+def familia(attrs: dict[str, Any]) -> str:
+    """Quién instrumentó el span, por los atributos crudos que trae (D-215).
+
+    Las otras familias antes que la nuestra: OpenInference u OpenLLMetry dentro de un
+    proceso con el SDK pueden llevar algún `laplace.*` que pone nuestro procesador.
+    """
+    if any(k.startswith("openinference.") for k in attrs):
+        return "openinference"
+    if any(k.startswith(("traceloop.", "gen_ai.prompt.", "gen_ai.completion.")) for k in attrs):
+        return "openllmetry"
+    if any(k.startswith("laplace.") for k in attrs):
+        return "laplace"
+    if any(k.startswith("gen_ai.") for k in attrs):
+        return "genai"
+    return "otro"
+
+
 def _formas_del_ai_sdk(attrs: dict[str, Any]) -> dict[str, Any]:
     """Dos formas del AI SDK de Vercel y de Mastra encima de él (D-170).
 

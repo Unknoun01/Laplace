@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 207 decisiones.
+final. 208 decisiones.
 
 ## Coste, precios y caché
 
@@ -302,6 +302,7 @@ final. 207 decisiones.
 - [D-203](../DECISIONS.md#d-203--el-grafo-del-proyecto-marca-los-pasos-con-hallazgos-por-step_key-y-sin-adivinar) — El grafo del proyecto marca los pasos con hallazgos, por `step_key` y sin adivinar
 - [D-205](../DECISIONS.md#d-205--el-replay-con-herramientas-cada-resultado-el-que-grabó-la-traza-lo-que-no-se-grabó-corta-el-caso) — El replay con herramientas: cada resultado, el que grabó la traza; lo que no se grabó corta el caso
 - [D-206](../DECISIONS.md#d-206--la-parada-alcanza-lo-que-otro-instrumentador-traza-en-python-lo-que-no-alcanza-se-dice) — La parada alcanza lo que otro instrumentador traza en Python; lo que no alcanza, se dice
+- [D-215](../DECISIONS.md#d-215--de-dónde-viene-cada-span-y-qué-parte-del-tráfico-se-queda-fuera-de-la-parada) — De dónde viene cada span, y qué parte del tráfico se queda fuera de la parada
 
 ## Pruebas y método
 
@@ -663,3 +664,4 @@ final. 207 decisiones.
 - [D-205](../DECISIONS.md#d-205--el-replay-con-herramientas-cada-resultado-el-que-grabó-la-traza-lo-que-no-se-grabó-corta-el-caso) — El replay con herramientas: cada resultado, el que grabó la traza; lo que no se grabó corta el caso
 - [D-206](../DECISIONS.md#d-206--la-parada-alcanza-lo-que-otro-instrumentador-traza-en-python-lo-que-no-alcanza-se-dice) — La parada alcanza lo que otro instrumentador traza en Python; lo que no alcanza, se dice
 - [D-207](../DECISIONS.md#d-207--el-historial-de-los-preagregados-una-fila-por-conversación-paso-y-hora) — El historial, de los preagregados: una fila por conversación, paso y hora
+- [D-215](../DECISIONS.md#d-215--de-dónde-viene-cada-span-y-qué-parte-del-tráfico-se-queda-fuera-de-la-parada) — De dónde viene cada span, y qué parte del tráfico se queda fuera de la parada

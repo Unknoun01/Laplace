@@ -11,7 +11,7 @@ más— para que lo que se pone en la interfaz no pueda ser algo que el código 
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -83,3 +83,50 @@ def guardar(metadata: Any, body: ControlIn, ahora: datetime | None = None) -> Co
     }
     metadata.set_setting(body.project_id, CLAVE, valor)
     return Control(**body.model_dump(), stopped_at=parado_desde, updated_at=ahora.isoformat())
+
+
+# Qué parte del tráfico se queda fuera de la parada (D-215).
+
+#: Cuántos días se miran: la semana, como el resto de pantallas por defecto.
+DIAS_ALCANCE = 7
+
+
+class Alcance(BaseModel):
+    """De las llamadas a modelos con origen conocido, qué parte viene de procesos que no
+    dicen llevar el SDK de Laplace. `fuera` es `None` sin muestra suficiente."""
+
+    project_id: str
+    days: int = DIAS_ALCANCE
+    #: Llamadas con origen, y las ingeridas antes de que se guardase (no se cuentan).
+    llamadas: int = 0
+    sin_origen: int = 0
+    fuera: float | None = None
+    #: Los lenguajes de lo que queda fuera, los que el recurso dice.
+    lenguajes: list[str] = Field(default_factory=list)
+    minimo: int = 0
+
+
+def alcance(store: Any, project_id: str, ahora: datetime | None = None) -> Alcance:
+    from .coverage import MIN_CALLS_FOR_COVERAGE
+    from .storage.base import Window
+
+    ahora = ahora or datetime.now(timezone.utc)
+    ventana = Window(since=ahora - timedelta(days=DIAS_ALCANCE), until=ahora, days=DIAS_ALCANCE)
+    filas = store.origen_llamadas(project_id, ventana)
+    # `instrumentor` vacío es un span de antes de D-215: no se sabe de dónde viene.
+    con_origen = [f for f in filas if f.instrumentor]
+    fuera = [f for f in con_origen if f.sdk_name != "laplace"]
+    llamadas = sum(f.llamadas for f in con_origen)
+    peso = sum(f.peso for f in con_origen)
+    return Alcance(
+        project_id=project_id,
+        llamadas=llamadas,
+        sin_origen=sum(f.llamadas for f in filas if not f.instrumentor),
+        fuera=(
+            sum(f.peso for f in fuera) / peso
+            if llamadas >= MIN_CALLS_FOR_COVERAGE and peso > 0
+            else None
+        ),
+        lenguajes=sorted({f.sdk_language for f in fuera if f.sdk_language}),
+        minimo=MIN_CALLS_FOR_COVERAGE,
+    )

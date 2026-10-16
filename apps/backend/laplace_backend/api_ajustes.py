@@ -758,6 +758,13 @@ async def get_control(request: Request, project_id: str) -> control.Control:
     return await run_in_threadpool(_guard, control.leer, _meta(request), project_id)
 
 
+@router.get("/control/alcance", response_model=control.Alcance)
+async def get_alcance(request: Request, project_id: str) -> control.Alcance:
+    """Qué parte del tráfico queda fuera de la parada (D-215). Aparte del GET de arriba,
+    que el SDK pide cada 30 s: esto lee los spans y sólo lo pide la pantalla."""
+    return await run_in_threadpool(control.alcance, _store(request), project_id)
+
+
 @router.put("/control", response_model=control.Control)
 async def put_control(request: Request, body: control.ControlIn) -> control.Control:
     meta = _meta(request)
