@@ -522,7 +522,7 @@
   "github.fusionado": "Corrigido ao fundir o pull request #{numero} ({url}). Não chegou aviso de implantação (deployment_status), por isso mede-se desde o merge: se foi implantado mais tarde, marque-o de novo ao implantar ou envie esse evento.",
   "github.desplegado": "Corrigido: o pull request #{numero} ({url}) foi implantado em «{entorno}» com o commit {sha}. Mede-se desde a implantação, não desde o merge.",
   "pr.sin_cambio": "Este problema ainda não tem uma correção que possa ser proposta no código.",
-  "pr.sin_sitio": "Não se sabe de que linha a chamada é feita: o agente precisa de uma versão do SDK que a registre (laplace-trace com D-185).",
+  "pr.sin_sitio": "Não se sabe de que linha a chamada é feita: seus spans precisam ter code.file.path e code.line.number (ou code.filepath e code.lineno). O SDK da Laplace os registra (laplace-trace com D-185), assim como qualquer SDK do OpenTelemetry que os defina.",
   "pr.no_esta_en_repo": "{ruta} não está no repositório conectado. É o repositório deste agente?",
   "pr.ruta_ambigua": "{ruta} aparece {veces} vezes no repositório e não se escolhe uma no chute.",
   "pr.modelo_no_literal": "O modelo {modelo} não está escrito no código da chamada (vem de uma variável ou da configuração). Mude-o onde for definido.",

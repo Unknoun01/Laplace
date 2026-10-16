@@ -1082,9 +1082,10 @@ def _arreglo(store: Any, project_id: str, hallazgo: Any) -> dict[str, Any]:
         # La función raíz de la ejecución de ejemplo: la anota `@observe` (D-190).
         raiz = next((s for s in spans if not s.parent_span_id), None)
         attrs = (raiz.attributes if raiz is not None else None) or {}
-        ruta, linea = attrs.get(github_bot.ATTR_RUTA), attrs.get(github_bot.ATTR_LINEA)
-        if not ruta or not linea:
+        donde = github_bot.ubicacion(attrs)
+        if not donde:
             raise github_bot.SinPropuesta("pr.sin_raiz")
+        ruta, linea = donde
         funcion = str(attrs.get("code.function.name") or raiz.name)
         tope = MIN_VUELTAS_BUCLE
 

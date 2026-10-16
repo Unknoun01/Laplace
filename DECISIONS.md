@@ -5646,3 +5646,38 @@ que existen.
 Pruebas en `test_pantallas.py`: pulsar un paso con problema abre su ficha con las dos
 acciones y cada enlace lleva donde dice (el explorador filtrado por ese paso, la ficha de
 ese hallazgo); un paso sin `step_key` no ofrece las trazas; con teclado también.
+
+### D-218 — El bot de PR encuentra la llamada con los atributos estándar; sólo escribe Python
+El bot de PR (D-185, D-190) sabía dónde estaba la llamada porque el SDK de Python anota
+`code.file.path` y `code.line.number`. Ahora lee también esos atributos cuando los pone
+cualquier otro SDK o instrumentador, y con sus nombres de antes en las convenciones de
+OpenTelemetry (`code.filepath`, `code.lineno`, `code.function`), que son los que siguen
+poniendo muchas bibliotecas. La ingesta no cambia: ya guardaba tal cual los atributos que
+no traduce, y la prueba lo fija con un span de OpenTelemetry sin nada de Laplace.
+
+* **Una sola lectura** (`github_bot.ubicacion`), para el sitio de la llamada y para la raíz
+  del tope. Si una llamada no trae fichero y línea, no hay PR y el mensaje dice qué
+  atributos faltan, no sólo «actualiza el SDK».
+* **Rutas absolutas.** El SDK de Laplace anota la ruta relativa; otros, la absoluta de la
+  máquina (`/home/ana/agente/src/llamar.py`, `C:\…`, `file://…`). `ubicar` casa ahora el
+  sufijo en los dos sentidos —la anotada termina en un fichero del árbol, o al revés—, por
+  tramos enteros y con la barra de Windows normalizada; si casan dos, sigue sin elegir. Y
+  como esa ruta diría quién es y en qué máquina, el título, el cuerpo y el commit del PR
+  llevan la ruta del repositorio, no la anotada.
+* **TypeScript y JavaScript: se sabe dónde, no se escribe nada.** D-190 exige escribir el
+  arreglo sobre el árbol de sintaxis y comprobar que el fichero sigue compilando. Desde
+  Python no hay un parser de TypeScript sin una dependencia nueva con binarios
+  (`tree-sitter` y su gramática), y el de `typescript` de `apps/web/node_modules` no está
+  donde corre el backend: la imagen es `python:3.12-slim`, sin node. El cambio de modelo
+  por búsqueda de texto funcionaría casi siempre, pero sería justo lo que D-190 descarta
+  (un literal dentro de un comentario o de una plantilla se cambiaría igual) y nadie
+  comprobaría que el fichero sigue compilando. Así que una llamada anotada en un fichero
+  que no es `.py` no tiene PR y se dice (`pr.solo_python`), antes de pedir nada a GitHub.
+  Si un día hace falta, el camino es `tree-sitter` como extra opcional, igual que
+  `cryptography` va en `[github]`.
+
+Pruebas en `test_github_bot.py`: los nombres viejos y nuevos, la línea que no es un
+número, la ruta absoluta (POSIX, Windows y `file://`) que casa y la que casa dos veces, el
+PR desde una ruta absoluta sin que aparezca en el texto, un fichero `.ts` que no llega a
+GitHub, el mensaje cuando no hay atributos, y la ingesta de un span de OpenTelemetry con
+`code.filepath` y `code.lineno`.
