@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 203 decisiones.
+final. 204 decisiones.
 
 ## Coste, precios y caché
 
@@ -83,6 +83,7 @@ final. 203 decisiones.
 - [D-191](../DECISIONS.md#d-191--el-webhook-de-github-marca-el-hallazgo-como-arreglado-al-fusionar-su-pr) — El webhook de GitHub marca el hallazgo como arreglado al fusionar su PR
 - [D-197](../DECISIONS.md#d-197--la-carga-mide-lo-que-habrá-casos-para-las-reglas-nuevas-y-preagregados-calculados) — La carga mide lo que habrá: casos para las reglas nuevas y preagregados calculados
 - [D-203](../DECISIONS.md#d-203--el-grafo-del-proyecto-marca-los-pasos-con-hallazgos-por-step_key-y-sin-adivinar) — El grafo del proyecto marca los pasos con hallazgos, por `step_key` y sin adivinar
+- [D-204](../DECISIONS.md#d-204--la-señal-de-despliegue-el-aviso-deployment_status-de-github-mueve-la-frontera-del-arreglado) — La señal de despliegue: el aviso `deployment_status` de GitHub mueve la frontera del arreglado
 
 ## Probar: evaluaciones, juez y replay
 
@@ -205,6 +206,7 @@ final. 203 decisiones.
 - [D-075](../DECISIONS.md#d-075--las-alertas-son-el-mismo-código-en-local-y-en-la-nube-el-estado-va-donde-ya-va-lo-mutable) — Las alertas son el mismo código en local y en la nube; el estado va donde ya va lo mutable
 - [D-162](../DECISIONS.md#d-162--lo-que-quedaba-del-margen-por-cliente-sus-ejecuciones-sus-problemas-la-alerta-y-stripe) — Lo que quedaba del margen por cliente: sus ejecuciones, sus problemas, la alerta y Stripe
 - [D-182](../DECISIONS.md#d-182--verificación-de-correo-sso-por-openid-connect-y-scim) — Verificación de correo, SSO por OpenID Connect y SCIM
+- [D-204](../DECISIONS.md#d-204--la-señal-de-despliegue-el-aviso-deployment_status-de-github-mueve-la-frontera-del-arreglado) — La señal de despliegue: el aviso `deployment_status` de GitHub mueve la frontera del arreglado
 
 ## Cuentas, claves y seguridad
 
@@ -651,3 +653,4 @@ final. 203 decisiones.
 - [D-200](../DECISIONS.md#d-200--caché-semántica-la-misma-pregunta-con-la-misma-respuesta-hasta-x-y-sin-dinero-en-el-total) — Caché semántica: la misma pregunta con la misma respuesta, «hasta X» y sin dinero en el total
 - [D-202](../DECISIONS.md#d-202--sin-ciclos-de-imports-en-el-sdk-init-sale-de-_tracer) — Sin ciclos de imports en el SDK: `init()` sale de `_tracer`
 - [D-203](../DECISIONS.md#d-203--el-grafo-del-proyecto-marca-los-pasos-con-hallazgos-por-step_key-y-sin-adivinar) — El grafo del proyecto marca los pasos con hallazgos, por `step_key` y sin adivinar
+- [D-204](../DECISIONS.md#d-204--la-señal-de-despliegue-el-aviso-deployment_status-de-github-mueve-la-frontera-del-arreglado) — La señal de despliegue: el aviso `deployment_status` de GitHub mueve la frontera del arreglado

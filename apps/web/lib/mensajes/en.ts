@@ -1071,7 +1071,7 @@ export const en: Mensajes = {
   "aj.gh.guardado": "Saved.",
   "aj.gh.quitado": "Disconnected. The token has been deleted.",
   "aj.gh.webhook.titulo": "Let Laplace know when it's merged",
-  "aj.gh.webhook.texto": "In GitHub, Settings → Webhooks → Add webhook, with this URL, Content type application/json, this secret and the Pull requests event. When a Laplace PR is merged, the problem is marked as fixed and Laplace checks whether it really goes down.",
+  "aj.gh.webhook.texto": "In GitHub, Settings → Webhooks → Add webhook, with this URL, Content type application/json, this secret and the Pull requests event. When a Laplace PR is merged, the problem is marked as fixed and Laplace checks whether it really goes down. Tick the Deployment statuses event too: if you deploy through GitHub (Actions with an environment, Vercel, Netlify…), it's measured from the production deployment that carries the merge; without it, from the merge.",
   "aj.gh.webhook.app": "With this installation's GitHub App you don't need it: the notifications arrive on their own.",
   "aj.gh.webhook.url": "URL",
   "aj.gh.webhook.secreto": "Secret",

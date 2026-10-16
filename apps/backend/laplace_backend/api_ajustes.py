@@ -860,6 +860,14 @@ async def github_webhook(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=401, detail=t("github.webhook_firma"))
     if evento == "ping":
         return {"ok": True, "projects": len(validos)}
+    if evento == "deployment_status":
+        ajustes_de = dict(proyectos)
+        desplegados = []
+        for project_id in validos:
+            desplegados += await run_in_threadpool(
+                _desplegado, _meta(request), project_id, ajustes_de[project_id], datos
+            )
+        return {"deployed": desplegados}
     if evento != "pull_request" or datos.get("action") != "closed":
         return {"ignored": evento or "?", "fixed": []}
     pr = datos.get("pull_request") or {}
@@ -909,7 +917,13 @@ def _pr_cerrado(meta: Any, project_id: str, pr: dict[str, Any]) -> list[str]:
             meta.set_setting,
             project_id,
             clave_pr,
-            {**guardado, "state": "merged" if fusionado else "closed", "closed_at": momento},
+            {
+                **guardado,
+                "state": "merged" if fusionado else "closed",
+                "closed_at": momento,
+                # Lo que un despliegue tiene que llevar para mover la frontera (D-204).
+                "merge_sha": str(pr.get("merge_commit_sha") or "") if fusionado else "",
+            },
         )
         if not fusionado:
             continue
@@ -931,6 +945,79 @@ def _pr_cerrado(meta: Any, project_id: str, pr: dict[str, Any]) -> list[str]:
                     project_id)
         arreglados.append(finding_id)
     return arreglados
+
+
+def _hora(valor: Any) -> datetime | None:
+    try:
+        fecha = datetime.fromisoformat(str(valor).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return fecha if fecha.tzinfo else fecha.replace(tzinfo=timezone.utc)
+
+
+def _desplegado(
+    meta: Any, project_id: str, ajustes: dict[str, Any], datos: dict[str, Any]
+) -> list[str]:
+    """Mueve la frontera del arreglado de la fusión al despliegue que la lleva (D-204).
+
+    Sólo un despliegue con éxito en producción, de un PR ya fusionado, nunca antes de la
+    fusión, y sólo el estado que puso el aviso de la fusión: lo que decidió una persona
+    manda. De varios despliegues vale el más temprano.
+    """
+    estado = datos.get("deployment_status") or {}
+    despliegue = datos.get("deployment") or {}
+    momento = _hora(estado.get("created_at"))
+    sha = str(despliegue.get("sha") or "")
+    if estado.get("state") != "success" or not github_bot.es_produccion(despliegue):
+        return []
+    if momento is None or not sha:
+        return []
+    movidos = []
+    for clave_pr, guardado in _guard(
+        meta.list_settings, project_id, github_bot.PREFIJO_PR
+    ).items():
+        fusion = str(guardado.get("merge_sha") or "")
+        fusionado = _hora(guardado.get("closed_at"))
+        anterior = _hora(guardado.get("deployed_at"))
+        # Sin `merge_sha` no hay fusión: un PR cerrado sin fusionar lo deja vacío.
+        if not fusion or fusionado is None:
+            continue
+        if momento < fusionado or (anterior is not None and anterior <= momento):
+            continue
+        finding_id = clave_pr[len(github_bot.PREFIJO_PR) :]
+        actual = _guard(meta.get_setting, project_id, clave(finding_id)) or {}
+        if actual.get("status") != "arreglado" or actual.get("by") != "github":
+            continue
+        if not github_bot.lleva_la_fusion(ajustes, fusion, sha):
+            continue
+        entorno = str(despliegue.get("environment") or "")
+        cuando = momento.isoformat()
+        _guard(
+            meta.set_setting,
+            project_id,
+            clave_pr,
+            {**guardado, "deployed_at": cuando, "deployed_sha": sha, "environment": entorno},
+        )
+        _guard(
+            meta.set_setting,
+            project_id,
+            clave(finding_id),
+            {
+                **actual,
+                "at": cuando,
+                "note": t(
+                    "github.desplegado",
+                    numero=guardado.get("number"),
+                    url=guardado.get("url") or "",
+                    entorno=entorno,
+                    sha=sha[:7],
+                ),
+            },
+        )
+        logger.info("hallazgo %s: se mide desde el despliegue %s — %s", finding_id, sha[:7],
+                    project_id)
+        movidos.append(finding_id)
+    return movidos
 
 
 class PullRequestIn(BaseModel):

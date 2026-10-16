@@ -1073,7 +1073,7 @@ export const fr: Mensajes = {
   "aj.gh.guardado": "Enregistré.",
   "aj.gh.quitado": "Déconnecté. Le jeton a été supprimé.",
   "aj.gh.webhook.titulo": "Prévenir Laplace à la fusion",
-  "aj.gh.webhook.texto": "Dans GitHub, Settings → Webhooks → Add webhook, avec cette URL, Content type application/json, ce secret et l'événement Pull requests. À la fusion d'une PR de Laplace, le problème est marqué comme corrigé et Laplace vérifie qu'il baisse vraiment.",
+  "aj.gh.webhook.texto": "Dans GitHub, Settings → Webhooks → Add webhook, avec cette URL, Content type application/json, ce secret et l'événement Pull requests. À la fusion d'une PR de Laplace, le problème est marqué comme corrigé et Laplace vérifie qu'il baisse vraiment. Cochez aussi l'événement Deployment statuses : si vous déployez via GitHub (Actions avec environment, Vercel, Netlify…), on mesure depuis le déploiement en production qui contient la fusion ; sans lui, depuis la fusion.",
   "aj.gh.webhook.app": "Avec la GitHub App de cette installation, ce n'est pas nécessaire : les notifications arrivent toutes seules.",
   "aj.gh.webhook.url": "URL",
   "aj.gh.webhook.secreto": "Secret",

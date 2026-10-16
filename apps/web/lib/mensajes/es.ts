@@ -1078,7 +1078,7 @@ export const es = {
   "aj.gh.guardado": "Guardado.",
   "aj.gh.quitado": "Desconectado. El token se ha borrado.",
   "aj.gh.webhook.titulo": "Avisar a Laplace al fusionar",
-  "aj.gh.webhook.texto": "En GitHub, Settings → Webhooks → Add webhook, con esta URL, Content type application/json, este secreto y el evento Pull requests. Al fusionar un PR de Laplace, el problema queda marcado como arreglado y Laplace comprueba si de verdad baja.",
+  "aj.gh.webhook.texto": "En GitHub, Settings → Webhooks → Add webhook, con esta URL, Content type application/json, este secreto y el evento Pull requests. Al fusionar un PR de Laplace, el problema queda marcado como arreglado y Laplace comprueba si de verdad baja. Marca también el evento Deployment statuses: si despliegas con GitHub (Actions con environment, Vercel, Netlify…), se mide desde el despliegue a producción que lleva la fusión; sin él, desde la fusión.",
   "aj.gh.webhook.app": "Con la GitHub App de esta instalación no hace falta: los avisos llegan solos.",
   "aj.gh.webhook.url": "URL",
   "aj.gh.webhook.secreto": "Secreto",
