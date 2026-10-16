@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from laplace.schema import Diagnosis, DiagnosisClaim
+from laplace.schema import Annotation, Diagnosis, DiagnosisClaim
 
 from laplace_backend import diagnostico_modelo, judge
 from laplace_backend.config import Settings
@@ -208,3 +208,164 @@ def _traza_de(store) -> str:
     from laplace_backend.storage.base import TraceFilter
 
     return store.list_traces(TraceFilter(project_id="local")).traces[0].trace_id
+
+
+# -- D-208: borrar un sujeto borra sus diagnósticos; un rechazo deja su coste ----------
+
+
+def _almacenes_meta(tmp_path):
+    from laplace_backend.storage.postgres import PostgresMetadataStore
+
+    almacenes = [SQLiteMetadataStore(tmp_path / "m.db")]
+    nube = PostgresMetadataStore(Settings())
+    if nube.health():
+        almacenes.append(nube)
+    for meta in almacenes:
+        meta.migrate()
+    return almacenes
+
+
+def test_delete_trace_data_borra_sólo_las_trazas_dichas_y_del_proyecto(tmp_path):
+    for meta in _almacenes_meta(tmp_path):
+        a, b, c = (uuid.uuid4().hex for _ in range(3))
+        p = f"p{uuid.uuid4().hex[:6]}"
+        for t in (a, b):
+            meta.save_diagnosis(_diag(p, t))
+        meta.save_diagnosis(_diag(p + "x", c))
+        for t in (a, b):
+            meta.save_annotation(p, Annotation(
+                id=uuid.uuid4().hex, trace_id=t, created_at=datetime.now(timezone.utc)))
+        meta.delete_trace_data(p, [a, c])
+        assert meta.list_annotations(a, p) == [], "las anotaciones se van con la traza"
+        assert len(meta.list_annotations(b, p)) == 1
+        assert meta.get_diagnosis(a, p) is None
+        assert meta.get_diagnosis(b, p) is not None
+        assert meta.get_diagnosis(c, p + "x") is not None, "otro proyecto, no se toca"
+        meta.delete_trace_data(p, [])
+
+
+def test_borrar_un_sujeto_por_la_api_borra_sus_diagnosticos(tmp_path, monkeypatch):
+    from laplace_backend.storage.base import TraceFilter
+
+    db = tmp_path / "laplace.db"
+    store = SQLiteStore(db)
+    store.migrate()
+    spans = _agente("local")
+    traza = spans[0].trace_id
+    store.insert_spans([s.model_copy(update={"user_id": "ana"}) if s.parent_span_id is None
+                        else s for s in spans])
+    otra = _agente("local")
+    store.insert_spans(otra)
+    monkeypatch.setenv("LAPLACE_STORE", "sqlite")
+    monkeypatch.setenv("LAPLACE_SQLITE_PATH", str(db))
+    monkeypatch.setenv("LAPLACE_POSTGRES_ENABLED", "false")
+    monkeypatch.setenv("LAPLACE_HOME", str(tmp_path))
+    from laplace_backend import config, main
+
+    config.get_settings.cache_clear()
+    importlib.reload(main)
+    try:
+        with TestClient(main.app) as cliente:
+            meta = main.app.state.metadata
+            for t in {s.trace_id for s in spans + otra}:
+                meta.save_diagnosis(_diag("local", t))
+            r = cliente.delete(
+                "/api/subjects",
+                params={"project_id": "local", "user_id": "ana", "confirm": "ana"},
+            )
+            assert r.status_code == 200, r.text
+            assert meta.get_diagnosis(traza, "local") is None
+            quedan = store.list_traces(TraceFilter(project_id="local")).traces
+            assert quedan and all(meta.get_diagnosis(x.trace_id, "local") for x in quedan)
+    finally:
+        config.get_settings.cache_clear()
+
+
+def test_un_rechazo_apunta_lo_que_costo(monkeypatch, tmp_path):
+    traza, spans = _traza()
+    _proveedor(monkeypatch, {"cause": "x", "claims": []}, tokens=(1_200, 150))
+    with pytest.raises(diagnostico_modelo.DiagnosisRejected) as e:
+        diagnostico_modelo.diagnosticar(_config(), traza, "diag", spans)
+    esperado = get_price_table().compute(MODELO, input_tokens=1_200, output_tokens=150)
+    assert (e.value.input_tokens, e.value.output_tokens) == (1_200, 150)
+    assert e.value.cost_usd == esperado.total_usd and e.value.cost_unknown == esperado.unknown
+    for meta in _almacenes_meta(tmp_path):
+        p = f"r{uuid.uuid4().hex[:6]}"
+        assert meta.rejected_diagnosis_cost(p) == (0.0, False, 0)
+        for _ in range(2):  # una fila por llamada pagada: no se sustituyen
+            meta.save_rejected_diagnosis(p, traza, MODELO, e.value)
+        usd, desconocido, llamadas = meta.rejected_diagnosis_cost(p)
+        assert llamadas == 2 and usd == pytest.approx(2 * esperado.total_usd)
+        assert desconocido is esperado.unknown
+        assert meta.rejected_diagnosis_cost(p + "x")[2] == 0, "acotado al proyecto"
+
+
+def test_el_rechazo_por_la_api_queda_apuntado_sin_tocar_spans(app, monkeypatch):
+    cliente, store = app(True)
+    traza = _traza_de(store)
+    antes = store.get_trace_spans(traza, "local")
+    _proveedor(monkeypatch, {"cause": "x", "claims": []})
+    from laplace_backend import main
+
+    with cliente:
+        r = cliente.post(f"/api/traces/{traza}/diagnosis", params={"project_id": "local"})
+        assert r.status_code == 422
+        usd, _, llamadas = main.app.state.metadata.rejected_diagnosis_cost("local")
+        assert llamadas == 1 and usd > 0
+    assert store.get_trace_spans(traza, "local") == antes
+
+
+def test_un_json_ilegible_tambien_cuesta(monkeypatch):
+    traza, spans = _traza()
+    _proveedor(monkeypatch, "Lo siento, no puedo ayudar con eso.", tokens=(900, 40))
+    with pytest.raises(diagnostico_modelo.DiagnosisRejected) as e:
+        diagnostico_modelo.diagnosticar(_config(), traza, "diag", spans)
+    assert (e.value.input_tokens, e.value.output_tokens) == (900, 40)
+    esperado = get_price_table().compute(MODELO, input_tokens=900, output_tokens=40)
+    assert e.value.cost_usd == esperado.total_usd
+
+
+def test_si_falla_borrar_lo_guardado_no_se_borra_ninguna_traza(tmp_path, monkeypatch):
+    """Los metadatos van primero: un fallo ahí deja todo en su sitio y repetir basta."""
+    from laplace_backend.storage.base import TraceFilter
+
+    db = tmp_path / "laplace.db"
+    store = SQLiteStore(db)
+    store.migrate()
+    spans = _agente("local")
+    store.insert_spans([s.model_copy(update={"user_id": "ana"}) if s.parent_span_id is None
+                        else s for s in spans])
+    monkeypatch.setenv("LAPLACE_STORE", "sqlite")
+    monkeypatch.setenv("LAPLACE_SQLITE_PATH", str(db))
+    monkeypatch.setenv("LAPLACE_POSTGRES_ENABLED", "false")
+    monkeypatch.setenv("LAPLACE_HOME", str(tmp_path))
+    from laplace_backend import config, main
+
+    config.get_settings.cache_clear()
+    importlib.reload(main)
+    try:
+        with TestClient(main.app, raise_server_exceptions=False) as cliente:
+            def roto(*a, **k):
+                raise RuntimeError("metadatos caídos")
+
+            monkeypatch.setattr(main.app.state.metadata, "delete_trace_data", roto)
+            r = cliente.delete("/api/subjects",
+                               params={"project_id": "local", "user_id": "ana", "confirm": "ana"})
+            assert r.status_code >= 500
+            assert store.list_traces(TraceFilter(project_id="local")).traces, "sigue la traza"
+    finally:
+        config.get_settings.cache_clear()
+
+
+def test_judge_dice_lo_que_costaron_los_rechazados(app, monkeypatch):
+    cliente, store = app(True)
+    traza = _traza_de(store)
+    _proveedor(monkeypatch, {"cause": "x", "claims": []})
+    with cliente:
+        assert cliente.get("/api/judge", params={"project_id": "local"}).json()[
+            "diagnosis_rejected"] is None
+        cliente.post(f"/api/traces/{traza}/diagnosis", params={"project_id": "local"})
+        r = cliente.get("/api/judge", params={"project_id": "local"}).json()["diagnosis_rejected"]
+        assert r["calls"] == 1 and r["cost_usd"] > 0
+        assert cliente.get("/api/judge", params={"project_id": "otro"}).json()[
+            "diagnosis_rejected"] is None

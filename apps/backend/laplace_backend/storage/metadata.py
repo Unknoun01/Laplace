@@ -69,6 +69,22 @@ class MetadataStore(Protocol):
 
     def save_diagnosis(self, diagnosis: Diagnosis) -> Diagnosis: ...
 
+    def delete_trace_data(self, project_id: str, trace_ids: list[str]) -> None:
+        """Borra lo que se guardó aparte de esas trazas del proyecto: sus diagnósticos y las
+        anotaciones (D-208). Las filas de coste de los rechazados no llevan contenido."""
+        ...
+
+    def save_rejected_diagnosis(
+        self, project_id: str, trace_id: str, model: str, rechazo: Any
+    ) -> None:
+        """Apunta lo que costó un diagnóstico rechazado, una fila por llamada (D-208).
+        `rechazo` es la `DiagnosisRejected`: lleva tokens, coste y `cost_unknown`."""
+        ...
+
+    def rejected_diagnosis_cost(self, project_id: str) -> tuple[float, bool, int]:
+        """(dólares, alguna llamada sin tarifa, llamadas) de los rechazados (D-208)."""
+        ...
+
     # -- anotaciones ------------------------------------------------------------------
 
     def list_annotations(
@@ -478,6 +494,21 @@ CREATE TABLE IF NOT EXISTS trace_diagnoses (
     diagnosis   TEXT NOT NULL,
     PRIMARY KEY (project_id, trace_id)
 );
+
+-- Lo que costó un diagnóstico rechazado (D-208): una fila por llamada pagada, sin
+-- contenido del modelo, y fuera de `spans`: no es tráfico del agente.
+CREATE TABLE IF NOT EXISTS diagnosis_rejections (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id     TEXT NOT NULL,
+    trace_id       TEXT NOT NULL,
+    created_at     TEXT NOT NULL,
+    model          TEXT NOT NULL,
+    input_tokens   INTEGER NOT NULL,
+    output_tokens  INTEGER NOT NULL,
+    cost_usd       REAL NOT NULL,
+    cost_unknown   INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS diagnosis_rejections_project_idx ON diagnosis_rejections (project_id);
 """
 
 
@@ -498,6 +529,7 @@ _BORRAR_PROYECTO_SQLITE = (
     "DELETE FROM settings WHERE project_id = ?",
     "DELETE FROM api_keys WHERE project_id = ?",
     "DELETE FROM trace_diagnoses WHERE project_id = ?",
+    "DELETE FROM diagnosis_rejections WHERE project_id = ?",
 )
 
 
@@ -605,6 +637,36 @@ class SQLiteMetadataStore:
                 ),
             )
         return diagnosis
+
+    def delete_trace_data(self, project_id: str, trace_ids: list[str]) -> None:
+        with self._conn() as conn:
+            for i in range(0, len(trace_ids), 500):
+                lote = trace_ids[i : i + 500]
+                marcas = ", ".join("?" * len(lote))
+                for tabla in ("trace_diagnoses", "annotations"):
+                    conn.execute(
+                        f"DELETE FROM {tabla} WHERE project_id = ? AND trace_id IN ({marcas})",
+                        (project_id, *lote),
+                    )
+
+    def save_rejected_diagnosis(
+        self, project_id: str, trace_id: str, model: str, rechazo: Any
+    ) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO diagnosis_rejections (project_id, trace_id, created_at, model, "
+                "input_tokens, output_tokens, cost_usd, cost_unknown) VALUES (?,?,?,?,?,?,?,?)",
+                (project_id, trace_id, _now().isoformat(), model, rechazo.input_tokens,
+                 rechazo.output_tokens, rechazo.cost_usd, int(rechazo.cost_unknown)),
+            )
+
+    def rejected_diagnosis_cost(self, project_id: str) -> tuple[float, bool, int]:
+        with self._conn() as conn:
+            f = conn.execute(
+                "SELECT COALESCE(SUM(cost_usd), 0), COALESCE(MAX(cost_unknown), 0), COUNT(*) "
+                "FROM diagnosis_rejections WHERE project_id = ?", (project_id,)
+            ).fetchone()
+        return float(f[0]), bool(f[1]), int(f[2])
 
     # -- anotaciones -------------------------------------------------------------------
 
@@ -1216,6 +1278,17 @@ class NullMetadataStore:
 
     def save_diagnosis(self, diagnosis: Diagnosis) -> Diagnosis:
         raise MetadataUnavailable("no hay base de metadatos: el diagnóstico no se ha guardado")
+
+    def delete_trace_data(self, project_id: str, trace_ids: list[str]) -> None:
+        return None
+
+    def save_rejected_diagnosis(
+        self, project_id: str, trace_id: str, model: str, rechazo: Any
+    ) -> None:
+        return None
+
+    def rejected_diagnosis_cost(self, project_id: str) -> tuple[float, bool, int]:
+        return 0.0, False, 0
 
     def list_annotations(
         self, trace_id: str, project_id: str | None = None

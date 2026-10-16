@@ -5321,3 +5321,42 @@ sesiones, contar dos veces las trazas que cruzan, decidir con lo que sale en cru
 copias contadas por hora, no ensuciar las horas al crear la tabla y pedir las trazas sin
 la última versión de cada span. Esta última no mordía hasta añadir la prueba del lote
 reenviado.
+
+### D-208 — Los diagnósticos con modelo se van con su sujeto, y el rechazado deja su coste
+Cierra las dos cosas que D-180 dejó fuera.
+
+**Borrar un sujeto borra sus diagnósticos.** Un diagnóstico cita contenido de la traza, y
+el borrado de un sujeto (D-118) existe para que no quede nada suyo.
+* `delete_subject` de los almacenes de trazas devuelve **los `trace_id` que borró**, no
+  sólo cuántos (`list[str]`, ordenados). SQLite ya los tenía; ClickHouse los lee antes del
+  `DELETE`, con la misma subconsulta, así que la paridad es la de siempre.
+* El almacén de metadatos tiene `delete_diagnoses(project_id, trace_ids)`, en SQLite y en
+  Postgres, por lotes de 500. La API lo llama con esa lista, acotado al proyecto. Si el
+  almacén de metadatos no está, no hay diagnósticos que borrar y no falla.
+* Orden: **primero lo guardado aparte, después las trazas**, como al borrar un proyecto.
+  La API lee los `trace_id` del sujeto (`subject_traces`), borra sus diagnósticos y
+  anotaciones (`delete_trace_data`) y entonces borra las trazas; las que entraran entre
+  las dos lecturas se limpian al final. Si falla lo guardado no se ha borrado nada y
+  repetir basta: no quedan huérfanos.
+* Las anotaciones (juez y humanas) cuelgan de la traza y se van con ella.
+
+**El coste de un diagnóstico rechazado.** El juez apunta su coste dentro de lo que
+guarda (`Annotation.judge.cost_usd`), en el almacén de metadatos y nunca en `spans`;
+reutilizamos ese camino:
+* tabla `diagnosis_rejections` en metadatos (SQLite y Postgres): una fila por llamada
+  pagada (`project_id`, `trace_id`, `created_at`, `model`, tokens, `cost_usd`,
+  `cost_unknown`). Una fila **por llamada**, no una por traza: cada intento rechazado se
+  pagó, y sustituir la anterior perdería dinero. Sin contenido del modelo.
+* No es tráfico real ni se suma al del agente: no entra en `spans`, y por tanto ni en los
+  preagregados ni en las reglas. Tampoco se cuenta dos veces: un diagnóstico guardado
+  lleva su coste en `Diagnosis.cost_usd` y uno rechazado sólo en esta tabla; nunca los dos.
+* `DiagnosisRejected` lleva tokens, coste y `cost_unknown` (el JSON ilegible también
+  cuesta). Un modelo sin tarifa sigue sin costar cero: `cost_unknown`.
+* `rejected_diagnosis_cost(project_id)` suma (`usd`, `unknown`, `calls`); `unknown` si
+  alguna llamada no tenía tarifa. `/api/judge?project_id=` lo devuelve en
+  `diagnosis_rejected` (`null` si no hubo ninguno) y la ficha de la traza lo dice bajo el
+  diagnóstico, en los cinco idiomas, y lo relee tras un rechazo. Estas filas no se borran
+  con un sujeto (no tienen contenido, y el gasto ocurrió); `delete_project` sí.
+
+`test_pantallas.py` exige que la ficha diga lo que costaron los rechazados; se rompió a
+propósito el bloque y la prueba falla.

@@ -328,6 +328,8 @@ export const fr: Mensajes = {
   "traza.diag.tiradas_one": "Une affirmation qui ne citait aucune étape de cette trace a été écartée.",
   "traza.diag.tiradas_other": "{n} affirmations qui ne citaient pas d'étapes de cette trace ont été écartées.",
   "traza.diag.vacio": "Cette exécution n'a pas encore de diagnostic. Un modèle peut la lire et dire ce qui a échoué, en citant chaque étape.",
+  "traza.diag.rechazados_one": "Un diagnostic de ce projet a été rejeté et payé quand même : il a coûté {coste}.",
+  "traza.diag.rechazados_other": "{n} diagnostics de ce projet ont été rejetés et payés quand même : ils ont coûté {coste}.",
   "traza.diag.pidiendo": "Diagnostic en cours…",
   "traza.diag.otra_vez": "Diagnostiquer à nouveau",
   "traza.diag.pedir": "Diagnostiquer avec un modèle",

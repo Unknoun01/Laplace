@@ -2095,17 +2095,23 @@ class SQLiteStore:
         )
         self._conn.commit()
 
-    def delete_subject(
+    def subject_traces(
         self, project_id: str, *, user_id: str | None = None, customer_id: str | None = None
-    ) -> int:
+    ) -> list[str]:
         columna, valor = _sujeto(user_id, customer_id)
-        trazas = [
+        return [
             r["trace_id"]
             for r in self._query(
-                f"SELECT DISTINCT trace_id FROM spans WHERE project_id = :p AND {columna} = :v",
+                f"SELECT DISTINCT trace_id FROM spans WHERE project_id = :p AND {columna} = :v"
+                " ORDER BY trace_id",
                 {"p": project_id, "v": valor},
             )
         ]
+
+    def delete_subject(
+        self, project_id: str, *, user_id: str | None = None, customer_id: str | None = None
+    ) -> list[str]:
+        trazas = self.subject_traces(project_id, user_id=user_id, customer_id=customer_id)
         for inicio in range(0, len(trazas), 500):
             lote = trazas[inicio : inicio + 500]
             marcas = ", ".join(f":t{i}" for i in range(len(lote)))
@@ -2115,7 +2121,7 @@ class SQLiteStore:
                 f"DELETE FROM spans WHERE project_id = :p AND trace_id IN ({marcas})", params
             )
         self._conn.commit()
-        return len(trazas)
+        return trazas
 
     def health(self) -> bool:
         try:

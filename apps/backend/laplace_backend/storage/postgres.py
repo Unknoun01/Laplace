@@ -102,6 +102,7 @@ _BORRAR_PROYECTO = (
 #: Lo que sólo existe en la nube.
 _BORRAR_PROYECTO_PG = (
     "DELETE FROM trace_diagnoses WHERE project_id = %s",
+    "DELETE FROM diagnosis_rejections WHERE project_id = %s",
     "DELETE FROM alert_state WHERE project_id = %s",
     "DELETE FROM projects WHERE id = %s",
 )
@@ -199,6 +200,34 @@ class PostgresMetadataStore:
                 ),
             )
         return diagnosis
+
+    def delete_trace_data(self, project_id: str, trace_ids: list[str]) -> None:
+        if trace_ids:
+            with self._connect() as conn:
+                for tabla in ("trace_diagnoses", "annotations"):
+                    conn.execute(
+                        f"DELETE FROM {tabla} WHERE project_id = %s AND trace_id = ANY(%s)",
+                        (project_id, list(trace_ids)),
+                    )
+
+    def save_rejected_diagnosis(
+        self, project_id: str, trace_id: str, model: str, rechazo: Any
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO diagnosis_rejections (project_id, trace_id, model, input_tokens, "
+                "output_tokens, cost_usd, cost_unknown) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                (project_id, trace_id, model, rechazo.input_tokens, rechazo.output_tokens,
+                 rechazo.cost_usd, rechazo.cost_unknown),
+            )
+
+    def rejected_diagnosis_cost(self, project_id: str) -> tuple[float, bool, int]:
+        with self._connect() as conn:
+            f = conn.execute(
+                "SELECT COALESCE(SUM(cost_usd), 0), COALESCE(BOOL_OR(cost_unknown), false), "
+                "COUNT(*) FROM diagnosis_rejections WHERE project_id = %s", (project_id,)
+            ).fetchone()
+        return float(f[0]), bool(f[1]), int(f[2])
 
     # -- anotaciones -----------------------------------------------------------------
 

@@ -73,14 +73,15 @@ def test_borrar_una_persona_se_lleva_sus_trazas_enteras(almacenes, cual):
     if store is None:
         pytest.skip("no hay ClickHouse escuchando")
     project = f"sujeto-{uuid.uuid4().hex[:8]}"
-    store.insert_spans(
-        _traza(project, 1, user="ana") + _traza(project, 2, user="ana")
-        + _traza(project, 1, user="luis", customer="acme")
-    )
+    ana1, ana2 = _traza(project, 1, user="ana"), _traza(project, 2, user="ana")
+    luis = _traza(project, 1, user="luis", customer="acme")
+    store.insert_spans(ana1 + ana2 + luis)
     try:
-        assert store.delete_subject(project, user_id="ana") == 2
+        # El almacén dice qué trazas borró, no sólo cuántas (D-208).
+        borradas = store.delete_subject(project, user_id="ana")
+        assert borradas == sorted({ana1[0].trace_id, ana2[0].trace_id})
         assert _cuantos(store, project) == 2, "sólo quedan la raíz y la hija de luis"
-        assert store.delete_subject(project, customer_id="acme") == 1
+        assert store.delete_subject(project, customer_id="acme") == [luis[0].trace_id]
         assert _cuantos(store, project) == 0
         with pytest.raises(ValueError):
             store.delete_subject(project)

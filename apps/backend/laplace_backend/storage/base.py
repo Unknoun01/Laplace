@@ -1157,11 +1157,17 @@ class SpanStore(Protocol):
     def delete_project_before(self, project_id: str, cutoff: datetime) -> None:
         """La retención de un proyecto: sus spans anteriores a `cutoff` (D-173)."""
 
+    def subject_traces(
+        self, project_id: str, *, user_id: str | None = None, customer_id: str | None = None
+    ) -> list[str]:
+        """Los `trace_id`, ordenados, en los que aparece esa persona o ese cliente (D-208)."""
+
     def delete_subject(
         self, project_id: str, *, user_id: str | None = None, customer_id: str | None = None
-    ) -> int:
+    ) -> list[str]:
         """Borra las trazas enteras en las que aparece esa persona o ese cliente (D-173).
-        Devuelve cuántas trazas eran."""
+        Devuelve los `trace_id` que borró, ordenados (D-208): lo que se guardó aparte de
+        esas trazas, como sus diagnósticos, tiene que irse con ellas."""
 
     def health(self) -> bool:
         """True si el almacén responde."""

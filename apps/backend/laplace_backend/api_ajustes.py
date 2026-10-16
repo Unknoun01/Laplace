@@ -692,9 +692,17 @@ async def delete_subject(
         raise HTTPException(status_code=400, detail=t("error.sujeto_uno"))
     if confirm != quien:
         raise HTTPException(status_code=400, detail=t("error.confirmar_sujeto"))
-    trazas = await run_in_threadpool(
-        _store(request).delete_subject, project_id, user_id=user_id, customer_id=customer_id
-    )
+    sujeto = {"user_id": user_id, "customer_id": customer_id}
+    # Lo mutable primero, como al borrar un proyecto: diagnósticos y anotaciones citan
+    # contenido de esas trazas. Si esto falla no se ha borrado nada y repetir basta; al
+    # revés quedaban huérfanos sin forma de saber de qué trazas (D-208).
+    previas = await run_in_threadpool(_store(request).subject_traces, project_id, **sujeto)
+    await run_in_threadpool(_guard, _meta(request).delete_trace_data, project_id, previas)
+    trazas = await run_in_threadpool(_store(request).delete_subject, project_id, **sujeto)
+    # Una traza que entró entre las dos lecturas: sus diagnósticos también se van.
+    nuevas = sorted(set(trazas) - set(previas))
+    if nuevas:
+        await run_in_threadpool(_guard, _meta(request).delete_trace_data, project_id, nuevas)
     cuentas = getattr(request.app.state, "cuentas", None)
     if cuentas is not None:
         org_id = await run_in_threadpool(cuentas.org_del_proyecto, project_id)
@@ -706,8 +714,8 @@ async def delete_subject(
             project_id,
         )
     logger.warning("datos borrados de %s %s en %s: %d trazas",
-                   "la persona" if user_id else "el cliente", quien, project_id, trazas)
-    return {"project_id": project_id, "deleted_traces": trazas}
+                   "la persona" if user_id else "el cliente", quien, project_id, len(trazas))
+    return {"project_id": project_id, "deleted_traces": len(trazas)}
 
 
 @router.delete("/projects")
