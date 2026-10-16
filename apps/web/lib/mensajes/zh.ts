@@ -935,6 +935,8 @@ export const zh: Mensajes = {
   "grafo.llamadas_other": "{n} 次调用",
   "grafo.errores_one": "{n} 次出错",
   "grafo.errores_other": "{n} 次出错",
+  "grafo.problemas_one": "{n} 个诊断问题",
+  "grafo.problemas_other": "{n} 个诊断问题",
   "grafo.tipo.agent": "智能体",
   "grafo.tipo.llm": "模型",
   "grafo.tipo.tool": "工具",

@@ -279,6 +279,11 @@ async def get_overview(
     days: int = Query(7, ge=1, le=90),
 ) -> Overview:
     """Cuánto cuesta el agente, cuánto sobra y qué hay que arreglar."""
+    return await _diagnostico(request, project_id, days)
+
+
+async def _diagnostico(request: Request, project_id: str, days: int) -> Overview:
+    """El Diagnóstico de la ventana, recordado: lo leen el inicio y el grafo (D-203)."""
     # Si el proyecto no gestiona prompts, que no haya versiones en las trazas no es un
     # defecto suyo: es que no usa esa parte. La señal se enseña igual pero no pinta de
     # rojo ni cuenta para el veredicto, y eso hay que saberlo aquí (D-096).
@@ -401,9 +406,12 @@ async def get_graph(
     project_id: str,
     days: int = Query(7, ge=1, le=90),
 ) -> grafo.ProjectGraph:
-    """El agente entero en la ventana: pasos, modelos y coste por arista (D-188)."""
+    """El agente entero en la ventana: pasos, modelos y coste por arista (D-188), con
+    los pasos que tienen un hallazgo del Diagnóstico de esos mismos días (D-203)."""
+    diagnostico = await _diagnostico(request, project_id, days)
     return await run_in_threadpool(
-        grafo.del_proyecto, _store(request), project_id, _window(days)
+        grafo.del_proyecto, _store(request), project_id, _window(days),
+        diagnostico.findings + diagnostico.set_aside,
     )
 
 

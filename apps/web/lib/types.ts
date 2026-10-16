@@ -877,6 +877,8 @@ export interface ProjectGraphNode {
   estimated_spans: number;
   errors: number;
   models: string[];
+  /** Hallazgos del Diagnóstico de este paso en la ventana; vacío sin `step_key` (D-203). */
+  findings: string[];
 }
 
 export interface ProjectGraphEdge {

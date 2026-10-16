@@ -13,18 +13,23 @@ Tiene que salir igual en SQLite y en ClickHouse; la siembra está empatada a pro
 from __future__ import annotations
 
 import importlib
+import sys
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 from laplace.schema import Cost, LLMAttributes, Span, TokenUsage
 from laplace.semconv import EVAL_TAG
 
-from laplace_backend import grafo
+from laplace_backend import grafo, insights
 from laplace_backend.config import Settings
 from laplace_backend.storage.base import Window
 from laplace_backend.storage.sqlite import SQLiteStore
+
+sys.path.insert(0, str(Path(__file__).parent))
+from test_sqlite_store import _agente  # noqa: E402
 
 AHORA = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(hours=1)
 VENTANA = Window(since=AHORA - timedelta(days=1), until=AHORA + timedelta(minutes=30), days=1)
@@ -222,6 +227,84 @@ def test_sale_igual_en_sqlite_y_en_clickhouse(tmp_path):
 
 
 # ---------------------------------------------------------------------------------
+# Los pasos con hallazgos del Diagnóstico (D-203)
+# ---------------------------------------------------------------------------------
+
+
+@pytest.fixture(params=["sqlite", "clickhouse"])
+def almacen(request, tmp_path):
+    proyecto = f"marcas-{uuid.uuid4().hex[:8]}"
+    if request.param == "sqlite":
+        yield _sqlite(tmp_path), proyecto
+        return
+    nube = _nube()
+    try:
+        yield nube, proyecto
+    finally:
+        nube.delete_project(proyecto)
+
+
+def test_los_pasos_con_un_hallazgo_se_marcan_con_su_id(almacen):
+    """Como en el grafo de la traza: el hallazgo se ata al paso por `step_key`."""
+    store, proyecto = almacen
+    store.insert_spans(_agente(proyecto))
+    hallazgos = insights.detect(store, proyecto, VENTANA)
+    rep = next(f for f in hallazgos if f.kind == "repeticion")
+    g = grafo.del_proyecto(store, proyecto, VENTANA, hallazgos)
+
+    nodos = _por_id(g)
+    assert rep.step_key == "paso-json"
+    assert rep.id in nodos["paso-json"].findings
+    # Cada marca es de un hallazgo de esa ventana atado a ese paso, y no falta ninguna.
+    marcas = {(n.id, f) for n in g.nodes for f in n.findings}
+    assert marcas == {
+        (k, f.id) for f in hallazgos for k in {f.step_key, *f.step_shares}
+        if k in nodos and nodos[k].type == "llm"
+    }
+    # Los pasos sin `step_key` no se marcan.
+    assert nodos["agent:responder"].findings == []
+    assert nodos["tool:buscar"].findings == []
+
+
+def test_un_paso_sin_step_key_no_se_marca_aunque_el_hallazgo_lo_parezca(tmp_path):
+    """Un hallazgo de un paso sin identidad cae a su nombre, y el nodo a `tipo:nombre`:
+    atarlos sería adivinar. Tampoco se marca nada con un hallazgo sin paso."""
+    store = _sqlite(tmp_path)
+    store.insert_spans(_agente("p"))
+    rep = next(f for f in insights.detect(store, "p", VENTANA) if f.kind == "repeticion")
+    falsos = [
+        rep.model_copy(update={"id": "a", "step_key": "tool:buscar"}),
+        rep.model_copy(update={"id": "b", "step_key": "buscar"}),
+        rep.model_copy(update={"id": "c", "step_key": "agent:responder"}),
+        rep.model_copy(update={"id": "d", "step_key": ""}),
+    ]
+    g = grafo.del_proyecto(store, "p", VENTANA, falsos)
+    assert all(n.findings == [] for n in g.nodes), [(n.id, n.findings) for n in g.nodes]
+
+
+def test_un_hallazgo_de_varios_pasos_marca_todos_los_de_su_reparto(tmp_path):
+    """La caché compartida reparte su ahorro entre pasos (D-178): es de todos ellos."""
+    store = _sqlite(tmp_path)
+    store.insert_spans(_agente("p"))
+    rep = next(f for f in insights.detect(store, "p", VENTANA) if f.kind == "repeticion")
+    varios = rep.model_copy(update={
+        "id": "x", "step_key": "paso-json",
+        "step_shares": {"paso-json": 0.5, "paso-clasificar": 0.5},
+    })
+    nodos = _por_id(grafo.del_proyecto(store, "p", VENTANA, [varios]))
+    assert nodos["paso-json"].findings == ["x"]
+    assert nodos["paso-clasificar"].findings == ["x"]
+    assert nodos["paso-manual"].findings == []
+
+
+def test_sin_hallazgos_no_se_marca_nada(tmp_path):
+    store = _sqlite(tmp_path)
+    store.insert_spans(_agente("p"))
+    g = grafo.del_proyecto(store, "p", VENTANA)
+    assert g.nodes and all(n.findings == [] for n in g.nodes)
+
+
+# ---------------------------------------------------------------------------------
 # La API
 # ---------------------------------------------------------------------------------
 
@@ -232,6 +315,7 @@ def local(tmp_path, monkeypatch):
     store = SQLiteStore(db)
     store.migrate()
     _sembrar(store, "p")
+    store.insert_spans(_agente("a"))
     monkeypatch.setenv("LAPLACE_STORE", "sqlite")
     monkeypatch.setenv("LAPLACE_SQLITE_PATH", str(db))
     monkeypatch.setenv("LAPLACE_POSTGRES_ENABLED", "false")
@@ -252,3 +336,16 @@ def test_la_ruta_del_grafo(local):
         "agent:atender", "tool:buscar", "k_resumir", "k_clasificar"
     }
     assert datos["traces"] == 5
+
+
+def test_la_ruta_marca_los_pasos_con_los_hallazgos_del_diagnostico(local):
+    """Los de la misma ventana que el grafo: los que da `/api/overview` con esos días,
+    los apartados incluidos, como en la vista de traza."""
+    diagnostico = local.get("/api/overview", params={"project_id": "a", "days": 1}).json()
+    todos = diagnostico["findings"] + diagnostico["set_aside"]
+    rep = next(f for f in todos if f["kind"] == "repeticion")
+    r = local.get("/api/graph", params={"project_id": "a", "days": 1})
+    assert r.status_code == 200, r.text
+    nodos = {n["id"]: n for n in r.json()["nodes"]}
+    assert rep["id"] in nodos["paso-json"]["findings"]
+    assert nodos["tool:buscar"]["findings"] == []

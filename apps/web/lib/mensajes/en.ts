@@ -937,6 +937,8 @@ export const en: Mensajes = {
   "grafo.llamadas_other": "{n} calls",
   "grafo.errores_one": "{n} with an error",
   "grafo.errores_other": "{n} with errors",
+  "grafo.problemas_one": "{n} Diagnosis problem",
+  "grafo.problemas_other": "{n} Diagnosis problems",
   "grafo.tipo.agent": "agent",
   "grafo.tipo.llm": "model",
   "grafo.tipo.tool": "tool",
