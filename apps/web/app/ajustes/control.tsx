@@ -112,6 +112,7 @@ export function Control({ project }: { project: string }) {
         </button>
       </div>
       <p className="muted">{t("aj.control.como")}</p>
+      <p className="muted alcance">{t("aj.control.alcance")}</p>
       <Aviso {...msg} />
     </section>
   );
