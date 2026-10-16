@@ -446,7 +446,7 @@ _FORMAS = {
 def _wrap_sync(original: Any, forma: _Forma) -> Any:
     @functools.wraps(original)
     def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
-        if c.other_instrumentor():
+        if c.cede(kwargs.get("model")):
             return original(self, *args, **kwargs)
         span = forma.start(kwargs)
         try:
@@ -471,7 +471,7 @@ def _wrap_sync(original: Any, forma: _Forma) -> Any:
 def _wrap_async(original: Any, forma: _Forma) -> Any:
     @functools.wraps(original)
     async def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
-        if c.other_instrumentor():
+        if c.cede(kwargs.get("model")):
             return await original(self, *args, **kwargs)
         span = forma.start(kwargs)
         try:

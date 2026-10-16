@@ -311,10 +311,25 @@ def antes(tipo: str, nombre: str, entrada: Any) -> Vuelta | None:
     Devuelve con qué apuntarle la salida (`despues`) y, si es del modelo, el span
     (`con_span`). Sin ningún `guard` abierto ni parada no hace nada ni cuesta nada.
     """
-    remotas = _remotas()
+    parada(nombre)
     guardias = _activas.get()
-    if remotas.stopped:
-        parada = GuardExceeded(
+    if not guardias:
+        return None
+    remotas = _remotas()
+    clave = huella(tipo, nombre, entrada, ignorar_numeros=True)
+    for guardia in guardias:
+        guardia.comprobar(clave, nombre, remotas)
+    for guardia in guardias:
+        guardia.apuntar(clave, nombre)
+    return Vuelta(guardias, clave, tipo, nombre)
+
+
+def parada(nombre: str) -> None:
+    """Lanza si el proyecto está parado desde Laplace. Es lo único que se aplica a una
+    llamada que traza otro instrumentador (D-206)."""
+    if _remotas().stopped:
+        guardias = _activas.get()
+        corte = GuardExceeded(
             f"laplace.guard: el proyecto está parado desde Laplace; «{nombre}» no se hace.",
             reason=MOTIVO_PARADA,
             limit=0.0,
@@ -325,16 +340,8 @@ def antes(tipo: str, nombre: str, entrada: Any) -> Vuelta | None:
         # Las ejecuciones en marcha quedan cortadas: reanudar deja empezar otras, no
         # resucita una que se paró a medias.
         for guardia in guardias:
-            guardia.cortar(parada)
-        raise parada
-    if not guardias:
-        return None
-    clave = huella(tipo, nombre, entrada, ignorar_numeros=True)
-    for guardia in guardias:
-        guardia.comprobar(clave, nombre, remotas)
-    for guardia in guardias:
-        guardia.apuntar(clave, nombre)
-    return Vuelta(guardias, clave, tipo, nombre)
+            guardia.cortar(corte)
+        raise corte
 
 
 def con_span(vuelta: Vuelta | None, span: Any) -> None:

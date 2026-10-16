@@ -111,6 +111,17 @@ def other_instrumentor() -> str | None:
     return None
 
 
+def cede(model: str | None) -> bool:
+    """¿Se cede la llamada a otro instrumentador? Al ceder no se traza ni se cuenta para
+    el tope o los bucles, pero la parada de Laplace se aplica igual (D-206)."""
+    if not other_instrumentor():
+        return False
+    from .._guardia import parada
+
+    parada(span_name(semconv.OPERATION_CHAT, model))
+    return True
+
+
 def set_attr(span: OtelSpan, key: str, value: Any) -> None:
     if value is None or value == "":
         return
