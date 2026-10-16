@@ -679,5 +679,21 @@
   "tec.misma_respuesta": "Com a mesma resposta",
   "tec.porcentaje_misma": "Mesma resposta",
   "error.replay_sin_clave": "A chave do provedor não está no ambiente: defina-a onde você iniciou «laplace ui» e abra de novo.",
-  "error.replay_en_curso": "Já há um replay em andamento neste projeto."
+  "error.replay_en_curso": "Já há um replay em andamento neste projeto.",
+  "cache_parecida.titulo": "«{paso}» recebe perguntas quase iguais e responde o mesmo",
+  "cache_parecida.lead": "Um cache por semelhança poderia servi-las sem chamar o modelo, se uma palavra diferente não mudar a resposta.",
+  "cache_parecida.resumen": "{parecidas} chamadas de «{paso}» fazem uma pergunta quase igual a uma anterior (a uma palavra de distância, {grupos} grupos), e {mismas} receberam exatamente a mesma resposta que ela{tasa}. {gasto}",
+  "cache_parecida.gasto.hasta": "Um cache por semelhança teria economizado até {ahorro}, mas uma palavra diferente pode mudar a resposta e não sabemos se serviria.",
+  "cache_parecida.sin_dinero": "Não entra na economia total: duas perguntas quase iguais não são a mesma pergunta, e receber aqui a mesma resposta não prova que receberá da próxima vez nem que serve a outro usuário. Veja os pares à mão e confirme com um replay antes de usar cache.",
+  "cache_parecida.que_pasa": "«{paso}» recebe perguntas que diferem em poucas palavras de uma anterior de outra execução: {grupos} grupos e {parecidas} chamadas. Em {mismas} delas o modelo respondeu exatamente o mesmo que à primeira do grupo.{tasa} As perguntas idênticas não contam aqui: são do cache exato, e uma chamada nunca é contada duas vezes.",
+  "cache_parecida.por_que": "A impressão mede quanto texto mudou, não se o sentido mudou: tirar um «não» ou trocar um nome ou um valor a move tão pouco quanto um sinônimo. Só podemos dizer quantas vezes, nesta janela, o modelo respondeu igual a perguntas quase iguais. Num passo com poucas respostas possíveis (um classificador) a porcentagem sai alta seja qual for a pergunta. Por isso é um teto e não entra na economia total.",
+  "cache_parecida.deteccion": "Regra ativa: **primeira chamada `llm` de cada pergunta distinta (`loop_hash`) do mesmo passo e modelo, com impressão de semelhança (`sim_hash`, um simhash de 64 bits de tudo menos as instruções de sistema, só com 100 palavras ou mais)**. Cada pergunta se une à primeira cabeça a {bits} bits ou menos —uma palavra de diferença— sem encadear; contam as de outra execução que sua cabeça, e «a mesma resposta» é a mesma saída exata (`loop_out_hash`). Pelo menos {minimo} por passo e modelo. As execuções de avaliação e as chamadas com erro não contam, nem os passos com mais de {tope} perguntas distintas. A porcentagem, só com pelo menos {muestra} parecidas, com seu intervalo de Wilson a 95 %.",
+  "cache_parecida.arreglo.probar.titulo": "Veja os pares e confirme",
+  "cache_parecida.arreglo.probar.texto": "Abra o trace de exemplo e procure no grupo perguntas que difiram em uma palavra: alguma mudaria a resposta certa? Depois salve execuções deste passo como conjunto de casos e reenvie-as ao mesmo modelo com `laplace replay`, com o juiz ligado.",
+  "cache_parecida.arreglo.cache.titulo": "Se for usar cache, comece pelo exato",
+  "cache_parecida.arreglo.cache.texto": "A chave exata é segura; a de semelhança só vale se, nos seus casos, trocar essa palavra nunca muda a resposta. Coloque validade e deixe de fora o que depende de quem pergunta.",
+  "cache_parecida.cuenta": "{mismas} chamadas parecidas com a mesma resposta custaram {coste} em {ventana}; um cache por semelhança teria economizado no máximo {ahorro}.{reclamado} Não entra na economia total enquanto não soubermos que a mesma resposta serve a todos.",
+  "cache_parecida.nota": "É um teto, não uma promessa: só conta as respostas que foram idênticas entre perguntas a uma palavra de distância, e não sabemos se continuarão assim.",
+  "tec.grupos_parecidos": "Grupos de perguntas parecidas",
+  "tec.llamadas_parecidas": "Chamadas parecidas entre execuções"
 }

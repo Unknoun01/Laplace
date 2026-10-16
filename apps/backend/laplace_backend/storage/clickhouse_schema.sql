@@ -119,6 +119,8 @@ CREATE TABLE IF NOT EXISTS spans
     instrumentor        LowCardinality(String) DEFAULT '',
     -- `service.version` del recurso: señal de despliegue del bot de PR (D-216).
     service_version     LowCardinality(String) DEFAULT '',
+    -- Simhash de lo que no son instrucciones, para la caché parecida (D-219). 0 = sin huella.
+    sim_hash            Int64 DEFAULT 0,
 
     events              String CODEC(ZSTD(3)),
     attributes          String CODEC(ZSTD(3)),
@@ -218,6 +220,8 @@ ALTER TABLE spans ADD COLUMN IF NOT EXISTS instrumentor LowCardinality(String) D
 
 -- Instalaciones anteriores a la versión como señal de despliegue (D-216).
 ALTER TABLE spans ADD COLUMN IF NOT EXISTS service_version LowCardinality(String) DEFAULT '';
+-- Instalaciones anteriores a la caché parecida (D-219).
+ALTER TABLE spans ADD COLUMN IF NOT EXISTS sim_hash Int64 DEFAULT 0;
 
 -- Instalaciones anteriores a D-142. Los payloads son casi todo el disco, y con ZSTD(3)
 -- ocupan menos de la mitad que con el LZ4 por defecto (medido con la prueba de carga).

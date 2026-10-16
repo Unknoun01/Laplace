@@ -679,5 +679,21 @@
   "tec.misma_respuesta": "Con la misma respuesta",
   "tec.porcentaje_misma": "Misma respuesta",
   "error.replay_sin_clave": "No hay en el entorno la clave del proveedor: ponla donde lanzaste «laplace ui» y vuelve a abrirlo.",
-  "error.replay_en_curso": "Ya hay una tirada de replay en marcha en este proyecto."
+  "error.replay_en_curso": "Ya hay una tirada de replay en marcha en este proyecto.",
+  "cache_parecida.titulo": "«{paso}» recibe preguntas casi iguales y responde lo mismo",
+  "cache_parecida.lead": "Una caché por parecido podría servirlas sin llamar al modelo, si una palabra distinta no cambia la respuesta.",
+  "cache_parecida.resumen": "{parecidas} llamadas de «{paso}» preguntan algo casi igual a una anterior (a una palabra de diferencia, {grupos} grupos), y {mismas} dieron exactamente la misma respuesta que ella{tasa}. {gasto}",
+  "cache_parecida.gasto.hasta": "Una caché por parecido se habría ahorrado hasta {ahorro}, pero una palabra distinta puede cambiar la respuesta y no sabemos si valdría.",
+  "cache_parecida.sin_dinero": "No entra en el ahorro total: dos preguntas casi iguales no son la misma pregunta, y que aquí dieran la misma respuesta no prueba que la den la próxima vez ni que valga para otro usuario. Mira las parejas a mano y compruébalo con un replay antes de cachear.",
+  "cache_parecida.que_pasa": "«{paso}» recibe preguntas que difieren en pocas palabras de otra anterior de otra ejecución: {grupos} grupos y {parecidas} llamadas. En {mismas} de ellas el modelo respondió exactamente lo mismo que a la primera del grupo.{tasa} Las preguntas idénticas no cuentan aquí: son de la caché exacta, y las llamadas no se cuentan dos veces.",
+  "cache_parecida.por_que": "La huella mide cuánto texto cambió, no si cambió el sentido: quitar un «no» o cambiar un nombre o un importe mueve tan poco como un sinónimo. Lo único que podemos decir es cuántas veces, en esta ventana, el modelo respondió igual a preguntas casi iguales. En un paso con pocas respuestas posibles (un clasificador) el porcentaje sale alto sin que la pregunta importe. Por eso es un techo y no entra en el ahorro total.",
+  "cache_parecida.deteccion": "Regla activa: **primera llamada `llm` de cada pregunta distinta (`loop_hash`) del mismo paso y modelo, con huella de parecido (`sim_hash`, un simhash de 64 bits de lo que no son instrucciones de sistema, sólo con 100 palabras o más)**. Cada pregunta se une a la primera cabeza a {bits} bits o menos —una palabra de diferencia— sin encadenar; cuentan las de otra ejecución que su cabeza, y «la misma respuesta» es su misma salida exacta (`loop_out_hash`). Al menos {minimo} por paso y modelo. Las tiradas de evaluación y las llamadas con error no cuentan, ni los pasos con más de {tope} preguntas distintas. El porcentaje, sólo con al menos {muestra} parecidas, con su intervalo de Wilson al 95 %.",
+  "cache_parecida.arreglo.probar.titulo": "Mira las parejas y compruébalo",
+  "cache_parecida.arreglo.probar.texto": "Abre la traza de ejemplo y busca preguntas del grupo que difieran en una palabra: ¿alguna cambiaría la respuesta correcta? Después guarda ejecuciones de este paso como conjunto de casos y reenvíalas al mismo modelo con `laplace replay`, con el juez encendido.",
+  "cache_parecida.arreglo.cache.titulo": "Si decides cachear, empieza por lo exacto",
+  "cache_parecida.arreglo.cache.texto": "La clave exacta es segura; la de lo parecido sólo vale si en tus casos cambiar esa palabra nunca cambia la respuesta. Ponle caducidad y deja fuera lo que dependa de quién pregunta.",
+  "cache_parecida.cuenta": "{mismas} llamadas parecidas con la misma respuesta costaron {coste} en {ventana}; una caché por parecido habría ahorrado como mucho {ahorro}.{reclamado} No entra en el ahorro total mientras no sepamos que la misma respuesta vale para todos.",
+  "cache_parecida.nota": "Es un techo, no una promesa: cuenta sólo las respuestas que fueron idénticas entre preguntas que difieren en una palabra, y no sabemos si lo seguirán siendo.",
+  "tec.grupos_parecidos": "Grupos de preguntas parecidas",
+  "tec.llamadas_parecidas": "Llamadas parecidas entre ejecuciones"
 }

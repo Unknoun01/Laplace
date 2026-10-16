@@ -968,6 +968,7 @@ export const pt: Mensajes = {
   "aj.regla.historial": "Histórico que cresce",
   "aj.regla.lotes": "Trabalho que pode ir em lotes",
   "aj.regla.cache_semantica": "Respostas que poderiam ir para cache",
+  "aj.regla.cache_parecida": "Mesmas respostas a perguntas quase iguais",
   "diag.ahorrado_one": "Você já deixou de pagar {coste} desde que corrigiu um problema.",
   "diag.ahorrado_other": "Você já deixou de pagar {coste} desde que corrigiu {n} problemas.",
   "diag.ahorrado.suelo": "pelo menos {coste}",

@@ -31,6 +31,7 @@ FindingKind = Literal[
     "historial",
     "lotes",
     "cache_semantica",
+    "cache_parecida",
 ]
 Difficulty = Literal["easy", "mid", "hard"]
 

@@ -679,5 +679,21 @@
   "tec.misma_respuesta": "回答相同",
   "tec.porcentaje_misma": "相同回答占比",
   "error.replay_sin_clave": "环境中没有提供商的密钥：请在启动“laplace ui”的地方设置后重新打开。",
-  "error.replay_en_curso": "此项目已有一个回放正在运行。"
+  "error.replay_en_curso": "此项目已有一个回放正在运行。",
+  "cache_parecida.titulo": "「{paso}」收到几乎相同的问题，回答也相同",
+  "cache_parecida.lead": "如果多一个词不会改变答案，相似度缓存就可以不调用模型直接作答。",
+  "cache_parecida.resumen": "「{paso}」有 {parecidas} 次调用的问题与之前的某次几乎相同（相差一个词，共 {grupos} 组），其中 {mismas} 次得到了与它完全相同的回答{tasa}。{gasto}",
+  "cache_parecida.gasto.hasta": "相似度缓存最多本可节省 {ahorro}，但多一个词可能改变答案，我们不知道它是否适用。",
+  "cache_parecida.sin_dinero": "不计入总节省：两个几乎相同的问题不是同一个问题，这里得到相同回答并不能证明下次也会，也不能证明对其他用户适用。缓存之前请人工查看这些配对，并用 replay 验证。",
+  "cache_parecida.que_pasa": "「{paso}」收到的问题与另一次运行中的之前问题仅相差几个词：共 {grupos} 组、{parecidas} 次调用。其中 {mismas} 次，模型的回答与该组第一次完全相同。{tasa}完全相同的问题不在此计算：它们属于精确缓存，调用也不会被重复计算。",
+  "cache_parecida.por_que": "指纹衡量的是文本变了多少，而不是含义是否变了：去掉一个「不」、换一个名字或金额，与换一个同义词一样几乎没有变化。我们只能说，在这个窗口里模型对几乎相同的问题答得一样的次数。在可能回答很少的步骤（如分类器）中，无论问什么，百分比都会很高。因此这只是上限，不计入总节省。",
+  "cache_parecida.deteccion": "已启用的规则：**同一步骤、同一模型中每个不同问题（`loop_hash`）的第一次 `llm` 调用，需有相似度指纹（`sim_hash`，对系统指令以外内容的 64 位 simhash，仅当有 100 个词或以上）**。每个问题归入距其 {bits} 位以内的第一个组首——相差一个词——且不链式传递；只计与组首不同运行的调用，「相同回答」指输出完全相同（`loop_out_hash`）。每个步骤和模型至少 {minimo} 次。评估运行、出错的调用以及不同问题超过 {tope} 个的步骤不计入。百分比至少需要 {muestra} 次相似调用，附 95% Wilson 区间。",
+  "cache_parecida.arreglo.probar.titulo": "查看配对并验证",
+  "cache_parecida.arreglo.probar.texto": "打开示例追踪，在该组中找出相差一个词的问题：其中有没有会改变正确答案的？然后把该步骤的运行保存为用例集，用 `laplace replay` 在开启评委的情况下重发给同一模型。",
+  "cache_parecida.arreglo.cache.titulo": "如果要缓存，先从精确缓存开始",
+  "cache_parecida.arreglo.cache.texto": "精确的键是安全的；相似度的键只有在你的用例中改变那个词从不影响答案时才成立。设置过期时间，并排除依赖提问者的内容。",
+  "cache_parecida.cuenta": "{mismas} 次回答相同的相似调用在{ventana}花费 {coste}；相似度缓存最多本可节省 {ahorro}。{reclamado}在我们确认同一答案对所有人都适用之前，不计入总节省。",
+  "cache_parecida.nota": "这是上限，不是承诺：只统计相差一个词的问题之间完全相同的回答，我们不知道它们以后是否仍然如此。",
+  "tec.grupos_parecidos": "相似问题组",
+  "tec.llamadas_parecidas": "跨运行的相似调用"
 }

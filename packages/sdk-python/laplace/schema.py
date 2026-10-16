@@ -242,6 +242,11 @@ class Span(_Model):
     #: el avance. Muchas vueltas con pocas salidas distintas es la definición medible
     #: de «da vueltas sin llegar a ninguna parte».
     loop_out_hash: str = ""
+    #: Simhash de 64 bits (con signo) de lo que **no** son instrucciones de sistema, para
+    #: reconocer lo parecido pero no idéntico (D-219). 0 si no se capturan payloads o el
+    #: texto tiene menos de 100 palabras. Dos huellas a 4 bits o menos son textos que
+    #: difieren en una palabra; no dicen que el sentido sea el mismo.
+    sim_hash: int = 0
     #: Si la salida del modelo intenta ser JSON y si se lee: `ok`, `roto`, o vacío
     #: cuando no lo intenta (texto, herramientas, sin salida). Lo calcula la ingesta;
     #: es la señal de los reintentos por JSON mal formado (D-194).

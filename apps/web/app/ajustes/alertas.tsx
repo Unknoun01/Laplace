@@ -239,5 +239,6 @@ const REGLAS = [
   ["historial", "aj.regla.historial"],
   ["lotes", "aj.regla.lotes"],
   ["cache_semantica", "aj.regla.cache_semantica"],
+  ["cache_parecida", "aj.regla.cache_parecida"],
   ["cliente_pierde", "aj.regla.cliente_pierde"],
 ] as const;

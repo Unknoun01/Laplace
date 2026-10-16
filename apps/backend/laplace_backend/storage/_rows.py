@@ -112,6 +112,8 @@ COLUMNS = (
     "instrumentor",
     # La versión del servicio, señal de despliegue para el bot de PR (D-216).
     "service_version",
+    # La huella de lo parecido, para la caché parecida (D-219).
+    "sim_hash",
 )
 
 
@@ -395,6 +397,7 @@ def row_to_span(r: dict[str, Any]) -> Span:
         sdk_name=(r["sdk_name"] or "") if "sdk_name" in r.keys() else "",
         instrumentor=(r["instrumentor"] or "") if "instrumentor" in r.keys() else "",
         service_version=(r["service_version"] or "") if "service_version" in r.keys() else "",
+        sim_hash=int(r["sim_hash"] or 0) if "sim_hash" in r.keys() else 0,
         prompt_name=r["prompt_name"] or "",
         prompt_version=int(r["prompt_version"] or 0),
         events=events,
@@ -577,4 +580,5 @@ def span_to_row(span: Span) -> list[Any]:
         span.sdk_name,
         span.instrumentor,
         span.service_version,
+        int(span.sim_hash or 0),
     ]

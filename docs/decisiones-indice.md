@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 218 decisiones.
+final. 219 decisiones.
 
 ## Coste, precios y caché
 
@@ -42,6 +42,7 @@ final. 218 decisiones.
 - [D-208](../DECISIONS.md#d-208--los-diagnósticos-con-modelo-se-van-con-su-sujeto-y-el-rechazado-deja-su-coste) — Los diagnósticos con modelo se van con su sujeto, y el rechazado deja su coste
 - [D-209](../DECISIONS.md#d-209--la-demo-enseña-la-caché-compartida-entre-pasos) — La demo enseña la caché compartida entre pasos
 - [D-210](../DECISIONS.md#d-210--con-muestreo-se-estima-lo-que-falta-del-gasto-con-margen-nada-más) — Con muestreo, se estima lo que falta del gasto, con margen; nada más
+- [D-219](../DECISIONS.md#d-219--caché-parecida-simhash-local-sin-dinero-en-el-total-y-lo-que-sí-se-puede-afirmar) — Caché parecida: simhash local, sin dinero en el total, y lo que sí se puede afirmar
 
 ## Detección: reglas y hallazgos
 
@@ -368,6 +369,7 @@ final. 218 decisiones.
 - [D-206](../DECISIONS.md#d-206--la-parada-alcanza-lo-que-otro-instrumentador-traza-en-python-lo-que-no-alcanza-se-dice) — La parada alcanza lo que otro instrumentador traza en Python; lo que no alcanza, se dice
 - [D-218](../DECISIONS.md#d-218--el-bot-de-pr-encuentra-la-llamada-con-los-atributos-estándar-sólo-escribe-python) — El bot de PR encuentra la llamada con los atributos estándar; sólo escribe Python
 - [D-214](../DECISIONS.md#d-214--lanzar-el-replay-desde-la-interfaz-local-con-un-botón) — Lanzar el replay desde la interfaz local, con un botón
+- [D-219](../DECISIONS.md#d-219--caché-parecida-simhash-local-sin-dinero-en-el-total-y-lo-que-sí-se-puede-afirmar) — Caché parecida: simhash local, sin dinero en el total, y lo que sí se puede afirmar
 
 ## Todas, en orden
 
@@ -696,3 +698,4 @@ final. 218 decisiones.
 - [D-213](../DECISIONS.md#d-213--el-replay-con-imágenes-entre-proveedores-y-desde-la-api-responses-los-bloques-se-convierten-lo-que-no-tiene-equivalente-no-se-reenvía) — El replay con imágenes, entre proveedores y desde la API Responses: los bloques se convierten; lo que no tiene equivalente no se reenvía
 - [D-215](../DECISIONS.md#d-215--de-dónde-viene-cada-span-y-qué-parte-del-tráfico-se-queda-fuera-de-la-parada) — De dónde viene cada span, y qué parte del tráfico se queda fuera de la parada
 - [D-216](../DECISIONS.md#d-216--serviceversion-como-segunda-señal-de-despliegue-si-se-puede-atar-a-un-commit) — `service.version` como segunda señal de despliegue, si se puede atar a un commit
+- [D-219](../DECISIONS.md#d-219--caché-parecida-simhash-local-sin-dinero-en-el-total-y-lo-que-sí-se-puede-afirmar) — Caché parecida: simhash local, sin dinero en el total, y lo que sí se puede afirmar

@@ -31,6 +31,7 @@ from typing import Any
 from laplace.schema import Span
 from laplace.semconv import EVAL_TAG, PUEDE_ESPERAR_TAG
 
+from ._parecido import MAX_PREGUNTAS_PASO, agrupar
 from ._rows import (
     COLUMNS,
     coverage_from_rows,
@@ -182,6 +183,7 @@ CREATE TABLE IF NOT EXISTS spans (
     sdk_name              TEXT NOT NULL DEFAULT '',
     instrumentor          TEXT NOT NULL DEFAULT '',
     service_version       TEXT NOT NULL DEFAULT '',
+    sim_hash              INTEGER NOT NULL DEFAULT 0,
 
     events                TEXT NOT NULL DEFAULT '',
     attributes            TEXT NOT NULL DEFAULT '',
@@ -222,6 +224,8 @@ COLUMNAS_TARDIAS = (
     ("instrumentor", "TEXT NOT NULL DEFAULT ''"),
     # La versión del servicio, señal de despliegue del bot de PR (D-216).
     ("service_version", "TEXT NOT NULL DEFAULT ''"),
+    # La huella de lo parecido (D-219).
+    ("sim_hash", "INTEGER NOT NULL DEFAULT 0"),
 )
 
 #: Índices sobre columnas tardías. Van aquí y **no** en `SCHEMA` por un motivo que costó
@@ -791,6 +795,45 @@ ORDER BY coste_mismas DESC, paso_clave, modelo
 LIMIT :limit
 """
 
+#: La primera llamada de cada pregunta distinta (D-219), de los pasos que se pueden
+#: comparar: con huella y entre 2 y `max_preguntas` preguntas. El agrupado por parecido
+#: es de Python (`_parecido.agrupar`), igual para los dos almacenes. La primera llamada
+#: de una pregunta es justo la que la caché exacta (D-200) nunca reclama.
+SIMILAR_QUESTIONS_SQL = f"""
+WITH llamadas AS (
+    SELECT
+        CASE WHEN step_key != '' THEN step_key ELSE name END     AS paso_clave,
+        CASE WHEN step_label != '' THEN step_label ELSE name END AS etiqueta,
+        request_model, loop_hash, loop_out_hash, sim_hash, trace_id, span_id, start_time,
+        step_hint, step_site, cost_total_usd, cost_unknown, cost_rate_assumed
+    FROM spans
+    WHERE {RULES_WHERE} AND span_type = 'llm' AND status != 'error'
+      AND loop_hash != '' AND loop_out_hash != '' AND sim_hash != 0
+),
+comparables AS (
+    SELECT paso_clave, request_model
+    FROM llamadas
+    GROUP BY paso_clave, request_model
+    HAVING COUNT(DISTINCT loop_hash) BETWEEN 2 AND :max_preguntas
+),
+ordenadas AS (
+    SELECT
+        l.*,
+        ROW_NUMBER() OVER (
+            PARTITION BY l.paso_clave, l.request_model, l.loop_hash
+            ORDER BY l.start_time, l.trace_id, l.span_id
+        )                                                        AS orden
+    FROM llamadas l
+    JOIN comparables c
+      ON c.paso_clave = l.paso_clave AND c.request_model = l.request_model
+)
+SELECT paso_clave, etiqueta, request_model, loop_hash, loop_out_hash, sim_hash, trace_id,
+       span_id, start_time, step_hint, step_site, cost_total_usd, cost_unknown,
+       cost_rate_assumed
+FROM ordenadas
+WHERE orden = 1
+"""
+
 #: Reintentos por JSON mal formado (D-194). Una salida cortada es de la regla de arriba:
 #: aquí no entra aunque su JSON esté roto, y así lo que reclama aquélla no se cuenta dos
 #: veces.
@@ -1210,6 +1253,10 @@ class SQLiteStore:
         return CACHEABLE_GROUPS_SQL
 
     @property
+    def similar_questions_sql(self) -> str:
+        return SIMILAR_QUESTIONS_SQL
+
+    @property
     def model_usage_sql(self) -> str:
         return MODEL_USAGE_SQL
 
@@ -1388,6 +1435,15 @@ class SQLiteStore:
         return disambiguate(
             [_cacheable_group(r) for r in self._query(CACHEABLE_GROUPS_SQL, params)]
         )
+
+    def similar_groups(
+        self, project_id: str, window: Window, *, min_mismas: int = 5, limit: int = 20,
+        max_preguntas: int = MAX_PREGUNTAS_PASO,
+    ) -> list[CacheableGroup]:
+        params = self._window_params(project_id, window)
+        params["max_preguntas"] = max_preguntas
+        filas = [dict(r) for r in self._query(SIMILAR_QUESTIONS_SQL, params)]
+        return disambiguate(agrupar(filas, min_mismas=min_mismas, limit=limit))
 
     def _rehechas(
         self, sql: str, project_id: str, window: Window, min_redone: int,

@@ -24,6 +24,7 @@ from ..storage.base import (
 )
 from . import (
     cache_compartida,
+    cache_parecida,
     cache_semantica,
     historial,
     json_roto,
@@ -346,6 +347,7 @@ def detect(store: Any, project_id: str, window: Window) -> list[Finding]:
     # dinero en el total, así que no descuenta a nadie; su «hasta» es sobre lo que queda
     # de cada paso después de todas las demás, lotes incluida.
     findings += _hallazgos_de_cache(store, project_id, window, findings, usos, summary, dias)
+    findings += _hallazgos_de_parecidas(store, project_id, window, findings, usos, summary, dias)
 
     # Primero lo que más dinero devuelve; los que sólo cuestan tiempo, al final,
     # ordenados por el tiempo que recuperan. Se ordena por el dinero YA GASTADO y no
@@ -494,6 +496,35 @@ def _grupos_de_cache(store: Any, project_id: str, window: Window, compartidos: s
         ),
         compartidos,
     )
+
+
+def _grupos_de_parecidas(store: Any, project_id: str, window: Window, compartidos: set[str]):
+    return _nombrar(
+        store.similar_groups(project_id, window, min_mismas=cache_parecida.MIN_MISMAS_CACHE),
+        compartidos,
+    )
+
+
+def _hallazgos_de_parecidas(
+    store: Any,
+    project_id: str,
+    window: Window,
+    findings: list[Finding],
+    usos: list[ModelUsage],
+    summary: WindowSummary,
+    dias: float,
+) -> list[Finding]:
+    reclamado = _reclamado_por_todas(findings)
+    coste = _coste_por_paso(usos)
+    salida = []
+    for grupo in _grupos_de_parecidas(store, project_id, window, _pasos_compartidos(usos)):
+        hallazgo = cache_parecida.hallazgo(
+            grupo, reclamado.get(grupo.step_key, 0.0), coste.get(grupo.step_key, 0.0),
+            summary, dias,
+        )
+        if hallazgo is not None:
+            salida.append(_con_fecha(hallazgo, grupo))
+    return salida
 
 
 def _hallazgos_de_cache(
@@ -807,6 +838,25 @@ def _detalle_lotes(
     return None
 
 
+def _detalle_parecida(
+    store: Any, project_id: str, window: Window, key: str, ctx: _Contexto
+) -> FindingDetail | None:
+    """Recalcula como `detect()`: su «hasta» es lo que queda después de las demás."""
+    otras = [f for f in detect(store, project_id, window) if f.kind != cache_parecida.KIND]
+    reclamado = _reclamado_por_todas(otras)
+    coste = _coste_por_paso(store.model_usage(project_id, window, min_calls=1))
+    usos = store.model_usage(project_id, window, min_calls=1)
+    for grupo in _grupos_de_parecidas(store, project_id, window, _pasos_compartidos(usos)):
+        if f"{grupo.step_key}:{grupo.model}" != key:
+            continue
+        ya, total = reclamado.get(grupo.step_key, 0.0), coste.get(grupo.step_key, 0.0)
+        finding = cache_parecida.hallazgo(grupo, ya, total, ctx.summary, ctx.dias)
+        if finding is None:
+            return None
+        return cache_parecida.detalle(finding, grupo, ya, total, store.similar_questions_sql)
+    return None
+
+
 def _detalle_cache(
     store: Any, project_id: str, window: Window, key: str, ctx: _Contexto
 ) -> FindingDetail | None:
@@ -854,6 +904,7 @@ _DETALLADORES = {
     historial.KIND: _detalle_historial,
     lotes.KIND: _detalle_lotes,
     cache_semantica.KIND: _detalle_cache,
+    cache_parecida.KIND: _detalle_parecida,
 }
 
 #: Los tipos que `detail()` sabe reconstruir. Derivado, nunca escrito a mano: una lista
