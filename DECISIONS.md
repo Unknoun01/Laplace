@@ -4878,3 +4878,34 @@ Dos de ClickHouse no fallaban al principio: tomar la última ejecución de cada 
 en lugar de la primera, y elegir la traza de ejemplo sin exigir que repitiera respuesta.
 Ninguna prueba ponía otra respuesta entre dos iguales, ni dos preguntas con trazas de
 distinto orden; ahora las dos lo hacen.
+
+### D-203 — El grafo del proyecto marca los pasos con hallazgos, por `step_key` y sin adivinar
+El grafo de una traza (D-153) marca en ámbar los pasos con un problema del Diagnóstico;
+el del proyecto (D-188) no marcaba nada, y era justo el sitio donde se ve el agente
+entero. Ahora cada nodo de `/api/graph` lleva `findings`: los ids de los hallazgos de ese
+paso, y la web (`GrafoProyecto`) pasa esos nodos a `resaltados` del mismo `DibujoGrafo`,
+con la misma clase `problema` y el mismo token `--amber`. El `title` de la caja dice
+cuántos («2 problemas del Diagnóstico»). No hay mecanismo nuevo en la pantalla.
+
+* **Los hallazgos son los de la misma ventana**: el endpoint lee el mismo Diagnóstico que
+  `/api/overview` con esos días, recordado en `CACHE_DIAGNOSTICO` (`_diagnostico`, que
+  ahora comparten las dos rutas), con los apartados incluidos, como la vista de traza.
+  Un problema ignorado sigue siendo un problema de ese paso; su estado está en su ficha.
+* **Se atan por `step_key`**, como en la traza, y también por las claves de
+  `step_shares`: un hallazgo repartido entre pasos (la caché compartida, D-178) es de
+  todos ellos, y lo dice su propio reparto.
+* **Un paso sin `step_key` no se marca.** Su id es `tipo:nombre`, y el hallazgo de un
+  paso así cae a su nombre a secas: atarlos sería adivinar entre dos pasos homónimos de
+  tipos distintos. Se reconoce sin columna nueva: sin `step_key`, la etiqueta es el
+  nombre y el id es exactamente `tipo:etiqueta`; una clave de verdad es un hash.
+* **El cruce se hace en `grafo.py`**, sobre lo que da el almacén: no hay consulta nueva,
+  y la paridad SQLite/ClickHouse es la de `project_graph` y la de las reglas.
+
+Pruebas en `test_grafo_proyecto.py`: los pasos con un hallazgo llevan su id y sólo ésos,
+en los dos almacenes (parametrizada); un hallazgo que parece de un paso sin `step_key`
+(`tool:buscar`, `buscar`, vacío) no marca nada; uno repartido marca todos sus pasos; sin
+hallazgos no se marca nada; y la ruta marca los mismos que da `/api/overview`. En
+`test_pantallas.py`, el panel pinta al menos un paso en ámbar y ninguno que no sea una
+llamada al modelo. Se rompió a propósito cinco veces (quitar la guarda de `tipo:nombre`,
+olvidar el reparto, no marcar nada, no pasar los hallazgos desde la ruta, y no pasar
+`resaltados` en la web) y fallan todas.

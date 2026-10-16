@@ -874,6 +874,10 @@ def test_el_panel_ensena_el_agente_entero(servidor, navegador):
         assert textos and all(x.startswith("×") for x in textos), textos
         assert any("US$" in x or "$" in x for x in textos), textos
         assert grafo.locator("g.nodo.llm").count() >= 1
+        # D-203: los pasos con un problema del Diagnóstico, en ámbar como en la traza; y
+        # sólo pasos con `step_key` (en la demo, las llamadas al modelo).
+        assert grafo.locator("g.nodo.problema").count() >= 1
+        assert grafo.locator("g.nodo.problema:not(.llm)").count() == 0
         sobran = pagina.evaluate(
             """() => [...document.querySelectorAll('section.grafo-proyecto g.nodo')]
                 .map(g => [g.querySelector('rect').getBBox().width,

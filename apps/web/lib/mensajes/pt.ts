@@ -937,6 +937,8 @@ export const pt: Mensajes = {
   "grafo.llamadas_other": "{n} chamadas",
   "grafo.errores_one": "{n} com erro",
   "grafo.errores_other": "{n} com erro",
+  "grafo.problemas_one": "{n} problema do Diagnóstico",
+  "grafo.problemas_other": "{n} problemas do Diagnóstico",
   "grafo.tipo.agent": "agente",
   "grafo.tipo.llm": "modelo",
   "grafo.tipo.tool": "ferramenta",

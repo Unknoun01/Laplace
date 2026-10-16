@@ -6,6 +6,11 @@ sale del almacén, para la ventana entera: un nodo por paso, con la misma identi
 cada «este paso llama a este otro», con cuántas veces y lo que costaron esas llamadas.
 Es de sólo lectura: lo que se pueda cambiar desde aquí vendrá después.
 
+* **Los pasos con un hallazgo del Diagnóstico llevan su id** (D-203), como el grafo de
+  la traza los marca en ámbar: se atan por `step_key` (y por los pasos de su reparto),
+  con los hallazgos de la misma ventana. Un paso sin `step_key` (`tipo:nombre`) no se
+  marca: el hallazgo de un paso así cae a su nombre, y atarlos sería adivinar.
+
 * **El coste de una arista es el coste propio de las llamadas que lleva**, es decir, lo
   que costaron los spans de destino llamados desde el origen. Sólo cuestan las llamadas
   al modelo, así que una arista hacia una herramienta o un subpaso no lleva dinero: el
@@ -20,10 +25,12 @@ Es de sólo lectura: lo que se pueda cambiar desde aquí vendrá después.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
 from pydantic import BaseModel
 
+from .insights import Finding
 from .storage.base import Window
 
 #: Pasos que se dibujan como mucho.
@@ -43,6 +50,8 @@ class GraphNode(BaseModel):
     estimated_spans: int
     errors: int
     models: list[str]
+    #: Ids de los hallazgos del Diagnóstico de este paso en la ventana (D-203).
+    findings: list[str] = []
 
 
 class GraphEdge(BaseModel):
@@ -64,8 +73,14 @@ class ProjectGraph(BaseModel):
     hidden_calls: int = 0
 
 
-def del_proyecto(store: Any, project_id: str, window: Window) -> ProjectGraph:
+def del_proyecto(
+    store: Any, project_id: str, window: Window, hallazgos: Iterable[Finding] = ()
+) -> ProjectGraph:
     hechos = store.project_graph(project_id, window)
+    por_paso: dict[str, list[str]] = {}
+    for f in hallazgos:
+        for clave in dict.fromkeys([f.step_key, *f.step_shares]):
+            por_paso.setdefault(clave, []).append(f.id)
     # El almacén ya los da por llamadas y por id: el recorte es el mismo en los dos.
     dentro = hechos.steps[:MAX_NODOS]
     fuera = hechos.steps[MAX_NODOS:]
@@ -87,6 +102,8 @@ def del_proyecto(store: Any, project_id: str, window: Window) -> ProjectGraph:
                 estimated_spans=p.estimated_spans,
                 errors=p.errors,
                 models=list(p.models),
+                # Sin `step_key` el id es `tipo:nombre` (la etiqueta es el nombre).
+                findings=[] if p.id == f"{p.type}:{p.label}" else por_paso.get(p.id, []),
             )
             for p in dentro
         ],

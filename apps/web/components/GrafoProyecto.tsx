@@ -16,6 +16,10 @@ import { type CajaDibujo, DibujoGrafo, type FlechaDibujo, costeDe, tipoConocido 
  * dice cuántas veces se recorrió y lo que costaron esas llamadas; las que van a una
  * herramienta o a un subpaso no llevan dinero, porque el de debajo está en sus propias
  * flechas y sumarlo aquí lo contaría dos veces.
+ *
+ * Los pasos con un hallazgo del Diagnóstico de la misma ventana salen en ámbar, como en
+ * el grafo de la traza (D-203). Qué paso tiene cuál lo dice el backend, por `step_key`:
+ * un paso sin él no se marca.
  */
 export function GrafoProyecto({ project, days }: { project: string; days: number }) {
   const [grafo, setGrafo] = useState<ProjectGraph | null>(null);
@@ -59,7 +63,10 @@ export function GrafoProyecto({ project, days }: { project: string; days: number
         `${n.label} · ${tn("grafo.llamadas", n.calls, { n: number(n.calls) })}` +
         (n.models.length > 0 ? ` · ${n.models.join(", ")}` : "") +
         (coste ? ` · ${coste}` : "") +
-        (n.errors > 0 ? ` · ${tn("grafo.errores", n.errors, { n: number(n.errors) })}` : ""),
+        (n.errors > 0 ? ` · ${tn("grafo.errores", n.errors, { n: number(n.errors) })}` : "") +
+        (n.findings.length > 0
+          ? ` · ${tn("grafo.problemas", n.findings.length, { n: number(n.findings.length) })}`
+          : ""),
     };
   });
   const flechas: FlechaDibujo[] = grafo.edges.map((a) => {
@@ -81,7 +88,7 @@ export function GrafoProyecto({ project, days }: { project: string; days: number
       <DibujoGrafo
         cajas={cajas}
         flechas={flechas}
-        resaltados={new Set()}
+        resaltados={new Set(grafo.nodes.filter((n) => n.findings.length > 0).map((n) => n.id))}
         aria={t("grafo.aria", { pasos: grafo.nodes.length })}
         hueco={132}
       />

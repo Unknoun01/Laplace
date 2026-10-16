@@ -944,6 +944,8 @@ export const es = {
   "grafo.llamadas_other": "{n} llamadas",
   "grafo.errores_one": "{n} con error",
   "grafo.errores_other": "{n} con error",
+  "grafo.problemas_one": "{n} problema del Diagnóstico",
+  "grafo.problemas_other": "{n} problemas del Diagnóstico",
   "grafo.tipo.agent": "agente",
   "grafo.tipo.llm": "modelo",
   "grafo.tipo.tool": "herramienta",
