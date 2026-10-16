@@ -627,6 +627,11 @@ class CoverageFacts:
     sampled_traces: int = 0
     represented_traces: float = 0.0
     unseen_cost_usd: float = 0.0
+    #: La varianza estimada de `unseen_cost_usd` (Horvitz-Thompson, D-210): la suma de
+    #: `rate · (rate − 1) · coste²` de esas trazas. Y cuántas de ellas tienen alguna
+    #: llamada sin tarifa, que deja el coste en un suelo y no se puede escalar.
+    unseen_cost_var: float = 0.0
+    sampled_unpriced: int = 0
 
 
 def _sujeto(user_id: str | None, customer_id: str | None) -> tuple[str, str]:

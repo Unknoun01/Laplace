@@ -1984,9 +1984,12 @@ class ClickHouseStore:
             self._consulta(
                 f"""
                 SELECT count() AS trazas, sum(rate) AS representadas,
-                       sum(coste * (rate - 1)) AS no_visto
+                       sum(coste * (rate - 1)) AS no_visto,
+                       sum(rate * (rate - 1) * coste * coste) AS varianza,
+                       sum(sin_tarifa) AS sin_tarifa
                 FROM (
-                    SELECT trace_id, max(sample_rate) AS rate, sum(cost_total_usd) AS coste
+                    SELECT trace_id, max(sample_rate) AS rate, sum(cost_total_usd) AS coste,
+                           max(cost_unknown) AS sin_tarifa
                     FROM spans FINAL
                     WHERE {WINDOW_WHERE} AND sample_rate > 1
                     GROUP BY trace_id

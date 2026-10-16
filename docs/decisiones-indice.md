@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 209 decisiones.
+final. 210 decisiones.
 
 ## Coste, precios y caché
 
@@ -41,6 +41,7 @@ final. 209 decisiones.
 - [D-200](../DECISIONS.md#d-200--caché-semántica-la-misma-pregunta-con-la-misma-respuesta-hasta-x-y-sin-dinero-en-el-total) — Caché semántica: la misma pregunta con la misma respuesta, «hasta X» y sin dinero en el total
 - [D-208](../DECISIONS.md#d-208--los-diagnósticos-con-modelo-se-van-con-su-sujeto-y-el-rechazado-deja-su-coste) — Los diagnósticos con modelo se van con su sujeto, y el rechazado deja su coste
 - [D-209](../DECISIONS.md#d-209--la-demo-enseña-la-caché-compartida-entre-pasos) — La demo enseña la caché compartida entre pasos
+- [D-210](../DECISIONS.md#d-210--con-muestreo-se-estima-lo-que-falta-del-gasto-con-margen-nada-más) — Con muestreo, se estima lo que falta del gasto, con margen; nada más
 
 ## Detección: reglas y hallazgos
 
@@ -244,6 +245,7 @@ final. 209 decisiones.
 - [D-163](../DECISIONS.md#d-163--stripe-se-trae-solo-cada-día-y-el-cliente-desde-node-sin-sdk) — Stripe se trae solo cada día, y el cliente desde Node sin SDK
 - [D-173](../DECISIONS.md#d-173--retención-por-proyecto-y-borrar-lo-de-una-persona-o-un-cliente) — Retención por proyecto, y borrar lo de una persona o un cliente
 - [D-179](../DECISIONS.md#d-179--margen-por-cliente-lo-evitable-de-cada-uno-otras-monedas-y-su-columna) — Margen por cliente: lo evitable de cada uno, otras monedas y su columna
+- [D-210](../DECISIONS.md#d-210--con-muestreo-se-estima-lo-que-falta-del-gasto-con-margen-nada-más) — Con muestreo, se estima lo que falta del gasto, con margen; nada más
 
 ## Idiomas y textos
 
@@ -670,3 +672,4 @@ final. 209 decisiones.
 - [D-207](../DECISIONS.md#d-207--el-historial-de-los-preagregados-una-fila-por-conversación-paso-y-hora) — El historial, de los preagregados: una fila por conversación, paso y hora
 - [D-208](../DECISIONS.md#d-208--los-diagnósticos-con-modelo-se-van-con-su-sujeto-y-el-rechazado-deja-su-coste) — Los diagnósticos con modelo se van con su sujeto, y el rechazado deja su coste
 - [D-209](../DECISIONS.md#d-209--la-demo-enseña-la-caché-compartida-entre-pasos) — La demo enseña la caché compartida entre pasos
+- [D-210](../DECISIONS.md#d-210--con-muestreo-se-estima-lo-que-falta-del-gasto-con-margen-nada-más) — Con muestreo, se estima lo que falta del gasto, con margen; nada más

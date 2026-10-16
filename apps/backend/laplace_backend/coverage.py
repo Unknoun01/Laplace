@@ -25,11 +25,13 @@ Tres reglas de diseño:
 from __future__ import annotations
 
 import logging
+import math
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
 from . import cifras
+from .evals import Z_95
 from .storage.base import CoverageFacts
 from .textos import t, tn
 
@@ -42,6 +44,10 @@ logger = logging.getLogger("laplace.coverage")
 #: Llamadas a modelos por debajo de las cuales no se enseña ningún porcentaje. Con
 #: cuatro llamadas, «el 75 % de tus pasos se identifican» no informa de nada.
 MIN_CALLS_FOR_COVERAGE = 10
+
+#: Trazas elegidas al azar por debajo de las cuales no se estima lo que el muestreo dejó
+#: fuera: con menos, el intervalo normal no vale (D-210).
+MIN_TRAZAS_PARA_ESTIMAR = 30
 
 #: Por debajo de esto, una señal está mal y se avisa arriba del todo. No es un número
 #: redondo por casualidad: con una de cada diez llamadas sin identificar, las reglas
@@ -192,9 +198,23 @@ def build(facts: CoverageFacts, *, has_managed_prompts: bool = False) -> Coverag
             "cobertura.muestreo",
             facts.sampled_traces,
             representadas=cifras.miles(round(facts.represented_traces)),
-            no_visto=cifras.dinero(facts.unseen_cost_usd),
-        )
+        ) + " " + _lo_que_falta(facts)
     return cobertura
+
+
+def _lo_que_falta(facts: CoverageFacts) -> str:
+    """Cuánto costaría lo que el muestreo dejó fuera (D-210): Horvitz-Thompson con su
+    intervalo al 95 %, y sin cifra con poca muestra o con algo sin tarifa."""
+    if facts.sampled_traces < MIN_TRAZAS_PARA_ESTIMAR:
+        return t("cobertura.muestreo_pocas", minimo=MIN_TRAZAS_PARA_ESTIMAR)
+    if facts.sampled_unpriced:
+        return t("cobertura.muestreo_sin_tarifa")
+    margen = Z_95 * math.sqrt(facts.unseen_cost_var)
+    return t(
+        "cobertura.muestreo_estimado",
+        desde=cifras.dinero(max(0.0, facts.unseen_cost_usd - margen)),
+        hasta=cifras.dinero(facts.unseen_cost_usd + margen),
+    )
 
 
 def _verdict(signals: list[Signal]) -> tuple[Level, bool]:

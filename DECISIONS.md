@@ -5394,3 +5394,65 @@ que cero. Se rompió a propósito: no descontar lo del contexto fijo (falla la s
 verificar en las dos versiones (fallan las dos) y quitar la llamada (fallan las dos).
 No se han corrido las pruebas de ClickHouse ni las de pantalla (se saltan sin la interfaz
 exportada).
+
+### D-210 — Con muestreo, se estima lo que falta del gasto, con margen; nada más
+D-181 dejó las cifras como un suelo y una línea que decía «con lo que no llegó serían
+unos X más»: una estimación puntual sin margen ni muestra mínima, que con una sola traza
+elegida a un 10 % ya daba una cifra. Se decide qué se escala y cómo.
+
+**El gasto de la ventana sí se puede estimar con honradez.** El muestreo por cola no es
+un azar sobre todo el tráfico, sino por estratos:
+* Lo que falla, lo que pasa de `sample_keep_tokens` o `sample_keep_ms`, lo de evaluación
+  y lo que el SDK manda entero por sus límites llegan **siempre**, sin
+  `laplace.sample.rate`: pesan 1 y ya están medidos.
+* Lo demás se queda con probabilidad `1 / rate`, decidida por el `trace_id`, que no
+  depende de lo que la traza gaste ni de cómo acabe.
+
+Dentro de ese estrato es un muestreo de Bernoulli con probabilidad conocida, y el
+estimador de Horvitz-Thompson no tiene sesgo: lo que falta se estima como
+`Σ coste · (rate − 1)` sobre las trazas elegidas, que es lo que ya se calculaba. El
+sesgo hacia los errores y lo caro no lo estropea: esas trazas no se escalan, porque
+llegan todas. Y como lo caro llega entero, el coste de cada traza escalada está acotado
+(menos de 20 000 tokens), y la varianza no la dispara una sola traza.
+
+**Con su margen.** La varianza de ese estimador se estima sin sesgo con
+`Σ rate · (rate − 1) · coste²` sobre las mismas trazas. Se da el intervalo normal al
+95 % (`Z_95` de `evals.py`), cortado en cero por abajo: «serían entre A y B más». Nunca
+la cifra puntual sola.
+
+**Sin muestra suficiente, no hay cifra.** Con menos de 30 trazas elegidas al azar en la
+ventana (`MIN_TRAZAS_PARA_ESTIMAR`) la aproximación normal no vale, y la línea dice que
+son pocas para estimar cuánto falta, sin número.
+
+**Un modelo sin tarifa no cuesta cero.** Si alguna traza elegida al azar tiene una
+llamada sin tarifa, su coste es un suelo y multiplicarlo por `rate − 1` daría un suelo
+disfrazado de estimación. Entonces no se estima, y se dice por qué.
+
+**Qué no se escala, y por qué:**
+* **Los hallazgos y su ahorro.** Las reglas no son sumas: tienen umbrales, mínimos de
+  muestra, repeticiones entre trazas y comparaciones entre pasos. Multiplicar el ahorro
+  de un hallazgo por el peso supondría que lo que no llegó repite el patrón con la
+  misma frecuencia, y eso no se ha medido. Siguen siendo de lo que llegó, un suelo, y así
+  tampoco se cuenta dos veces un ahorro.
+* **Los totales, la proyección y las demás cifras de la pantalla.** No cambian: son lo
+  medido. La proyección a fin de mes sigue saliendo de lo medido y con su regla de no
+  proyectar desde menos de un día. La estimación no es una proyección en el tiempo
+  (habla de la misma ventana) y no alimenta ninguna otra cifra.
+* **Los recuentos** (llamadas, trazas): ya se dice a cuántas trazas representan las
+  elegidas, que es el único recuento que importa para leer la línea.
+
+**Cómo se distingue en la pantalla.** La cifra estimada sólo vive en la línea de
+muestreo del bloque de cobertura, que va delante del dinero (D-096), como intervalo y
+con la palabra «estimación». Ninguna cifra grande cambia, y ninguna escalada se pinta
+como medida. No hace falta tocar la web: la frase sale del servidor.
+
+**Lo que cuesta:** dos sumas más en la consulta de muestreo de cada almacén
+(`SUM(rate·(rate−1)·coste²)` y cuántas trazas elegidas tienen alguna llamada sin
+tarifa), dos campos en `CoverageFacts` y tres frases en los cinco idiomas.
+
+Pruebas (`test_redaccion_muestreo.py`): la varianza y las trazas elegidas sin tarifa en
+los dos almacenes; el intervalo en la frase, sin la cifra puntual sola; el corte en cero;
+y que con 29 trazas o con una sin tarifa no sale ningún importe. Se rompieron a propósito
+el margen, el mínimo de muestra, el caso sin tarifa, el corte en cero, el
+`rate · (rate − 1)` de la varianza y la cuenta de las trazas sin tarifa, y en todas falla
+alguna.
