@@ -3,7 +3,8 @@
 Las rutas siguen las dos familias de `api_cuentas.py`: `/api/auth/*` atiende a quien
 todavía no tiene sesión (empezar y terminar un SSO, gastar un enlace de verificación) y
 `/api/org/*` es de personas con sesión, con el rol comprobado en esa organización.
-SCIM, que habla el proveedor de identidad y no una persona, vive en `scim.py`.
+SCIM, que habla el proveedor de identidad y no una persona, vive en `scim.py`. SAML
+(D-211), en `saml.py`: aquí sólo empieza y vuelve, con el mismo `state` que OIDC.
 """
 
 from __future__ import annotations
@@ -18,8 +19,9 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from . import sso
+from . import saml, sso
 from .api_cuentas import _cuentas, _exigir_org, _ip, _local, _poner_cookie, _usuario
+from .scim import sincronizar_roles
 from .textos import t
 
 logger = logging.getLogger("laplace.api.empresa")
@@ -124,11 +126,25 @@ async def sso_start(request: Request, response: Response, body: SSOStartIn) -> d
     dominio = sso.dominio_de(body.email)
     org_id = await run_in_threadpool(cuentas.org_por_dominio, dominio)
     config = await run_in_threadpool(cuentas.config_sso, org_id) if org_id else None
-    if config is None or not config.client_secret:
+    es_saml = config is not None and config.protocol == "saml"
+    if config is None or not (config.idp_cert if es_saml else config.client_secret):
         raise HTTPException(status_code=404, detail=t("error.sin_sso"))
-    redirect_uri = f"{_base(request)}/api/auth/sso/callback"
+    if es_saml and not saml.disponible():
+        raise HTTPException(status_code=503, detail=t("error.saml_sin_xmlsec"))
     try:
-        inicio = await run_in_threadpool(sso.empezar, config, redirect_uri, body.email.strip())
+        if es_saml:
+            # La petición SAML no lleva nonce ni PKCE: su `ID` va en la columna del nonce
+            # y tiene que volver en el `InResponseTo`.
+            state = secrets.token_urlsafe(32)
+            url, request_id = await run_in_threadpool(
+                saml.empezar, config, _base(request), state
+            )
+            inicio = sso.Inicio(url=url, state=state, nonce=request_id, verifier="")
+        else:
+            inicio = await run_in_threadpool(
+                sso.empezar, config, f"{_base(request)}/api/auth/sso/callback",
+                body.email.strip(),
+            )
     except sso.SSOError as exc:
         logger.warning("sso: no se pudo empezar para %s: %s", org_id, exc)
         raise HTTPException(status_code=502, detail=t("error.sso_proveedor")) from exc
@@ -139,9 +155,11 @@ async def sso_start(request: Request, response: Response, body: SSOStartIn) -> d
         _seguro(body.next),
     )
     segura = _base(request).startswith("https://")
+    # SAML vuelve con un POST desde el proveedor, otro sitio: con `Lax` el navegador no
+    # mandaría la cookie. `None` exige `Secure`, así que en http se queda en `Lax`.
     response.set_cookie(
         sso.COOKIE_ESTADO, navegador, max_age=sso.DURACION_ESTADO_S, httponly=True,
-        secure=segura, samesite="lax", path="/api/auth/sso",
+        secure=segura, samesite="none" if es_saml and segura else "lax", path="/api/auth/sso",
     )
     return {"url": inicio.url}
 
@@ -151,24 +169,18 @@ async def sso_callback(
     request: Request, code: str = "", state: str = "", error: str = ""
 ) -> RedirectResponse:
     """La vuelta del proveedor. Siempre redirige: a donde iba, o a entrar con el motivo."""
-
-    def fuera(codigo: str) -> RedirectResponse:
-        r = RedirectResponse(f"/entrar?sso_error={codigo}", status_code=303)
-        r.delete_cookie(sso.COOKIE_ESTADO, path="/api/auth/sso")
-        return r
-
     if _local(request):
-        return fuera("local")
+        return _fuera("local")
     cuentas = _cuentas(request)
     navegador = request.cookies.get(sso.COOKIE_ESTADO, "")
     estado = await run_in_threadpool(cuentas.gastar_estado, state, navegador) if state else None
     if estado is None:
-        return fuera("estado")
+        return _fuera("estado")
     if error or not code:
-        return fuera("cancelado")
+        return _fuera("cancelado")
     config = await run_in_threadpool(cuentas.config_sso, estado["org_id"])
-    if config is None:
-        return fuera("estado")
+    if config is None or config.protocol != "oidc":
+        return _fuera("estado")
     try:
         persona = await run_in_threadpool(
             lambda: sso.terminar(
@@ -177,11 +189,27 @@ async def sso_callback(
             )
         )
     except sso.SSOError as exc:
-        logger.warning("sso: %s rechazado: %s", config.org_id, exc)
-        await run_in_threadpool(
-            cuentas.anotar, config.org_id, "", "sso_rechazado", exc.codigo, _ip(request)
-        )
-        return fuera(exc.codigo)
+        return await _rechazo(request, config.org_id, exc)
+    return await _abrir(request, config, persona, estado["next"])
+
+
+def _fuera(codigo: str) -> RedirectResponse:
+    r = RedirectResponse(f"/entrar?sso_error={codigo}", status_code=303)
+    r.delete_cookie(sso.COOKIE_ESTADO, path="/api/auth/sso")
+    return r
+
+
+async def _rechazo(request: Request, org_id: str, exc: sso.SSOError) -> RedirectResponse:
+    logger.warning("sso: %s rechazado: %s", org_id, exc)
+    await run_in_threadpool(
+        _cuentas(request).anotar, org_id, "", "sso_rechazado", exc.codigo, _ip(request)
+    )
+    return _fuera(exc.codigo)
+
+
+async def _abrir(request: Request, config: Any, persona: Any, siguiente: str) -> RedirectResponse:
+    """Lo común a OIDC y SAML una vez que el proveedor dijo quién es (D-182)."""
+    cuentas = _cuentas(request)
     usuario, motivo = await run_in_threadpool(
         cuentas.usuario_sso, config.org_id, persona, config.default_role
     )
@@ -190,17 +218,48 @@ async def sso_callback(
             cuentas.anotar, config.org_id, "", "sso_rechazado", f"{motivo}: {persona.email}",
             _ip(request),
         )
-        return fuera(motivo)
+        return _fuera(motivo)
     token = await run_in_threadpool(
         cuentas.abrir_sesion, usuario.id, request.headers.get("user-agent", "")
     )
     await run_in_threadpool(
         cuentas.anotar, config.org_id, usuario.id, "login_sso", "", _ip(request)
     )
-    respuesta = RedirectResponse(_seguro(estado["next"]), status_code=303)
+    respuesta = RedirectResponse(_seguro(siguiente), status_code=303)
     _poner_cookie(request, respuesta, token)
     respuesta.delete_cookie(sso.COOKIE_ESTADO, path="/api/auth/sso")
     return respuesta
+
+
+@router.post("/auth/sso/saml/acs")
+async def saml_acs(request: Request) -> RedirectResponse:
+    """La vuelta de SAML: un formulario que el navegador manda desde el proveedor.
+
+    Sin la cabecera propia (viene de otro sitio), así que está en `PUBLIC_PATHS`: lo que
+    la protege es la firma, el `state` de un solo uso atado a la cookie de este navegador,
+    el `InResponseTo` de esa petición y el `ID` de la aserción gastado (D-211)."""
+    if _local(request):
+        return _fuera("local")
+    cuerpo = urllib.parse.parse_qs((await request.body())[:500_000].decode("latin-1"))
+    relay = (cuerpo.get("RelayState") or [""])[0]
+    respuesta_saml = (cuerpo.get("SAMLResponse") or [""])[0]
+    cuentas = _cuentas(request)
+    navegador = request.cookies.get(sso.COOKIE_ESTADO, "")
+    estado = await run_in_threadpool(cuentas.gastar_estado, relay, navegador) if relay else None
+    if estado is None:
+        return _fuera("estado")
+    config = await run_in_threadpool(cuentas.config_sso, estado["org_id"])
+    if config is None or config.protocol != "saml":
+        return _fuera("estado")
+    try:
+        persona, asercion, caduca = await run_in_threadpool(
+            saml.terminar, config, _base(request), respuesta_saml, estado["nonce"]
+        )
+        if not await run_in_threadpool(cuentas.gastar_asercion, config.org_id, asercion, caduca):
+            raise sso.SSOError("token", f"aserción repetida: {asercion}")
+    except sso.SSOError as exc:
+        return await _rechazo(request, config.org_id, exc)
+    return await _abrir(request, config, persona, estado["next"])
 
 
 # ---------------------------------------------------------------------------------
@@ -214,6 +273,7 @@ def _estado_sso(request: Request, org_id: str) -> dict[str, Any]:
     base = _base(request)
     return {
         "configured": config is not None,
+        "protocol": config.protocol if config else "oidc",
         "issuer": config.issuer if config else "",
         "client_id": config.client_id if config else "",
         # El secreto no vuelve nunca: sólo si hay uno.
@@ -222,6 +282,12 @@ def _estado_sso(request: Request, org_id: str) -> dict[str, Any]:
         "enforce": bool(config and config.enforce),
         "domains": cuentas.dominios(org_id),
         "redirect_uri": f"{base}/api/auth/sso/callback",
+        # D-211: lo que el administrador pega en su proveedor SAML, y si se puede.
+        "sso_url": config.sso_url if config else "",
+        "idp_cert": config.idp_cert if config else "",
+        "saml_available": saml.disponible(),
+        "saml_entity_id": saml.entity_id(base),
+        "saml_acs_url": saml.acs(base),
         "scim_url": f"{base}/scim/v2",
         "scim_tokens": cuentas.tokens_scim(org_id),
     }
@@ -241,27 +307,46 @@ class SSOIn(BaseModel):
     client_secret: str | None = Field(default=None, max_length=2000)
     default_role: str = Field(default="miembro", pattern="^(lector|miembro|admin)$")
     enforce: bool = False
+    protocol: str = Field(default="oidc", pattern="^(oidc|saml)$")
+    #: SAML (D-211): `issuer` es el entityID del proveedor.
+    sso_url: str = Field(default="", max_length=1000)
+    idp_cert: str = Field(default="", max_length=20000)
 
 
 @router.put("/org/sso")
 async def put_sso(request: Request, body: SSOIn) -> dict[str, Any]:
     usuario = await run_in_threadpool(_exigir_org, request, body.org_id, "admin")
     issuer = body.issuer.strip().rstrip("/")
-    # Se comprueba ya, contra el proveedor: un emisor mal escrito se descubre aquí y no
-    # el día que alguien intenta entrar.
-    try:
-        await run_in_threadpool(sso.descubrir, issuer)
-    except sso.SSOError as exc:
-        raise HTTPException(
-            status_code=400, detail=t("error.sso_emisor", detalle=str(exc))
-        ) from exc
+    if body.protocol == "saml":
+        if not saml.disponible():
+            raise HTTPException(status_code=400, detail=t("error.saml_sin_xmlsec"))
+        # Un entityID es un identificador, no una URL que se pide: se guarda tal cual.
+        issuer = body.issuer.strip()
+        try:
+            saml.comprobar_config(issuer, body.sso_url.strip(), body.idp_cert)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400, detail=t("error.saml_config", detalle=str(exc))
+            ) from exc
+    else:
+        # Se comprueba ya, contra el proveedor: un emisor mal escrito se descubre aquí y
+        # no el día que alguien intenta entrar.
+        try:
+            await run_in_threadpool(sso.descubrir, issuer)
+        except sso.SSOError as exc:
+            raise HTTPException(
+                status_code=400, detail=t("error.sso_emisor", detalle=str(exc))
+            ) from exc
     cuentas = _cuentas(request)
     if body.enforce and not await run_in_threadpool(cuentas.dominios, body.org_id):
         raise HTTPException(status_code=400, detail=t("error.sso_sin_dominios"))
     secreto = body.client_secret.strip() if body.client_secret else None
     await run_in_threadpool(
-        cuentas.guardar_sso, body.org_id, issuer, body.client_id.strip(), secreto,
-        body.default_role, body.enforce,
+        lambda: cuentas.guardar_sso(
+            body.org_id, issuer, body.client_id.strip(), secreto, body.default_role,
+            body.enforce, protocolo=body.protocol, sso_url=body.sso_url.strip(),
+            cert=body.idp_cert.strip(),
+        )
     )
     await run_in_threadpool(
         cuentas.anotar, body.org_id, usuario.id, "configurar_sso", issuer, _ip(request)
@@ -318,6 +403,45 @@ async def create_scim_token(request: Request, body: ScimTokenIn) -> dict[str, An
     )
     # Sólo sale en esta respuesta: se guarda su hash.
     return {"id": token_id, "token": token}
+
+
+def _grupos(request: Request, org_id: str) -> dict[str, Any]:
+    return {"groups": [
+        {"id": g["id"], "display_name": g["display_name"], "role": g["role"],
+         "members": len(g["members"])}
+        for g in _cuentas(request).scim_grupos(org_id)
+    ]}
+
+
+@router.get("/org/scim-groups")
+async def get_scim_groups(request: Request, org_id: str) -> dict[str, Any]:
+    await run_in_threadpool(_exigir_org, request, org_id, "admin")
+    return await run_in_threadpool(_grupos, request, org_id)
+
+
+class ScimGroupIn(BaseModel):
+    org_id: str
+    group_id: str
+    #: '' es ninguno. Nunca propietario (D-211).
+    role: str = Field(pattern="^(|lector|miembro|admin)$")
+
+
+@router.put("/org/scim-groups")
+async def put_scim_group(request: Request, body: ScimGroupIn) -> dict[str, Any]:
+    """El rol que da un grupo del proveedor. Lo decide la organización, no el proveedor."""
+    usuario = await run_in_threadpool(_exigir_org, request, body.org_id, "admin")
+    cuentas = _cuentas(request)
+    miembros = await run_in_threadpool(
+        cuentas.rol_de_grupo, body.org_id, body.group_id, body.role
+    )
+    if miembros is None:
+        raise HTTPException(status_code=404, detail=t("error.grupo_scim"))
+    await run_in_threadpool(
+        cuentas.anotar, body.org_id, usuario.id, "rol_grupo_scim",
+        f"{body.group_id}: {body.role or '-'}", _ip(request),
+    )
+    await sincronizar_roles(cuentas, body.org_id, miembros)
+    return await run_in_threadpool(_grupos, request, body.org_id)
 
 
 @router.delete("/org/scim-tokens")

@@ -28,6 +28,10 @@ cloud = ["clickhouse-connect>=0.7", "psycopg[binary,pool]>=3.1", "cryptography>=
 # Firmar como GitHub App (el bot de PR, D-185) es RS256, que la biblioteca estándar no
 # hace. Va con la nube, que es donde vive la App; en local basta un token del usuario.
 github = ["cryptography>=42"]
+# SAML (D-211): python3-saml trae `xmlsec` y `lxml`, nativas, y las dos tienen que llevar
+# la misma libxml2. Sin ellas SAML está apagado y la interfaz lo dice; OIDC no las
+# necesita. `test_saml.py` se salta sin ellas, salvo la prueba de SAML apagado.
+saml = ["python3-saml>=1.16"]
 # `httpx2` lo pide el TestClient de Starlette para montar la app en memoria, y los dos
 # SDK de proveedor están aquí porque `test_proveedores_reales.py` los usa DE VERDAD:
 # cliente real, parseo real, lector de SSE real, con el transporte HTTP falseado. Si no

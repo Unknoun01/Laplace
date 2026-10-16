@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 211 decisiones.
+final. 212 decisiones.
 
 ## Coste, precios y caché
 
@@ -235,6 +235,7 @@ final. 211 decisiones.
 - [D-184](../DECISIONS.md#d-184--un-límite-de-gasto-y-de-bucles-en-el-sdk-con-la-misma-cuenta-que-la-traza) — Un límite de gasto y de bucles en el SDK, con la misma cuenta que la traza
 - [D-189](../DECISIONS.md#d-189--las-pantallas-del-plano-de-control-tope-y-parada-en-ajustes-el-agente-entero-en-el-panel) — Las pantallas del plano de control: Tope y parada en Ajustes, el agente entero en el Panel
 - [D-190](../DECISIONS.md#d-190--cache_control-y-un-tope-de-vueltas-escritos-sobre-el-árbol-de-sintaxis) — `cache_control` y un tope de vueltas, escritos sobre el árbol de sintaxis
+- [D-211](../DECISIONS.md#d-211--saml-con-xmlsec-opcional-y-los-grupos-de-scim-dan-los-roles) — SAML con `xmlsec` opcional, y los grupos de SCIM dan los roles
 
 ## Margen por cliente
 
@@ -677,3 +678,4 @@ final. 211 decisiones.
 - [D-209](../DECISIONS.md#d-209--la-demo-enseña-la-caché-compartida-entre-pasos) — La demo enseña la caché compartida entre pasos
 - [D-210](../DECISIONS.md#d-210--con-muestreo-se-estima-lo-que-falta-del-gasto-con-margen-nada-más) — Con muestreo, se estima lo que falta del gasto, con margen; nada más
 - [D-212](../DECISIONS.md#d-212--el-diagnóstico-de-siete-días-a-diez-millones-de-spans-al-día-medido-no-arreglado) — El Diagnóstico de siete días a diez millones de spans al día: medido, no arreglado
+- [D-211](../DECISIONS.md#d-211--saml-con-xmlsec-opcional-y-los-grupos-de-scim-dan-los-roles) — SAML con `xmlsec` opcional, y los grupos de SCIM dan los roles

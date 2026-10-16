@@ -452,13 +452,27 @@ def _recorrido(cuentas, sufijo: str) -> dict:
     nora, ya = cuentas.scim_alta(org, f"nora-{sufijo}@ej{sufijo}.com", "N", "e1", "miembro",
                                  True)
     cuentas.scim_activar(org, nora.id, False, "miembro")
+    luis_rol = cuentas.rol_en(org, luis.id)
+    # D-211: un grupo con rol manda sobre quien gestiona el proveedor.
+    grupo = cuentas.scim_crear_grupo(org, "Devs", "g1")
+    cuentas.scim_editar_grupo(org, grupo, "Devs", "g1", {luis.id})
+    cuentas.rol_de_grupo(org, grupo, "admin")
+    rol_grupo = cuentas.sincronizar_rol(org, luis.id)
+    # D-211: SAML se guarda en la misma configuración, y una aserción se gasta una vez.
+    cuentas.guardar_sso(org, "urn:idp", "", None, "miembro", True, protocolo="saml",
+                        sso_url="https://idp/sso", cert="CERT")
+    c = cuentas.config_sso(org)
+    asercion = [cuentas.gastar_asercion(org, f"_a-{sufijo}", time.time() + 60) for _ in "ab"]
     return {
+        "saml": (c.protocol, c.issuer, c.sso_url, c.idp_cert, c.default_role),
+        "asercion": asercion,
+        "rol_grupo": rol_grupo,
         "org": org,
         "antes": antes,
         "verificado": verificado,
         "estado": estado,
         "gastado": gastado,
-        "luis_rol": cuentas.rol_en(org, luis.id),
+        "luis_rol": luis_rol,
         "motivo": motivo,
         "obligado": cuentas.sso_obligado(u.id, u.email),
         "scim_org": cuentas.org_de_token_scim(token_scim) == org,
@@ -486,14 +500,18 @@ def test_lo_mismo_en_postgres_y_en_sqlite(tmp_path):
     a, b = _recorrido(nube, sufijo), _recorrido(local, sufijo + "l")
     try:
         for clave in ("antes", "verificado", "gastado", "luis_rol", "motivo", "obligado",
-                      "scim_org", "ya"):
+                      "scim_org", "ya", "rol_grupo", "saml", "asercion"):
             assert a[clave] == b[clave], clave
         assert a["estado"]["next"] == "/x" and a["gastado"] is None and a["verificado"]
         assert a["luis_rol"] == "lector" and a["obligado"] is True
+        assert a["rol_grupo"] == "admin" and a["asercion"] == [True, False]
+        assert a["saml"] == ("saml", "urn:idp", "https://idp/sso", "CERT", "miembro")
         assert a["nora"] == [(f"nora-{sufijo}@ej{sufijo}.com", False)]
     finally:
+        nube._ejecutar("DELETE FROM scim_group_members WHERE group_id IN "
+                       "(SELECT id FROM scim_groups WHERE org_id = ?)", (a["org"],))
         for tabla in ("sso_configs", "sso_domains", "sso_identities", "scim_tokens",
-                      "scim_users", "memberships"):
+                      "scim_users", "scim_groups", "saml_assertions", "memberships"):
             nube._ejecutar(f"DELETE FROM {tabla} WHERE org_id = ?", (a["org"],))
         nube._ejecutar("DELETE FROM orgs WHERE id = ?", (a["org"],))
         nube._ejecutar("DELETE FROM users WHERE email LIKE ?", (f"%-{sufijo}@ej{sufijo}.com",))

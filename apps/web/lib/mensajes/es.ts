@@ -780,6 +780,7 @@ export const es = {
   "ent.sso_error.proveedor": "El proveedor de identidad no responde.",
   "ent.sso_error.sin_invitacion": "Ya tienes cuenta con ese correo, pero no en esta organización: pide una invitación y luego entra con SSO.",
   "ent.sso_error.fuera": "Ya no eres de esa organización.",
+  "ent.sso_error.saml": "SAML no está disponible en esta instalación. Avisa a quien la administra.",
   "ent.sso_error.otro": "No se pudo entrar con SSO.",
   "verif.ok": "Correo verificado",
   "verif.mal": "No se pudo verificar",

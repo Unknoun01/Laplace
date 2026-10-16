@@ -353,7 +353,9 @@ def test_el_preflight_de_cors_pasa_pero_no_trae_datos(cerrado):
 
 def test_la_lista_blanca_es_corta_y_explicita():
     """Si esta lista crece, que sea con un diff que alguien tenga que aprobar."""
-    assert auth.PUBLIC_PATHS == frozenset({"/health", "/api/github/webhook"})
+    assert auth.PUBLIC_PATHS == frozenset(
+        {"/health", "/api/github/webhook", "/api/auth/sso/saml/acs"}
+    )
 
 
 def test_el_webhook_de_github_no_pide_clave_pero_si_firma(cerrado):

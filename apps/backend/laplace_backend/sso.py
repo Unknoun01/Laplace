@@ -1,10 +1,8 @@
 """Entrar con el proveedor de identidad de la organización, por OpenID Connect (D-182).
 
 Okta, Entra ID, Google Workspace, OneLogin, Auth0, Keycloak y JumpCloud hablan OIDC, y
-OIDC se puede hacer bien sin dependencias. SAML no está, y es a propósito: verificar una
-firma XML a mano es justo donde los inicios de sesión se rompen (los ataques de
-*signature wrapping*), y hacerlo bien pide `xmlsec`, una biblioteca nativa que no
-queremos en cada instalación. Ver D-182.
+OIDC se puede hacer bien sin dependencias. SAML, que pide `xmlsec`, está en `saml.py` y
+es opcional (D-211).
 
 Cómo se hace, y por qué así:
 
@@ -72,6 +70,10 @@ class ConfigSSO:
     #: Los miembros con correo de estos dominios no pueden entrar con contraseña.
     enforce: bool = False
     domains: list[str] = field(default_factory=list)
+    #: D-211: `saml` usa `issuer` como entityID del proveedor, `sso_url` e `idp_cert`.
+    protocol: str = "oidc"
+    sso_url: str = ""
+    idp_cert: str = ""
 
 
 def normalizar_dominio(dominio: str) -> str:

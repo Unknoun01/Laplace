@@ -771,6 +771,7 @@ export const zh: Mensajes = {
   "ent.sso_error.proveedor": "身份提供商没有响应。",
   "ent.sso_error.sin_invitacion": "你已有该邮箱的账号，但不在此组织中：请先申请邀请，再使用 SSO 登录。",
   "ent.sso_error.fuera": "你已不属于该组织。",
+  "ent.sso_error.saml": "此安装不支持 SAML。请联系其管理员。",
   "ent.sso_error.otro": "无法使用 SSO 登录。",
   "verif.ok": "邮箱已验证",
   "verif.mal": "无法验证",
