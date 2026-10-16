@@ -5321,3 +5321,81 @@ sesiones, contar dos veces las trazas que cruzan, decidir con lo que sale en cru
 copias contadas por hora, no ensuciar las horas al crear la tabla y pedir las trazas sin
 la última versión de cada span. Esta última no mordía hasta añadir la prueba del lote
 reenviado.
+
+### D-212 — El Diagnóstico de siete días a diez millones de spans al día: medido, no arreglado
+El encargo era bajar el Diagnóstico de 7 días en ClickHouse, que según D-177 tardaba
+6 s con diez millones de spans al día, guardando por hora los recuentos de ejecuciones
+distintas y las medianas (la pista de la hoja de ruta). Antes de optimizar se midió, y
+la premisa ya no vale: desde D-177 han entrado cinco lecturas que van en crudo (D-178,
+D-193 a D-196), y el historial de D-207 lee casi la ventana entera para las trazas que
+cruzan. Los recuentos y las medianas son una parte pequeña del coste. Se decidió dejar
+la medida escrita y no tocar código: cada pieza es un cambio con su diseño y sus
+pruebas.
+
+**Cómo se midió.** `scripts/carga.py --spans 10000000 --dias 7` (72,5 millones de spans,
+6,1 GiB; la mitad, del proyecto grande; las 169 horas de preagregados, calculadas en
+236 s). El Diagnóstico entero, tres veces, con la ventana como la de la API (empieza en
+minuto entero y acaba a destiempo, a media hora del último span), y cada consulta en
+`system.query_log`. Fue en este portátil (ClickHouse en Docker, 16 hilos, 9,7 GB) y no
+en el contenedor de 4 núcleos de D-177. Con mucho ruido: ClickHouse gasta del 90 al
+130 % de CPU sin ninguna consulta, porque sus tablas de registro (`text_log`, 1,2 GiB;
+`processors_profile_log`, 630 MiB) no tienen tope. Por eso dos tandas sobre los mismos
+datos dieron 59–76 s y 118–181 s.
+
+| | 1 día | 7 días |
+|---|---|---|
+| Diagnóstico entero | 19–35 s | 59–181 s |
+| historial (`history_groups`) | 4,2 s | 38 s; una consulta de 33 s y **3,8 GiB** sobre 39 millones de filas |
+| caché entre pasos (`cacheable_groups`) | 2,4 s | 19 s; 70 millones de filas |
+| JSON roto (`json_retry_groups`) | 2,3 s | 18 s; 70 millones de filas |
+| truncadas (`truncated_groups`) | 2,3 s | 15 s; 70 millones de filas |
+| bucles (`loop_groups`) | 1,2 s | 10,5 s; 37 millones de filas, 1,4 GiB |
+| cobertura (`coverage`) | 1,5 s | 8,5 s |
+| aplazables (`deferrable_groups`) | 0,8 s | 7,2 s |
+| repeticiones (`repeated_groups`) | 1,2 s | 5,3 s; 37 millones de filas |
+| uso por paso (`model_usage`) | 1,3 s | 4,7 s |
+| resumen y p95 (`summarize_window`) | 1,0 s | 4,0 s |
+
+(Los segundos por lectura son de la tanda lenta; el reparto es el mismo en las dos.)
+
+**Dónde se va el tiempo, consulta a consulta:**
+
+* **Las tres lecturas en crudo** (caché, JSON, truncadas) recorren `spans` entero dos
+  veces cada una: 70 millones de filas. D-197 las midió a 0,78 s con 500.000 spans al
+  día, y crecen con el volumen.
+* **El historial** compone bien `pre_historial`, pero lo crudo de las trazas que cruzan
+  (`trace_id IN pedir`) lee 39 millones de filas y pide 3,8 GiB. D-207 avisó de que esto
+  crecería; con este volumen, una sola consulta pasa de lo que tumbó Docker en D-142.
+* **Bucles y repeticiones** leen 37 millones de spans, aunque casi todo sale de
+  `pre_bucles` y `pre_repes`. Es la búsqueda de candidatas de los bordes (`_CANDIDATAS`):
+  las trazas que cruzan se buscan entre `cruce_desde` y `cruce_hasta`, que van del
+  primer tramo crudo al último. Con un borde a cada lado de la ventana, eso es la semana
+  entera. Acotarlo a cada borde más el margen no es exacto (pierde una pareja con spans
+  en el borde y en una hora limpia a más de una hora), así que habría que sacar de
+  `pre_trazas` las trazas de las horas limpias.
+* **Lo que señalaba la pista**, los recuentos exactos y las medianas: el uso por paso
+  (4,4 s, 1 GiB), las ejecuciones por paso de la cobertura (4,1 s), las trazas que cruzan
+  del historial (2,4 s), el p95 (2,1 s), los prompts (2,1 s) y el resumen (1,7 s). Son
+  unos 15 s de 60–180.
+
+**Lo pensado para los recuentos, sin hacer.** Por hora, cuántas trazas «solas» (sin
+spans en otra hora, buscadas en `spans`) tiene cada grupo, y aparte las que cruzan. Al
+calcular una hora, si una traza suya está en otra hora que no la tiene marcada, esa otra
+hora se ensucia. Al leer: la suma de las solas, más `uniqExact` de las que cruzan y de
+lo crudo, menos las de lo crudo que ya contaban como solas en una hora limpia (la hora
+en curso, cuando una traza empieza antes). Las medianas, exactas, con pares (valor,
+cuenta) por hora y la posición `floor(n/2)` que usa `quantileExact`. El p95 usa
+`quantile`, que es aproximado y no siempre da lo mismo, así que no se puede exigir que
+salga idéntico.
+
+**Lo que queda, por orden de lo que pesa:**
+1. las tres lecturas en crudo (caché, JSON, truncadas), precalculadas por hora como el
+   historial;
+2. la memoria del historial con las trazas que cruzan (el paso que D-207 dejó escrito);
+3. las candidatas de bucles y repeticiones, desde `pre_trazas`;
+4. los recuentos y las medianas, con el diseño de arriba;
+5. un tope (TTL) para las tablas de registro de ClickHouse, que meten el ruido en todas
+   las medidas.
+
+El objetivo de 1,5 s para el día tampoco se cumple ya: 19–35 s aquí. Hay que medir
+otra vez en el contenedor de 4 núcleos antes de dar ninguna cifra por buena.
