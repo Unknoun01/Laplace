@@ -10,6 +10,7 @@ reenviados, y el juez con la respuesta de la llamada como referencia.
 from __future__ import annotations
 
 import importlib
+import json
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -252,7 +253,9 @@ def test_lo_que_no_se_reenvia_se_cuenta_por_motivo(local):
     conjunto = _conjunto(local, step_key=PASO)
     fuera = local.get(f"/api/datasets/{conjunto['id']}/replay").json()["excluded"]
     assert fuera == {
-        "herramientas": 3,
+        # Las tres con herramientas de tr00 no son una conversación: ninguna continúa
+        # a otra (D-205).
+        "herramientas_sin_cadena": 3,
         "mensajes_no_texto": 2,
         "fallo": 1,
         "sin_respuesta": 1,
@@ -414,3 +417,239 @@ def test_el_juez_compara_con_la_respuesta_de_la_llamada(local, monkeypatch):
     assert vistos[trazas[0]] == "facturación"
     # Las demás, con la referencia de su caso, como siempre.
     assert vistos[trazas[1]] == "Te la reenvío."
+
+
+# ---------------------------------------------------------------------------------
+# Con herramientas: la conversación entera, con los resultados grabados (D-205)
+# ---------------------------------------------------------------------------------
+
+PASO_H = "resolver"
+SISTEMA_H = "Resuelve el ticket. Usa buscar_factura si hace falta."
+RESULTADO = "factura 42: pagada el 3 de octubre"
+FINAL = "Ya está pagada."
+HERRAMIENTAS = {
+    "openai": [
+        {
+            "type": "function",
+            "function": {
+                "name": "buscar_factura",
+                "parameters": {"type": "object", "properties": {"numero": {"type": "integer"}}},
+            },
+        }
+    ],
+    "anthropic": [
+        {
+            "name": "buscar_factura",
+            "input_schema": {"type": "object", "properties": {"numero": {"type": "integer"}}},
+        }
+    ],
+}
+
+
+def _peticion(proveedor: str, id_: str = "call_a", numero: int = 42) -> dict:
+    """Lo que el original pidió: una búsqueda de factura, en el formato de cada uno."""
+    if proveedor == "anthropic":
+        return {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": id_,
+                    "name": "buscar_factura",
+                    "input": {"numero": numero},
+                }
+            ],
+        }
+    return {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": id_,
+                "type": "function",
+                "function": {"name": "buscar_factura", "arguments": f'{{"numero": {numero}}}'},
+            }
+        ],
+    }
+
+
+def _resultado(proveedor: str, id_: str = "call_a", texto: str = RESULTADO) -> dict:
+    if proveedor == "anthropic":
+        return {
+            "role": "user",
+            "content": [{"type": "tool_result", "tool_use_id": id_, "content": texto}],
+        }
+    return {"role": "tool", "tool_call_id": id_, "content": texto}
+
+
+def _bucle(trace_id: str, proveedor: str = "openai", *, entre: list | None = None) -> list[Span]:
+    """Un agente que busca la factura y contesta: dos vueltas del paso «resolver».
+
+    `entre` es lo que el agente mete entre la petición y la segunda vuelta; por
+    defecto, sólo el resultado de la herramienta."""
+    raiz = Span(
+        span_id=_id(),
+        trace_id=trace_id,
+        project_id="local",
+        name="atender_ticket",
+        type="agent",
+        status="ok",
+        start_time=AHORA,
+        end_time=AHORA + timedelta(seconds=3),
+        duration_ms=3000.0,
+        input="¿está pagada la factura 42?",
+        output=FINAL,
+    )
+    inicio = [
+        {"role": "system", "content": SISTEMA_H},
+        {"role": "user", "content": f"Ticket {trace_id}: ¿está pagada la factura 42?"},
+    ]
+    primera = _llm(
+        trace_id, raiz.span_id, paso=PASO_H, mensajes=inicio, salida=[_peticion(proveedor)]
+    )
+    segunda = _llm(
+        trace_id,
+        raiz.span_id,
+        paso=PASO_H,
+        mensajes=[*inicio, _peticion(proveedor), *(entre or [_resultado(proveedor)])],
+        salida=[{"role": "assistant", "content": FINAL}],
+        start_time=AHORA + timedelta(seconds=1),
+    )
+    for span, (ent, sal, coste) in zip(
+        (primera, segunda), ((500, 10, 0.001), (600, 8, 0.0012)), strict=True
+    ):
+        assert span.llm is not None
+        span.llm.system = proveedor
+        span.llm.usage = TokenUsage(input_tokens=ent, output_tokens=sal)
+        span.llm.cost = Cost(total_usd=coste)
+        span.attributes["laplace.request.tools"] = json.dumps(HERRAMIENTAS[proveedor])
+    return [raiz, primera, segunda]
+
+
+@pytest.fixture
+def con_herramientas(tmp_path, monkeypatch):
+    db = tmp_path / "laplace.db"
+    store = SQLiteStore(db)
+    store.migrate()
+    store.insert_spans(_bucle("th00") + _bucle("th01", "anthropic"))
+    monkeypatch.setenv("LAPLACE_STORE", "sqlite")
+    monkeypatch.setenv("LAPLACE_SQLITE_PATH", str(db))
+    monkeypatch.setenv("LAPLACE_POSTGRES_ENABLED", "false")
+    from laplace_backend import config, main
+
+    config.get_settings.cache_clear()
+    importlib.reload(main)
+    with TestClient(main.app) as client:
+        client.store = store  # type: ignore[attr-defined]
+        yield client
+    config.get_settings.cache_clear()
+
+
+def _cadenas(client) -> dict:
+    conjunto = _conjunto(client, step_key=PASO_H)
+    return client.get(f"/api/datasets/{conjunto['id']}/replay").json()
+
+
+def test_una_conversacion_con_herramientas_se_entrega_entera(con_herramientas):
+    cuerpo = _cadenas(con_herramientas)
+    assert cuerpo["calls"] == [] and cuerpo["excluded"] == {}
+    por_traza = {c["trace_id"]: c for c in cuerpo["chains"]}
+    cadena = por_traza["th00"]
+    # El punto de partida es la entrada de la primera vuelta, tal cual.
+    assert [m["role"] for m in cadena["messages"]] == ["system", "user"]
+    assert cadena["tools"] == HERRAMIENTAS["openai"]
+    assert cadena["system"] == "openai"
+    # Lo que pidió el original, con lo que le devolvió la herramienta.
+    assert cadena["recorded"] == [
+        {
+            "id": "call_a",
+            "name": "buscar_factura",
+            "arguments": '{"numero": 42}',
+            "result": _resultado("openai"),
+            "turn": 0,
+        }
+    ]
+    assert cadena["output"] == FINAL
+    # Las dos vueltas, para que la tirada original cueste el bucle entero.
+    assert len(cadena["span_ids"]) == 2
+    assert cadena["cost_usd"] == pytest.approx(0.0022)
+    assert cadena["input_tokens"] == 600 and cadena["output_tokens"] == 10
+    assert cadena["total_input_tokens"] == 1100 and cadena["total_output_tokens"] == 18
+    assert cadena["params"] == {"temperature": 0, "max_tokens": 20}
+
+    anthropic = por_traza["th01"]
+    assert anthropic["system"] == "anthropic"
+    assert anthropic["recorded"][0]["arguments"] == {"numero": 42}
+    assert anthropic["recorded"][0]["result"] == _resultado("anthropic")["content"][0]
+
+
+def _motivo(client, spans: list[Span]) -> dict:
+    client.store.insert_spans(spans)
+    return _cadenas(client)
+
+
+def test_si_el_agente_mete_otra_cosa_entre_vueltas_no_es_una_conversacion(con_herramientas):
+    cuerpo = _motivo(
+        con_herramientas,
+        _bucle("th02", entre=[_resultado("openai"), {"role": "user", "content": "¿Y bien?"}]),
+    )
+    assert {c["trace_id"] for c in cuerpo["chains"]} == {"th00", "th01"}
+    assert cuerpo["excluded"] == {"herramientas_sin_cadena": 2}
+
+
+def test_si_cambian_las_herramientas_no_es_una_conversacion(con_herramientas):
+    spans = _bucle("th02")
+    spans[2].attributes["laplace.request.tools"] = "[]"
+    assert _motivo(con_herramientas, spans)["excluded"] == {"herramientas_sin_cadena": 2}
+
+
+def test_si_una_vuelta_no_continua_la_anterior_no_es_una_conversacion(con_herramientas):
+    spans = _bucle("th02")
+    assert spans[2].llm is not None
+    spans[2].llm.input_messages[1] = {"role": "user", "content": "otra pregunta"}
+    assert _motivo(con_herramientas, spans)["excluded"] == {"herramientas_sin_cadena": 2}
+
+
+def test_una_peticion_sin_su_resultado_no_se_reenvia(con_herramientas):
+    """Sin el resultado grabado, simularlo sería inventarlo."""
+    spans = _bucle("th02", entre=[_resultado("openai", "call_b")])
+    assert _motivo(con_herramientas, spans)["excluded"] == {"herramientas_sin_grabar": 2}
+
+
+def test_herramientas_recortadas_no_se_reenvian(con_herramientas):
+    spans = _bucle("th02")
+    for span in spans[1:]:
+        span.attributes["laplace.request.tools"] = '[{"type": "function", "funct…'
+    assert _motivo(con_herramientas, spans)["excluded"] == {"herramientas_sin_grabar": 2}
+
+
+def test_si_el_original_no_llego_a_contestar_no_hay_referencia(con_herramientas):
+    spans = _bucle("th02")
+    assert spans[2].llm is not None
+    spans[2].llm.output_messages = [_peticion("openai", "call_b")]
+    assert _motivo(con_herramientas, spans)["excluded"] == {"sin_respuesta": 2}
+
+
+def test_un_formato_que_no_se_lee_no_se_reenvia(con_herramientas):
+    """La API Responses guarda los resultados como elementos sin rol."""
+    spans = _bucle(
+        "th02", entre=[{"type": "function_call_output", "call_id": "call_a", "output": "x"}]
+    )
+    assert _motivo(con_herramientas, spans)["excluded"] == {"herramientas_formato": 2}
+
+
+def test_cada_peticion_sabe_en_que_vuelta_la_pidio_el_original(con_herramientas):
+    """Dos búsquedas seguidas: la segunda puede depender de la primera, y el SDK no
+    deja reordenarlas."""
+    spans = _bucle(
+        "th02",
+        entre=[
+            _resultado("openai"),
+            _peticion("openai", "call_b", numero=43),
+            _resultado("openai", "call_b", texto="factura 43: pendiente"),
+        ],
+    )
+    cuerpo = _motivo(con_herramientas, spans)
+    cadena = next(c for c in cuerpo["chains"] if c["trace_id"] == "th02")
+    assert [(g["id"], g["turn"]) for g in cadena["recorded"]] == [("call_a", 0), ("call_b", 1)]
+    assert cadena["recorded"][1]["result"]["content"] == "factura 43: pendiente"

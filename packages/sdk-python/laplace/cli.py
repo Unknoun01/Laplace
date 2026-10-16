@@ -178,6 +178,11 @@ def comando_replay(args: argparse.Namespace) -> int:
             f"{resultado.cases_failed} ejecuciones han fallado al reenviarlas "
             "y cuentan como fallo."
         )
+    if resultado.cases_cut:
+        print(
+            f"De ellas, {resultado.cases_cut} se han cortado: el modelo pidió una herramienta "
+            "o unos argumentos que la traza no grabó, y no se inventa qué habría devuelto."
+        )
     if resultado.judged:
         print(f"El juez da por buenas {resultado.passed} de {resultado.judged} respuestas "
               f"(juzgar ha costado {resultado.judge_cost_usd:.4f} $).")

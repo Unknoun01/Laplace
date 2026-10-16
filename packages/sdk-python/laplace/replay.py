@@ -25,8 +25,13 @@ Tres garantías, por este orden:
 3. **Con permiso.** Antes de gastar se dice cuántas llamadas, lo que costaron y lo que
    costarán como mucho, y se pregunta. `yes=True` (o `--si`) es para quien ya lo sabe.
 
-Sólo se reenvía lo que no puede tener efectos: llamadas hoja del paso, sin
-herramientas, con los mensajes en texto. Lo demás se cuenta por motivo.
+Sólo se reenvía lo que no puede tener efectos: llamadas hoja del paso, con los mensajes
+en texto. Lo demás se cuenta por motivo.
+
+Las que usan herramientas se repiten como la conversación entera (D-205): el modelo
+nuevo pide herramientas y recibe, como resultado, el que quedó grabado en la traza. La
+herramienta de verdad no se ejecuta nunca. Si pide una herramienta o unos argumentos que
+no se grabaron en ese punto, no se inventa nada: el caso se corta y cuenta como fallo.
 
 El resultado son dos tiradas del mismo conjunto: «original», que apunta a las llamadas
 reenviadas dentro de las trazas reales (sin gastar nada), y la del modelo nuevo. Se
@@ -37,6 +42,7 @@ llamadas a los dos lados.
 from __future__ import annotations
 
 import inspect
+import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -62,6 +68,9 @@ SALIDA_MAXIMA = 4096
 #: Por qué no se reenvía una llamada, dicho para una persona.
 MOTIVOS = {
     "herramientas": "usa herramientas",
+    "herramientas_sin_cadena": "sus vueltas con herramientas no son una sola conversación",
+    "herramientas_sin_grabar": "la traza no grabó lo que hace falta para simular sus herramientas",
+    "herramientas_formato": "sus herramientas van en un formato que no es el del modelo de destino",
     "mensajes_no_texto": "sus mensajes no son sólo texto (o se guardaron recortados)",
     "fallo": "falló",
     "sin_respuesta": "no dejó respuesta con la que comparar",
@@ -90,6 +99,8 @@ class Plan:
     max_usd: float
     excluded: dict[str, int] = field(default_factory=dict)
     rate_verified: bool = True
+    #: Ejecuciones que se repiten como conversación con herramientas (D-205).
+    chains: int = 0
 
     def describe(self) -> str:
         lineas = [
@@ -101,6 +112,12 @@ class Plan:
             f"como mucho {_dinero(self.worst_usd)}.",
             f"  Tope: {_dinero(self.max_usd)}. Se para antes de pasarlo.",
         ]
+        if self.chains:
+            lineas.append(
+                f"  {self.chains} usan herramientas: cada resultado es el que grabó la traza "
+                "y ninguna herramienta se ejecuta. Si el modelo pide otra cosa, ese caso se "
+                "corta y cuenta como fallo."
+            )
         if self.worst_usd > self.max_usd:
             lineas.append(
                 "  Lo peor pasa del tope: puede que no se reenvíen todas y la prueba "
@@ -128,6 +145,8 @@ class ReplayResult:
     #: Llamadas que no se hicieron porque habrían pasado del tope.
     calls_skipped_by_cap: int = 0
     cases_failed: int = 0
+    #: De los fallidos, los cortados porque el modelo pidió algo que no se grabó.
+    cases_cut: int = 0
     #: Lo gastado, calculado con la tarifa y los tokens que devolvió el proveedor. Es un
     #: techo: no descuenta la caché. El coste medido sale en la comparación.
     spent_usd: float = 0.0
@@ -167,6 +186,20 @@ def _peor(llamada: dict[str, Any], tarifa: dict[str, Any]) -> float:
     )
 
 
+def _peor_cadena(cadena: dict[str, Any], tarifa: dict[str, Any]) -> float:
+    """Lo peor de una conversación con herramientas (D-205).
+
+    Con N peticiones grabadas hay como mucho N + 1 vueltas: cada vuelta con peticiones
+    gasta al menos una grabada o corta. La entrada de cada vuelta cabe en la de la última
+    vuelta original, con margen (lleva la de partida y todos los resultados), más lo que
+    el modelo nuevo respondió en las anteriores, que es como mucho la salida máxima.
+    """
+    maximo = _salida_maxima(cadena)
+    entrada = int(cadena.get("input_tokens") or 0) * MARGEN_ENTRADA
+    vueltas = len(cadena.get("recorded") or []) + 1
+    return sum(_coste(entrada + k * maximo, maximo, tarifa) for k in range(vueltas))
+
+
 # ---------------------------------------------------------------------------------
 # Proveedores
 # ---------------------------------------------------------------------------------
@@ -201,37 +234,170 @@ def _muestreo(metodo: Any) -> tuple[str, ...]:
     return tuple(k for k in ("temperature", "top_p") if k in aceptados)
 
 
-def _llamar(
-    cliente: Any, provider: str, model: str, llamada: dict[str, Any]
-) -> tuple[str, int, int]:
-    """Reenvía una llamada. Devuelve (texto, tokens de entrada, tokens de salida)."""
-    params = llamada.get("params", {})
+def _pedir(
+    cliente: Any,
+    provider: str,
+    model: str,
+    mensajes: list[dict[str, Any]],
+    maximo: int,
+    params: dict[str, Any],
+    tools: list[Any] | None = None,
+) -> tuple[Any, int, int]:
+    """Una petición al modelo. Devuelve (respuesta, tokens de entrada, tokens de salida)."""
     metodo = cliente.messages.create if provider == "anthropic" else cliente.chat.completions.create
     extra = {k: params[k] for k in _muestreo(metodo) if k in params}
-    maximo = _salida_maxima(llamada)
-    mensajes = llamada["messages"]
+    if tools:
+        extra["tools"] = tools
     if provider == "anthropic":
-        sistema = "\n\n".join(
-            m["content"] for m in mensajes if m["role"] in ("system", "developer")
-        )
+        sistema = [m["content"] for m in mensajes if m["role"] in ("system", "developer")]
         resto = [m for m in mensajes if m["role"] not in ("system", "developer")]
         if sistema:
-            extra["system"] = sistema
+            # Una sola, tal cual: con herramientas puede venir en bloques.
+            extra["system"] = sistema[0] if len(sistema) == 1 else "\n\n".join(sistema)
         respuesta = cliente.messages.create(model=model, max_tokens=maximo, messages=resto, **extra)
-        texto = "".join(getattr(b, "text", "") for b in respuesta.content)
         uso = respuesta.usage
         entrada = (
             (uso.input_tokens or 0)
             + (getattr(uso, "cache_read_input_tokens", 0) or 0)
             + (getattr(uso, "cache_creation_input_tokens", 0) or 0)
         )
-        return texto, entrada, uso.output_tokens or 0
+        return respuesta, entrada, uso.output_tokens or 0
     respuesta = cliente.chat.completions.create(
         model=model, messages=mensajes, max_completion_tokens=maximo, **extra
     )
-    texto = respuesta.choices[0].message.content or ""
     uso = respuesta.usage
-    return texto, (uso.prompt_tokens if uso else 0), (uso.completion_tokens if uso else 0)
+    return respuesta, (uso.prompt_tokens if uso else 0), (uso.completion_tokens if uso else 0)
+
+
+def _texto(respuesta: Any, provider: str) -> str:
+    if provider == "anthropic":
+        return "".join(getattr(b, "text", "") for b in respuesta.content)
+    return respuesta.choices[0].message.content or ""
+
+
+def _llamar(
+    cliente: Any, provider: str, model: str, llamada: dict[str, Any]
+) -> tuple[str, int, int]:
+    """Reenvía una llamada. Devuelve (texto, tokens de entrada, tokens de salida)."""
+    respuesta, entrada, salida = _pedir(
+        cliente, provider, model, llamada["messages"], _salida_maxima(llamada),
+        llamada.get("params", {}),
+    )
+    return _texto(respuesta, provider), entrada, salida
+
+
+# ---------------------------------------------------------------------------------
+# Con herramientas (D-205)
+# ---------------------------------------------------------------------------------
+
+
+class _Corte(Exception):
+    """El modelo nuevo pidió algo que la traza no grabó: no se sabe qué devolvería."""
+
+
+def _clave(nombre: str, argumentos: Any) -> str:
+    """Nombre y argumentos como JSON, sin mirar espacios ni el orden de las claves."""
+    if isinstance(argumentos, str):
+        try:
+            argumentos = json.loads(argumentos)
+        except ValueError:
+            pass
+    return json.dumps([nombre, argumentos], sort_keys=True, ensure_ascii=False)
+
+
+def _casar(
+    pedidas: list[tuple[str, Any]], grabadas: list[dict[str, Any]], desde: int
+) -> list[dict[str, Any]] | None:
+    """Las grabadas que responden a `pedidas`, en su orden; `None` si no están grabadas.
+
+    Las peticiones tienen que seguir a las grabadas en orden, desde `desde`. Sólo se
+    pueden reordenar las que el original también pidió a la vez: él mismo las trató como
+    independientes. Las de vueltas distintas, no: una puede depender de lo que hizo otra.
+    """
+    tramo = grabadas[desde : desde + len(pedidas)]
+    if len(tramo) < len(pedidas):
+        return None
+    claves = [_clave(g["name"], g["arguments"]) for g in tramo]
+    if len({g["turn"] for g in tramo}) > 1:
+        return tramo if [_clave(*p) for p in pedidas] == claves else None
+    libres = list(range(len(tramo)))
+    casadas = []
+    for pedida in pedidas:
+        clave = _clave(*pedida)
+        i = next((j for j in libres if claves[j] == clave), None)
+        if i is None:
+            return None
+        libres.remove(i)
+        casadas.append(tramo[i])
+    return casadas
+
+
+def _pedidas(respuesta: Any, provider: str) -> list[tuple[str, str, Any]]:
+    """Las peticiones de herramienta de la respuesta: (id, nombre, argumentos)."""
+    if provider == "anthropic":
+        return [
+            (b.id, b.name, b.input)
+            for b in respuesta.content
+            if getattr(b, "type", None) == "tool_use"
+        ]
+    llamadas = respuesta.choices[0].message.tool_calls or []
+    return [(t.id, t.function.name, t.function.arguments) for t in llamadas]
+
+
+def _respuestas(
+    respuesta: Any, provider: str, pedidas: list[tuple[str, str, Any]], casadas: list[dict]
+) -> list[Any]:
+    """La respuesta del modelo nuevo y, detrás, los resultados grabados con sus ids."""
+    pares = list(zip([p[0] for p in pedidas], casadas, strict=True))
+    if provider == "anthropic":
+        return [
+            {"role": "assistant", "content": respuesta.content},
+            {"role": "user", "content": [{**g["result"], "tool_use_id": i} for i, g in pares]},
+        ]
+    return [
+        respuesta.choices[0].message,
+        *({**g["result"], "tool_call_id": i} for i, g in pares),
+    ]
+
+
+def _conversar(
+    cliente: Any,
+    provider: str,
+    model: str,
+    cadena: dict[str, Any],
+    pagar: Callable[[int, int], None],
+) -> tuple[str, int]:
+    """Repite la conversación con el modelo nuevo. Devuelve (respuesta final, vueltas).
+
+    Termina por construcción: cada vuelta con peticiones gasta al menos una grabada, o
+    corta; así que son como mucho las grabadas más una.
+    """
+    mensajes = list(cadena["messages"])
+    grabadas = cadena.get("recorded") or []
+    maximo = _salida_maxima(cadena)
+    usadas = vueltas = 0
+    while True:
+        respuesta, entrada, salida = _pedir(
+            cliente, provider, model, mensajes, maximo, cadena.get("params", {}),
+            cadena.get("tools"),
+        )
+        pagar(entrada, salida)
+        vueltas += 1
+        pedidas = _pedidas(respuesta, provider)
+        if not pedidas:
+            return _texto(respuesta, provider), vueltas
+        casadas = _casar([(n, a) for _, n, a in pedidas], grabadas, usadas)
+        if casadas is None:
+            pedido = ", ".join(
+                f"{n}({a if isinstance(a, str) else json.dumps(a, ensure_ascii=False)})"
+                for _, n, a in pedidas
+            )
+            raise _Corte(
+                f"cortado en la vuelta {vueltas}: {model} pidió {pedido} y la traza no grabó "
+                "qué devuelve en ese punto; no se inventa un resultado"
+            )
+        usadas += len(casadas)
+        mensajes += _respuestas(respuesta, provider, pedidas, casadas)
 
 
 # ---------------------------------------------------------------------------------
@@ -276,32 +442,47 @@ def replay_dataset(
             f"Laplace no tiene tarifa para «{model}»: sin ella no se puede respetar el tope, "
             "así que no se reenvía nada. Ponle tarifa en Ajustes o elige otro modelo."
         )
+    proveedor = provider or provider_for(model)
     llamadas: list[dict[str, Any]] = datos.get("calls") or []
-    excluidas = datos.get("excluded") or {}
-    if not llamadas:
+    excluidas = dict(datos.get("excluded") or {})
+    # Los mensajes de herramientas van en el formato de quien los grabó (D-205).
+    cadenas: list[dict[str, Any]] = []
+    for cadena in datos.get("chains") or []:
+        if cadena.get("system") == proveedor:
+            cadenas.append(cadena)
+        else:
+            excluidas["herramientas_formato"] = excluidas.get(
+                "herramientas_formato", 0
+            ) + len(cadena["span_ids"])
+    if not llamadas and not cadenas:
         motivos = ", ".join(f"{n} {MOTIVOS.get(m, m)}" for m, n in excluidas.items())
         raise EvalError(
             "no hay ninguna llamada de este conjunto que se pueda reenviar"
             + (f" ({motivos})" if motivos else "")
         )
 
-    proveedor = provider or provider_for(model)
     plan = Plan(
         dataset_id=dataset_id,
         model=model,
         provider=proveedor,
-        calls=len(llamadas),
-        cases=len({ll["case_id"] for ll in llamadas}),
-        original_usd=sum(float(ll.get("cost_usd") or 0) for ll in llamadas),
-        original_unknown=any(ll.get("cost_unknown") for ll in llamadas),
+        calls=len(llamadas) + sum(len(c["span_ids"]) for c in cadenas),
+        cases=len({ll["case_id"] for ll in [*llamadas, *cadenas]}),
+        original_usd=sum(float(ll.get("cost_usd") or 0) for ll in [*llamadas, *cadenas]),
+        original_unknown=any(ll.get("cost_unknown") for ll in [*llamadas, *cadenas]),
         estimated_usd=sum(
             _coste(ll.get("input_tokens") or 0, ll.get("output_tokens") or 0, tarifa)
             for ll in llamadas
+        )
+        + sum(
+            _coste(c.get("total_input_tokens") or 0, c.get("total_output_tokens") or 0, tarifa)
+            for c in cadenas
         ),
-        worst_usd=sum(_peor(ll, tarifa) for ll in llamadas),
+        worst_usd=sum(_peor(ll, tarifa) for ll in llamadas)
+        + sum(_peor_cadena(c, tarifa) for c in cadenas),
         max_usd=max_usd,
-        excluded=dict(excluidas),
+        excluded=excluidas,
         rate_verified=bool(tarifa.get("verified", True)),
+        chains=len(cadenas),
     )
     resultado = ReplayResult(plan=plan)
     if confirm is not None and not confirm(plan):
@@ -313,58 +494,81 @@ def replay_dataset(
     por_caso: dict[str, list[dict[str, Any]]] = {}
     for llamada in llamadas:
         por_caso.setdefault(llamada["case_id"], []).append(llamada)
+    cadena_de = {c["case_id"]: c for c in cadenas}
+    for case_id in cadena_de:
+        por_caso.setdefault(case_id, [])
 
     originales: list[dict[str, Any]] = []
     reenviadas: list[dict[str, Any]] = []
     referencias: dict[str, str] = {}
     hechas = 0
+
+    def pagar(tok_in: int, tok_out: int) -> None:
+        nonlocal hechas
+        resultado.spent_usd += _coste(tok_in, tok_out, tarifa)
+        hechas += 1
+        if on_call:
+            on_call(hechas, plan.calls)
+
     parar = False
     for case_id, del_caso in por_caso.items():
+        cadena = cadena_de.get(case_id)
+        span_ids = [ll["span_id"] for ll in del_caso] + (cadena["span_ids"] if cadena else [])
         # Un caso se reenvía entero o no se reenvía: medio caso compararía menos
         # llamadas en un lado que en el otro.
         peor = sum(_peor(ll, tarifa) for ll in del_caso)
+        if cadena:
+            peor += _peor_cadena(cadena, tarifa)
         if parar or resultado.spent_usd + peor > max_usd:
             parar = True
-            resultado.calls_skipped_by_cap += len(del_caso)
+            resultado.calls_skipped_by_cap += len(span_ids)
             continue
         fallado, error, trace_id, textos = False, "", "", []
         with span(
             f"eval:{nombre}",
             type=semconv.SPAN_TYPE_AGENT,
-            input=[m for ll in del_caso for m in ll["messages"]],
+            input=[m for ll in del_caso for m in ll["messages"]]
+            + (cadena["messages"] if cadena else []),
             tags=[semconv.EVAL_TAG, f"variant:{nombre}", "laplace-replay"],
             metadata={
                 "eval.case_id": case_id,
                 "eval.variant": nombre,
                 "replay.model": model,
-                "replay.spans": ",".join(ll["span_id"] for ll in del_caso),
+                "replay.spans": ",".join(span_ids),
             },
         ):
             trace_id = get_current_trace_id() or ""
             try:
                 for llamada in del_caso:
                     texto, tok_in, tok_out = _llamar(cliente, proveedor, model, llamada)
-                    resultado.spent_usd += _coste(tok_in, tok_out, tarifa)
+                    pagar(tok_in, tok_out)
                     textos.append(texto)
-                    hechas += 1
-                    if on_call:
-                        on_call(hechas, len(llamadas))
+                if cadena:
+                    texto, vueltas = _conversar(cliente, proveedor, model, cadena, pagar)
+                    textos.append(texto)
+                    update_current_span(metadata={"replay.turns": vueltas})
                 update_current_span(output="\n\n".join(textos))
+            except _Corte as exc:
+                fallado, error = True, str(exc)
+                resultado.cases_cut += 1
+                logger.warning("el caso %s se ha cortado: %s", case_id, error)
             except Exception as exc:  # noqa: BLE001 - un caso roto es un fallo, no un corte
                 fallado, error = True, f"{type(exc).__name__}: {exc}"
                 logger.warning("el caso %s ha fallado al reenviarlo: %s", case_id, error)
         originales.append(
             {
                 "case_id": case_id,
-                "trace_id": del_caso[0]["trace_id"],
-                "span_ids": [ll["span_id"] for ll in del_caso],
+                "trace_id": del_caso[0]["trace_id"] if del_caso else cadena["trace_id"],
+                "span_ids": span_ids,
             }
         )
         reenviadas.append(
             {"case_id": case_id, "trace_id": trace_id, "failed": fallado, "error": error[:500]}
         )
         if trace_id and not fallado:
-            referencias[trace_id] = "\n\n".join(ll["output"] for ll in del_caso)
+            referencias[trace_id] = "\n\n".join(
+                [ll["output"] for ll in del_caso] + ([cadena["output"]] if cadena else [])
+            )
     resultado.calls_done = hechas
     resultado.cases_failed = sum(1 for r in reenviadas if r["failed"])
     resultado.trace_ids = [r["trace_id"] for r in reenviadas if r["trace_id"]]
@@ -374,7 +578,9 @@ def replay_dataset(
     # Las trazas tienen que estar escritas antes de registrar la tirada (como en
     # `run_dataset`): si no, la comparación buscaría costes que aún no existen.
     flush()
-    modelo_original = ", ".join(sorted({ll["model"] for ll in llamadas if ll.get("model")}))
+    modelo_original = ", ".join(
+        sorted({ll["model"] for ll in [*llamadas, *cadenas] if ll.get("model")})
+    )
     notas = (
         f"Replay contrafactual: {hechas} llamadas reenviadas a {model} con tope {_dinero(max_usd)}."
     )
