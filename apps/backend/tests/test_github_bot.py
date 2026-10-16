@@ -534,6 +534,7 @@ def test_sin_sitio_anotado_se_dice_por_que(api, monkeypatch):
     r = c.post("/api/github/pull-request", json={"project_id": "p", "finding_id": caro["id"]})
     assert r.status_code == 409
     assert "SDK" in r.json()["detail"]
+    assert "code.lineno" in r.json()["detail"], "dice qué atributos faltan (D-218)"
 
 
 def test_un_repositorio_mal_escrito_no_se_guarda(api):
@@ -553,3 +554,96 @@ def test_un_paquete_instalado_fuera_del_entorno_tampoco_es_codigo_del_usuario(tm
     assert _sitio._es_ajeno(str(ajeno)) is True
     assert _sitio._es_ajeno(str(propio)) is False
     assert _sitio._es_ajeno("<frozen runpy>") is True
+
+
+# ---------------------------------------------------------------------------------
+# Más allá del SDK de Laplace (D-218)
+# ---------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("ruta", "linea"), [("code.file.path", "code.line.number"), ("code.filepath", "code.lineno")]
+)
+def test_la_ubicacion_vale_con_los_nombres_nuevos_y_los_viejos(ruta, linea):
+    assert gb.ubicacion({ruta: "agente/resumen.py", linea: "9"}) == ("agente/resumen.py", 9)
+
+
+@pytest.mark.parametrize(
+    "attrs",
+    [
+        {},
+        {"code.filepath": "a.py"},
+        {"code.lineno": 9},
+        {"code.filepath": "a.py", "code.lineno": "x"},
+    ],
+)
+def test_sin_fichero_o_sin_una_linea_que_sea_numero_no_hay_ubicacion(attrs):
+    assert gb.ubicacion(attrs) is None
+
+
+@pytest.mark.parametrize(
+    "anotada",
+    [
+        "/home/ana/acme/servicios/agente/resumen.py",
+        r"C:\Users\ana\acme\servicios\agente\resumen.py",
+        "file:///srv/app/servicios/agente/resumen.py",
+    ],
+)
+def test_una_ruta_absoluta_se_encuentra_por_sufijo(anotada):
+    arbol = ["servicios/agente/resumen.py", "servicios/otroagente/clasificar.py", "README.md"]
+    assert gb.ubicar(anotada, arbol) == "servicios/agente/resumen.py"
+
+
+def test_una_ruta_absoluta_va_por_tramos_enteros_y_si_casa_dos_veces_no_elige():
+    with pytest.raises(SinPropuesta) as no:
+        gb.ubicar("/srv/miagente/resumen.py", ["agente/resumen.py"])
+    assert no.value.clave == "pr.no_esta_en_repo"
+    with pytest.raises(SinPropuesta) as no:
+        gb.ubicar("/srv/app/src/resumen.py", ["src/resumen.py", "resumen.py"])
+    assert no.value.clave == "pr.ruta_ambigua"
+
+
+def test_el_pr_desde_una_ruta_absoluta_no_la_publica():
+    """La ruta de la máquina diría quién es y dónde: el PR lleva la del repositorio."""
+    absoluta = "/home/ana/acme/servicios/agente/resumen.py"
+    github = GitHubFalso({"servicios/agente/resumen.py": AGENTE})
+    _abrir(github, ruta_anotada=absoluta, titulo=f"Cambio en {absoluta}",
+           cuerpo=f"En `{absoluta}`, línea 9.")
+    pr = github.prs[0]
+    assert "/home/ana" not in pr["title"] + pr["body"]
+    assert "`servicios/agente/resumen.py`" in pr["body"]
+    assert 'model="gpt-5.6-luna"' in github.fichero(pr["head"], "servicios/agente/resumen.py")
+
+
+@pytest.mark.parametrize("ruta", ["src/agente.ts", "/srv/app/agente.js"])
+def test_un_fichero_que_no_es_python_no_tiene_pr_y_no_llega_a_github(ruta):
+    github = GitHubFalso({"src/agente.ts": 'llamar({model: "gpt-5.5"})\n'})
+    with pytest.raises(SinPropuesta) as no:
+        _abrir(github, ruta_anotada=ruta)
+    assert no.value.clave == "pr.solo_python"
+    assert github.llamadas == []
+
+
+def test_un_span_de_otro_instrumentador_con_code_lineno_llega_por_la_ingesta():
+    """Sin nada de Laplace: un span de OpenTelemetry con los atributos de antes."""
+    from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    from laplace_backend.ingest.otlp import parse_spans
+
+    salida = InMemorySpanExporter()
+    proveedor = TracerProvider()
+    proveedor.add_span_processor(SimpleSpanProcessor(salida))
+    atributos = {
+        "gen_ai.system": "openai",
+        "gen_ai.request.model": "gpt-5.5",
+        "code.filepath": "/srv/app/agente/resumen.py",
+        "code.lineno": 9,
+        "code.function": "resumir",
+    }
+    with proveedor.get_tracer("otro").start_as_current_span("chat gpt-5.5", attributes=atributos):
+        pass
+    spans = parse_spans(encode_spans(salida.get_finished_spans()))
+    assert gb.sitio(spans, "gpt-5.5") == ("/srv/app/agente/resumen.py", 9)

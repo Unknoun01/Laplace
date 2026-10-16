@@ -516,7 +516,7 @@
   "github.fusionado": "Fixed when pull request #{numero} was merged ({url}). No deployment notice (deployment_status) has arrived, so it's measured from the merge: if it was deployed later, mark it again when you deploy or send that event.",
   "github.desplegado": "Fixed: pull request #{numero} ({url}) was deployed to “{entorno}” with commit {sha}. It's measured from the deployment, not from the merge.",
   "pr.sin_cambio": "This problem does not have a fix that can be proposed in the code yet.",
-  "pr.sin_sitio": "It is not known which line makes the call: the agent needs an SDK version that records it (laplace-trace with D-185).",
+  "pr.sin_sitio": "It is not known which line makes the call: its spans need code.file.path and code.line.number (or code.filepath and code.lineno). The Laplace SDK records them (laplace-trace with D-185), as does any OpenTelemetry SDK that sets them.",
   "pr.no_esta_en_repo": "{ruta} is not in the connected repository. Is it this agent's repository?",
   "pr.ruta_ambigua": "{ruta} appears {veces} times in the repository and one is not picked by guesswork.",
   "pr.modelo_no_literal": "The model {modelo} is not written in the call's code (it comes from a variable or the configuration). Change it where it is defined.",

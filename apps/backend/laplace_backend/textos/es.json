@@ -516,7 +516,7 @@
   "github.fusionado": "Arreglado al fusionar el pull request #{numero} ({url}). No ha llegado aviso de despliegue (deployment_status), así que se mide desde la fusión: si se desplegó más tarde, vuelve a marcarlo al desplegar o manda ese evento.",
   "github.desplegado": "Arreglado: el pull request #{numero} ({url}) se desplegó en «{entorno}» con el commit {sha}. Se mide desde el despliegue, no desde la fusión.",
   "pr.sin_cambio": "Este problema todavía no tiene un arreglo que se pueda proponer en el código.",
-  "pr.sin_sitio": "No se sabe desde qué línea se hace la llamada: hace falta que el agente use una versión del SDK que la anote (laplace-trace con D-185).",
+  "pr.sin_sitio": "No se sabe desde qué línea se hace la llamada: sus spans tienen que llevar code.file.path y code.line.number (o code.filepath y code.lineno). Los anota el SDK de Laplace (laplace-trace con D-185) o cualquier SDK de OpenTelemetry que los ponga.",
   "pr.no_esta_en_repo": "{ruta} no está en el repositorio conectado. ¿Es el repositorio de este agente?",
   "pr.ruta_ambigua": "{ruta} aparece {veces} veces en el repositorio y no se elige una a ojo.",
   "pr.modelo_no_literal": "El modelo {modelo} no está escrito en el código de la llamada (sale de una variable o de la configuración). Cámbialo donde se defina.",

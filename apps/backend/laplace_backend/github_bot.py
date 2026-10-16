@@ -56,6 +56,10 @@ VENTANA_LINEAS = 30
 
 ATTR_RUTA = "code.file.path"
 ATTR_LINEA = "code.line.number"
+#: Los mismos con sus nombres de antes en las convenciones de OpenTelemetry, que siguen
+#: poniendo otros SDK e instrumentadores (D-218).
+ATTRS_RUTA = (ATTR_RUTA, "code.filepath")
+ATTRS_LINEA = (ATTR_LINEA, "code.lineno")
 
 #: Quien habla con GitHub: `(método, url, token, cuerpo) -> json`. Se cambia en las pruebas.
 Pedir = Callable[[str, str, str, dict[str, Any] | None], Any]
@@ -306,10 +310,11 @@ def ubicar(ruta_anotada: str, arbol: list[str]) -> str:
     `agente/llamar.py` casa con `servicios/agente/llamar.py` y no con
     `servicios/otroagente/llamar.py`. Si casan varios, no se elige uno a ojo.
     """
-    ruta = ruta_anotada.strip("/")
+    ruta = ruta_anotada.replace("\\", "/").strip("/")
     if ruta in arbol:
         return ruta
-    candidatos = [p for p in arbol if p.endswith("/" + ruta)]
+    # En los dos sentidos: otros SDK anotan la ruta absoluta de la máquina (D-218).
+    candidatos = [p for p in arbol if p.endswith("/" + ruta) or ruta.endswith("/" + p)]
     if len(candidatos) == 1:
         return candidatos[0]
     if not candidatos:
@@ -347,6 +352,16 @@ def cambiar_modelo(fuente: str, linea: int, de: str, a: str) -> str:
     return "".join(lineas)
 
 
+def ubicacion(attrs: dict[str, Any]) -> tuple[str, int] | None:
+    """El fichero y la línea anotados, con cualquiera de sus nombres (D-218)."""
+    ruta = next((attrs[k] for k in ATTRS_RUTA if attrs.get(k)), None)
+    linea = next((attrs[k] for k in ATTRS_LINEA if attrs.get(k)), None)
+    try:
+        return (str(ruta), int(linea)) if ruta and linea else None
+    except (TypeError, ValueError):
+        return None
+
+
 def sitio(evidencia: list[Any], modelo: str) -> tuple[str, int]:
     """El fichero y la línea más repetidos entre las llamadas de ejemplo con ese modelo."""
     vistos: Counter[tuple[str, int]] = Counter()
@@ -359,12 +374,9 @@ def sitio(evidencia: list[Any], modelo: str) -> tuple[str, int]:
         pedido = getattr(llm, "request_model", None) if llm else None
         if modelo and pedido and pedido != modelo:
             continue
-        ruta, linea = attrs.get(ATTR_RUTA), attrs.get(ATTR_LINEA)
-        if ruta and linea:
-            try:
-                vistos[(str(ruta), int(linea))] += 1
-            except (TypeError, ValueError):
-                continue
+        donde = ubicacion(attrs)
+        if donde:
+            vistos[donde] += 1
     if not vistos:
         raise SinPropuesta("pr.sin_sitio")
     return vistos.most_common(1)[0][0]
@@ -435,6 +447,10 @@ def abrir(
     def _modelo(fuente: str, _ruta: str) -> str:
         return cambiar_modelo(fuente, linea, de, a)
 
+    # Los arreglos se escriben sobre el árbol de sintaxis de Python (D-190); para otros
+    # lenguajes no hay parser donde corre el backend (D-218).
+    if not ruta_anotada.endswith(".py"):
+        raise SinPropuesta("pr.solo_python")
     cambiar = cambiar or _modelo
     # Se resuelve al llamar, no al definir: así las pruebas cambian `_pedir` del módulo.
     pedir = pedir or _pedir
@@ -461,6 +477,8 @@ def abrir(
     arbol = pedir("GET", f"{base}/git/trees/{sha_base}?recursive=1", token, None)
     rutas = [n["path"] for n in arbol.get("tree", []) if n.get("type") == "blob"]
     ruta = ubicar(ruta_anotada, rutas)
+    # La anotada puede ser absoluta y decir quién es y en qué máquina (D-218).
+    titulo, cuerpo, mensaje = (x.replace(ruta_anotada, ruta) for x in (titulo, cuerpo, mensaje))
 
     fichero = pedir(
         "GET",

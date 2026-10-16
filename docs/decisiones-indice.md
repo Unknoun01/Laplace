@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 207 decisiones.
+final. 208 decisiones.
 
 ## Coste, precios y caché
 
@@ -346,6 +346,7 @@ final. 207 decisiones.
 - [D-173](../DECISIONS.md#d-173--retención-por-proyecto-y-borrar-lo-de-una-persona-o-un-cliente) — Retención por proyecto, y borrar lo de una persona o un cliente
 - [D-179](../DECISIONS.md#d-179--margen-por-cliente-lo-evitable-de-cada-uno-otras-monedas-y-su-columna) — Margen por cliente: lo evitable de cada uno, otras monedas y su columna
 - [D-206](../DECISIONS.md#d-206--la-parada-alcanza-lo-que-otro-instrumentador-traza-en-python-lo-que-no-alcanza-se-dice) — La parada alcanza lo que otro instrumentador traza en Python; lo que no alcanza, se dice
+- [D-218](../DECISIONS.md#d-218--el-bot-de-pr-encuentra-la-llamada-con-los-atributos-estándar-sólo-escribe-python) — El bot de PR encuentra la llamada con los atributos estándar; sólo escribe Python
 
 ## Todas, en orden
 
@@ -663,3 +664,4 @@ final. 207 decisiones.
 - [D-205](../DECISIONS.md#d-205--el-replay-con-herramientas-cada-resultado-el-que-grabó-la-traza-lo-que-no-se-grabó-corta-el-caso) — El replay con herramientas: cada resultado, el que grabó la traza; lo que no se grabó corta el caso
 - [D-206](../DECISIONS.md#d-206--la-parada-alcanza-lo-que-otro-instrumentador-traza-en-python-lo-que-no-alcanza-se-dice) — La parada alcanza lo que otro instrumentador traza en Python; lo que no alcanza, se dice
 - [D-207](../DECISIONS.md#d-207--el-historial-de-los-preagregados-una-fila-por-conversación-paso-y-hora) — El historial, de los preagregados: una fila por conversación, paso y hora
+- [D-218](../DECISIONS.md#d-218--el-bot-de-pr-encuentra-la-llamada-con-los-atributos-estándar-sólo-escribe-python) — El bot de PR encuentra la llamada con los atributos estándar; sólo escribe Python

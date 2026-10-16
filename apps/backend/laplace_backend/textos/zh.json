@@ -516,7 +516,7 @@
   "github.fusionado": "合并 pull request #{numero} 时已标记为已修复（{url}）。尚未收到部署通知（deployment_status），因此从合并时开始衡量：如果是之后才部署的，请在部署时重新标记，或发送该事件。",
   "github.desplegado": "已修复：pull request #{numero}（{url}）已用提交 {sha} 部署到「{entorno}」。从部署时开始衡量，而不是从合并时。",
   "pr.sin_cambio": "此问题目前还没有可在代码中提出的修复。",
-  "pr.sin_sitio": "不知道调用发生在哪一行：智能体需要使用会记录调用位置的 SDK 版本（含 D-185 的 laplace-trace）。",
+  "pr.sin_sitio": "不知道调用发生在哪一行：其 span 需要带有 code.file.path 和 code.line.number（或 code.filepath 和 code.lineno）。Laplace 的 SDK（含 D-185 的 laplace-trace）会记录它们，任何设置这些属性的 OpenTelemetry SDK 也可以。",
   "pr.no_esta_en_repo": "{ruta} 不在已连接的仓库中。这是该智能体的仓库吗？",
   "pr.ruta_ambigua": "{ruta} 在仓库中出现了 {veces} 次，不会凭猜测选择其中一个。",
   "pr.modelo_no_literal": "模型 {modelo} 没有直接写在调用代码中（来自变量或配置）。请在其定义处修改。",

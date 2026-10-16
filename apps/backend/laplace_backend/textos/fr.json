@@ -516,7 +516,7 @@
   "github.fusionado": "Corrigé à la fusion de la pull request #{numero} ({url}). Aucun avis de déploiement (deployment_status) n'est arrivé, donc on mesure depuis la fusion : s'il a été déployé plus tard, marquez-le à nouveau au déploiement ou envoyez cet événement.",
   "github.desplegado": "Corrigé : la pull request #{numero} ({url}) a été déployée en « {entorno} » avec le commit {sha}. On mesure depuis le déploiement, pas depuis la fusion.",
   "pr.sin_cambio": "Ce problème n'a pas encore de correction proposable dans le code.",
-  "pr.sin_sitio": "On ne sait pas depuis quelle ligne l'appel est fait : l'agent doit utiliser une version du SDK qui l'enregistre (laplace-trace avec D-185).",
+  "pr.sin_sitio": "On ne sait pas depuis quelle ligne l'appel est fait : ses spans doivent porter code.file.path et code.line.number (ou code.filepath et code.lineno). Le SDK de Laplace les enregistre (laplace-trace avec D-185), comme tout SDK OpenTelemetry qui les ajoute.",
   "pr.no_esta_en_repo": "{ruta} n'est pas dans le dépôt connecté. Est-ce bien le dépôt de cet agent ?",
   "pr.ruta_ambigua": "{ruta} apparaît {veces} fois dans le dépôt, et on n'en choisit pas une au hasard.",
   "pr.modelo_no_literal": "Le modèle {modelo} n'est pas écrit dans le code de l'appel (il vient d'une variable ou de la configuration). Changez-le là où il est défini.",
