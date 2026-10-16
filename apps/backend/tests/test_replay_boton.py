@@ -12,7 +12,8 @@ import threading
 import time
 
 import pytest
-from test_replay_sdk import BARATO, _openai, backend  # noqa: F401 - `backend` es un fixture
+import test_replay_sdk
+from test_replay_sdk import BARATO, _openai
 
 from laplace_backend import config, replay_proceso
 
@@ -143,3 +144,7 @@ def test_el_proceso_aparte_habla_en_json(tmp_path):
     }
     with pytest.raises(RuntimeError):
         replay_proceso.lanzar_proceso(spec, lambda n, total: None, python=sys.executable)
+
+
+# El fixture de `test_replay_sdk.py`, visible en este módulo.
+backend = test_replay_sdk.backend

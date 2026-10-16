@@ -5353,7 +5353,7 @@ botón no las pide, no las guarda y no pasan por la API.
   está en las trazas y en las tiradas de evaluación.
 * **Quién.** Es una escritura con `project_id` en el cuerpo: pasa por la misma comprobación
   de rol que `POST /api/runs`, que es lo que hoy permite lanzar tiradas (miembro o más).
-  La pantalla oculta el botón al lector con `usarPermisos`.
+  La pantalla oculta el botón al lector con `usePermisos`.
 * **Pruebas.** `test_replay_boton.py`: plan sin gasto, lanzar con el transporte HTTP falso
   de los proveedores, tope, 409 por segunda tirada y por lo peor que cambió, 404 en la
   nube, falta de clave, y el protocolo del proceso hijo. En pantalla, el botón con SQLite

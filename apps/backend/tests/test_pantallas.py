@@ -777,6 +777,7 @@ def test_el_boton_de_replay_pide_permiso_y_enseña_lo_peor(servidor, navegador):
         "escritorio",
     )
     try:
+        pagina.wait_for_selector("#probar button, #probar pre")
         crear = pagina.get_by_role("button", name=re.compile("Crear el conjunto"))
         if crear.count():  # otra prueba del módulo pudo crearlo ya
             crear.click()
