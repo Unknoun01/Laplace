@@ -269,13 +269,13 @@ def test_se_pregunta_cada_treinta_segundos_en_segundo_plano(monkeypatch):
 
 
 def test_init_arranca_la_consulta_y_se_puede_apagar(monkeypatch):
-    from laplace import _tracer
+    from laplace import _arranque, _tracer
     from opentelemetry.sdk.trace import SpanProcessor
 
     arrancado = []
     monkeypatch.setattr(_control, "arrancar", lambda **kw: arrancado.append(kw))
     monkeypatch.setattr(_tracer, "_build_processor", lambda cfg, batch: SpanProcessor())
-    monkeypatch.setattr(_tracer, "_auto_instrument", lambda cfg: None)
+    monkeypatch.setattr(_arranque, "_auto_instrument", lambda cfg: None)
     monkeypatch.setattr(_tracer, "_config", _tracer._config)
     monkeypatch.setattr(_tracer, "_provider", None)
     import laplace

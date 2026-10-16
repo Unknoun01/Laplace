@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 201 decisiones.
+final. 202 decisiones.
 
 ## Coste, precios y caché
 
@@ -137,6 +137,7 @@ final. 201 decisiones.
 - [D-184](../DECISIONS.md#d-184--un-límite-de-gasto-y-de-bucles-en-el-sdk-con-la-misma-cuenta-que-la-traza) — Un límite de gasto y de bucles en el SDK, con la misma cuenta que la traza
 - [D-187](../DECISIONS.md#d-187--tope-bucles-y-parada-desde-laplace-el-sdk-los-pide-cada-30-s-y-manda-el-más-estricto) — Tope, bucles y parada desde Laplace: el SDK los pide cada 30 s y manda el más estricto
 - [D-196](../DECISIONS.md#d-196--lecturas-de-caché-pagadas-en-openai-la-ficha-propone-lo-mismo-que-la-tarjeta) — Lecturas de caché pagadas en OpenAI: la ficha propone lo mismo que la tarjeta
+- [D-202](../DECISIONS.md#d-202--sin-ciclos-de-imports-en-el-sdk-init-sale-de-_tracer) — Sin ciclos de imports en el SDK: `init()` sale de `_tracer`
 
 ## Almacenes y escala
 
@@ -645,3 +646,4 @@ final. 201 decisiones.
 - [D-198](../DECISIONS.md#d-198--el-historial-sólo-abre-las-conversaciones-que-pueden-contar) — El historial sólo abre las conversaciones que pueden contar
 - [D-199](../DECISIONS.md#d-199--trabajo-que-podría-ir-por-lotes-con-la-marca-hay-dinero-sin-ella-una-pregunta) — Trabajo que podría ir por lotes: con la marca hay dinero, sin ella una pregunta
 - [D-200](../DECISIONS.md#d-200--caché-semántica-la-misma-pregunta-con-la-misma-respuesta-hasta-x-y-sin-dinero-en-el-total) — Caché semántica: la misma pregunta con la misma respuesta, «hasta X» y sin dinero en el total
+- [D-202](../DECISIONS.md#d-202--sin-ciclos-de-imports-en-el-sdk-init-sale-de-_tracer) — Sin ciclos de imports en el SDK: `init()` sale de `_tracer`

@@ -4878,3 +4878,37 @@ Dos de ClickHouse no fallaban al principio: tomar la última ejecución de cada 
 en lugar de la primera, y elegir la traza de ejemplo sin exigir que repitiera respuesta.
 Ninguna prueba ponía otra respuesta entre dos iguales, ni dos preguntas con trazas de
 distinto orden; ahora las dos lo hacen.
+
+### D-202 — Sin ciclos de imports en el SDK: `init()` sale de `_tracer`
+El grafo de graphify marcaba dos ciclos (`laplace/__init__` → `evals`, `decorators` o
+`prompts` → `_tracer` → `__init__`, e `integrations/__init__` → `openai` → `_streaming` →
+`integrations/__init__`), pero las vueltas a los `__init__` no eran de verdad: salían de
+`from . import semconv` y `from . import _common`, que importan un submódulo y no toman
+nada del `__init__`. Los ciclos reales estaban en los imports tardíos de `init()`:
+`_tracer` ⇢ `_control` → `_http` → `_tracer`, y `_tracer` ⇢ `integrations.openai` →
+`_tracer` (y por `_common` ⇢ `prompts` → `_tracer`). Funcionaban sólo porque esos imports
+iban dentro de funciones; subir cualquiera a la cabecera rompía el paquete.
+
+* **El arranque, aparte.** `init()` y `_auto_instrument()` pasan a `laplace/_arranque.py`,
+  que importa en la cabecera a quien necesita (el control remoto, las integraciones).
+  `_tracer` se queda con el estado y lo que lo usa (`get_config`, `get_tracer`, `flush`,
+  `shutdown`, `is_enabled`, los procesadores) y ya no importa a ninguno de sus lectores:
+  es el fondo del grafo.
+* **El estado sigue siendo uno.** `_config` y `_provider` viven en `_tracer`; `_arranque`
+  los escribe como atributos del módulo (`_tracer._config = cfg`), y llama a
+  `_tracer._build_processor`, así que los `monkeypatch` sobre `_tracer` siguen valiendo.
+  Sacar el estado a un módulo nuevo habría obligado a cambiar todos sus lectores y las
+  pruebas que lo parchean, sin romper más ciclos que éste.
+* **La API no cambia.** `laplace.init` es el mismo nombre; `demo` lo toma de `_arranque`.
+  La única prueba que parcheaba algo movido (`_auto_instrument` en
+  `test_plano_control.py`) apunta ahora a `_arranque`.
+
+Prueba: `test_imports_sdk.py` construye el grafo con `ast` sobre todos los ficheros del
+paquete, con los imports de dentro de las funciones, y falla si `graphlib` encuentra un
+ciclo, diciendo cuál. `from . import x` cuenta como el submódulo si existe y como el
+`__init__` si es un nombre suyo; importar `a.b.c` cuenta también `a` y `a.b`, salvo los
+paquetes que ya contienen al que importa. Otra prueba comprueba que el grafo ve los
+imports tardíos y no confunde un submódulo con su `__init__`. Estaba en rojo antes del
+cambio (`_tracer → integrations.anthropic → _common → prompts → _tracer`). Se rompió a
+propósito tres veces (un import tardío de `_control` y otro de `integrations.openai` en
+`_tracer`, y `from .. import init` dentro de `_streaming`): las tres fallan.
