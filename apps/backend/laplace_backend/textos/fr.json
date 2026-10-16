@@ -669,5 +669,7 @@
   "tec.preguntas_repetidas": "Questions qui se répètent",
   "tec.llamadas_repetidas": "Appels répétés entre exécutions",
   "tec.misma_respuesta": "Avec la même réponse",
-  "tec.porcentaje_misma": "Même réponse"
+  "tec.porcentaje_misma": "Même réponse",
+  "error.replay_sin_clave": "La clé du fournisseur n’est pas dans l’environnement : définissez-la là où vous avez lancé « laplace ui » et rouvrez-le.",
+  "error.replay_en_curso": "Un replay est déjà en cours dans ce projet."
 }

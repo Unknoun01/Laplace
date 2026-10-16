@@ -5321,3 +5321,40 @@ sesiones, contar dos veces las trazas que cruzan, decidir con lo que sale en cru
 copias contadas por hora, no ensuciar las horas al crear la tabla y pedir las trazas sin
 la última versión de cada span. Esta última no mordía hasta añadir la prueba del lote
 reenviado.
+
+
+### D-214 — Lanzar el replay desde la interfaz local, con un botón
+`laplace replay` (D-167) se lanzaba copiando la orden que enseña la pantalla y pegándola
+en un terminal. En `laplace ui` (SQLite, una sola persona, la máquina es suya) ahora hay un
+botón que lo lanza. La decisión de D-167 de que Laplace no custodia claves sigue en pie: el
+botón no las pide, no las guarda y no pasan por la API.
+
+* **Sólo en local.** Todo cuelga de `/api/replay`. En la nube (`settings.store !=
+  "sqlite"`) `GET /api/replay/estado` dice `disponible: false` y la pantalla no pinta el
+  botón; los `POST` contestan 404. En la nube el proceso es de todos y la clave sería la
+  del servidor, que es justo lo que D-167 evitó.
+* **Se reutiliza, no se copia.** Lo corre `python -m laplace_backend.replay_proceso`, un
+  proceso aparte que llama a `laplace.replay.replay_dataset` con los mismos argumentos que
+  la orden. Aparte porque `laplace.init()` es global y el backend no debe quedar
+  instrumentado, y porque las claves se leen del entorno de `laplace ui` igual que las lee
+  la orden en el terminal. `replay.py` no se toca.
+* **Dos pasos, con permiso.** `POST /api/replay/plan` ejecuta `replay_dataset` con un
+  `confirm` que dice que no: devuelve el `Plan` sin gastar nada. La pantalla enseña cuántas
+  llamadas, lo que costaron y **lo peor que pueden costar** (el menor entre `worst_usd` y
+  el tope; «como mínimo» si alguna no tenía tarifa), y pide confirmar. Sin tarifa del modelo
+  no hay tope que cumplir y no hay botón, con el motivo. `POST /api/replay` lleva
+  `acepta_usd` (lo que se enseñó) y recalcula el plan: si lo peor ya es mayor, 409 y no
+  gasta. Si la clave del proveedor no está en el entorno, el plan lo dice (sólo el nombre
+  de la variable, nunca su valor) y no se puede lanzar.
+* **Segundo plano, una por proyecto.** La tirada corre en un hilo que lee el proceso hijo;
+  el estado (hechas/total, resultado o error) está en memoria y se consulta con `GET
+  /api/replay/estado`. Una segunda tirada del mismo proyecto mientras corre da 409. Si el
+  backend se reinicia a medias, la tirada se pierde, pero lo que se hubiera gastado ya
+  está en las trazas y en las tiradas de evaluación.
+* **Quién.** Es una escritura con `project_id` en el cuerpo: pasa por la misma comprobación
+  de rol que `POST /api/runs`, que es lo que hoy permite lanzar tiradas (miembro o más).
+  La pantalla oculta el botón al lector con `usarPermisos`.
+* **Pruebas.** `test_replay_boton.py`: plan sin gasto, lanzar con el transporte HTTP falso
+  de los proveedores, tope, 409 por segunda tirada y por lo peor que cambió, 404 en la
+  nube, falta de clave, y el protocolo del proceso hijo. En pantalla, el botón con SQLite
+  (`test_pantallas.py`).

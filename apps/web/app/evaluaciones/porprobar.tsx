@@ -6,7 +6,8 @@ import { createDataset } from "@/lib/api";
 import { money } from "@/lib/format";
 import type { Dataset, Finding, RunSummary } from "@/lib/types";
 import { t, tn } from "@/lib/textos";
-import { lineaDeReplay, pruebasDelPaso } from "../problema/ciclo";
+import { BotonReplay } from "../problema/boton-replay";
+import { alternativa, lineaDeReplay, pruebasDelPaso } from "../problema/ciclo";
 
 /** Cuántos problemas se listan: los que más devuelven. El resto sigue en el Diagnóstico. */
 const MAX = 6;
@@ -125,6 +126,9 @@ function Fila({
             {lineaDeReplay(project, guardado, finding) ||
               `laplace.run_dataset("${guardado}", mi_agente, variant="${t("seg.probar.arreglado")}")`}
           </pre>
+          {lineaDeReplay(project, guardado, finding) && (
+            <BotonReplay project={project} conjunto={guardado} modelo={alternativa(finding)} />
+          )}
         </>
       )}
       {error && <p className="verr">{error}</p>}

@@ -669,5 +669,7 @@
   "tec.preguntas_repetidas": "Preguntas que se repiten",
   "tec.llamadas_repetidas": "Llamadas repetidas entre ejecuciones",
   "tec.misma_respuesta": "Con la misma respuesta",
-  "tec.porcentaje_misma": "Misma respuesta"
+  "tec.porcentaje_misma": "Misma respuesta",
+  "error.replay_sin_clave": "No hay en el entorno la clave del proveedor: ponla donde lanzaste «laplace ui» y vuelve a abrirlo.",
+  "error.replay_en_curso": "Ya hay una tirada de replay en marcha en este proyecto."
 }

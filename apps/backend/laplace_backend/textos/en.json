@@ -669,5 +669,7 @@
   "tec.preguntas_repetidas": "Questions that repeat",
   "tec.llamadas_repetidas": "Calls repeated across runs",
   "tec.misma_respuesta": "With the same answer",
-  "tec.porcentaje_misma": "Same answer"
+  "tec.porcentaje_misma": "Same answer",
+  "error.replay_sin_clave": "The provider key is not in the environment: set it where you started “laplace ui” and reopen it.",
+  "error.replay_en_curso": "A replay is already running in this project."
 }
