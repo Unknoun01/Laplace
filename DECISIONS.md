@@ -5619,3 +5619,30 @@ de un grupo se guardaba aunque quien lo pedía no fuera admin (la respuesta, que
 comprobaba, daba 403 después de guardar: arreglado), dos comprobaciones de «quien
 gestiona el proveedor» que ningún camino alcanzaba (quitadas), y la cookie en https y el
 motivo del 400 sin `xmlsec`, que ahora tienen prueba.
+
+### D-217 — El grafo del proyecto deja de ser sólo de lectura: pulsar un paso lleva a sus trazas y a sus fichas
+El grafo del Panel (D-188, con los hallazgos de D-203) se miraba y ya. Se pulsa un paso y
+debajo del dibujo sale su ficha corta: lo que ya se sabe de él, y dos atajos a pantallas
+que existen.
+
+* **Qué se hace desde aquí, y sólo esto:** (1) **«Ver las trazas de este paso»**, al
+  explorador con el filtro por identidad exacta (`step` y `step_label`, el mismo de la
+  ficha de un hallazgo); (2) **las fichas de sus problemas**, una por hallazgo, a
+  `/problema?id=`. Son enlaces: navegar no gasta ni cambia nada.
+* **Qué se descarta, con motivo.** *Tope y parada*: son por proyecto (D-187), no por paso;
+  un control por paso sería inventar una regla que el SDK no sabe aplicar. *Ignorar un
+  hallazgo*: pide un motivo y deja registro; duplicar ese formulario aquí lo bifurca, y
+  la ficha queda a un clic. *Modelo por paso* y *repartos A/B*: fuera por decisión del
+  usuario, no se empiezan.
+* **Roles (D-127):** las dos acciones son de lectura, así que las ve cualquier rol y no
+  hay botón de escritura que esconder; lo que se escriba en la ficha lo decide su
+  pantalla con `usePermisos`, como hasta ahora.
+* **Un paso sin `step_key` no ofrece las trazas** (su id es `tipo:nombre`; el filtro es por
+  clave y filtraría otra cosa o nada), la misma regla que D-203 para no marcarlo. Sin
+  hallazgos, no hay fichas. Sin ninguna de las dos, la ficha dice el paso y nada más.
+* **Accesible:** las cajas son botones (`role="button"`, Intro y Espacio); la elegida
+  lleva `--iris` en el borde. No hay mecanismo nuevo en el backend.
+
+Pruebas en `test_pantallas.py`: pulsar un paso con problema abre su ficha con las dos
+acciones y cada enlace lleva donde dice (el explorador filtrado por ese paso, la ficha de
+ese hallazgo); un paso sin `step_key` no ofrece las trazas; con teclado también.

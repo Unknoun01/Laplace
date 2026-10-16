@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 212 decisiones.
+final. 213 decisiones.
 
 ## Coste, precios y caché
 
@@ -91,6 +91,7 @@ final. 212 decisiones.
 - [D-208](../DECISIONS.md#d-208--los-diagnósticos-con-modelo-se-van-con-su-sujeto-y-el-rechazado-deja-su-coste) — Los diagnósticos con modelo se van con su sujeto, y el rechazado deja su coste
 - [D-209](../DECISIONS.md#d-209--la-demo-enseña-la-caché-compartida-entre-pasos) — La demo enseña la caché compartida entre pasos
 - [D-212](../DECISIONS.md#d-212--el-diagnóstico-de-siete-días-a-diez-millones-de-spans-al-día-medido-no-arreglado) — El Diagnóstico de siete días a diez millones de spans al día: medido, no arreglado
+- [D-217](../DECISIONS.md#d-217--el-grafo-del-proyecto-deja-de-ser-sólo-de-lectura-pulsar-un-paso-lleva-a-sus-trazas-y-a-sus-fichas) — El grafo del proyecto deja de ser sólo de lectura: pulsar un paso lleva a sus trazas y a sus fichas
 
 ## Probar: evaluaciones, juez y replay
 
@@ -209,6 +210,7 @@ final. 212 decisiones.
 - [D-192](../DECISIONS.md#d-192--las-pantallas-del-bot-más-allá-el-pr-de-cada-arreglo-y-el-webhook-en-ajustes) — Las pantallas del bot, más allá: el PR de cada arreglo y el webhook en Ajustes
 - [D-196](../DECISIONS.md#d-196--lecturas-de-caché-pagadas-en-openai-la-ficha-propone-lo-mismo-que-la-tarjeta) — Lecturas de caché pagadas en OpenAI: la ficha propone lo mismo que la tarjeta
 - [D-203](../DECISIONS.md#d-203--el-grafo-del-proyecto-marca-los-pasos-con-hallazgos-por-step_key-y-sin-adivinar) — El grafo del proyecto marca los pasos con hallazgos, por `step_key` y sin adivinar
+- [D-217](../DECISIONS.md#d-217--el-grafo-del-proyecto-deja-de-ser-sólo-de-lectura-pulsar-un-paso-lleva-a-sus-trazas-y-a-sus-fichas) — El grafo del proyecto deja de ser sólo de lectura: pulsar un paso lleva a sus trazas y a sus fichas
 
 ## Alertas y presupuesto
 
@@ -313,6 +315,7 @@ final. 212 decisiones.
 - [D-205](../DECISIONS.md#d-205--el-replay-con-herramientas-cada-resultado-el-que-grabó-la-traza-lo-que-no-se-grabó-corta-el-caso) — El replay con herramientas: cada resultado, el que grabó la traza; lo que no se grabó corta el caso
 - [D-206](../DECISIONS.md#d-206--la-parada-alcanza-lo-que-otro-instrumentador-traza-en-python-lo-que-no-alcanza-se-dice) — La parada alcanza lo que otro instrumentador traza en Python; lo que no alcanza, se dice
 - [D-212](../DECISIONS.md#d-212--el-diagnóstico-de-siete-días-a-diez-millones-de-spans-al-día-medido-no-arreglado) — El Diagnóstico de siete días a diez millones de spans al día: medido, no arreglado
+- [D-217](../DECISIONS.md#d-217--el-grafo-del-proyecto-deja-de-ser-sólo-de-lectura-pulsar-un-paso-lleva-a-sus-trazas-y-a-sus-fichas) — El grafo del proyecto deja de ser sólo de lectura: pulsar un paso lleva a sus trazas y a sus fichas
 
 ## Pruebas y método
 
@@ -679,3 +682,4 @@ final. 212 decisiones.
 - [D-210](../DECISIONS.md#d-210--con-muestreo-se-estima-lo-que-falta-del-gasto-con-margen-nada-más) — Con muestreo, se estima lo que falta del gasto, con margen; nada más
 - [D-212](../DECISIONS.md#d-212--el-diagnóstico-de-siete-días-a-diez-millones-de-spans-al-día-medido-no-arreglado) — El Diagnóstico de siete días a diez millones de spans al día: medido, no arreglado
 - [D-211](../DECISIONS.md#d-211--saml-con-xmlsec-opcional-y-los-grupos-de-scim-dan-los-roles) — SAML con `xmlsec` opcional, y los grupos de SCIM dan los roles
+- [D-217](../DECISIONS.md#d-217--el-grafo-del-proyecto-deja-de-ser-sólo-de-lectura-pulsar-un-paso-lleva-a-sus-trazas-y-a-sus-fichas) — El grafo del proyecto deja de ser sólo de lectura: pulsar un paso lleva a sus trazas y a sus fichas

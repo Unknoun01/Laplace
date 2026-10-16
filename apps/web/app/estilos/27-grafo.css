@@ -37,6 +37,21 @@
   stroke: var(--amber);
   stroke-width: 2;
 }
+.grafo-agente .nodo[role="button"] {
+  cursor: pointer;
+}
+.grafo-agente .nodo.elegido rect,
+.grafo-agente .nodo[role="button"]:focus-visible rect {
+  stroke: var(--iris);
+  stroke-width: 2.5;
+}
+.grafo-agente .paso-acciones {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-top: 10px;
+}
 .grafo-agente .nodo.error rect {
   stroke: var(--rose);
   stroke-width: 2;

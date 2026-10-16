@@ -951,6 +951,8 @@ export const fr: Mensajes = {
   "grafo.tipo.retrieval": "recherche",
   "grafo.tipo.chain": "étape",
   "grafo.tipo.otro": "autre",
+  "grafo.paso.trazas": "Voir les traces de cette étape →",
+  "grafo.paso.ficha": "Fiche du problème {n} →",
   "grafo.sin_tarifa": "sans tarif",
   "grafo.al_menos": "≥ {coste}",
   "grafo.aprox": "≈ {coste}",

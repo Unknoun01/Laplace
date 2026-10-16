@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { getGraph } from "@/lib/api";
 import { number } from "@/lib/format";
 import { t, tn } from "@/lib/textos";
@@ -23,10 +24,12 @@ import { type CajaDibujo, DibujoGrafo, type FlechaDibujo, costeDe, tipoConocido 
  */
 export function GrafoProyecto({ project, days }: { project: string; days: number }) {
   const [grafo, setGrafo] = useState<ProjectGraph | null>(null);
+  const [elegido, setElegido] = useState<string | null>(null);
 
   useEffect(() => {
     let vigente = true;
     setGrafo(null);
+    setElegido(null);
     getGraph(project, days)
       .then((g) => vigente && setGrafo(g))
       .catch(() => vigente && setGrafo(null));
@@ -37,6 +40,7 @@ export function GrafoProyecto({ project, days }: { project: string; days: number
 
   if (!grafo || grafo.nodes.length < 2) return null;
 
+  const paso = grafo.nodes.find((n) => n.id === elegido);
   const columna = columnas(grafo);
   const porColumna = new Map<number, number>();
   const cajas: CajaDibujo[] = grafo.nodes.map((n) => {
@@ -91,7 +95,10 @@ export function GrafoProyecto({ project, days }: { project: string; days: number
         resaltados={new Set(grafo.nodes.filter((n) => n.findings.length > 0).map((n) => n.id))}
         aria={t("grafo.aria", { pasos: grafo.nodes.length })}
         hueco={132}
+        elegido={elegido}
+        onElegir={(id) => setElegido(elegido === id ? null : id)}
       />
+      {paso && <AccionesDePaso paso={paso} project={project} days={days} />}
       {grafo.hidden_nodes > 0 && (
         <p className="muted">
           {t("grafo.proyecto.fuera", {
@@ -101,6 +108,30 @@ export function GrafoProyecto({ project, days }: { project: string; days: number
         </p>
       )}
     </section>
+  );
+}
+
+/**
+ * Lo que se puede hacer con un paso (D-217): sólo enlaces a pantallas que ya existen. Las
+ * trazas por identidad exacta, y sólo con `step_key` (sin él el id es `tipo:nombre`, como
+ * en D-203); y la ficha de cada problema, donde se decide si se ignora.
+ */
+function AccionesDePaso({ paso, project, days }: { paso: ProjectGraph["nodes"][number]; project: string; days: number }) {
+  const contexto = `project=${encodeURIComponent(project)}&days=${days}`;
+  const conClave = paso.id !== `${paso.type}:${paso.label}`;
+  const filtro = new URLSearchParams({ step: paso.id, step_label: paso.label }).toString();
+  return (
+    <div className="paso-acciones">
+      <strong>{paso.label}</strong>
+      {conClave && (
+        <Link href={`/trazas?${contexto}&${filtro}`}>{t("grafo.paso.trazas")}</Link>
+      )}
+      {paso.findings.map((id, i) => (
+        <Link key={id} href={`/problema?${contexto}&id=${encodeURIComponent(id)}`}>
+          {t("grafo.paso.ficha", { n: i + 1 })}
+        </Link>
+      ))}
+    </div>
   );
 }
 

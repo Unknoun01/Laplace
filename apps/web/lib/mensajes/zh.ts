@@ -947,6 +947,8 @@ export const zh: Mensajes = {
   "grafo.tipo.retrieval": "检索",
   "grafo.tipo.chain": "步骤",
   "grafo.tipo.otro": "其他",
+  "grafo.paso.trazas": "查看此步骤的追踪 →",
+  "grafo.paso.ficha": "问题 {n} 详情 →",
   "grafo.sin_tarifa": "无费率",
   "grafo.al_menos": "≥ {coste}",
   "grafo.aprox": "≈ {coste}",

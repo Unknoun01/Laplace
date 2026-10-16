@@ -166,6 +166,8 @@ export function DibujoGrafo({
   resaltados,
   aria,
   hueco = HUECO_X,
+  elegido,
+  onElegir,
 }: {
   cajas: CajaDibujo[];
   flechas: FlechaDibujo[];
@@ -173,6 +175,9 @@ export function DibujoGrafo({
   aria: string;
   /** Hueco entre columnas: más ancho si las flechas llevan texto largo. */
   hueco?: number;
+  /** Si hay `onElegir`, las cajas son botones (D-217); `elegido` lleva el borde de foco. */
+  elegido?: string | null;
+  onElegir?: (id: string) => void;
 }) {
   const columnas = Math.max(...cajas.map((n) => n.columna)) + 1;
   const filas = Math.max(...cajas.map((n) => n.fila)) + 1;
@@ -223,12 +228,29 @@ export function DibujoGrafo({
             "nodo",
             n.tipo,
             resaltados.has(n.id) ? "problema" : "",
+            elegido === n.id ? "elegido" : "",
             n.errores > 0 ? "error" : "",
           ]
             .filter(Boolean)
             .join(" ");
           return (
-            <g key={n.id} className={clase} transform={`translate(${p.x} ${p.y})`}>
+            <g
+              key={n.id}
+              className={clase}
+              transform={`translate(${p.x} ${p.y})`}
+              {...(onElegir && {
+                role: "button",
+                tabIndex: 0,
+                "aria-pressed": elegido === n.id,
+                onClick: () => onElegir(n.id),
+                onKeyDown: (e: React.KeyboardEvent) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onElegir(n.id);
+                  }
+                },
+              })}
+            >
               <title>{n.titulo}</title>
               <rect width={ANCHO} height={ALTO} rx={8} />
               <text x={12} y={21} className="nombre">
