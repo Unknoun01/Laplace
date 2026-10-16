@@ -201,13 +201,14 @@ class PostgresMetadataStore:
             )
         return diagnosis
 
-    def delete_diagnoses(self, project_id: str, trace_ids: list[str]) -> None:
+    def delete_trace_data(self, project_id: str, trace_ids: list[str]) -> None:
         if trace_ids:
             with self._connect() as conn:
-                conn.execute(
-                    "DELETE FROM trace_diagnoses WHERE project_id = %s AND trace_id = ANY(%s)",
-                    (project_id, list(trace_ids)),
-                )
+                for tabla in ("trace_diagnoses", "annotations"):
+                    conn.execute(
+                        f"DELETE FROM {tabla} WHERE project_id = %s AND trace_id = ANY(%s)",
+                        (project_id, list(trace_ids)),
+                    )
 
     def save_rejected_diagnosis(
         self, project_id: str, trace_id: str, model: str, rechazo: Any

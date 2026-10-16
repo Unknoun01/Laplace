@@ -333,6 +333,8 @@ export const es = {
   "traza.diag.tiradas_one": "Se descartó una afirmación que no citaba ningún paso de esta traza.",
   "traza.diag.tiradas_other": "Se descartaron {n} afirmaciones que no citaban pasos de esta traza.",
   "traza.diag.vacio": "Esta ejecución aún no tiene diagnóstico. Un modelo puede leerla y decir qué falló, citando cada paso.",
+  "traza.diag.rechazados_one": "Un diagnóstico de este proyecto se rechazó y se pagó igual: costó {coste}.",
+  "traza.diag.rechazados_other": "{n} diagnósticos de este proyecto se rechazaron y se pagaron igual: costaron {coste}.",
   "traza.diag.pidiendo": "Diagnosticando…",
   "traza.diag.otra_vez": "Diagnosticar otra vez",
   "traza.diag.pedir": "Diagnosticar con modelo",

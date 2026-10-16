@@ -326,6 +326,8 @@ export const en: Mensajes = {
   "traza.diag.tiradas_one": "One claim that didn't cite any step of this trace was discarded.",
   "traza.diag.tiradas_other": "{n} claims that didn't cite steps of this trace were discarded.",
   "traza.diag.vacio": "This run has no diagnosis yet. A model can read it and say what went wrong, citing each step.",
+  "traza.diag.rechazados_one": "One diagnosis in this project was rejected and still paid for: it cost {coste}.",
+  "traza.diag.rechazados_other": "{n} diagnoses in this project were rejected and still paid for: they cost {coste}.",
   "traza.diag.pidiendo": "Diagnosing…",
   "traza.diag.otra_vez": "Diagnose again",
   "traza.diag.pedir": "Diagnose with a model",

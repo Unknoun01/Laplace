@@ -136,11 +136,18 @@ function DiagnosticoModelo({
   const [puede, setPuede] = useState(false);
   const [pidiendo, setPidiendo] = useState(false);
   const [error, setError] = useState("");
-  useEffect(() => {
-    judgeStatus()
-      .then((s) => setPuede(Boolean(s.diagnosis_enabled)))
+  const [rechazados, setRechazados] = useState<JudgeStatus["diagnosis_rejected"]>(null);
+  const leerEstado = () =>
+    judgeStatus(project)
+      .then((s) => {
+        setPuede(Boolean(s.diagnosis_enabled));
+        setRechazados(s.diagnosis_rejected ?? null);
+      })
       .catch(() => setPuede(false));
-  }, []);
+  useEffect(() => {
+    leerEstado();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project]);
 
   const nombres = new Map(
     allNodes(trace.roots).map((n) => [n.span.span_id, n.span.step_label || n.span.name]),
@@ -153,6 +160,8 @@ function DiagnosticoModelo({
       setDiag(await diagnoseTrace(project, trace.summary.trace_id));
     } catch (e) {
       setError(e instanceof Error ? e.message : t("traza.diag.error"));
+      // Un rechazo también se pagó: se vuelve a leer lo que llevan gastado (D-208).
+      leerEstado();
     } finally {
       setPidiendo(false);
     }
@@ -206,6 +215,15 @@ function DiagnosticoModelo({
         </div>
       )}
       {error && <p className="verr">{error}</p>}
+      {rechazados && (
+        <p className="disclaimer">
+          {tn("traza.diag.rechazados", rechazados.calls, {
+            coste: rechazados.cost_unknown
+              ? t("traza.diag.coste_desconocido")
+              : moneyExact(rechazados.cost_usd),
+          })}
+        </p>
+      )}
     </section>
   );
 }

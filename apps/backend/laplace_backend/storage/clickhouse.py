@@ -2022,6 +2022,18 @@ class ClickHouseStore:
         self._olvidar_preagregados("project_id = %(p)s AND ", {"p": project_id}, cutoff)
         preagregados.marcar(self._client, {(project_id, cutoff)})
 
+    def subject_traces(
+        self, project_id: str, *, user_id: str | None = None, customer_id: str | None = None
+    ) -> list[str]:
+        columna, valor = _sujeto(user_id, customer_id)
+        sub = (
+            f"SELECT DISTINCT trace_id FROM spans WHERE project_id = %(p)s AND {columna} = %(v)s"
+        )
+        filas = self._consulta(
+            f"{sub} ORDER BY trace_id", parameters={"p": project_id, "v": valor}
+        ).result_rows
+        return [f[0] for f in filas]
+
     def delete_subject(
         self, project_id: str, *, user_id: str | None = None, customer_id: str | None = None
     ) -> list[str]:

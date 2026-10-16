@@ -1157,6 +1157,11 @@ class SpanStore(Protocol):
     def delete_project_before(self, project_id: str, cutoff: datetime) -> None:
         """La retención de un proyecto: sus spans anteriores a `cutoff` (D-173)."""
 
+    def subject_traces(
+        self, project_id: str, *, user_id: str | None = None, customer_id: str | None = None
+    ) -> list[str]:
+        """Los `trace_id`, ordenados, en los que aparece esa persona o ese cliente (D-208)."""
+
     def delete_subject(
         self, project_id: str, *, user_id: str | None = None, customer_id: str | None = None
     ) -> list[str]:

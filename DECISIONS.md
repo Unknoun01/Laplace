@@ -5333,13 +5333,12 @@ el borrado de un sujeto (D-118) existe para que no quede nada suyo.
 * El almacén de metadatos tiene `delete_diagnoses(project_id, trace_ids)`, en SQLite y en
   Postgres, por lotes de 500. La API lo llama con esa lista, acotado al proyecto. Si el
   almacén de metadatos no está, no hay diagnósticos que borrar y no falla.
-* Orden: primero las trazas, después los diagnósticos. Si lo segundo falla, la API da
-  503 pero las trazas ya no están: repetir la petición no encuentra su lista y los
-  diagnósticos quedan huérfanos. Queda dicho, no resuelto (hace falta un barrido de
-  diagnósticos sin traza). `delete_project` ya se los lleva: `trace_diagnoses` está en
-  los dos borrados de proyecto.
-* Sigue sin cubrirse, y se dice: las anotaciones del juez (`annotations`) cuelgan de la
-  traza y tampoco se borran con el sujeto.
+* Orden: **primero lo guardado aparte, después las trazas**, como al borrar un proyecto.
+  La API lee los `trace_id` del sujeto (`subject_traces`), borra sus diagnósticos y
+  anotaciones (`delete_trace_data`) y entonces borra las trazas; las que entraran entre
+  las dos lecturas se limpian al final. Si falla lo guardado no se ha borrado nada y
+  repetir basta: no quedan huérfanos.
+* Las anotaciones (juez y humanas) cuelgan de la traza y se van con ella.
 
 **El coste de un diagnóstico rechazado.** El juez apunta su coste dentro de lo que
 guarda (`Annotation.judge.cost_usd`), en el almacén de metadatos y nunca en `spans`;
@@ -5354,6 +5353,10 @@ reutilizamos ese camino:
 * `DiagnosisRejected` lleva tokens, coste y `cost_unknown` (el JSON ilegible también
   cuesta). Un modelo sin tarifa sigue sin costar cero: `cost_unknown`.
 * `rejected_diagnosis_cost(project_id)` suma (`usd`, `unknown`, `calls`); `unknown` si
-  alguna llamada no tenía tarifa. Quedan fuera, y se dicen: enseñarlo en pantalla, y
-  borrar estas filas al borrar un sujeto (no tienen contenido, y el gasto ocurrió);
-  `delete_project` sí las borra.
+  alguna llamada no tenía tarifa. `/api/judge?project_id=` lo devuelve en
+  `diagnosis_rejected` (`null` si no hubo ninguno) y la ficha de la traza lo dice bajo el
+  diagnóstico, en los cinco idiomas, y lo relee tras un rechazo. Estas filas no se borran
+  con un sujeto (no tienen contenido, y el gasto ocurrió); `delete_project` sí.
+
+Sin comprobar: la pantalla (no hay `node_modules` en este árbol, así que ni `tsc` ni
+`next build` ni `test_pantallas.py`).

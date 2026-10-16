@@ -683,6 +683,8 @@ export interface JudgeStatus {
   enabled: boolean;
   /** El diagnóstico con modelo de una traza, con el mismo proveedor (D-180). */
   diagnosis_enabled?: boolean;
+  /** Lo que costaron los diagnósticos rechazados del proyecto, si hubo alguno (D-208). */
+  diagnosis_rejected?: { calls: number; cost_usd: number; cost_unknown: boolean } | null;
   system: string;
   model: string;
   max_batch: number;

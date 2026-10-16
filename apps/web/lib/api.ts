@@ -349,8 +349,8 @@ export async function annotationsFor(
   return data.annotations;
 }
 
-export function judgeStatus(): Promise<JudgeStatus> {
-  return get<JudgeStatus>("/api/judge");
+export function judgeStatus(project?: string): Promise<JudgeStatus> {
+  return get<JudgeStatus>(project ? `/api/judge?project_id=${encodeURIComponent(project)}` : "/api/judge");
 }
 
 interface JudgeResult {

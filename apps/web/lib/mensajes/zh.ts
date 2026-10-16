@@ -324,6 +324,8 @@ export const zh: Mensajes = {
   "traza.diag.tiradas_one": "已丢弃一条未引用本 trace 任何步骤的结论。",
   "traza.diag.tiradas_other": "已丢弃 {n} 条未引用本 trace 步骤的结论。",
   "traza.diag.vacio": "这次运行还没有诊断。模型可以阅读它并说明哪里出错，并引用每个步骤。",
+  "traza.diag.rechazados_one": "本项目有 1 次诊断被拒绝但仍已付费：花费 {coste}。",
+  "traza.diag.rechazados_other": "本项目有 {n} 次诊断被拒绝但仍已付费：共花费 {coste}。",
   "traza.diag.pidiendo": "诊断中…",
   "traza.diag.otra_vez": "重新诊断",
   "traza.diag.pedir": "用模型诊断",

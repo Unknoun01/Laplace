@@ -179,13 +179,23 @@ class JudgeIn(BaseModel):
 
 
 @router.get("/judge")
-async def judge_status(request: Request) -> dict[str, Any]:
-    """Si el juez está configurado y con qué modelo. **La clave no sale nunca.**"""
+async def judge_status(request: Request, project_id: str = "") -> dict[str, Any]:
+    """Si el juez está configurado y con qué modelo. **La clave no sale nunca.**
+
+    Con `project_id`, también lo que costaron los diagnósticos rechazados (D-208)."""
     config: JudgeConfig = request.app.state.judge
     from .diagnostico_modelo import DiagnosisConfig
 
+    rechazados = None
+    if project_id:
+        usd, desconocido, llamadas = await run_in_threadpool(
+            _guard, _meta(request).rejected_diagnosis_cost, project_id
+        )
+        if llamadas:
+            rechazados = {"calls": llamadas, "cost_usd": usd, "cost_unknown": desconocido}
     return {
         "enabled": config.enabled,
+        "diagnosis_rejected": rechazados,
         # El diagnóstico con modelo usa el mismo proveedor y se enciende aparte (D-180).
         "diagnosis_enabled": DiagnosisConfig.of(request.app.state.settings).enabled,
         "system": config.system,

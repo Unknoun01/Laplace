@@ -2095,11 +2095,11 @@ class SQLiteStore:
         )
         self._conn.commit()
 
-    def delete_subject(
+    def subject_traces(
         self, project_id: str, *, user_id: str | None = None, customer_id: str | None = None
     ) -> list[str]:
         columna, valor = _sujeto(user_id, customer_id)
-        trazas = [
+        return [
             r["trace_id"]
             for r in self._query(
                 f"SELECT DISTINCT trace_id FROM spans WHERE project_id = :p AND {columna} = :v"
@@ -2107,6 +2107,11 @@ class SQLiteStore:
                 {"p": project_id, "v": valor},
             )
         ]
+
+    def delete_subject(
+        self, project_id: str, *, user_id: str | None = None, customer_id: str | None = None
+    ) -> list[str]:
+        trazas = self.subject_traces(project_id, user_id=user_id, customer_id=customer_id)
         for inicio in range(0, len(trazas), 500):
             lote = trazas[inicio : inicio + 500]
             marcas = ", ".join(f":t{i}" for i in range(len(lote)))

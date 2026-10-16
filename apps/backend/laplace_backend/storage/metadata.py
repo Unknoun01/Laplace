@@ -69,8 +69,9 @@ class MetadataStore(Protocol):
 
     def save_diagnosis(self, diagnosis: Diagnosis) -> Diagnosis: ...
 
-    def delete_diagnoses(self, project_id: str, trace_ids: list[str]) -> None:
-        """Borra los diagnósticos de esas trazas del proyecto (D-208)."""
+    def delete_trace_data(self, project_id: str, trace_ids: list[str]) -> None:
+        """Borra lo que se guardó aparte de esas trazas del proyecto: sus diagnósticos y las
+        anotaciones (D-208). Las filas de coste de los rechazados no llevan contenido."""
         ...
 
     def save_rejected_diagnosis(
@@ -637,15 +638,16 @@ class SQLiteMetadataStore:
             )
         return diagnosis
 
-    def delete_diagnoses(self, project_id: str, trace_ids: list[str]) -> None:
+    def delete_trace_data(self, project_id: str, trace_ids: list[str]) -> None:
         with self._conn() as conn:
             for i in range(0, len(trace_ids), 500):
                 lote = trace_ids[i : i + 500]
-                conn.execute(
-                    "DELETE FROM trace_diagnoses WHERE project_id = ? AND trace_id IN "
-                    f"({', '.join('?' * len(lote))})",
-                    (project_id, *lote),
-                )
+                marcas = ", ".join("?" * len(lote))
+                for tabla in ("trace_diagnoses", "annotations"):
+                    conn.execute(
+                        f"DELETE FROM {tabla} WHERE project_id = ? AND trace_id IN ({marcas})",
+                        (project_id, *lote),
+                    )
 
     def save_rejected_diagnosis(
         self, project_id: str, trace_id: str, model: str, rechazo: Any
@@ -1277,7 +1279,7 @@ class NullMetadataStore:
     def save_diagnosis(self, diagnosis: Diagnosis) -> Diagnosis:
         raise MetadataUnavailable("no hay base de metadatos: el diagnóstico no se ha guardado")
 
-    def delete_diagnoses(self, project_id: str, trace_ids: list[str]) -> None:
+    def delete_trace_data(self, project_id: str, trace_ids: list[str]) -> None:
         return None
 
     def save_rejected_diagnosis(
