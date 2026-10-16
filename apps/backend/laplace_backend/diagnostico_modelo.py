@@ -85,7 +85,18 @@ class DiagnosisUnavailable(RuntimeError):
 
 
 class DiagnosisRejected(RuntimeError):
-    """El modelo respondió, pero nada de lo que dijo citaba un span de la traza."""
+    """El modelo respondió, pero nada de lo que dijo citaba un span de la traza.
+
+    La llamada ya se pagó: lleva lo que costó para que la API lo apunte (D-208).
+    """
+
+    def __init__(self, motivo: str, *, input_tokens=0, output_tokens=0, cost_usd=0.0,
+                 cost_unknown=False) -> None:
+        super().__init__(motivo)
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+        self.cost_usd = cost_usd
+        self.cost_unknown = cost_unknown
 
 
 def _recorte(valor: Any) -> str:
@@ -187,14 +198,16 @@ def diagnosticar(
     except judge.JudgeUnavailable as exc:
         raise DiagnosisUnavailable(str(exc)) from exc
     coste = get_price_table().compute(config.juez.model, input_tokens=tok_in, output_tokens=tok_out)
+    pagado = {"input_tokens": tok_in, "output_tokens": tok_out,
+              "cost_usd": coste.total_usd, "cost_unknown": coste.unknown}
     datos = _json(texto)
     if datos is None:
-        raise DiagnosisRejected("el modelo no devolvió el JSON pedido")
+        raise DiagnosisRejected("el modelo no devolvió el JSON pedido", **pagado)
     afirmaciones, tiradas = comprobar(datos, {s.span_id.lower() for s in spans})
     causa = str(datos.get("cause") or "").strip()
     if not afirmaciones or not causa:
         raise DiagnosisRejected(
-            f"ninguna afirmación citaba un span de la traza ({tiradas} descartadas)"
+            f"ninguna afirmación citaba un span de la traza ({tiradas} descartadas)", **pagado
         )
     confianza = datos.get("confidence")
     try:

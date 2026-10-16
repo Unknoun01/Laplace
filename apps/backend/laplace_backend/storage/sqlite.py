@@ -2097,12 +2097,13 @@ class SQLiteStore:
 
     def delete_subject(
         self, project_id: str, *, user_id: str | None = None, customer_id: str | None = None
-    ) -> int:
+    ) -> list[str]:
         columna, valor = _sujeto(user_id, customer_id)
         trazas = [
             r["trace_id"]
             for r in self._query(
-                f"SELECT DISTINCT trace_id FROM spans WHERE project_id = :p AND {columna} = :v",
+                f"SELECT DISTINCT trace_id FROM spans WHERE project_id = :p AND {columna} = :v"
+                " ORDER BY trace_id",
                 {"p": project_id, "v": valor},
             )
         ]
@@ -2115,7 +2116,7 @@ class SQLiteStore:
                 f"DELETE FROM spans WHERE project_id = :p AND trace_id IN ({marcas})", params
             )
         self._conn.commit()
-        return len(trazas)
+        return trazas
 
     def health(self) -> bool:
         try:

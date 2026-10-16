@@ -2024,17 +2024,17 @@ class ClickHouseStore:
 
     def delete_subject(
         self, project_id: str, *, user_id: str | None = None, customer_id: str | None = None
-    ) -> int:
+    ) -> list[str]:
         columna, valor = _sujeto(user_id, customer_id)
         sub = (
             f"SELECT DISTINCT trace_id FROM spans WHERE project_id = %(p)s AND {columna} = %(v)s"
         )
         parametros = {"p": project_id, "v": valor}
-        cuantas = int(
-            self._consulta(f"SELECT count() FROM ({sub})", parameters=parametros)
-            .result_rows[0][0]
+        trazas = sorted(
+            f[0]
+            for f in self._consulta(f"{sub} ORDER BY trace_id", parameters=parametros).result_rows
         )
-        if cuantas:
+        if trazas:
             horas = self._consulta(
                 f"""SELECT DISTINCT toStartOfHour(start_time) FROM spans
                     WHERE project_id = %(p)s AND trace_id IN ({sub})""",
@@ -2045,7 +2045,7 @@ class ClickHouseStore:
                 parameters=parametros,
             )
             preagregados.marcar(self._client, {(project_id, h[0]) for h in horas})
-        return cuantas
+        return trazas
 
     def _olvidar_preagregados(self, filtro: str, params: dict[str, Any], cutoff: datetime) -> None:
         """Lo anterior a un corte: sus horas dejan de estar calculadas, y la del corte,

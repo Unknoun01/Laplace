@@ -1159,9 +1159,10 @@ class SpanStore(Protocol):
 
     def delete_subject(
         self, project_id: str, *, user_id: str | None = None, customer_id: str | None = None
-    ) -> int:
+    ) -> list[str]:
         """Borra las trazas enteras en las que aparece esa persona o ese cliente (D-173).
-        Devuelve cuántas trazas eran."""
+        Devuelve los `trace_id` que borró, ordenados (D-208): lo que se guardó aparte de
+        esas trazas, como sus diagnósticos, tiene que irse con ellas."""
 
     def health(self) -> bool:
         """True si el almacén responde."""

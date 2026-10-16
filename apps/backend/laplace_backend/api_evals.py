@@ -606,6 +606,15 @@ async def run_diagnosis(request: Request, trace_id: str, project_id: str) -> dic
         diagnostico = await run_in_threadpool(diagnosticar, config, trace_id, project_id, spans)
     except DiagnosisRejected as exc:
         # El modelo respondió y se pagó, pero nada de lo que dijo se sostenía en la traza.
+        # Apuntado aparte del tráfico, como el coste del juez (D-208). Si no se puede
+        # apuntar, el 422 sale igual: el usuario no pierde la respuesta por eso.
+        try:
+            await run_in_threadpool(
+                _meta(request).save_rejected_diagnosis, project_id, trace_id,
+                config.juez.model, exc,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("coste del diagnóstico rechazado sin apuntar", exc_info=True)
         detalle = t("diag_modelo.rechazado", motivo=str(exc))
         raise HTTPException(status_code=422, detail=detalle) from exc
     except DiagnosisUnavailable as exc:

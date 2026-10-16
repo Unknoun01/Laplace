@@ -257,7 +257,7 @@ def test_borrar_un_cliente_deja_las_horas_al_dia(almacenes, mes):
     ]
     _cargar(pre, spans, "demo")
     _calcular_todo(pre)
-    assert pre.delete_subject("demo", customer_id="acme") == len(suyas)
+    assert len(pre.delete_subject("demo", customer_id="acme")) == len(suyas)
     ventana = VENTANAS["30 días"]
     _comparar(pre, crudo, "demo", ventana, "borrado un cliente, sin recalcular")
     _calcular_todo(pre)

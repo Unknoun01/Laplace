@@ -5321,3 +5321,39 @@ sesiones, contar dos veces las trazas que cruzan, decidir con lo que sale en cru
 copias contadas por hora, no ensuciar las horas al crear la tabla y pedir las trazas sin
 la última versión de cada span. Esta última no mordía hasta añadir la prueba del lote
 reenviado.
+
+### D-208 — Los diagnósticos con modelo se van con su sujeto, y el rechazado deja su coste
+Cierra las dos cosas que D-180 dejó fuera.
+
+**Borrar un sujeto borra sus diagnósticos.** Un diagnóstico cita contenido de la traza, y
+el borrado de un sujeto (D-118) existe para que no quede nada suyo.
+* `delete_subject` de los almacenes de trazas devuelve **los `trace_id` que borró**, no
+  sólo cuántos (`list[str]`, ordenados). SQLite ya los tenía; ClickHouse los lee antes del
+  `DELETE`, con la misma subconsulta, así que la paridad es la de siempre.
+* El almacén de metadatos tiene `delete_diagnoses(project_id, trace_ids)`, en SQLite y en
+  Postgres, por lotes de 500. La API lo llama con esa lista, acotado al proyecto. Si el
+  almacén de metadatos no está, no hay diagnósticos que borrar y no falla.
+* Orden: primero las trazas, después los diagnósticos. Si lo segundo falla, la API da
+  503 pero las trazas ya no están: repetir la petición no encuentra su lista y los
+  diagnósticos quedan huérfanos. Queda dicho, no resuelto (hace falta un barrido de
+  diagnósticos sin traza). `delete_project` ya se los lleva: `trace_diagnoses` está en
+  los dos borrados de proyecto.
+* Sigue sin cubrirse, y se dice: las anotaciones del juez (`annotations`) cuelgan de la
+  traza y tampoco se borran con el sujeto.
+
+**El coste de un diagnóstico rechazado.** El juez apunta su coste dentro de lo que
+guarda (`Annotation.judge.cost_usd`), en el almacén de metadatos y nunca en `spans`;
+reutilizamos ese camino:
+* tabla `diagnosis_rejections` en metadatos (SQLite y Postgres): una fila por llamada
+  pagada (`project_id`, `trace_id`, `created_at`, `model`, tokens, `cost_usd`,
+  `cost_unknown`). Una fila **por llamada**, no una por traza: cada intento rechazado se
+  pagó, y sustituir la anterior perdería dinero. Sin contenido del modelo.
+* No es tráfico real ni se suma al del agente: no entra en `spans`, y por tanto ni en los
+  preagregados ni en las reglas. Tampoco se cuenta dos veces: un diagnóstico guardado
+  lleva su coste en `Diagnosis.cost_usd` y uno rechazado sólo en esta tabla; nunca los dos.
+* `DiagnosisRejected` lleva tokens, coste y `cost_unknown` (el JSON ilegible también
+  cuesta). Un modelo sin tarifa sigue sin costar cero: `cost_unknown`.
+* `rejected_diagnosis_cost(project_id)` suma (`usd`, `unknown`, `calls`); `unknown` si
+  alguna llamada no tenía tarifa. Quedan fuera, y se dicen: enseñarlo en pantalla, y
+  borrar estas filas al borrar un sujeto (no tienen contenido, y el gasto ocurrió);
+  `delete_project` sí las borra.

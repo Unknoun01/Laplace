@@ -42,6 +42,20 @@ CREATE TABLE IF NOT EXISTS trace_diagnoses (
 
 CREATE INDEX IF NOT EXISTS trace_diagnoses_project_idx ON trace_diagnoses (project_id, created_at DESC);
 
+-- Lo que costó un diagnóstico rechazado (D-208): una fila por llamada, fuera de las trazas.
+CREATE TABLE IF NOT EXISTS diagnosis_rejections (
+    id             BIGSERIAL PRIMARY KEY,
+    project_id     TEXT NOT NULL,
+    trace_id       TEXT NOT NULL,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    model          TEXT NOT NULL,
+    input_tokens   INTEGER NOT NULL,
+    output_tokens  INTEGER NOT NULL,
+    cost_usd       DOUBLE PRECISION NOT NULL,
+    cost_unknown   BOOLEAN NOT NULL
+);
+CREATE INDEX IF NOT EXISTS diagnosis_rejections_project_idx ON diagnosis_rejections (project_id);
+
 -- ---------------------------------------------------------------------------
 -- Hueco reservado: evaluación (Fase 4).
 -- Una anotación cuelga de una traza o de un span concreto: un veredicto sobre
