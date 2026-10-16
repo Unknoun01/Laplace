@@ -67,7 +67,7 @@ def test_la_carga_da_a_cada_regla_nueva_algo_que_encontrar_y_calcula_sus_horas(c
     almacen, carga = cargado
     ventana = _ventana()
     tipos = {f.kind for f in insights.detect(almacen, carga.GRANDE, ventana)}
-    assert {"salida_truncada", "json_roto", "historial"} <= tipos, tipos
+    assert {"salida_truncada", "json_roto", "historial", "cache_parecida"} <= tipos, tipos
 
     horas = almacen._client.query(
         "SELECT uniqExact(hora) FROM pre_horas WHERE project_id = %(p)s",

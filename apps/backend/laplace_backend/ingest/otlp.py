@@ -258,6 +258,52 @@ def loop_hash(span_type: str, name: str, payload: Any, *, ignorar_numeros: bool 
     return hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
 
 
+#: Palabras mínimas para tener huella de parecido (D-219): con menos, una palabra
+#: distinta mueve ~10 bits de 64 y el umbral de 4 no separa nada. Medido en D-219.
+SIMHASH_MIN_PALABRAS = 100
+_PALABRAS = re.compile(r"\w+")
+
+
+def simhash(messages: Any) -> int:
+    """Simhash de 64 bits, con signo, de lo que no son instrucciones de sistema (D-219).
+
+    Minúsculas, cada tirada de dígitos a `#` (como `loop_hash`) y trigramas de palabras.
+    0 si hay menos de `SIMHASH_MIN_PALABRAS`. Sólo propone qué preguntas comparar: dos
+    textos a pocos bits difieren en pocas palabras, y una negación es una palabra.
+    """
+    if not isinstance(messages, list):
+        return 0
+    resto = [
+        m for m in messages
+        if isinstance(m, dict) and str(m.get("role", "")).lower() not in ROLES_DE_INSTRUCCIONES
+    ]
+    texto = _SOLO_DIGITOS.sub("#", _contenido(resto).lower())
+    palabras = _PALABRAS.findall(texto)
+    if len(palabras) < SIMHASH_MIN_PALABRAS:
+        return 0
+    pesos = [0] * 64
+    for i in range(len(palabras) - 2):
+        digest = hashlib.blake2b(" ".join(palabras[i : i + 3]).encode(), digest_size=8).digest()
+        h = int.from_bytes(digest, "big")
+        for bit in range(64):
+            pesos[bit] += 1 if (h >> bit) & 1 else -1
+    huella = sum(1 << bit for bit in range(64) if pesos[bit] > 0)
+    return huella - (1 << 64) if huella >= 1 << 63 else huella
+
+
+def _contenido(messages: list[dict[str, Any]]) -> str:
+    partes: list[str] = []
+    for message in messages:
+        content = message.get("content")
+        if content is None and isinstance(message.get("parts"), list):
+            content = _texto_de_parts(message["parts"])
+        if isinstance(content, str):
+            partes.append(content)
+        elif content is not None:
+            partes.append(json.dumps(content, sort_keys=True, ensure_ascii=False, default=str))
+    return " ".join(partes)
+
+
 #: Cuánto de las instrucciones se guarda como pista legible para la interfaz.
 STEP_HINT_CHARS = 80
 
@@ -615,6 +661,7 @@ def _build_span(
         # vueltas sin avanzar produce siempre lo mismo (D-109).
         loop_out_hash=loop_hash(span_type, name, salida_payload, ignorar_numeros=False),
         output_json=salida_json(llm.output_messages) if llm is not None else "",
+        sim_hash=simhash(llm.input_messages) if llm is not None else 0,
         step_key=step_key,
         step_site=step_site,
         step_label=step_label,

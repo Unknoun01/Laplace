@@ -14,6 +14,7 @@ from laplace.semconv import EVAL_TAG, PUEDE_ESPERAR_TAG
 
 from ..config import Settings
 from . import preagregados
+from ._parecido import MAX_PREGUNTAS_PASO, agrupar
 from ._rows import (
     COLUMNS,
     coverage_from_rows,
@@ -641,6 +642,8 @@ _LLAMADA_CACHEABLE = (
     "span_type = 'llm' AND status != 'error' AND loop_hash != '' AND loop_out_hash != ''"
 )
 
+_LLAMADA_PARECIDA = f"{_LLAMADA_CACHEABLE} AND sim_hash != 0"
+
 CACHEABLE_GROUPS_SQL = f"""
 SELECT
     paso_clave                                                    AS paso,
@@ -728,6 +731,36 @@ GROUP BY paso_clave, request_model
 HAVING mismas >= %(min_mismas)s
 ORDER BY coste_mismas DESC, paso_clave, modelo
 LIMIT %(limit)s
+"""
+
+#: La primera llamada de cada pregunta distinta (D-219), gemela de la de sqlite.py. El
+#: agrupado por parecido es de Python (`_parecido.agrupar`). El filtro previo es por
+#: hash de 64 bits, como el de la caché exacta (D-200). SIN PROBAR contra ClickHouse.
+SIMILAR_QUESTIONS_SQL = f"""
+SELECT
+    if(step_key != '', step_key, name)                            AS paso_clave,
+    argMin(if(step_label != '', step_label, name), (start_time, trace_id, span_id)) AS etiqueta,
+    request_model, loop_hash,
+    argMin(loop_out_hash, (start_time, trace_id, span_id))        AS salida_q,
+    argMin(sim_hash, (start_time, trace_id, span_id))             AS sim_q,
+    argMin(trace_id, (start_time, trace_id, span_id))             AS traza_q,
+    argMin(span_id, (start_time, trace_id, span_id))              AS span_q,
+    min(start_time)                                               AS inicio_q,
+    argMin(step_hint, (start_time, trace_id, span_id))            AS pista_q,
+    argMin(step_site, (start_time, trace_id, span_id))            AS sitio_q,
+    argMin(cost_total_usd, (start_time, trace_id, span_id))       AS coste_q,
+    argMin(cost_unknown, (start_time, trace_id, span_id))         AS sin_tarifa_q,
+    argMin(cost_rate_assumed, (start_time, trace_id, span_id))    AS asumida_q
+FROM spans FINAL
+WHERE {RULES_WHERE} AND {_LLAMADA_PARECIDA}
+  AND sipHash64(if(step_key != '', step_key, name), request_model) IN (
+      SELECT sipHash64(if(step_key != '', step_key, name), request_model)
+      FROM spans
+      WHERE {RULES_WHERE} AND {_LLAMADA_PARECIDA}
+      GROUP BY sipHash64(if(step_key != '', step_key, name), request_model)
+      HAVING uniqExact(loop_hash) BETWEEN 2 AND %(max_preguntas)s
+  )
+GROUP BY paso_clave, request_model, loop_hash
 """
 
 #: Reintentos por JSON mal formado (D-194): sin las cortadas, que son de la de arriba.
@@ -1224,6 +1257,10 @@ class ClickHouseStore:
         return CACHEABLE_GROUPS_SQL
 
     @property
+    def similar_questions_sql(self) -> str:
+        return SIMILAR_QUESTIONS_SQL
+
+    @property
     def model_usage_sql(self) -> str:
         return MODEL_USAGE_SQL
 
@@ -1412,6 +1449,27 @@ class ClickHouseStore:
         params.update(min_mismas=min_mismas, limit=limit)
         filas = _named(self._consulta(CACHEABLE_GROUPS_SQL, parameters=params))
         return disambiguate([_cacheable_group(r) for r in filas])
+
+    def similar_groups(
+        self, project_id: str, window: Window, *, min_mismas: int = 5, limit: int = 20,
+        max_preguntas: int = MAX_PREGUNTAS_PASO,
+    ) -> list[CacheableGroup]:
+        """Gemelo del de sqlite.py (D-219): las filas, en crudo; el agrupado, el mismo."""
+        params = self._window_params(project_id, window)
+        params["max_preguntas"] = max_preguntas
+        filas = [
+            {
+                "paso_clave": r["paso_clave"], "etiqueta": r["etiqueta"],
+                "request_model": r["request_model"], "loop_hash": r["loop_hash"],
+                "loop_out_hash": r["salida_q"], "sim_hash": r["sim_q"],
+                "trace_id": r["traza_q"], "span_id": r["span_q"],
+                "start_time": r["inicio_q"], "step_hint": r["pista_q"],
+                "step_site": r["sitio_q"], "cost_total_usd": r["coste_q"],
+                "cost_unknown": r["sin_tarifa_q"], "cost_rate_assumed": r["asumida_q"],
+            }
+            for r in _named(self._consulta(SIMILAR_QUESTIONS_SQL, parameters=params))
+        ]
+        return disambiguate(agrupar(filas, min_mismas=min_mismas, limit=limit))
 
     def sample_conversation(
         self, project_id: str, window: Window, step_key: str, conversation: str,

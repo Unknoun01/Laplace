@@ -312,6 +312,11 @@ Esa misma huella, **sin el sitio**, se guarda aparte en cada llamada como
 puede reutilizar. Dos pasos distintos con el mismo `prefix_hash` mandan el mismo prefijo
 y pueden compartir la caché dentro de una ejecución (D-178). La calcula la ingesta.
 
+Y `sim_hash`: un simhash de 64 bits (entero con signo) de lo que no son instrucciones de
+sistema, con los números a `#`, para reconocer preguntas que difieren en una palabra
+(D-219). Vale 0 con menos de 100 palabras o sin payloads. Dos huellas a 4 bits o menos son
+textos casi iguales, no textos con el mismo sentido. La calcula la ingesta.
+
 ---
 
 ## 9. Compatibilidad

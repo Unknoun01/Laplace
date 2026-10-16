@@ -958,6 +958,7 @@ export const zh: Mensajes = {
   "aj.regla.historial": "不断增长的历史",
   "aj.regla.lotes": "可以走批量接口的任务",
   "aj.regla.cache_semantica": "可以缓存的回答",
+  "aj.regla.cache_parecida": "几乎相同的问题得到相同回答",
   "diag.ahorrado_one": "自从你修复了一个问题，已经少付了 {coste}。",
   "diag.ahorrado_other": "自从你修复了 {n} 个问题，已经少付了 {coste}。",
   "diag.ahorrado.suelo": "至少 {coste}",

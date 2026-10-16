@@ -909,6 +909,10 @@ class SpanStore(Protocol):
         (D-199)."""
 
     @property
+    def similar_questions_sql(self) -> str:
+        """La consulta de las preguntas que se agrupan por parecido (D-219)."""
+
+    @property
     def cacheable_groups_sql(self) -> str:
         """La consulta de las preguntas repetidas entre ejecuciones, tal cual se ejecuta
         (D-200)."""
@@ -1102,6 +1106,13 @@ class SpanStore(Protocol):
     ) -> list[CacheableGroup]:
         """La misma pregunta con la misma respuesta en ejecuciones distintas, por paso y
         modelo (D-200)."""
+
+    def similar_groups(
+        self, project_id: str, window: Window, *, min_mismas: int = 5, limit: int = 20,
+        max_preguntas: int = 20_000,
+    ) -> list[CacheableGroup]:
+        """Preguntas casi iguales (huella a ≤ 4 bits) con la misma respuesta que la
+        cabeza de su grupo, por paso y modelo (D-219)."""
 
     def sample_conversation(
         self, project_id: str, window: Window, step_key: str, conversation: str,

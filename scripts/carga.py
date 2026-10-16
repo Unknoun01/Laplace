@@ -62,7 +62,7 @@ INSERT INTO spans (
     input_messages, output_messages, tool_name, tool_arguments, tool_output,
     session_id, user_id, dedup_hash, loop_hash, loop_out_hash,
     step_key, step_site, step_label, step_hint, finish_reasons, output_json,
-    ingested_at
+    sim_hash, ingested_at
 )
 SELECT
     if(t %% 2 = 0, '{GRANDE}', concat('{PREFIJO}', toString(t %% 10))) AS project_id,
@@ -113,7 +113,9 @@ SELECT
     if(t %% 10 = 0 AND p IN (1, 3), concat('rep-', toString(t)), toString(n))
                                                                       AS dedup_hash,
     dedup_hash                                                        AS loop_hash,
-    toString(n)                                                       AS loop_out_hash,
+    -- Una de cada veinte trazas hace una pregunta casi igual en «responder» y recibe la
+    -- misma respuesta: lo que encuentra la caché parecida (D-219).
+    if(parecida, 'misma-parecida', toString(n))                       AS loop_out_hash,
     if(p IN (1, 3, 5), concat('paso-', toString(q)), '')              AS step_key,
     if(p IN (1, 3, 5), 'atender_ticket', '')                          AS step_site,
     if(p IN (1, 3, 5), multiIf(q = 1, 'clasificar', q = 3, 'extraer', 'responder'), '')
@@ -122,6 +124,8 @@ SELECT
     if(p IN (1, 3, 5), if(t %% 50 = 22 AND p = 1, ['length'], ['stop']), [])
                                                                       AS finish_reasons,
     if(t %% 50 = 44 AND p = 1, 'roto', '')                             AS output_json,
+    if(parecida, bitXor(toInt64(1085102592571150095), bitShiftLeft(toInt64(1), t %% 3)), 0)
+                                                                      AS sim_hash,
     now64(3)                                                          AS ingested_at
 FROM (
     SELECT number AS n,
@@ -129,7 +133,8 @@ FROM (
            number %% {SPANS_POR_TRAZA} AS p,
            -- La llamada que se rehace: en estas trazas, p = 1 también es «extraer».
            if(t %% 50 IN (22, 44) AND p = 1, 3, p) AS q,
-           intDiv(t, 10) %% 20 = 1 AS historial
+           intDiv(t, 10) %% 20 = 1 AS historial,
+           t %% 20 = 7 AND p = 5 AS parecida
     FROM numbers(%(inicio)s, %(cuantos)s)
 )
 """

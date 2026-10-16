@@ -669,5 +669,21 @@
   "tec.preguntas_repetidas": "Questions that repeat",
   "tec.llamadas_repetidas": "Calls repeated across runs",
   "tec.misma_respuesta": "With the same answer",
-  "tec.porcentaje_misma": "Same answer"
+  "tec.porcentaje_misma": "Same answer",
+  "cache_parecida.titulo": "«{paso}» gets near-identical questions and answers the same",
+  "cache_parecida.lead": "A similarity cache could serve them without calling the model, if one different word doesn't change the answer.",
+  "cache_parecida.resumen": "{parecidas} calls of «{paso}» ask something nearly identical to an earlier one (one word apart, {grupos} groups), and {mismas} got exactly the same answer as it{tasa}. {gasto}",
+  "cache_parecida.gasto.hasta": "A similarity cache would have saved up to {ahorro}, but one different word can change the answer and we don't know whether it would hold.",
+  "cache_parecida.sin_dinero": "Not included in total savings: two nearly identical questions are not the same question, and getting the same answer here doesn't prove they will next time or that it's right for another user. Look at the pairs by hand and check with a replay before caching.",
+  "cache_parecida.que_pasa": "«{paso}» gets questions that differ by a few words from an earlier one in another run: {grupos} groups and {parecidas} calls. In {mismas} of them the model answered exactly what it answered to the first of the group.{tasa} Identical questions don't count here: they belong to the exact cache, and calls are never counted twice.",
+  "cache_parecida.por_que": "The fingerprint measures how much text changed, not whether the meaning did: dropping a «not» or changing a name or an amount moves it as little as a synonym. All we can say is how often, in this window, the model answered the same to nearly identical questions. In a step with few possible answers (a classifier) the percentage comes out high whatever the question. That is why it's a ceiling and isn't in total savings.",
+  "cache_parecida.deteccion": "Active rule: **the first `llm` call of each distinct question (`loop_hash`) of the same step and model, with a similarity fingerprint (`sim_hash`, a 64-bit simhash of everything but system instructions, only for 100 words or more)**. Each question joins the first head within {bits} bits —one word apart— without chaining; those from a different run than their head count, and «the same answer» is its exact same output (`loop_out_hash`). At least {minimo} per step and model. Evaluation runs and failed calls don't count, nor do steps with more than {tope} distinct questions. The percentage, only with at least {muestra} similar calls, with its 95% Wilson interval.",
+  "cache_parecida.arreglo.probar.titulo": "Look at the pairs and check",
+  "cache_parecida.arreglo.probar.texto": "Open the example trace and look for questions in the group that differ by one word: would any change the right answer? Then save runs of this step as a case set and resend them to the same model with `laplace replay`, with the judge on.",
+  "cache_parecida.arreglo.cache.titulo": "If you cache, start with the exact one",
+  "cache_parecida.arreglo.cache.texto": "The exact key is safe; the similarity key only holds if, in your cases, changing that word never changes the answer. Give it an expiry and leave out anything that depends on who asks.",
+  "cache_parecida.cuenta": "{mismas} similar calls with the same answer cost {coste} in {ventana}; a similarity cache would have saved at most {ahorro}.{reclamado} Not included in total savings until we know the same answer is right for everyone.",
+  "cache_parecida.nota": "It's a ceiling, not a promise: it only counts answers that were identical across questions one word apart, and we don't know whether they'll stay that way.",
+  "tec.grupos_parecidos": "Groups of similar questions",
+  "tec.llamadas_parecidas": "Similar calls across runs"
 }

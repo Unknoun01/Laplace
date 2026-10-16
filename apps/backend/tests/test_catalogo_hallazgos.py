@@ -321,6 +321,28 @@ def almacen_con_los_cuatro_tipos(tmp_path):
             )
         )
 
+    # Regla 12 — caché parecida (D-219): preguntas distintas a pocos bits, misma respuesta.
+    salida_cat = [{"role": "assistant", "content": "billing"}]
+    for t, palabra in enumerate(["uno", "dos", "tres", "cuatro", "cinco", "seis"]):
+        entrada = [{"role": "user", "content": f"Clasifica el ticket {palabra}"}]
+        llamada = _span(
+            f"cat-{t}",
+            paso="clasificar_ticket",
+            clave="k-clasificar-ticket",
+            entrada_tokens=60,
+            salida_tokens=8,
+            i=5000 + t * 20,
+            dedup=f"cat-{t}",
+            entrada_msgs=entrada,
+            salida_msgs=salida_cat,
+            bucle=(
+                loop_hash("llm", "chat", entrada),
+                loop_hash("llm", "chat", salida_cat, ignorar_numeros=False),
+            ),
+        )
+        llamada.sim_hash = 0x0F0F_0F0F_0F0F_0F0F ^ t % 3
+        spans.append(llamada)
+
     store.insert_spans(spans)
     return store
 
@@ -630,6 +652,12 @@ GARANTIAS: dict[str, dict[str, str]] = {
         "detrás de lotes y es, en proporción, lo que queda del paso después de lo que "
         "reclaman todas (`_reclamado_por_todas`); deja fuera las repeticiones dentro de "
         "una ejecución, que son de la repetición y los bucles",
+    },
+    "cache_parecida": {
+        "nombre": "`_nombrar` y `disambiguate` sobre (paso, modelo), como la caché semántica",
+        "descuento": "nunca pone dinero en el total (`costs_money` falso); cuenta la primera "
+        "llamada de cada pregunta, que la caché exacta nunca reclama, así que no cuentan la "
+        "misma llamada; su «hasta» va detrás de todas, en proporción (`_reclamado_por_todas`)",
     },
     "prompt_caro": {
         "nombre": "el nombre del prompt y sus dos versiones, que son únicos",

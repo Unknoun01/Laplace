@@ -5321,3 +5321,57 @@ sesiones, contar dos veces las trazas que cruzan, decidir con lo que sale en cru
 copias contadas por hora, no ensuciar las horas al crear la tabla y pedir las trazas sin
 la última versión de cada span. Esta última no mordía hasta añadir la prueba del lote
 reenviado.
+
+### D-219 — Caché parecida: simhash local, sin dinero en el total, y lo que sí se puede afirmar
+D-200 dejó fuera lo parecido pero no idéntico. Se hace con una huella local, sin modelo ni
+clave (los embeddings quedan fuera). Antes de escribir código se midió qué separa y qué no.
+
+* **La huella.** Simhash de 64 bits sobre los mensajes que **no** son de sistema (las
+  instrucciones fijas hacen parecidas a todas las llamadas de un paso), en minúsculas,
+  con cada tirada de dígitos a `#` (como `loop_hash`) y trigramas de palabras. Se calcula
+  en la ingesta (`ingest/otlp.py`, `simhash`) y se guarda en `spans.sim_hash` (Int64; 0 =
+  sin huella). Sin ella la regla tendría que leer el texto de todas las llamadas de la
+  ventana, que es lo que D-200 evitó; con ella lee una fila por pregunta. Es columna
+  nueva en los dos almacenes (tardía en SQLite, `ALTER ... IF NOT EXISTS` en ClickHouse),
+  campo nuevo en `laplace.schema.Span`. Las filas anteriores tienen 0 y no cuentan.
+* **El umbral, medido (distancia de Hamming).** Texto de 107 palabras: añadir una frase
+  al final, 3; cambiar una palabra, 4; dos palabras, 7; cambiar «no ha llegado» por «ya ha
+  llegado», 9; otro cliente con el mismo molde, 12. Texto de 26 palabras: una palabra,
+  11; la negación, 8; otro asunto, 31. **Lo que enseña:** la huella mide cuánto texto
+  cambió, no si cambió el sentido: en 26 palabras la negación queda más cerca que un
+  sinónimo. Por eso (1) sólo hay huella con **al menos 100 palabras** (con menos, una
+  palabra mueve ~10 bits y el umbral no separa nada), (2) el umbral es **4 bits**: una
+  palabra de diferencia en un texto largo, y (3) la huella **no decide si la caché
+  valdría**; sólo propone qué preguntas comparar. Lo que se afirma sale de las
+  respuestas, no del parecido.
+* **Qué se cuenta.** Por (paso, modelo), sólo preguntas distintas (`loop_hash`
+  distinto), de cada una su **primera** llamada en la ventana. Se agrupan con un criterio
+  sin encadenar (cada pregunta se une a la primera cabeza a ≤ 4 bits, o es cabeza; orden
+  (inicio, traza, span)): ningún miembro dista de su cabeza más que el umbral. Cuentan los
+  miembros de **otra ejecución** que la cabeza (`parecidas`) y, de ésos, los que dieron
+  **exactamente** la salida de la cabeza (`mismas`, `loop_out_hash`).
+* **Qué se puede afirmar** (y qué no). Sí: «de N preguntas casi iguales a otra anterior,
+  M recibieron exactamente su misma respuesta (el X %, entre A y B)», con el intervalo de
+  Wilson y sólo con ≥ 10 parecidas (`MIN_CASES_FOR_RATE`). Y «una caché por parecido se
+  habría ahorrado hasta Y» (el coste de esas M llamadas). **No:** que la caché valga. Una
+  palabra de diferencia puede ser una negación, un nombre o un importe; que en esta
+  muestra la respuesta saliera igual no prueba que salga igual la próxima vez, ni que sirva
+  a otro usuario. Más débil que D-200, que al menos tiene la misma pregunta. Por eso:
+  `window_waste_usd = 0`, `costs_money` falso, `cost_unavailable` dice por qué, y la
+  ficha pide `laplace replay` con el juez **y mirar a mano las parejas que difieren**
+  antes de cachear. Un 95 % de salidas iguales entre preguntas parecidas puede ser un paso
+  de pocas salidas posibles (un clasificador): la tarjeta lo dice.
+* **Sin contar dos veces.** La primera llamada de cada pregunta es justo la que D-200 no
+  reclama (sólo cuenta las repeticiones de la misma pregunta, nunca la primera), así que
+  los dos conjuntos de llamadas son disjuntos y se pueden sumar. La regla va detrás de
+  `cache_semantica` y como ella no reclama: su «hasta» es sobre lo que queda del paso
+  después de lo que reclaman las demás (`_reclamado_por_todas`), en proporción (D-117).
+* **Fuera:** repeticiones dentro de una ejecución, evaluaciones (`RULES_WHERE`), errores,
+  preguntas de la misma ejecución que su cabeza (son de un bucle o una conversación),
+  grupos con menos de 5 `mismas`, y los pasos con más de **20.000** preguntas distintas en
+  la ventana: ahí no se compara (el filtro por bandas de 16 bits dejaría ~n²/65.000
+  candidatos). Callar no es afirmar: la regla no dice «no hay», no dice nada.
+* **Lectura.** `similar_questions` devuelve una fila por pregunta (la primera llamada) de
+  los pasos con huella y entre 2 y 20.000 preguntas; el agrupado es una sola función de
+  Python (`storage/_parecido.py`) que usan los dos almacenes, así que la paridad es la de
+  las filas, no la de dos implementaciones de un agrupado.

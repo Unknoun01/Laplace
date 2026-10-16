@@ -669,5 +669,21 @@
   "tec.preguntas_repetidas": "Questions qui se répètent",
   "tec.llamadas_repetidas": "Appels répétés entre exécutions",
   "tec.misma_respuesta": "Avec la même réponse",
-  "tec.porcentaje_misma": "Même réponse"
+  "tec.porcentaje_misma": "Même réponse",
+  "cache_parecida.titulo": "«{paso}» reçoit des questions presque identiques et répond pareil",
+  "cache_parecida.lead": "Un cache par similarité pourrait les servir sans appeler le modèle, si un mot différent ne change pas la réponse.",
+  "cache_parecida.resumen": "{parecidas} appels de «{paso}» posent une question presque identique à une précédente (à un mot près, {grupos} groupes), et {mismas} ont reçu exactement la même réponse qu’elle{tasa}. {gasto}",
+  "cache_parecida.gasto.hasta": "Un cache par similarité aurait économisé jusqu’à {ahorro}, mais un mot différent peut changer la réponse et nous ne savons pas si elle conviendrait.",
+  "cache_parecida.sin_dinero": "Non inclus dans l’économie totale : deux questions presque identiques ne sont pas la même question, et obtenir ici la même réponse ne prouve pas qu’on l’obtiendra la prochaine fois ni qu’elle convient à un autre utilisateur. Regardez les paires à la main et vérifiez avec un replay avant de mettre en cache.",
+  "cache_parecida.que_pasa": "«{paso}» reçoit des questions qui diffèrent de quelques mots d’une précédente d’une autre exécution : {grupos} groupes et {parecidas} appels. Dans {mismas} d’entre eux, le modèle a répondu exactement comme à la première du groupe.{tasa} Les questions identiques ne comptent pas ici : elles relèvent du cache exact, et un appel n’est jamais compté deux fois.",
+  "cache_parecida.por_que": "L’empreinte mesure combien de texte a changé, pas si le sens a changé : retirer un « ne » ou changer un nom ou un montant la déplace aussi peu qu’un synonyme. Nous pouvons seulement dire combien de fois, dans cette fenêtre, le modèle a répondu pareil à des questions presque identiques. Dans une étape à peu de réponses possibles (un classifieur), le pourcentage est élevé quelle que soit la question. C’est un plafond, et il n’entre pas dans l’économie totale.",
+  "cache_parecida.deteccion": "Règle active : **premier appel `llm` de chaque question distincte (`loop_hash`) de la même étape et du même modèle, avec une empreinte de similarité (`sim_hash`, un simhash 64 bits de tout sauf les instructions système, seulement à partir de 100 mots)**. Chaque question rejoint la première tête à {bits} bits ou moins —un mot d’écart— sans chaînage ; comptent celles d’une autre exécution que leur tête, et « la même réponse » est exactement la même sortie (`loop_out_hash`). Au moins {minimo} par étape et modèle. Les exécutions d’évaluation et les appels en erreur ne comptent pas, ni les étapes de plus de {tope} questions distinctes. Le pourcentage, seulement avec au moins {muestra} appels similaires, avec son intervalle de Wilson à 95 %.",
+  "cache_parecida.arreglo.probar.titulo": "Regardez les paires et vérifiez",
+  "cache_parecida.arreglo.probar.texto": "Ouvrez la trace d’exemple et cherchez dans le groupe des questions qui diffèrent d’un mot : l’une changerait-elle la bonne réponse ? Puis enregistrez des exécutions de cette étape comme jeu de cas et renvoyez-les au même modèle avec `laplace replay`, juge activé.",
+  "cache_parecida.arreglo.cache.titulo": "Si vous mettez en cache, commencez par l’exact",
+  "cache_parecida.arreglo.cache.texto": "La clé exacte est sûre ; celle de la similarité ne vaut que si, dans vos cas, changer ce mot ne change jamais la réponse. Donnez-lui une expiration et laissez de côté ce qui dépend de qui demande.",
+  "cache_parecida.cuenta": "{mismas} appels similaires avec la même réponse ont coûté {coste} sur {ventana} ; un cache par similarité aurait économisé au plus {ahorro}.{reclamado} Non inclus dans l’économie totale tant que nous ne savons pas que la même réponse convient à tous.",
+  "cache_parecida.nota": "C’est un plafond, pas une promesse : il ne compte que les réponses identiques entre questions à un mot d’écart, et nous ne savons pas si elles le resteront.",
+  "tec.grupos_parecidos": "Groupes de questions similaires",
+  "tec.llamadas_parecidas": "Appels similaires entre exécutions"
 }

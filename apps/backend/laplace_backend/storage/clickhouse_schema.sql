@@ -113,6 +113,8 @@ CREATE TABLE IF NOT EXISTS spans
     sample_rate         Float32 DEFAULT 1,
     -- ok, roto o vacio: si la salida del modelo es JSON que se lee (D-194).
     output_json         LowCardinality(String) DEFAULT '',
+    -- Simhash de lo que no son instrucciones, para la caché parecida (D-219). 0 = sin huella.
+    sim_hash            Int64 DEFAULT 0,
 
     events              String CODEC(ZSTD(3)),
     attributes          String CODEC(ZSTD(3)),
@@ -204,6 +206,9 @@ ALTER TABLE spans ADD COLUMN IF NOT EXISTS sample_rate Float32 DEFAULT 1;
 
 -- Instalaciones anteriores a los reintentos por JSON roto (D-194).
 ALTER TABLE spans ADD COLUMN IF NOT EXISTS output_json LowCardinality(String) DEFAULT '';
+
+-- Instalaciones anteriores a la caché parecida (D-219).
+ALTER TABLE spans ADD COLUMN IF NOT EXISTS sim_hash Int64 DEFAULT 0;
 
 -- Instalaciones anteriores a D-142. Los payloads son casi todo el disco, y con ZSTD(3)
 -- ocupan menos de la mitad que con el LZ4 por defecto (medido con la prueba de carga).

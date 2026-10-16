@@ -106,6 +106,8 @@ COLUMNS = (
     "sample_rate",
     # Si la salida es JSON que se lee, para los reintentos por JSON roto (D-194).
     "output_json",
+    # La huella de lo parecido, para la caché parecida (D-219).
+    "sim_hash",
 )
 
 
@@ -370,6 +372,7 @@ def row_to_span(r: dict[str, Any]) -> Span:
         prefix_hash=(r["prefix_hash"] if "prefix_hash" in r.keys() else ""),
         sample_rate=float(r["sample_rate"] or 1) if "sample_rate" in r.keys() else 1.0,
         output_json=(r["output_json"] or "") if "output_json" in r.keys() else "",
+        sim_hash=int(r["sim_hash"] or 0) if "sim_hash" in r.keys() else 0,
         prompt_name=r["prompt_name"] or "",
         prompt_version=int(r["prompt_version"] or 0),
         events=events,
@@ -548,4 +551,5 @@ def span_to_row(span: Span) -> list[Any]:
         span.prefix_hash,
         float(span.sample_rate or 1.0),
         span.output_json,
+        int(span.sim_hash or 0),
     ]
