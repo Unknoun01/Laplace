@@ -5358,5 +5358,5 @@ reutilizamos ese camino:
   diagnóstico, en los cinco idiomas, y lo relee tras un rechazo. Estas filas no se borran
   con un sujeto (no tienen contenido, y el gasto ocurrió); `delete_project` sí.
 
-Sin comprobar: la pantalla (no hay `node_modules` en este árbol, así que ni `tsc` ni
-`next build` ni `test_pantallas.py`).
+`test_pantallas.py` exige que la ficha diga lo que costaron los rechazados; se rompió a
+propósito el bloque y la prueba falla.

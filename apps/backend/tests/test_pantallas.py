@@ -979,3 +979,27 @@ def test_el_bucle_ofrece_un_pr_con_tope_y_ajustes_ensena_el_webhook(servidor, na
         # El servidor es de todo el módulo: se deja como estaba.
         poner_github({"repo": ""})
         pagina.close()
+
+
+def test_la_ficha_dice_lo_que_costaron_los_diagnosticos_rechazados(servidor, navegador):
+    """D-208: un diagnóstico rechazado también se pagó, y la ficha lo dice."""
+    import json
+    import re
+
+    pagina, errores = _abrir(navegador, servidor + "/trazas/?project=demo&days=30", "escritorio")
+    try:
+        def con_rechazos(ruta):
+            respuesta = ruta.fetch()
+            cuerpo = respuesta.json()
+            cuerpo["diagnosis_enabled"] = True
+            cuerpo["diagnosis_rejected"] = {"calls": 2, "cost_usd": 0.0123, "cost_unknown": False}
+            ruta.fulfill(response=respuesta, body=json.dumps(cuerpo))
+
+        pagina.route(re.compile(r"/api/judge(\?|$)"), con_rechazos)
+        pagina.locator("a[href*='/traza?'], a[href*='/traza/?']").first.click()
+        caja = pagina.locator("section.diag-modelo")
+        caja.wait_for(timeout=15_000)
+        assert "0,0123" in caja.inner_text(), caja.inner_text()
+        assert errores == [], errores
+    finally:
+        pagina.close()
