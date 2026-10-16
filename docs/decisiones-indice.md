@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 205 decisiones.
+final. 206 decisiones.
 
 ## Coste, precios y caché
 
@@ -141,6 +141,7 @@ final. 205 decisiones.
 - [D-187](../DECISIONS.md#d-187--tope-bucles-y-parada-desde-laplace-el-sdk-los-pide-cada-30-s-y-manda-el-más-estricto) — Tope, bucles y parada desde Laplace: el SDK los pide cada 30 s y manda el más estricto
 - [D-196](../DECISIONS.md#d-196--lecturas-de-caché-pagadas-en-openai-la-ficha-propone-lo-mismo-que-la-tarjeta) — Lecturas de caché pagadas en OpenAI: la ficha propone lo mismo que la tarjeta
 - [D-202](../DECISIONS.md#d-202--sin-ciclos-de-imports-en-el-sdk-init-sale-de-_tracer) — Sin ciclos de imports en el SDK: `init()` sale de `_tracer`
+- [D-206](../DECISIONS.md#d-206--la-parada-alcanza-lo-que-otro-instrumentador-traza-en-python-lo-que-no-alcanza-se-dice) — La parada alcanza lo que otro instrumentador traza en Python; lo que no alcanza, se dice
 
 ## Almacenes y escala
 
@@ -299,6 +300,7 @@ final. 205 decisiones.
 - [D-188](../DECISIONS.md#d-188--el-grafo-del-proyecto-el-agente-entero-sumando-las-trazas) — El grafo del proyecto: el agente entero, sumando las trazas
 - [D-203](../DECISIONS.md#d-203--el-grafo-del-proyecto-marca-los-pasos-con-hallazgos-por-step_key-y-sin-adivinar) — El grafo del proyecto marca los pasos con hallazgos, por `step_key` y sin adivinar
 - [D-205](../DECISIONS.md#d-205--el-replay-con-herramientas-cada-resultado-el-que-grabó-la-traza-lo-que-no-se-grabó-corta-el-caso) — El replay con herramientas: cada resultado, el que grabó la traza; lo que no se grabó corta el caso
+- [D-206](../DECISIONS.md#d-206--la-parada-alcanza-lo-que-otro-instrumentador-traza-en-python-lo-que-no-alcanza-se-dice) — La parada alcanza lo que otro instrumentador traza en Python; lo que no alcanza, se dice
 
 ## Pruebas y método
 
@@ -342,6 +344,7 @@ final. 205 decisiones.
 - [D-164](../DECISIONS.md#d-164--clientbeta-en-python-las-llamadas-que-no-se-veían) — `client.beta.*` en Python: las llamadas que no se veían
 - [D-173](../DECISIONS.md#d-173--retención-por-proyecto-y-borrar-lo-de-una-persona-o-un-cliente) — Retención por proyecto, y borrar lo de una persona o un cliente
 - [D-179](../DECISIONS.md#d-179--margen-por-cliente-lo-evitable-de-cada-uno-otras-monedas-y-su-columna) — Margen por cliente: lo evitable de cada uno, otras monedas y su columna
+- [D-206](../DECISIONS.md#d-206--la-parada-alcanza-lo-que-otro-instrumentador-traza-en-python-lo-que-no-alcanza-se-dice) — La parada alcanza lo que otro instrumentador traza en Python; lo que no alcanza, se dice
 
 ## Todas, en orden
 
@@ -657,3 +660,4 @@ final. 205 decisiones.
 - [D-203](../DECISIONS.md#d-203--el-grafo-del-proyecto-marca-los-pasos-con-hallazgos-por-step_key-y-sin-adivinar) — El grafo del proyecto marca los pasos con hallazgos, por `step_key` y sin adivinar
 - [D-204](../DECISIONS.md#d-204--la-señal-de-despliegue-el-aviso-deployment_status-de-github-mueve-la-frontera-del-arreglado) — La señal de despliegue: el aviso `deployment_status` de GitHub mueve la frontera del arreglado
 - [D-205](../DECISIONS.md#d-205--el-replay-con-herramientas-cada-resultado-el-que-grabó-la-traza-lo-que-no-se-grabó-corta-el-caso) — El replay con herramientas: cada resultado, el que grabó la traza; lo que no se grabó corta el caso
+- [D-206](../DECISIONS.md#d-206--la-parada-alcanza-lo-que-otro-instrumentador-traza-en-python-lo-que-no-alcanza-se-dice) — La parada alcanza lo que otro instrumentador traza en Python; lo que no alcanza, se dice

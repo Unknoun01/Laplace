@@ -276,7 +276,7 @@ class _AnthropicStream:
 def _wrap_sync(original: Any) -> Any:
     @functools.wraps(original)
     def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
-        if c.other_instrumentor():
+        if c.cede(kwargs.get("model")):
             return original(self, *args, **kwargs)
         span = _start_span(kwargs)
         try:
@@ -301,7 +301,7 @@ def _wrap_sync(original: Any) -> Any:
 def _wrap_async(original: Any) -> Any:
     @functools.wraps(original)
     async def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
-        if c.other_instrumentor():
+        if c.cede(kwargs.get("model")):
             return await original(self, *args, **kwargs)
         span = _start_span(kwargs)
         try:
@@ -365,7 +365,7 @@ def _wrap_stream_sync(original: Any) -> Any:
     @functools.wraps(original)
     def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
         gestor = original(self, *args, **kwargs)
-        if c.other_instrumentor():
+        if c.cede(kwargs.get("model")):
             return gestor
 
         def envolver(peticion: Any) -> Any:
@@ -397,7 +397,7 @@ def _wrap_stream_async(original: Any) -> Any:
     @functools.wraps(original)
     def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
         gestor = original(self, *args, **kwargs)
-        if c.other_instrumentor():
+        if c.cede(kwargs.get("model")):
             return gestor
 
         def envolver(peticion: Any) -> Any:

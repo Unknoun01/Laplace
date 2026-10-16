@@ -139,7 +139,10 @@ queda en la traza como el error del paso. También como decorador
   de parada, sin tocar el código. El SDK los pide cada 30 s en segundo plano; se suman a
   los del código y manda el más estricto (`GuardExceeded.source` dice de dónde salió).
   Sin `guard` en el código, la ejecución es el `@observe` más externo. Parado, ninguna
-  llamada al modelo ni ningún paso se hace (`reason="stopped"`). Si Laplace no responde,
+  llamada al modelo ni ningún paso se hace (`reason="stopped"`), también las llamadas a
+  OpenAI y Anthropic que traza OpenInference u OpenLLMetry (a ésas no se les aplican el
+  tope ni los bucles). No llega a lo que el SDK no ve: agentes en otros lenguajes,
+  procesos sin `laplace.init()` y otros proveedores fuera de un `@observe`. Si Laplace no responde,
   se sigue con lo último recibido; si nunca respondió, sin límites. Se apaga con
   `laplace.init(remote_rules=False)` o `LAPLACE_REMOTE_RULES=false`.
 

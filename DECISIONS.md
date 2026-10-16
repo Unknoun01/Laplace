@@ -5109,3 +5109,50 @@ la conversación, el plan y el tope sin ella, la referencia sin la respuesta fin
 el backend cada comprobación de la conversación, las vueltas, los `span_ids` y la
 entrada de la última vuelta) y en todos falla alguna. La de la referencia no mordía al
 principio y tiene ahora su prueba. No toca los almacenes ni la interfaz.
+
+### D-206 — La parada alcanza lo que otro instrumentador traza en Python; lo que no alcanza, se dice
+La parada de Ajustes (D-187) vive en el proceso del agente: la aplica el SDK de Python
+antes de cada llamada al modelo y de cada paso. El backend recibe las trazas después de
+la llamada y no puede impedir nada. Hasta aquí no frenaba tres cosas que la pantalla
+daba por frenadas: las llamadas que traza OpenInference u OpenLLMetry, lo que corre en
+otro hilo y los agentes en Node. Se separa lo que se puede de lo que no.
+
+* **OpenInference u OpenLLMetry en un proceso con `laplace.init()`: sí.** Con otro
+  instrumentador de LLM activo, las integraciones de Laplace le ceden la traza (D-141),
+  pero su parche sigue puesto en `create` de OpenAI y de Anthropic, por debajo de
+  LangChain, LlamaIndex o quien sea, y la llamada pasa por él. Ahora, antes de ceder,
+  mira la parada: parado, `GuardExceeded(reason="stopped")` y la petición no sale. Si el
+  otro instrumentador envuelve por fuera, su span acaba con ese error: la traza dice que
+  se cortó.
+* **El tope y los bucles, no, para esas llamadas.** El gasto de una ejecución se suma
+  desde el span de Laplace, que al ceder no se abre, y los bucles miran también la
+  salida. Contarlas a medias cortaría donde el Diagnóstico no señala, o no cortaría
+  donde sí: mejor no tocarlas y decirlo. Los pasos de `@observe` que las rodean sí
+  cuentan como siempre.
+* **Proveedores que el SDK no envuelve** (Bedrock, Gemini, Mistral…): no hay parche, no
+  hay parada de la llamada; sólo la de los pasos de `@observe` que la rodean.
+* **Otro hilo: la parada sí llegaba.** STATUS decía que lo que corre en otro hilo sin
+  copiar el contexto sigue gastando. Para la parada no es verdad: la copia de las reglas
+  es del proceso, no del contexto. Ahora hay una prueba que lo fija. Lo que se pierde en
+  otro hilo es el `guard` abierto, y con él el tope y los bucles de esa ejecución.
+* **Node y otros lenguajes: no, y se dice.** No hay SDK de JS. Un frenado en un paquete
+  sin publicar no lo instalaría nadie, y el SDK de TypeScript espera nombre en npm (el
+  usuario lo dejó para el final). Lo honrado es que la pantalla no prometa una parada que
+  no ocurre.
+* **La pantalla y el README lo dicen.** «Parado desde…» ya no dice que no se ejecuta
+  nada: dice que el SDK de Python no deja hacer llamadas ni pasos. Y debajo de «Tope y
+  parada», una línea dice a qué llega (agentes en Python con `laplace.init()`, sus
+  llamadas a OpenAI y Anthropic aunque las trace otro, y los pasos de `@observe`) y a qué
+  no (otros lenguajes, procesos sin el SDK y otros proveedores fuera de un paso).
+* **Pendiente:** decir con un número qué parte del tráfico de un proyecto queda fuera
+  (Node, procesos sin `init()`). Pide guardar de dónde viene cada span —el lenguaje del
+  recurso OTLP, la familia de la convención— en los dos almacenes; no se hace aquí.
+
+Pruebas en `test_parada_alcance.py` (7): parado con otro instrumentador activo no sale
+ninguna petición por OpenAI (síncrono y asíncrono) ni por Anthropic (síncrono,
+asíncrono y `messages.stream`); en marcha, sale; y parado, tampoco sale lo que corre en
+otro hilo sin contexto. En `test_pantallas.py`, la línea de «Parado» nombra el SDK de
+Python y la del alcance, Node. Se rompieron a propósito cinco sitios (ceder sin mirar la
+parada, el `stream` de Anthropic sin mirarla, ceder cortando siempre, las reglas sólo
+en el hilo principal y la pantalla sin la línea del alcance) y en todos falla alguna. La
+del hilo fija algo que ya funcionaba: no estuvo en rojo antes del arreglo.
