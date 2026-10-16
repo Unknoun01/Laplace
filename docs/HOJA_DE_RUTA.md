@@ -84,19 +84,22 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
 
 ### Siguiente: funciones diferenciales (confirmar el orden con el usuario)
 - **Replay contrafactual, más allá** (lo básico está hecho, D-167): llamadas con herramientas (habría que simular sus resultados con los grabados, sin ejecutarlas), imágenes y bloques entre proveedores, y un botón en la versión local que lo lance sin copiar la orden.
-- **Bot de pull requests, más allá** (hecho: el cambio de modelo, D-185; `cache_control` y el tope de vueltas sobre el árbol de sintaxis, D-190; el webhook que marca el hallazgo arreglado al fusionar, D-191; sus pantallas, D-192). Lo que queda:
+- **Bot de pull requests, más allá** (hecho: el cambio de modelo, D-185; `cache_control` y el tope de vueltas sobre el árbol de sintaxis, D-190; el webhook que marca el hallazgo arreglado al fusionar, D-191; sus pantallas, D-192; la
+  frontera en el despliegue a producción por el aviso `deployment_status`, D-204). Lo que queda:
   - arreglos que no se derivan del código (acortar un contexto, cambiar un prompt): harían falta un modelo que los escriba y una persona que los mire, y por eso no se hicieron (D-190);
   - otros lenguajes: el SDK de Python es el único que anota la línea;
-  - una señal de despliegue: hoy la frontera del «arreglado» es la hora de la fusión.
+  - la señal de despliegue sólo llega si el repositorio publica despliegues en GitHub;
+    sin ellos la frontera sigue en la fusión, y la nota lo dice (D-204). La versión que
+    manda el tráfico (`service.version`) no se guarda: sería otra señal, con columnas
+    nuevas en los dos almacenes.
 - **Plano de control, más allá** (lo básico está hecho, D-187 a D-189: tope, bucles y
   parada desde Ajustes, y el grafo del proyecto en el Panel):
   - Modelo por paso desde la interfaz y repartos A/B: **fuera por decisión del usuario**;
     no empezar sin que lo pida.
   - La parada sólo alcanza lo que instrumenta el SDK de Python: no las llamadas por
     OpenInference u OpenLLMetry ni los agentes en Node (`STATUS.md`, «Qué hay que vigilar»).
-  - El grafo del proyecto es de sólo lectura y no marca los pasos con hallazgos del
-    Diagnóstico, como hace el de la traza; se podría, con los `step_key` de los hallazgos
-    de la misma ventana.
+  - El grafo del proyecto marca ya los pasos con hallazgos de la misma ventana (D-203),
+    pero sigue siendo de sólo lectura: no se cambia nada desde él.
 - **Reglas nuevas** (cada una entra por `detect()` y `detail()`, con su prueba de catálogo;
   fase `fase-reglas-diagnostico`). Hechas: la salida truncada y rehecha (D-193; la
   «descartada» no se puede saber y queda fuera), los reintentos por JSON mal formado
@@ -138,11 +141,6 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
   pero pide otra forma (agrupar Prompts y Ajustes, o un menú) si se añade alguna más.
 - La documentación de usuario (`docs/usuario/`, D-174) es Markdown plano: pasarla a un sitio (Mintlify, Docusaurus o Starlight) cuando haya dominio.
 - `STATUS.md` se puso al día al cerrar las fases 5 y 6: mantenerlo así al cerrar cada fase.
-- **Ciclos de imports en el SDK de Python**, que sacó el grafo de graphify (2 de octubre):
-  `laplace/__init__` → `evals`, `decorators` o `prompts` → `_tracer` → `__init__`, y
-  `integrations/__init__` → `openai` → `_streaming` → `integrations/__init__`. Hoy
-  funcionan porque los imports son tardíos, pero son frágiles: sacar lo que `_tracer`
-  toma de `__init__` a un módulo propio los rompe.
 - Tras la caída de Docker del 26 de septiembre quedaron apartadas `%LOCALAPPDATA%\Docker\run.viejo-*` y `docker-secrets-engine.viejo-*` con sockets bloqueados; se pueden borrar tras reiniciar Windows.
 
 ## 5. Lo que sólo puede hacer el usuario
@@ -151,7 +149,7 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
 - Decidir el dominio: `laplace.dev`, `laplace.ai` y `laplace.sh` están cogidos; `uselaplace.com` parecía libre, pero hay que confirmarlo.
 - Poner una clave de proveedor para las 4 pruebas vivas que validan las cifras contra la factura real (`LAPLACE_LIVE_TESTS=1`).
 - Una clave de pruebas de Stripe (`rk_test_…`) para probar la traída de ingresos contra la API real.
-- **Registrar la GitHub App de Laplace** (D-185): permisos de contenido y pull requests, y poner `LAPLACE_GITHUB_APP_ID` y `LAPLACE_GITHUB_APP_PRIVATE_KEY` en el despliegue. Para el aviso al fusionar (D-191), suscribirla al evento *Pull request* con la URL `…/api/github/webhook` y poner su secreto en `LAPLACE_GITHUB_WEBHOOK_SECRET`. Sin App, el bot funciona con un token por proyecto y el webhook se pone a mano en cada repositorio.
+- **Registrar la GitHub App de Laplace** (D-185): permisos de contenido y pull requests, y poner `LAPLACE_GITHUB_APP_ID` y `LAPLACE_GITHUB_APP_PRIVATE_KEY` en el despliegue. Para el aviso al fusionar (D-191), suscribirla al evento *Pull request* con la URL `…/api/github/webhook` y poner su secreto en `LAPLACE_GITHUB_WEBHOOK_SECRET`. Para la señal de despliegue (D-204), suscribirla también a *Deployment status* con el permiso *Deployments: read*. Sin App, el bot funciona con un token por proyecto y el webhook se pone a mano en cada repositorio.
 
 ## 6. Negocio (del informe de auditoría)
 - **Mensaje:** «Laplace encuentra el dinero que tu agente tira, te dice cómo arreglarlo y demuestra cuánto has dejado de pagar». Complementario a Langfuse, no rival.

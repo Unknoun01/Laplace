@@ -29,7 +29,7 @@ ingesta OTLP, reglas en `insights/`, almacenes en `storage/`), `apps/web` (Next.
 - **Nada entra sin su prueba**: primero en rojo, después el arreglo, y comprobar que
   muerde rompiendo el código a propósito.
 - Cada cambio con criterio lleva su `D-xxx` al final de `DECISIONS.md`, y después
-  `python scripts/indice_decisiones.py`. La siguiente libre: **D-193** (compruébalo en
+  `python scripts/indice_decisiones.py`. La siguiente libre: **D-205** (D-201, reservada para la tabla de precios) (compruébalo en
   `origin/master`).
 - Los commits terminan con `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - Al cerrar una fase: la hoja de ruta y `STATUS.md` al día.

@@ -215,6 +215,14 @@ Del 5 al 15 de octubre, la segunda parte (`fase-reglas-nuevas-2`):
 Queda el historial con dinero, que pide un replay con evaluación (hoja de ruta, §3), y lo
 parecido pero no idéntico en la caché semántica.
 
+El 16 de octubre, tres arreglos sueltos, cada uno en su rama:
+- el SDK de Python sin ciclos de imports: `init()` sale de `_tracer` a `_arranque`, y
+  una prueba con `ast` falla si vuelve a haber un ciclo (D-202);
+- el grafo del proyecto marca en ámbar los pasos con hallazgos del Diagnóstico de la
+  misma ventana, por `step_key` y por su reparto (D-203);
+- el aviso `deployment_status` de GitHub mueve la frontera del «arreglado» al despliegue
+  a producción que lleva la fusión; sin él, se queda en la fusión (D-204).
+
 Del 1 al 2 de octubre entró el resto de la lista «siguiente»:
 - la caché compartida entre pasos (D-178);
 - lo evitable de cada cliente, ingresos en otras monedas y la columna de cliente en las
@@ -450,9 +458,15 @@ será multiplicar los tokens reenviados por la tarifa: eso sería decir que todo
 historial sobra.
 
 **«Arreglado al fusionar» no es «arreglado al desplegar».** El webhook (D-191) pone la
-frontera del seguimiento en la hora de la fusión. Si el despliegue llega horas o días
-después, las primeras ejecuciones «de después» son de antes y el hallazgo puede salir
-como reaparecido: la nota del estado lo dice y pide volver a marcarlo al desplegar.
+frontera del seguimiento en la hora de la fusión, y la mueve al despliegue sólo si llega
+un `deployment_status` correcto de producción que lleve el commit de la fusión (D-204).
+Sin ese aviso —repositorios que no publican despliegues en GitHub, o un despliegue que
+llega antes que la fusión— la frontera se queda en la fusión, el hallazgo puede salir como
+reaparecido, y la nota del estado lo dice. Comprobar que lo lleva pide una llamada a
+`compare` de GitHub dentro del webhook: si falla, la frontera no se mueve.
+
+**El grafo del proyecto calcula el Diagnóstico** (D-203): `/api/graph` pesa ahora lo
+mismo que `/api/overview` con la caché vacía. Los dos comparten `CACHE_DIAGNOSTICO`.
 
 **El webhook es una ruta pública.** `/api/github/webhook` está en `PUBLIC_PATHS` y la
 cierra sólo la firma HMAC. Si alguien toca esa ruta, la prueba de la firma de otro cuerpo
