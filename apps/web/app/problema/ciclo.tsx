@@ -6,6 +6,7 @@ import { createDataset, listDatasets, listRuns } from "@/lib/api";
 import { number, timestamp } from "@/lib/format";
 import type { Dataset, Finding, FindingDetail, RunSummary } from "@/lib/types";
 import { t, tn } from "@/lib/textos";
+import { BotonReplay } from "./boton-replay";
 
 /**
  * El ciclo de un problema: detectar → probar → arreglar → verificar (D-156).
@@ -235,6 +236,9 @@ function Probar({
             {t("seg.probar.existe", { nombre: conjunto.name, n: number(conjunto.item_count) })}
           </p>
           <pre>{lineaDePrueba(project, conjunto.name, finding)}</pre>
+          {lineaDeReplay(project, conjunto.name, finding) && (
+            <BotonReplay project={project} conjunto={conjunto.name} modelo={alternativa(finding)} />
+          )}
           <p>
             <Link href={`/evaluaciones${query}`}>{t("seg.probar.ir")}</Link>
           </p>
@@ -252,7 +256,7 @@ function Probar({
 }
 
 /** El modelo barato que propone el hallazgo: el valor con «→» de su línea técnica. */
-function alternativa(finding: Finding): string {
+export function alternativa(finding: Finding): string {
   return (
     finding.tech
       .find((item) => item.value.includes("→") && !/^v\d+ /.test(item.value))

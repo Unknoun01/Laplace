@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 214 decisiones.
+final. 215 decisiones.
 
 ## Coste, precios y caché
 
@@ -107,6 +107,7 @@ final. 214 decisiones.
 - [D-167](../DECISIONS.md#d-167--probar-el-modelo-barato-reenviando-las-llamadas-reales-sin-escribir-código) — Probar el modelo barato reenviando las llamadas reales, sin escribir código
 - [D-197](../DECISIONS.md#d-197--la-carga-mide-lo-que-habrá-casos-para-las-reglas-nuevas-y-preagregados-calculados) — La carga mide lo que habrá: casos para las reglas nuevas y preagregados calculados
 - [D-205](../DECISIONS.md#d-205--el-replay-con-herramientas-cada-resultado-el-que-grabó-la-traza-lo-que-no-se-grabó-corta-el-caso) — El replay con herramientas: cada resultado, el que grabó la traza; lo que no se grabó corta el caso
+- [D-214](../DECISIONS.md#d-214--lanzar-el-replay-desde-la-interfaz-local-con-un-botón) — Lanzar el replay desde la interfaz local, con un botón
 
 ## Prompts
 
@@ -211,6 +212,7 @@ final. 214 decisiones.
 - [D-196](../DECISIONS.md#d-196--lecturas-de-caché-pagadas-en-openai-la-ficha-propone-lo-mismo-que-la-tarjeta) — Lecturas de caché pagadas en OpenAI: la ficha propone lo mismo que la tarjeta
 - [D-203](../DECISIONS.md#d-203--el-grafo-del-proyecto-marca-los-pasos-con-hallazgos-por-step_key-y-sin-adivinar) — El grafo del proyecto marca los pasos con hallazgos, por `step_key` y sin adivinar
 - [D-217](../DECISIONS.md#d-217--el-grafo-del-proyecto-deja-de-ser-sólo-de-lectura-pulsar-un-paso-lleva-a-sus-trazas-y-a-sus-fichas) — El grafo del proyecto deja de ser sólo de lectura: pulsar un paso lleva a sus trazas y a sus fichas
+- [D-214](../DECISIONS.md#d-214--lanzar-el-replay-desde-la-interfaz-local-con-un-botón) — Lanzar el replay desde la interfaz local, con un botón
 
 ## Alertas y presupuesto
 
@@ -361,6 +363,7 @@ final. 214 decisiones.
 - [D-179](../DECISIONS.md#d-179--margen-por-cliente-lo-evitable-de-cada-uno-otras-monedas-y-su-columna) — Margen por cliente: lo evitable de cada uno, otras monedas y su columna
 - [D-206](../DECISIONS.md#d-206--la-parada-alcanza-lo-que-otro-instrumentador-traza-en-python-lo-que-no-alcanza-se-dice) — La parada alcanza lo que otro instrumentador traza en Python; lo que no alcanza, se dice
 - [D-218](../DECISIONS.md#d-218--el-bot-de-pr-encuentra-la-llamada-con-los-atributos-estándar-sólo-escribe-python) — El bot de PR encuentra la llamada con los atributos estándar; sólo escribe Python
+- [D-214](../DECISIONS.md#d-214--lanzar-el-replay-desde-la-interfaz-local-con-un-botón) — Lanzar el replay desde la interfaz local, con un botón
 
 ## Todas, en orden
 
@@ -685,3 +688,4 @@ final. 214 decisiones.
 - [D-211](../DECISIONS.md#d-211--saml-con-xmlsec-opcional-y-los-grupos-de-scim-dan-los-roles) — SAML con `xmlsec` opcional, y los grupos de SCIM dan los roles
 - [D-217](../DECISIONS.md#d-217--el-grafo-del-proyecto-deja-de-ser-sólo-de-lectura-pulsar-un-paso-lleva-a-sus-trazas-y-a-sus-fichas) — El grafo del proyecto deja de ser sólo de lectura: pulsar un paso lleva a sus trazas y a sus fichas
 - [D-218](../DECISIONS.md#d-218--el-bot-de-pr-encuentra-la-llamada-con-los-atributos-estándar-sólo-escribe-python) — El bot de PR encuentra la llamada con los atributos estándar; sólo escribe Python
+- [D-214](../DECISIONS.md#d-214--lanzar-el-replay-desde-la-interfaz-local-con-un-botón) — Lanzar el replay desde la interfaz local, con un botón

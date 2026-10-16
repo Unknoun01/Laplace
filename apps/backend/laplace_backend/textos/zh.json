@@ -675,5 +675,7 @@
   "tec.preguntas_repetidas": "重复出现的问题",
   "tec.llamadas_repetidas": "跨运行重复的调用",
   "tec.misma_respuesta": "回答相同",
-  "tec.porcentaje_misma": "相同回答占比"
+  "tec.porcentaje_misma": "相同回答占比",
+  "error.replay_sin_clave": "环境中没有提供商的密钥：请在启动“laplace ui”的地方设置后重新打开。",
+  "error.replay_en_curso": "此项目已有一个回放正在运行。"
 }

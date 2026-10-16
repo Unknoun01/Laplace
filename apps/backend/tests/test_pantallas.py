@@ -764,6 +764,39 @@ def test_el_modelo_caro_se_prueba_con_replay(servidor, navegador):
         pagina.close()
 
 
+def test_el_boton_de_replay_pide_permiso_y_enseña_lo_peor(servidor, navegador):
+    """D-214: en local (SQLite) la ficha lanza el replay con un botón. Antes de gastar
+    enseña lo peor que puede costar y pide confirmar; cancelar no lanza nada."""
+    import json as _json
+
+    with urllib.request.urlopen(f"{servidor}/api/overview?project_id=demo&days=30") as r:
+        caro = next(h for h in _json.load(r)["findings"] if h["kind"] == "modelo_caro")
+    pagina, errores = _abrir(
+        navegador,
+        f"{servidor}/problema/?project=demo&days=30&id={urllib.parse.quote(caro['id'])}",
+        "escritorio",
+    )
+    try:
+        pagina.wait_for_selector("#probar button, #probar pre")
+        crear = pagina.get_by_role("button", name=re.compile("Crear el conjunto"))
+        if crear.count():  # otra prueba del módulo pudo crearlo ya
+            crear.click()
+
+        pagina.get_by_role("button", name=re.compile("Lanzarlo aquí con")).click()
+        pagina.wait_for_function(
+            "() => document.querySelector('[data-replay]')?.innerText.includes('gastará')",
+            timeout=60_000,
+        )
+        texto = _texto_de(pagina, "[data-replay]")
+        assert "Como mucho gastará" in texto, texto
+        pagina.get_by_role("button", name="Cancelar").click()
+        with urllib.request.urlopen(f"{servidor}/api/replay/estado?project_id=demo") as r:
+            assert _json.load(r) == {"disponible": True, "tirada": None}
+        assert errores == [], errores
+    finally:
+        pagina.close()
+
+
 def test_al_cargar_no_se_pide_dos_veces_lo_mismo(servidor, navegador):
     """La barra, la página y el guardián de permisos pedían cada uno `/api/projects` y
     `/api/auth/me`: dos idas al servidor para la misma respuesta."""

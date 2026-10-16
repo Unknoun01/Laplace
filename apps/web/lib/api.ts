@@ -890,3 +890,57 @@ export function diagnoseTrace(projectId: string, traceId: string): Promise<Diagn
   const q = new URLSearchParams({ project_id: projectId });
   return send<Diagnosis>(`/api/traces/${encodeURIComponent(traceId)}/diagnosis?${q}`, "POST");
 }
+
+/** El replay lanzado desde la interfaz local (D-214). Sólo existe en `laplace ui`. */
+export interface ReplayPlan {
+  plan: {
+    calls: number;
+    cases: number;
+    model: string;
+    original_usd: number;
+    original_unknown: boolean;
+    estimated_usd: number;
+    worst_usd: number;
+    max_usd: number;
+  };
+  clave: boolean;
+  variable: string;
+  peor_usd: number;
+}
+
+export interface ReplayTirada {
+  estado: "corriendo" | "hecha" | "cancelada" | "fallo";
+  hechas: number;
+  total: number;
+  error?: string;
+  resultado?: {
+    calls_done: number;
+    calls_skipped_by_cap: number;
+    cases_failed: number;
+    spent_usd: number;
+    judged: number;
+    passed: number;
+    replay_run_id: string;
+  };
+}
+
+export interface ReplayPeticion {
+  project_id: string;
+  dataset: string;
+  model: string;
+  max_usd: number;
+}
+
+export function getReplayEstado(
+  project: string,
+): Promise<{ disponible: boolean; tirada: ReplayTirada | null }> {
+  return get("/api/replay/estado", { project_id: project });
+}
+
+export function planDeReplay(body: ReplayPeticion): Promise<ReplayPlan> {
+  return send("/api/replay/plan", "POST", body);
+}
+
+export function lanzarReplay(body: ReplayPeticion & { acepta_usd: number }): Promise<ReplayTirada> {
+  return send("/api/replay", "POST", body);
+}
