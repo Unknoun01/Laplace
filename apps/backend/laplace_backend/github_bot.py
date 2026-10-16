@@ -169,6 +169,44 @@ def firma_valida(cuerpo: bytes, firma: str, secreto: str) -> bool:
     return hmac.compare_digest(esperada, firma.removeprefix("sha256="))
 
 
+# El aviso de despliegue (D-204): la frontera del arreglado pasa de la fusión al despliegue.
+
+_SHA = re.compile(r"^[0-9a-f]{7,40}$")
+ENTORNOS_PRODUCCION = ("production", "prod")
+
+
+def es_produccion(despliegue: dict[str, Any]) -> bool:
+    """Un despliegue de vista previa no es el tráfico real: sólo cuenta producción."""
+    entorno = str(despliegue.get("environment") or "").lower()
+    return despliegue.get("production_environment") is True or entorno in ENTORNOS_PRODUCCION
+
+
+def lleva_la_fusion(
+    ajustes: dict[str, Any], fusion: str, desplegado: str, pedir: Pedir | None = None
+) -> bool:
+    """Si el commit desplegado tiene la fusión en su historia: el mismo, o uno posterior.
+
+    Lo dice GitHub (`compare`): `ahead` o `identical`. Si no contesta, no se sabe, y lo
+    que no se sabe no se da por desplegado.
+    """
+    if not (_SHA.match(fusion) and _SHA.match(desplegado)):
+        return False
+    if fusion == desplegado:
+        return True
+    pedir = pedir or _pedir
+    try:
+        respuesta = pedir(
+            "GET",
+            f"{API}/repos/{ajustes.get('repo')}/compare/{fusion}...{desplegado}",
+            token_de(ajustes, pedir),
+            None,
+        )
+    except GitHubError as exc:
+        logger.warning("github: no se sabe si %s lleva %s (%s)", desplegado, fusion, exc.clave)
+        return False
+    return (respuesta or {}).get("status") in ("ahead", "identical")
+
+
 # ---------------------------------------------------------------------------------
 # Hablar con GitHub
 # ---------------------------------------------------------------------------------

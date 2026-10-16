@@ -1067,7 +1067,7 @@ export const zh: Mensajes = {
   "aj.gh.guardado": "已保存。",
   "aj.gh.quitado": "已断开连接，令牌已删除。",
   "aj.gh.webhook.titulo": "合并时通知 Laplace",
-  "aj.gh.webhook.texto": "在 GitHub 中，Settings → Webhooks → Add webhook，填写此 URL、Content type 选 application/json、此密钥，并选择 Pull requests 事件。合并 Laplace 的 PR 时，问题会被标记为已修复，Laplace 会检查它是否真的下降。",
+  "aj.gh.webhook.texto": "在 GitHub 中，Settings → Webhooks → Add webhook，填写此 URL、Content type 选 application/json、此密钥，并选择 Pull requests 事件。合并 Laplace 的 PR 时，问题会被标记为已修复，Laplace 会检查它是否真的下降。请同时勾选 Deployment statuses 事件：如果你通过 GitHub 部署（带 environment 的 Actions、Vercel、Netlify…），将从包含该合并的生产部署开始衡量；没有它，则从合并开始。",
   "aj.gh.webhook.app": "使用此安装的 GitHub App 时无需设置：通知会自动送达。",
   "aj.gh.webhook.url": "URL",
   "aj.gh.webhook.secreto": "密钥",

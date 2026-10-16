@@ -1069,7 +1069,7 @@ export const pt: Mensajes = {
   "aj.gh.guardado": "Salvo.",
   "aj.gh.quitado": "Desconectado. O token foi apagado.",
   "aj.gh.webhook.titulo": "Avisar o Laplace no merge",
-  "aj.gh.webhook.texto": "No GitHub, Settings → Webhooks → Add webhook, com esta URL, Content type application/json, este segredo e o evento Pull requests. No merge de um PR do Laplace, o problema fica marcado como corrigido e o Laplace verifica se baixa de verdade.",
+  "aj.gh.webhook.texto": "No GitHub, Settings → Webhooks → Add webhook, com esta URL, Content type application/json, este segredo e o evento Pull requests. No merge de um PR do Laplace, o problema fica marcado como corrigido e o Laplace verifica se baixa de verdade. Marque também o evento Deployment statuses: se você implanta pelo GitHub (Actions com environment, Vercel, Netlify…), mede-se desde a implantação em produção que leva o merge; sem ele, desde o merge.",
   "aj.gh.webhook.app": "Com a GitHub App desta instalação não é preciso: os avisos chegam sozinhos.",
   "aj.gh.webhook.url": "URL",
   "aj.gh.webhook.secreto": "Segredo",

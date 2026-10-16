@@ -4878,3 +4878,66 @@ Dos de ClickHouse no fallaban al principio: tomar la última ejecución de cada 
 en lugar de la primera, y elegir la traza de ejemplo sin exigir que repitiera respuesta.
 Ninguna prueba ponía otra respuesta entre dos iguales, ni dos preguntas con trazas de
 distinto orden; ahora las dos lo hacen.
+
+### D-204 — La señal de despliegue: el aviso `deployment_status` de GitHub mueve la frontera del arreglado
+D-191 marca el hallazgo como arreglado a la hora de la fusión del PR, y lo dejó escrito:
+fusionar no es desplegar. Si el despliegue llega horas o días después, las primeras
+ejecuciones «de después» son de antes y el hallazgo sale como reaparecido. Hacía falta una
+señal medible de que el arreglo está en producción, y sin inventarla.
+
+* **Qué se miró y se descartó.** La versión del tráfico: el SDK manda `service.version`
+  (`LAPLACE_SERVICE_VERSION`) como atributo del recurso, pero la ingesta no lo guarda (del
+  recurso sólo lee el proyecto), y aunque lo guardase es un texto libre que no dice qué
+  commits lleva: casarlo con el PR pediría que el usuario pusiera ahí el SHA, una columna
+  nueva en los dos almacenes y adivinar el resto. Un endpoint propio («he desplegado»)
+  sería otra forma de marcar a mano, que ya existe. Queda fuera.
+* **La señal: el evento `deployment_status` de GitHub**, por el mismo
+  `POST /api/github/webhook`, con la misma firma y los mismos secretos (D-191). Lo mandan
+  GitHub Actions con `environment:`, Vercel, Netlify, Heroku y cualquier herramienta que
+  use la API de despliegues. Cuenta sólo si `deployment_status.state` es `success` y el
+  entorno es el de producción (`deployment.production_environment`, o el entorno se
+  llama `production`/`prod`): un despliegue de vista previa no es el tráfico real.
+* **Cómo se sabe que el despliegue lleva el arreglo.** Al fusionar se guarda, junto al PR,
+  `merge_commit_sha` (el commit de la fusión, o el del squash). El despliegue trae
+  `deployment.sha`. Si es el mismo, lo lleva. Si no, se pregunta a GitHub
+  (`GET /repos/{repo}/compare/{fusión}...{desplegado}`, con la credencial del proyecto):
+  `ahead` o `identical` quiere decir que el desplegado tiene la fusión en su historia,
+  que es lo normal cuando se despliega la rama principal con más cosas encima. Si GitHub
+  no contesta, o dice `behind`/`diverged`, no cuenta: no se afirma lo que no se sabe.
+* **Qué se guarda y dónde.** En el ajuste del PR (`github_pr:<hallazgo>`), además de su
+  estado: `merge_sha`, y al desplegar `deployed_at`, `deployed_sha` y `environment`. En el
+  estado del hallazgo (`finding:<hallazgo>`), `at` pasa a la hora del despliegue (la de
+  `deployment_status.created_at`, no la de llegada del aviso) con una nota que lo dice:
+  el PR, el entorno y el commit. El seguimiento (D-123) no cambia: mide desde `at`.
+* **Sin señal**, la frontera sigue en la fusión, y la nota de la fusión lo dice: no ha
+  llegado aviso de despliegue, se mide desde la fusión, y si se desplegó más tarde hay
+  que volver a marcarlo o mandar el evento. La ficha enseña esa nota tal cual
+  (`state_note`), así que la API y la interfaz lo dicen sin un campo nuevo.
+* **Si llega antes que la fusión.** Un despliegue sólo mueve PR ya fusionados, así que el
+  que llega antes no hace nada y queda la hora de la fusión. Y la frontera nunca va
+  antes de la fusión: un despliegue con hora anterior (relojes, reenvíos) se ignora. En
+  los dos casos se mide desde más tarde de lo debido, que es lo prudente: lo de antes
+  nunca se cuenta como después.
+* **Si llega varias veces.** Vale el primer despliegue de producción que lleva la
+  fusión: los siguientes también la llevan, pero el arreglo ya estaba. Si llega uno con
+  hora anterior al guardado (GitHub reenvía en cualquier orden), se queda el más
+  temprano.
+* **Lo que decidió una persona manda.** Sólo se mueve el estado que puso el aviso de la
+  fusión (`by: github`, arreglado). Si el usuario lo ignoró, lo deshizo o lo volvió a
+  marcar a mano, el despliegue no lo toca.
+* **Ajustes → GitHub** pide ahora también el evento *Deployment statuses* en el webhook
+  del repositorio. Con la GitHub App, hay que suscribirla a ese evento y darle lectura de
+  despliegues (*Deployments: read*); eso va en la nota de la hoja de ruta cuando se
+  registre la App.
+
+Pruebas en `test_bot_webhook.py` (8 nuevas): el despliegue del commit de la fusión mueve la
+frontera a su hora; sin aviso se queda la fusión y la nota lo dice; uno fallido, en curso
+o de vista previa no cuenta; uno posterior cuenta si GitHub dice que lleva la fusión y no
+si ha divergido; si GitHub no contesta, no; uno antes de la fusión (de llegada o de hora)
+no mueve nada; de varios, el primero, y uno anterior que llega tarde gana; lo que marcó
+la persona no lo toca. Se rompieron a propósito diez sitios (cualquier entorno, GitHub
+caído como si lo llevara, cualquier respuesta de `compare`, sin mirar el SHA, antes de la
+fusión, el último gana, pisar lo de la persona, cualquier estado del despliegue, la hora
+de llegada, sin guardar el commit de la fusión) y en todos falla alguna. Una undécima,
+dejar pasar los PR cerrados sin fusionar, no mordía porque la comprobación sobraba: esos
+PR guardan `merge_sha` vacío, y se quitó. No toca los almacenes: todo va en los ajustes.

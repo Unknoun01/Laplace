@@ -25,6 +25,8 @@ from test_bot_arreglos import (  # noqa: F401 - `api` es una fixture
 from laplace_backend import github_bot as gb
 
 FUSIONADO = "2026-10-03T10:00:00Z"
+#: El commit de la fusión, que es lo que un despliegue tiene que llevar (D-204).
+FUSION_SHA = "f" * 40
 
 
 def _evento(numero: int, *, merged: bool = True, repo: str = "acme/agentes",
@@ -36,6 +38,7 @@ def _evento(numero: int, *, merged: bool = True, repo: str = "acme/agentes",
             "number": numero,
             "merged": merged,
             "merged_at": FUSIONADO if merged else None,
+            "merge_commit_sha": FUSION_SHA if merged else None,
             "html_url": f"https://github.com/{repo}/pull/{numero}",
             "head": {"ref": rama},
         },
@@ -163,4 +166,139 @@ def test_el_secreto_del_proyecto_se_genera_una_vez_y_se_conserva(con_pr):
     c, _, _, _, secreto = con_pr
     c.put("/api/github", json={"project_id": "p", "repo": "acme/agentes", "base_branch": "main"})
     assert c.get("/api/github", params={"project_id": "p"}).json()["webhook_secret"] == secreto
+
+
+# ---------------------------------------------------------------------------------
+# La señal de despliegue (D-204): la frontera pasa de la fusión al despliegue
+# ---------------------------------------------------------------------------------
+
+DESPLEGADO = "2026-10-05T08:30:00Z"
+
+
+def _despliegue(sha: str = FUSION_SHA, *, cuando: str = DESPLEGADO, estado: str = "success",
+                entorno: str = "production") -> dict:
+    return {
+        "action": "created",
+        "repository": {"full_name": "acme/agentes"},
+        "deployment_status": {"state": estado, "created_at": cuando, "environment": entorno},
+        "deployment": {"sha": sha, "environment": entorno},
+    }
+
+
+def _fusionar(c, hallazgo, numero, secreto):
+    r = _mandar(c, _evento(numero, rama=gb.rama_para(hallazgo["id"])), secreto)
+    assert r.json()["fixed"] == [hallazgo["id"]]
+
+
+def _desplegar(c, secreto, **kw):
+    r = _mandar(c, _despliegue(**kw), secreto, evento="deployment_status")
+    assert r.status_code == 200, r.text
+    return r.json()["deployed"]
+
+
+def test_el_despliegue_de_la_fusion_mueve_la_frontera(con_pr):
+    c, app, hallazgo, numero, secreto = con_pr
+    _fusionar(c, hallazgo, numero, secreto)
+    assert _desplegar(c, secreto) == [hallazgo["id"]]
+    estado = _estado(app, hallazgo["id"])
+    assert estado["status"] == "arreglado"
+    # Desde el despliegue, no desde la fusión ni desde la llegada del aviso.
+    assert estado["at"].startswith("2026-10-05T08:30:00")
+    assert "production" in estado["note"] and FUSION_SHA[:7] in estado["note"]
+    pr = app.state.metadata.get_setting("p", gb.PREFIJO_PR + hallazgo["id"])
+    assert pr["merge_sha"] == FUSION_SHA
+    assert pr["deployed_sha"] == FUSION_SHA
+
+
+def test_sin_despliegue_se_mide_desde_la_fusion_y_la_nota_lo_dice(con_pr):
+    from laplace_backend.textos import t
+
+    c, app, hallazgo, numero, secreto = con_pr
+    _fusionar(c, hallazgo, numero, secreto)
+    estado = _estado(app, hallazgo["id"])
+    assert estado["at"].startswith("2026-10-03T10:00:00")
+    # La nota no da por desplegado lo que sólo está fusionado.
+    assert estado["note"] == t("github.fusionado", numero=numero,
+                               url=f"https://github.com/acme/agentes/pull/{numero}")
+    assert "deployment_status" in estado["note"]
+
+
+def test_un_despliegue_fallido_o_de_otro_entorno_no_cuenta(con_pr):
+    c, app, hallazgo, numero, secreto = con_pr
+    _fusionar(c, hallazgo, numero, secreto)
+    assert _desplegar(c, secreto, estado="failure") == []
+    assert _desplegar(c, secreto, estado="in_progress") == []
+    assert _desplegar(c, secreto, entorno="preview") == []
+    assert _estado(app, hallazgo["id"])["at"].startswith("2026-10-03T10:00:00")
+
+
+def test_un_despliegue_posterior_cuenta_si_github_dice_que_lleva_la_fusion(con_pr, monkeypatch):
+    c, app, hallazgo, numero, secreto = con_pr
+    _fusionar(c, hallazgo, numero, secreto)
+    falso = gb._pedir
+    respuestas = {"a" * 40: "diverged", "b" * 40: "ahead"}
+    preguntas = []
+
+    def con_compare(metodo, url, token, cuerpo):
+        if "/compare/" in url:
+            preguntas.append(url)
+            return {"status": respuestas[url.rsplit("...", 1)[1]]}
+        return falso(metodo, url, token, cuerpo)
+
+    monkeypatch.setattr(gb, "_pedir", con_compare)
+    # Otro commit que no lleva la fusión: no se afirma que esté desplegado.
+    assert _desplegar(c, secreto, sha="a" * 40) == []
+    assert _estado(app, hallazgo["id"])["at"].startswith("2026-10-03T10:00:00")
+    # Uno posterior que sí la lleva, con más cosas encima: cuenta.
+    assert _desplegar(c, secreto, sha="b" * 40, cuando="2026-10-06T09:00:00Z") == [hallazgo["id"]]
+    assert _estado(app, hallazgo["id"])["at"].startswith("2026-10-06T09:00:00")
+    assert preguntas[-1].endswith(f"/repos/acme/agentes/compare/{FUSION_SHA}...{'b' * 40}")
+
+
+def test_si_github_no_contesta_no_se_da_por_desplegado(con_pr, monkeypatch):
+    c, app, hallazgo, numero, secreto = con_pr
+    _fusionar(c, hallazgo, numero, secreto)
+    falso = gb._pedir
+
+    def caido(metodo, url, token, cuerpo):
+        if "/compare/" in url:
+            raise gb.GitHubError("github.sin_respuesta")
+        return falso(metodo, url, token, cuerpo)
+
+    monkeypatch.setattr(gb, "_pedir", caido)
+    assert _desplegar(c, secreto, sha="c" * 40) == []
+    assert _estado(app, hallazgo["id"])["at"].startswith("2026-10-03T10:00:00")
+
+
+def test_un_despliegue_antes_de_la_fusion_no_mueve_nada(con_pr):
+    c, app, hallazgo, numero, secreto = con_pr
+    # Llega antes que el aviso de la fusión: el PR aún no está fusionado.
+    assert _desplegar(c, secreto) == []
+    assert _estado(app, hallazgo["id"]) is None
+    _fusionar(c, hallazgo, numero, secreto)
+    # Con hora anterior a la fusión: la frontera nunca va antes de fusionar.
+    assert _desplegar(c, secreto, cuando="2026-10-02T10:00:00Z") == []
+    assert _estado(app, hallazgo["id"])["at"].startswith("2026-10-03T10:00:00")
+
+
+def test_varios_despliegues_vale_el_primero(con_pr):
+    c, app, hallazgo, numero, secreto = con_pr
+    _fusionar(c, hallazgo, numero, secreto)
+    assert _desplegar(c, secreto) == [hallazgo["id"]]
+    # Un redespliegue más tarde no mueve nada: el arreglo ya estaba.
+    assert _desplegar(c, secreto, cuando="2026-10-08T12:00:00Z") == []
+    assert _estado(app, hallazgo["id"])["at"].startswith("2026-10-05T08:30:00")
+    # Uno anterior que llega tarde (GitHub reenvía en cualquier orden) gana.
+    assert _desplegar(c, secreto, cuando="2026-10-04T07:00:00Z") == [hallazgo["id"]]
+    assert _estado(app, hallazgo["id"])["at"].startswith("2026-10-04T07:00:00")
+
+
+def test_lo_que_marco_la_persona_no_lo_mueve_el_despliegue(con_pr):
+    c, app, hallazgo, numero, secreto = con_pr
+    _fusionar(c, hallazgo, numero, secreto)
+    c.post("/api/finding-state",
+           json={"project_id": "p", "finding_id": hallazgo["id"], "status": "arreglado"})
+    a_mano = _estado(app, hallazgo["id"])["at"]
+    assert _desplegar(c, secreto) == []
+    assert _estado(app, hallazgo["id"])["at"] == a_mano
 
