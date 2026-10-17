@@ -80,18 +80,26 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
 
 ### Restos de fases cerradas
 - **Integraciones:** probadas contra un proveedor falso (D-164, D-165 y D-170): `client.beta.*` en Python; Anthropic por OpenInference-js y OpenLLMetry-js; el AI SDK de Vercel 7; LangChain.js; LangGraph.js; el Agents SDK de OpenAI y Mastra. **Falta pasarlas contra las API reales**, que espera una clave de proveedor (sección 5). El banco (`scripts/integraciones_js`) tiene el proveedor y el uso fijos: para una pasada real hace falta apuntar los agentes a la API y un verificador que no espere el uso exacto.
-- **Escala: el día, en el objetivo (D-177).** Con la clave por hora y los preagregados por minuto, el Diagnóstico de un día de un proyecto con diez millones de spans al día tarda 1,1 s en el contenedor de 4 núcleos (antes 6,5 s); el de 7 días, 6 s (antes casi un minuto). Si hace falta bajar la semana: los recuentos exactos de ejecuciones distintas y las medianas son lo que pesa; una idea es guardar por hora, además de por minuto, lo de las horas enteras. Las instalaciones que ya existen se migran a mano con `python -m laplace_backend.storage.migrar_orden`.
+- **Escala: ya no está en el objetivo (D-212).** D-177 dejó el día en 1,1 s y la semana en 6 s con diez millones de spans al día. Desde entonces han entrado cinco lecturas en crudo (D-178, D-193 a D-196), y medido otra vez (en el portátil, con mucho ruido) el día tarda 19–35 s y la semana 59–181 s. Lo que queda, por orden de lo que pesa:
+  1. las tres lecturas en crudo (caché, JSON, truncadas), precalculadas por hora como el historial;
+  2. la memoria del historial con las trazas que cruzan (3,8 GiB en una consulta);
+  3. las candidatas de bucles y repeticiones, desde `pre_trazas`;
+  4. los recuentos exactos y las medianas (el diseño está en D-212; el p95 es aproximado y no se puede exigir idéntico);
+  5. un tope (TTL) para las tablas de registro de ClickHouse, que meten ruido en todas las medidas.
+  Hay que volver a medir en el contenedor de 4 núcleos. Las instalaciones que ya existen se migran a mano con `python -m laplace_backend.storage.migrar_orden`.
 
 ### Siguiente: funciones diferenciales (confirmar el orden con el usuario)
-- **Replay contrafactual, más allá** (lo básico está hecho, D-167; las llamadas con herramientas, con los resultados grabados y cortando lo que no se grabó, D-205): imágenes y bloques entre proveedores (incluida la API Responses), y un botón en la versión local que lo lance sin copiar la orden.
+- **Replay contrafactual, más allá** (hecho: lo básico, D-167; las herramientas, D-205; las imágenes, los bloques entre proveedores y la API Responses, D-213; el botón en la versión local, D-214). Queda pasarlo contra las API reales (espera una clave, sección 5).
 - **Bot de pull requests, más allá** (hecho: el cambio de modelo, D-185; `cache_control` y el tope de vueltas sobre el árbol de sintaxis, D-190; el webhook que marca el hallazgo arreglado al fusionar, D-191; sus pantallas, D-192; la
   frontera en el despliegue a producción por el aviso `deployment_status`, D-204). Lo que queda:
   - arreglos que no se derivan del código (acortar un contexto, cambiar un prompt): harían falta un modelo que los escriba y una persona que los mire, y por eso no se hicieron (D-190);
-  - otros lenguajes: el SDK de Python es el único que anota la línea;
-  - la señal de despliegue sólo llega si el repositorio publica despliegues en GitHub;
-    sin ellos la frontera sigue en la fusión, y la nota lo dice (D-204). La versión que
-    manda el tráfico (`service.version`) no se guarda: sería otra señal, con columnas
-    nuevas en los dos almacenes.
+  - otros lenguajes: desde D-218 el bot encuentra la llamada con los atributos estándar
+    `code.*` de cualquier SDK, pero sólo escribe arreglos en Python. Para TypeScript y
+    JavaScript haría falta leer el árbol de sintaxis, y el camino sería `tree-sitter`
+    como extra opcional;
+  - la señal de despliegue: el aviso `deployment_status` (D-204) y, si no llega,
+    `service.version` cuando se puede atar al commit de la fusión (D-216). Sin ninguna de
+    las dos, la frontera sigue en la fusión, y la nota lo dice.
 - **Plano de control, más allá** (lo básico está hecho, D-187 a D-189: tope, bucles y
   parada desde Ajustes, y el grafo del proyecto en el Panel):
   - Modelo por paso desde la interfaz y repartos A/B: **fuera por decisión del usuario**;
@@ -99,10 +107,12 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
   - La parada alcanza ya las llamadas a OpenAI y Anthropic que traza OpenInference u
     OpenLLMetry en un proceso Python con `laplace.init()` (D-206), y la pantalla dice a
     qué no llega: Node y otros lenguajes (espera el SDK de TypeScript) y los procesos sin
-    el SDK. Queda decir con un número qué parte del tráfico queda fuera, que pide guardar
-    el lenguaje o la convención de cada span en los dos almacenes.
-  - El grafo del proyecto marca ya los pasos con hallazgos de la misma ventana (D-203),
-    pero sigue siendo de sólo lectura: no se cambia nada desde él.
+    el SDK. Desde D-215 se guarda de dónde viene cada span y se dice con un número qué
+    parte del tráfico queda fuera; los spans de antes no lo traen.
+  - El grafo del proyecto marca los pasos con hallazgos (D-203), y al pulsar un paso
+    lleva a sus trazas y a las fichas de sus problemas (D-217). Desde él no se puede
+    poner el tope ni la parada, ni ignorar un hallazgo: se dejó fuera, con el motivo en
+    D-217.
 - **Reglas nuevas** (cada una entra por `detect()` y `detail()`, con su prueba de catálogo;
   fase `fase-reglas-diagnostico`). Hechas: la salida truncada y rehecha (D-193; la
   «descartada» no se puede saber y queda fuera), los reintentos por JSON mal formado
@@ -118,19 +128,18 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
     componer las filas, unos 0,3 s cada una; en un día no gana nada;
   - caché semántica hecha (D-200): la misma pregunta salvo los números y la misma
     respuesta exacta en ejecuciones distintas, «hasta X» sin dinero en el total. Lo
-    parecido pero no idéntico (simhash, embeddings) queda para otra versión;
+    parecido, con simhash, también está (`cache_parecida`, D-219), sin dinero en el total.
+    Con embeddings no: pediría un modelo;
   - lotes, el peor caso sin medir: muchas ejecuciones sin usuario en un proyecto que sí
     lo pone en otras (la carga no tiene ese tráfico) (D-199);
   - el historial con dinero: un tope que se pueda defender, sacado de un replay con
     evaluación (D-195);
-- **Lo que dejaron D-178 a D-182, por si alguien lo pide:**
-  - la caché compartida en la demo (hoy no la enseña: moverla cambiaría cifras fijadas);
-  - el coste de los diagnósticos con modelo rechazados, que hoy no queda apuntado, y
-    borrar los diagnósticos al borrar a un sujeto;
-  - escalar las cifras por el muestreo del SDK (hoy son un suelo y la cobertura dice
-    cuánto falta);
-  - SAML, con `xmlsec` como dependencia opcional, y `Groups` en SCIM para mapear grupos
-    a roles.
+- **Lo que dejaron D-178 a D-182**, hecho: los diagnósticos con modelo se borran con su
+  sujeto, y el rechazado deja apuntado su coste (D-208); la caché compartida en la demo
+  (D-209); con muestreo, lo que falta del gasto sale como un intervalo, sin tocar los
+  hallazgos ni la proyección (D-210); SAML con `xmlsec` opcional, y los grupos de SCIM
+  dan los roles (D-211). SAML está probado contra un proveedor de identidad falso: falta
+  uno de verdad.
 
 ## 4. Deuda y detalles sueltos
 - **Los navegadores que no son Chromium**, que la auditoría del rediseño no revisó
@@ -141,8 +150,9 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
   recorren en `test_pantallas_cuentas.py` (D-175).
 - **En español a propósito, y por decidir si sigue así** (D-148): la línea de órdenes
   (`laplace ui`, `laplace demo`) y los logs.
-- **La barra con siete pestañas** ocupa tres filas en móvil (3 + 3 + 1). Cabe y se prueba,
-  pero pide otra forma (agrupar Prompts y Ajustes, o un menú) si se añade alguna más.
+- **Móvil: sin app, y la web adaptada se queda como está** (decisión del usuario, 17 de
+  octubre). La barra de siete pestañas ocupa tres filas en móvil (3 + 3 + 1): cabe y se
+  prueba. No hay que tocarla salvo que se añada otra pestaña.
 - La documentación de usuario (`docs/usuario/`, D-174) es Markdown plano: pasarla a un sitio (Mintlify, Docusaurus o Starlight) cuando haya dominio.
 - `STATUS.md` se puso al día al cerrar las fases 5 y 6: mantenerlo así al cerrar cada fase.
 - Tras la caída de Docker del 26 de septiembre quedaron apartadas `%LOCALAPPDATA%\Docker\run.viejo-*` y `docker-secrets-engine.viejo-*` con sockets bloqueados; se pueden borrar tras reiniciar Windows.

@@ -231,6 +231,22 @@ El 16 de octubre por la tarde, otras tres:
 - el historial, de los preagregados (`pre_historial`): de 1,77 s a 1,28 s en un
   Diagnóstico de 7 días, idéntico campo a campo al crudo (D-207).
 
+Del 16 al 17 de octubre, doce más, cada una en su sesión:
+- los diagnósticos con modelo se borran con su sujeto, y el rechazado deja apuntado su
+  coste (D-208); la demo enseña la caché compartida (D-209);
+- con muestreo, lo que falta del gasto sale como un intervalo al 95 %. No sale con menos
+  de 30 trazas al azar, ni si alguna usa un modelo sin tarifa (D-210);
+- SAML con `xmlsec` opcional, y los grupos de SCIM dan los roles (D-211);
+- el replay con imágenes, entre proveedores y desde la API Responses (D-213), y un botón
+  que lo lanza en la versión local (D-214);
+- de dónde viene cada span y qué parte del tráfico queda fuera de la parada (D-215), y
+  `service.version` como segunda señal de despliegue (D-216);
+- el grafo del proyecto lleva de un paso a sus trazas y a sus fichas (D-217); el bot de
+  PR encuentra la llamada con los atributos `code.*`, aunque sólo escribe Python (D-218);
+- la caché parecida, con simhash y sin dinero en el total (D-219);
+- y la escala, medida sin tocar código (D-212): con diez millones de spans al día, el
+  Diagnóstico de 7 días tarda 59–181 s y el de un día 19–35 s.
+
 Del 1 al 2 de octubre entró el resto de la lista «siguiente»:
 - la caché compartida entre pasos (D-178);
 - lo evitable de cada cliente, ingresos en otras monedas y la columna de cliente en las
@@ -445,9 +461,20 @@ que había que conseguir antes de enseñarlo.
 ClickHouse con preagregados. El historial ya no: sale de `pre_historial` (D-207), con
 las horas de los bordes y las trazas que las cruzan en crudo, y tiene que dar lo mismo
 campo a campo que lo crudo; la prueba de paridad de D-207 lo vigila. Sigue siendo la
-lectura más cara (1,28 s de un Diagnóstico de siete días de unos 6 s). Una instalación
-recién migrada lee en crudo hasta que se recalculan sus horas. Y `output_json` sólo lo lleva
-el tráfico ingerido desde D-194: lo de antes no sale en la regla del JSON.
+lectura más cara (1,28 s de un Diagnóstico de siete días de unos 6 s, con 500.000 spans
+al día). Una instalación recién migrada lee en crudo hasta que se recalculan sus horas. Y
+`output_json` sólo lo lleva el tráfico ingerido desde D-194: lo de antes no sale en la
+regla del JSON.
+
+**A diez millones de spans al día, el Diagnóstico no escala** (D-212). La semana tarda
+59–181 s y el día 19–35 s, por las lecturas en crudo, lo crudo del historial (una
+consulta de 3,8 GiB) y las candidatas de bucles. El plan, por orden, está en la hoja de
+ruta. Antes de medir, poner tope a `text_log` y `processors_profile_log` de ClickHouse:
+sin él gasta CPU en vacío y las medidas salen el doble de lentas.
+
+**Columnas nuevas en `spans`** (D-215, D-216, D-219): `sdk_language`, `sdk_name`,
+`instrumentor`, `service_version` y `sim_hash`. Los spans de antes las tienen vacías o a
+0, y eso significa «no se sabe», no «ninguno». No se rellenan a ojo.
 
 **La carga se mide con sus casos.** Una lectura sin nada que encontrar sale más rápida de
 lo que será (D-197): una regla nueva tiene que sembrar lo suyo en `scripts/carga.py`, y
