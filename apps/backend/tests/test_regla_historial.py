@@ -493,3 +493,36 @@ def test_un_lote_reenviado_de_lo_que_cruza_no_cuenta_dos_veces(store):
     assert vistos == CRUCES
     if type(store).__name__ == "Calculado":
         assert _de_los_preagregados(store, "reenviado")
+
+
+def test_una_conversacion_con_turnos_en_crudo_no_la_deja_fuera_el_filtro(store):
+    """El filtro previo de la tabla (D-222) mira sólo las filas que se leen: una
+    conversación con dos turnos en la tabla no llega a cuatro, pero con los de lo crudo
+    sí. Tienen que salir las que tienen turnos en el tramo del borde y las que tienen una
+    fila que no se lee porque una de sus trazas cruza."""
+    spans = []
+    for c in range(3):
+        # Dos turnos a las 9:50, que la ventana corta, y dos a las 10, de la tabla.
+        for k, minuto in enumerate([-10, -9, 5, 6]):
+            cuando = BASE + timedelta(minutes=minuto)
+            spans.append(_turno("partida", f"pb{c}-{k}", cuando, CRECE[k], sesion=f"pb-{c}",
+                                paso="borde"))
+        # Dos turnos a las 10:30, de la tabla, y dos a las 11. La última ejecución sigue
+        # a las 12 con otro paso: cruza, y la fila de las 11 no se lee.
+        for k, minuto in enumerate([30, 31, 80, 119]):
+            cuando = BASE + timedelta(minutes=minuto)
+            spans.append(_turno("partida", f"pc{c}-{k}", cuando, CRECE[k], sesion=f"pc-{c}",
+                                paso="cruce"))
+        spans.append(_turno("partida", f"pc{c}-3", BASE + timedelta(minutes=121), 900,
+                            sesion=f"pc-{c}", paso="otro"))
+    store.insert_spans(spans)
+    vistos = {
+        g.step_key: (g.conversations, g.calls, g.traces, g.history_tokens, g.max_turns)
+        for g in _grupos(store, "partida")
+    }
+    assert vistos == {
+        "k-borde": (3, 12, 12, 3 * 3_000, 4),
+        "k-cruce": (3, 12, 12, 3 * 3_000, 4),
+    }
+    if type(store).__name__ == "Calculado":
+        assert _de_los_preagregados(store, "partida")

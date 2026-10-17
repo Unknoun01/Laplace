@@ -1001,6 +1001,26 @@ _CONVERSACIONES = """
 """
 
 
+#: Las conversaciones de la tabla que pueden contar (D-222). Componer las demás guardaba
+#: sus etiquetas, sus trazas y sus horas para descartarlas al final: con diez millones de
+#: spans al día, 3,8 GiB. Es la misma cuenta de `_CONVERSACIONES` con estados de números,
+#: y es exacta para una conversación sin nada en crudo, salvo las bajadas entre horas,
+#: que sólo dejan fuera más. Las que tienen algo en crudo pasan todas: las de una fila
+#: que no se lee y las que tienen llamadas en los tramos crudos. Una ejecución sin sesión
+#: que cruza no tiene fila que se lea: todas llevan su traza.
+_PUEDEN = """
+    SELECT sipHash64(conversacion, paso) {de_tabla} AND NOT {tocada}
+    GROUP BY sipHash64(conversacion, paso)
+    HAVING sum(turnos) >= %(min_turnos)s AND sum(bajadas_hora) = 0
+       AND max(maxima) - argMin(primera, minuto) >= %(min_crece)s * (sum(turnos) - 1)
+    UNION ALL
+    SELECT sipHash64(conversacion, paso) FROM tocadas
+    UNION ALL
+    SELECT sipHash64({conversacion}, {paso}) FROM spans
+    WHERE project_id = %(project_id)s AND {tramos} AND span_type = 'llm'
+"""
+
+
 def _externa(externas: ExternalData, nombre: str, estructura: str, filas: list[dict]) -> None:
     """Una tabla que va con la consulta. En JSON, que escapa lo que traiga un id."""
     datos = "".join(json.dumps(fila) + "\n" for fila in filas).encode()
@@ -1084,10 +1104,14 @@ def historial(
     rango = "start_time >= %(since)s AND start_time <= %(until)s"
     horas = ", ".join(_literal(h, 0) for h, _ in enteras)
     columnas = COLUMNAS["pre_historial"]
+    pueden = _PUEDEN.format(
+        de_tabla=de_tabla, tocada=tocada, tramos=tramos, conversacion=CONVERSACION, paso=PASO
+    )
     # De lo crudo salen las horas sin tabla, las filas que no se leen y las ejecuciones
     # sin sesión que cruzan, que pueden no tener fila.
     partes = f"""
         SELECT {columnas} {de_tabla} AND NOT {tocada}
+          AND sipHash64(conversacion, paso) IN ({pueden})
         UNION ALL
         SELECT {columnas} FROM ({_historial_parcial(rango, origen=origen)})
         WHERE minuto NOT IN ({horas})
