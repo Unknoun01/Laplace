@@ -134,7 +134,7 @@ FROM (
            -- La llamada que se rehace: en estas trazas, p = 1 también es «extraer».
            if(t %% 50 IN (22, 44) AND p = 1, 3, p) AS q,
            intDiv(t, 10) %% 20 = 1 AS historial,
-           t %% 20 = 7 AND p = 5 AS parecida
+           t %% 20 = 6 AND p = 5 AS parecida  -- par: del proyecto grande
     FROM numbers(%(inicio)s, %(cuantos)s)
 )
 """

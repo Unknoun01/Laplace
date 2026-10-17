@@ -426,6 +426,19 @@ def test_los_argmax_llevan_su_desempate():
     import re
     from pathlib import Path
 
+    def segundo_argumento(texto: str, desde: int) -> str:
+        # El primer argumento puede llevar comas dentro, como `if(a, b, c)`: se cuentan
+        # los paréntesis en vez de cortar en la primera coma.
+        nivel = 0
+        for i in range(desde, len(texto)):
+            if texto[i] == "(":
+                nivel += 1
+            elif texto[i] == ")":
+                nivel -= 1
+            elif texto[i] == "," and nivel == 0:
+                return texto[i + 1 :].lstrip()
+        return ""
+
     fuente = Path(__file__).resolve().parents[1] / "laplace_backend" / "storage" / "clickhouse.py"
     sueltos = [
         linea.strip()
@@ -434,7 +447,8 @@ def test_los_argmax_llevan_su_desempate():
         # son código: si no se descartaran, esta prueba se quejaría de su propia
         # explicación, que es una forma tonta de que alguien la borre.
         if not linea.lstrip().startswith("#")
-        and re.search(r"arg(Max|Min)\([^,]+,\s*[^(\s]", linea.split("--")[0])
+        for m in re.finditer(r"arg(?:Max|Min)\(", linea.split("--")[0])
+        if not segundo_argumento(linea.split("--")[0], m.end()).startswith("(")
     ]
     assert not sueltos, "argMax/argMin sin desempate: " + "; ".join(sueltos)
 
