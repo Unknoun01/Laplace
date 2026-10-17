@@ -38,6 +38,11 @@ INTERFAZ = RAIZ / "apps" / "web" / "out" / "index.html"
 
 pytestmark = pytest.mark.pantallas
 
+#: Motor del navegador: `LAPLACE_NAVEGADOR=webkit` repite las pantallas con el motor de
+#: Safari (D-228). Por defecto, Chromium.
+MOTOR = os.environ.get("LAPLACE_NAVEGADOR", "chromium")
+assert MOTOR in ("chromium", "webkit", "firefox"), MOTOR
+
 ANCHOS = {"escritorio": (1440, 900), "movil": (375, 812)}
 
 #: Cada pantalla y algo que tiene que decir con la demo cargada. Es poco a propósito:
@@ -107,11 +112,21 @@ def servidor(tmp_path_factory):
 def navegador():
     with playwright_api.sync_playwright() as p:
         try:
-            chromium = p.chromium.launch()
+            lanzado = getattr(p, MOTOR).launch()
         except Exception as exc:  # noqa: BLE001 - sin navegador instalado no hay prueba
-            pytest.skip(f"no hay Chromium para Playwright: {exc}")
-        yield chromium
-        chromium.close()
+            pytest.skip(f"no hay {MOTOR} para Playwright: {exc}")
+        yield lanzado
+        lanzado.close()
+
+
+def _anota_excepcion(errores: list[str], exc) -> None:
+    # WebKit lanza una excepción cuando navegar corta un fetch en vuelo (la precarga de
+    # Next, o una API): el fetch abortado dice «due to access control checks». Todo es del
+    # mismo origen, así que no puede ser CORS: es la navegación, no un fallo de la página
+    # (D-228); Chromium lo calla.
+    if MOTOR == "webkit" and "due to access control checks" in str(exc):
+        return
+    errores.append(f"excepción: {exc}")
 
 
 def _abrir(navegador, url: str, ancho: str):
@@ -120,7 +135,7 @@ def _abrir(navegador, url: str, ancho: str):
     # buscan abajo son los del catálogo de origen (D-147).
     pagina = navegador.new_page(viewport={"width": w, "height": h}, locale="es-ES")
     errores: list[str] = []
-    pagina.on("pageerror", lambda exc: errores.append(f"excepción: {exc}"))
+    pagina.on("pageerror", lambda exc: _anota_excepcion(errores, exc))
     pagina.on(
         "console",
         lambda msg: errores.append(f"consola: {msg.text}") if msg.type == "error" else None,
@@ -423,8 +438,11 @@ def test_el_heroe_dice_lo_que_puedes_dejar_de_pagar(servidor, navegador):
         # Plegado: la línea de la proyección no se ve hasta abrir el distintivo.
         distintivo = pagina.locator("details.confianza")
         assert "Confianza" in distintivo.locator(":scope > summary").inner_text()
-        assert not pagina.get_by_text("Proyección desde").first.is_visible()
+        # `open` y no `is_visible`: WebKit deja caja de layout al contenido de un
+        # `<details>` cerrado y Playwright lo da por visible aunque no se pinte (D-228).
+        assert not distintivo.evaluate("d => d.open")
         distintivo.locator(":scope > summary").click()
+        assert distintivo.evaluate("d => d.open")
         assert pagina.get_by_text("Proyección desde").first.is_visible()
         assert errores == [], errores
     finally:

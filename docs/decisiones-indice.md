@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 221 decisiones.
+final. 222 decisiones.
 
 ## Coste, precios y caché
 
@@ -218,6 +218,7 @@ final. 221 decisiones.
 - [D-203](../DECISIONS.md#d-203--el-grafo-del-proyecto-marca-los-pasos-con-hallazgos-por-step_key-y-sin-adivinar) — El grafo del proyecto marca los pasos con hallazgos, por `step_key` y sin adivinar
 - [D-217](../DECISIONS.md#d-217--el-grafo-del-proyecto-deja-de-ser-sólo-de-lectura-pulsar-un-paso-lleva-a-sus-trazas-y-a-sus-fichas) — El grafo del proyecto deja de ser sólo de lectura: pulsar un paso lleva a sus trazas y a sus fichas
 - [D-214](../DECISIONS.md#d-214--lanzar-el-replay-desde-la-interfaz-local-con-un-botón) — Lanzar el replay desde la interfaz local, con un botón
+- [D-228](../DECISIONS.md#d-228--las-pantallas-también-en-webkit-el-motor-de-safari) — Las pantallas, también en WebKit (el motor de Safari)
 
 ## Alertas y presupuesto
 
@@ -705,3 +706,4 @@ final. 221 decisiones.
 - [D-219](../DECISIONS.md#d-219--caché-parecida-simhash-local-sin-dinero-en-el-total-y-lo-que-sí-se-puede-afirmar) — Caché parecida: simhash local, sin dinero en el total, y lo que sí se puede afirmar
 - [D-220](../DECISIONS.md#d-220--el-bot-de-pr-escribe-también-typescript-y-javascript-con-tree-sitter-opcional) — El bot de PR escribe también TypeScript y JavaScript, con `tree-sitter` opcional
 - [D-221](../DECISIONS.md#d-221--los-arreglos-de-texto-los-escribe-un-modelo-los-prueba-un-replay-y-los-aprueba-una-persona) — Los arreglos de texto: los escribe un modelo, los prueba un replay y los aprueba una persona
+- [D-228](../DECISIONS.md#d-228--las-pantallas-también-en-webkit-el-motor-de-safari) — Las pantallas, también en WebKit (el motor de Safari)
