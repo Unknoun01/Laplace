@@ -533,6 +533,8 @@
   "pr.commit": "Cambia {de} por {a} (propuesto por Laplace)",
   "pr.cuerpo": "**{titulo}**\n\n{resumen}\n\nEste cambio: `{de}` → `{a}` en `{ruta}`, línea {linea}.\n\nRevisa que la calidad se mantiene antes de fusionarlo; en Laplace, la pestaña Probar compara los dos modelos con llamadas reales. Al fusionarlo, Laplace lo marca como arreglado si recibe el aviso de GitHub (si no, márcalo tú) y comprueba si el gasto baja.\n\n_Propuesto por Laplace._",
   "pr.solo_python": "Sólo sé escribir este arreglo en Python, y el fichero de la llamada no lo es (o no se puede leer).",
+  "pr.ts_sin_extra": "Para escribir este arreglo en TypeScript o JavaScript hace falta el extra opcional del backend: pip install \"laplace-backend[typescript]\" (tree-sitter). Sin él no escribo a ojo.",
+  "pr.tope_no_ts": "El tope de vueltas (laplace.guard) es del SDK de Python, y el de Node no lo tiene: este arreglo no se puede escribir en un fichero TypeScript o JavaScript.",
   "pr.sin_llamada": "En la línea {linea} no hay una llamada al modelo que reconozca. ¿Ha cambiado el fichero desde que se anotó?",
   "pr.ya_cachea": "La llamada ya marca su system con cache_control: no hay nada que añadir. Si el contexto fijo sigue pesando, toca mandar menos.",
   "pr.sin_system": "La llamada no tiene system que cachear. El contexto fijo va en los mensajes o en las herramientas, y ahí no lo cambio a ciegas.",

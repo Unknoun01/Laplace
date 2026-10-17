@@ -533,6 +533,8 @@
   "pr.commit": "Remplace {de} par {a} (proposé par Laplace)",
   "pr.cuerpo": "**{titulo}**\n\n{resumen}\n\nCe changement : `{de}` → `{a}` dans `{ruta}`, ligne {linea}.\n\nVérifiez que la qualité tient avant de fusionner ; dans Laplace, l'onglet Tester compare les deux modèles sur des appels réels. À la fusion, Laplace le marque comme corrigé s'il reçoit la notification de GitHub (sinon, marquez-le vous-même) et vérifie si la dépense baisse.\n\n_Proposé par Laplace._",
   "pr.solo_python": "Je ne sais écrire ce correctif qu'en Python, et le fichier de l'appel n'en est pas (ou ne se lit pas).",
+  "pr.ts_sin_extra": "Écrire ce correctif en TypeScript ou JavaScript demande l'extra optionnel du backend : pip install \"laplace-backend[typescript]\" (tree-sitter). Sans lui, je n'écris pas à l'œil.",
+  "pr.tope_no_ts": "La limite de tours (laplace.guard) appartient au SDK Python et celui de Node ne l'a pas : ce correctif ne peut pas s'écrire dans un fichier TypeScript ou JavaScript.",
   "pr.sin_llamada": "Je ne reconnais aucun appel au modèle à la ligne {linea}. Le fichier a-t-il changé depuis qu'il a été noté ?",
   "pr.ya_cachea": "L'appel marque déjà son system avec cache_control : il n'y a rien à ajouter. Si le contexte fixe pèse toujours, il faut en envoyer moins.",
   "pr.sin_system": "L'appel n'a pas de system à mettre en cache. Le contexte fixe est dans les messages ou les outils, et je ne les modifie pas à l'aveugle.",

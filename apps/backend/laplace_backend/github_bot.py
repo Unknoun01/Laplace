@@ -439,6 +439,9 @@ class PullRequest:
 Cambio = Callable[[str, str], str]
 
 
+EXT_TS = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts")
+
+
 def comprobar_cambio(fuente: str, nueva: str, ruta: str) -> None:
     """Lo que se exige a cualquier arreglo antes de escribirlo (D-190): que cambie algo
     y, si es Python, que el fichero siga compilando."""
@@ -449,6 +452,10 @@ def comprobar_cambio(fuente: str, nueva: str, ruta: str) -> None:
             ast.parse(nueva)
         except SyntaxError as exc:
             raise SinPropuesta("pr.no_compila", ruta=ruta) from exc
+    elif ruta.endswith(EXT_TS):
+        from . import arreglos_ts
+
+        arreglos_ts.comprobar(nueva, ruta)
 
 
 def abrir(
@@ -470,12 +477,18 @@ def abrir(
     `cambiar` es el arreglo; sin él, el cambio de modelo de `de` a `a` en `linea`.
     """
 
-    def _modelo(fuente: str, _ruta: str) -> str:
+    from . import arreglos_ts  # aquí y no arriba: arreglos_ts importa SinPropuesta de este módulo
+
+    def _modelo(fuente: str, ruta: str) -> str:
+        if ruta.endswith(EXT_TS):
+            return arreglos_ts.cambiar_modelo(fuente, linea, de, a, ruta)
         return cambiar_modelo(fuente, linea, de, a)
 
-    # Los arreglos se escriben sobre el árbol de sintaxis de Python (D-190); para otros
-    # lenguajes no hay parser donde corre el backend (D-218).
-    if not ruta_anotada.endswith(".py"):
+    # Los arreglos se escriben sobre el árbol de sintaxis: el de Python (D-190) o, con el
+    # extra `[typescript]`, el de TypeScript y JavaScript (D-220). Sin parser, nada.
+    if ruta_anotada.endswith(EXT_TS):
+        arreglos_ts.requerir()
+    elif not ruta_anotada.endswith(".py"):
         raise SinPropuesta("pr.solo_python")
     cambiar = cambiar or _modelo
     # Se resuelve al llamar, no al definir: así las pruebas cambian `_pedir` del módulo.

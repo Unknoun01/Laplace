@@ -5966,3 +5966,48 @@ el tope de preguntas, poner dinero en el total y `costs_money` verdadero.
 `test_regla_cache_parecida.py`, `test_carga.py` (espera `cache_parecida`; `scripts/carga.py`
 siembra el caso sin ejecutarse) y la prueba de paridad sobre empates en `test_paridad.py`.
 
+
+### D-220 — El bot de PR escribe también TypeScript y JavaScript, con `tree-sitter` opcional
+D-218 dejó escrito el camino: la llamada se encuentra en cualquier lenguaje, pero sólo se
+sabía escribir Python. Muchos agentes son de Node. Ahora el bot escribe el cambio de modelo
+y `cache_control` en `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.mts` y `.cts`, con el
+mismo criterio de D-190: sobre el árbol, nunca sobre el texto, y lo ambiguo no se propone.
+
+* **Un módulo propio, `arreglos_ts.py`**, con `tree-sitter` y las gramáticas de TypeScript
+  (también `tsx`) y JavaScript como extra opcional del backend, `[typescript]`. En
+  `github_bot.py` sólo se despacha por extensión: `abrir` (antes de pedir nada a GitHub),
+  el cambio de modelo y `comprobar_cambio`. En `api_ajustes._arreglo`, `cache` y `tope`
+  despachan por la extensión del fichero **del repositorio**.
+* **Sin el extra, no hay PR y se dice** (`pr.ts_sin_extra`, con la orden para instalarlo).
+  No se cae a la búsqueda de texto: es lo que D-218 descartó. `pr.solo_python` queda para
+  lo que no es ni Python ni TS/JS.
+* **Cambio de modelo.** La llamada es la más interior cuyo primer argumento es un objeto
+  con `model` o `messages` (`create({...})`); se cambia el literal de `model` (cadena, o
+  plantilla sin sustituciones), conservando las comillas. Un comentario con el mismo texto
+  no se toca. Si el modelo es una variable, una plantilla con `${}`, o no es el esperado:
+  `pr.modelo_no_literal`. Una llamada envuelta (`envolver(c, {model})`, el objeto no es el
+  primer argumento): `pr.sin_llamada`. En TS/JS no hay el plan B de Python de «un único
+  literal en todo el fichero»: sin llamada reconocida no se escribe.
+* **`cache_control`** en el `system` de una llamada de Anthropic: texto (cadena, plantilla,
+  `+` con algún texto, o un identificador declarado **una sola vez** con uno de ésos) se
+  envuelve en `[{ type: "text", text: …, cache_control: { type: "ephemeral" } }]`; una
+  lista de bloques lleva `cache_control` en el último, también si se declara aparte. Todo
+  lo demás (una llamada a función, un `...otro` dentro del bloque, dos declaraciones) es
+  `pr.system_desconocido`; si ya cachea, `pr.ya_cachea`; sin `system`, `pr.sin_system`.
+* **Tope de vueltas: no.** `@laplace.guard` es del SDK de Python; el de Node (`sdk-js`) no
+  tiene `guard` ni anota `code.*`, así que no hay dónde ponerlo ni de dónde sacar la raíz
+  (`pr.tope_no_ts`). Cuando el SDK de Node lo tenga, sale por aquí.
+* **El resultado tiene que parsear sin errores** (`comprobar`, equivalente a `ast.parse`);
+  y si el original ya trae errores de sintaxis para `tree-sitter` (por ejemplo, sintaxis
+  que la gramática no conoce), tampoco se escribe: las posiciones no serían de fiar.
+  Las posiciones son bytes UTF-8, y se edita sobre los bytes.
+* **Límite conocido:** `tree-sitter` comprueba la sintaxis, no los tipos: un TS que parsea
+  pero no compila con `tsc` no se detecta. Y la imagen de la nube (`[cloud]`) no instala el
+  extra: hay que añadir `[typescript]` donde se despliegue si se quiere en producción.
+
+Pruebas en `test_bot_arreglos_ts.py` (19, se saltan sin `tree-sitter`): el modelo con
+comentario igual, comillas simples y clave entrecomillada, variable, plantilla, llamada
+envuelta; `cache` en variable, literal con tildes, lista, función, ya cachea, sin system,
+dos declaraciones, `.tsx`/`.jsx`; fichero roto; sin el extra (módulo y por `abrir`, sin
+llamar a GitHub); el PR entero contra el GitHub falso, con ruta absoluta; el tope. Se
+rompieron a propósito seis sitios y en todos falla alguna (dos hicieron falta nuevas).

@@ -28,6 +28,9 @@ cloud = ["clickhouse-connect>=0.7", "psycopg[binary,pool]>=3.1", "cryptography>=
 # Firmar como GitHub App (el bot de PR, D-185) es RS256, que la biblioteca estándar no
 # hace. Va con la nube, que es donde vive la App; en local basta un token del usuario.
 github = ["cryptography>=42"]
+# Escribir los arreglos del bot de PR en TypeScript y JavaScript (D-220) es tocar el árbol
+# de `tree-sitter`. Sin el extra el bot dice que no puede; nunca escribe a ojo.
+typescript = ["tree-sitter>=0.23", "tree-sitter-javascript>=0.23", "tree-sitter-typescript>=0.23"]
 # SAML (D-211): python3-saml trae `xmlsec` y `lxml`, nativas, y las dos tienen que llevar
 # la misma libxml2. Sin ellas SAML está apagado y la interfaz lo dice; OIDC no las
 # necesita. `test_saml.py` se salta sin ellas, salvo la prueba de SAML apagado.
