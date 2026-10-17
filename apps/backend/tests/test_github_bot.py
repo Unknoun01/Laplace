@@ -615,7 +615,7 @@ def test_el_pr_desde_una_ruta_absoluta_no_la_publica():
     assert 'model="gpt-5.6-luna"' in github.fichero(pr["head"], "servicios/agente/resumen.py")
 
 
-@pytest.mark.parametrize("ruta", ["src/agente.ts", "/srv/app/agente.js"])
+@pytest.mark.parametrize("ruta", ["src/agente.rb", "/srv/app/agente.go"])
 def test_un_fichero_que_no_es_python_no_tiene_pr_y_no_llega_a_github(ruta):
     github = GitHubFalso({"src/agente.ts": 'llamar({model: "gpt-5.5"})\n'})
     with pytest.raises(SinPropuesta) as no:

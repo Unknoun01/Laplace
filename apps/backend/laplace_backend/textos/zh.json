@@ -533,6 +533,8 @@
   "pr.commit": "将 {de} 换为 {a}（由 Laplace 提出）",
   "pr.cuerpo": "**{titulo}**\n\n{resumen}\n\n本次更改：在 `{ruta}` 第 {linea} 行将 `{de}` 换为 `{a}`。\n\n合并前请确认质量不受影响；在 Laplace 的“测试”页可以用真实调用对比两个模型。合并时，如果 Laplace 收到 GitHub 的通知，会自动标记为已修复（否则请手动标记），并检查花费是否下降。\n\n_由 Laplace 提出。_",
   "pr.solo_python": "这个修复我只会用 Python 写，而调用所在的文件不是 Python（或无法读取）。",
+  "pr.ts_sin_extra": "用 TypeScript 或 JavaScript 写这个修复需要后端的可选扩展：pip install \"laplace-backend[typescript]\"（tree-sitter）。没有它，我不会凭眼睛去写。",
+  "pr.tope_no_ts": "循环上限（laplace.guard）属于 Python SDK，Node 版没有它：这个修复无法写进 TypeScript 或 JavaScript 文件。",
   "pr.sin_llamada": "第 {linea} 行没有我能识别的模型调用。记录之后文件是否改过？",
   "pr.ya_cachea": "该调用的 system 已经带有 cache_control，没有可以添加的。如果固定上下文仍然占比很大，就需要少发送一些。",
   "pr.sin_system": "该调用没有可缓存的 system。固定上下文在消息或工具里，这些我不会盲目修改。",

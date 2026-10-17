@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 219 decisiones.
+final. 220 decisiones.
 
 ## Coste, precios y caché
 
@@ -154,6 +154,7 @@ final. 219 decisiones.
 - [D-196](../DECISIONS.md#d-196--lecturas-de-caché-pagadas-en-openai-la-ficha-propone-lo-mismo-que-la-tarjeta) — Lecturas de caché pagadas en OpenAI: la ficha propone lo mismo que la tarjeta
 - [D-202](../DECISIONS.md#d-202--sin-ciclos-de-imports-en-el-sdk-init-sale-de-_tracer) — Sin ciclos de imports en el SDK: `init()` sale de `_tracer`
 - [D-206](../DECISIONS.md#d-206--la-parada-alcanza-lo-que-otro-instrumentador-traza-en-python-lo-que-no-alcanza-se-dice) — La parada alcanza lo que otro instrumentador traza en Python; lo que no alcanza, se dice
+- [D-220](../DECISIONS.md#d-220--el-bot-de-pr-escribe-también-typescript-y-javascript-con-tree-sitter-opcional) — El bot de PR escribe también TypeScript y JavaScript, con `tree-sitter` opcional
 
 ## Almacenes y escala
 
@@ -699,3 +700,4 @@ final. 219 decisiones.
 - [D-215](../DECISIONS.md#d-215--de-dónde-viene-cada-span-y-qué-parte-del-tráfico-se-queda-fuera-de-la-parada) — De dónde viene cada span, y qué parte del tráfico se queda fuera de la parada
 - [D-216](../DECISIONS.md#d-216--serviceversion-como-segunda-señal-de-despliegue-si-se-puede-atar-a-un-commit) — `service.version` como segunda señal de despliegue, si se puede atar a un commit
 - [D-219](../DECISIONS.md#d-219--caché-parecida-simhash-local-sin-dinero-en-el-total-y-lo-que-sí-se-puede-afirmar) — Caché parecida: simhash local, sin dinero en el total, y lo que sí se puede afirmar
+- [D-220](../DECISIONS.md#d-220--el-bot-de-pr-escribe-también-typescript-y-javascript-con-tree-sitter-opcional) — El bot de PR escribe también TypeScript y JavaScript, con `tree-sitter` opcional

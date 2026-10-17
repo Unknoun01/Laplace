@@ -1181,7 +1181,11 @@ def _arreglo(store: Any, project_id: str, hallazgo: Any) -> dict[str, Any]:
     if hallazgo.code_fix == "cache":
         ruta, linea = github_bot.sitio(del_paso, "")
 
-        def _cache(fuente: str, _ruta: str) -> str:
+        def _cache(fuente: str, ruta_repo: str) -> str:
+            if ruta_repo.endswith(github_bot.EXT_TS):
+                from . import arreglos_ts
+
+                return arreglos_ts.poner_cache(fuente, linea, ruta_repo)
             return arreglos_codigo.poner_cache(fuente, linea)
 
         return {
@@ -1203,7 +1207,10 @@ def _arreglo(store: Any, project_id: str, hallazgo: Any) -> dict[str, Any]:
         funcion = str(attrs.get("code.function.name") or raiz.name)
         tope = MIN_VUELTAS_BUCLE
 
-        def _tope(fuente: str, _ruta: str) -> str:
+        def _tope(fuente: str, ruta_repo: str) -> str:
+            if ruta_repo.endswith(github_bot.EXT_TS):
+                # El guard es del SDK de Python (D-220).
+                raise github_bot.SinPropuesta("pr.tope_no_ts")
             return arreglos_codigo.poner_tope(fuente, int(linea), tope)
 
         return {

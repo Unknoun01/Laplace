@@ -533,6 +533,8 @@
   "pr.commit": "Switch {de} to {a} (proposed by Laplace)",
   "pr.cuerpo": "**{titulo}**\n\n{resumen}\n\nThis change: `{de}` → `{a}` in `{ruta}`, line {linea}.\n\nCheck that quality holds before merging; in Laplace, the Test tab compares both models on real calls. When it's merged, Laplace marks it as fixed if it gets GitHub's notification (if not, mark it yourself) and checks whether spending goes down.\n\n_Proposed by Laplace._",
   "pr.solo_python": "I can only write this fix in Python, and the file with the call isn't Python (or can't be read).",
+  "pr.ts_sin_extra": "Writing this fix in TypeScript or JavaScript needs the backend's optional extra: pip install \"laplace-backend[typescript]\" (tree-sitter). Without it I don't write by eye.",
+  "pr.tope_no_ts": "The loop limit (laplace.guard) belongs to the Python SDK and the Node one doesn't have it: this fix can't be written in a TypeScript or JavaScript file.",
   "pr.sin_llamada": "There's no model call I recognise on line {linea}. Has the file changed since it was recorded?",
   "pr.ya_cachea": "The call already marks its system with cache_control: there's nothing to add. If the fixed context still weighs a lot, send less of it.",
   "pr.sin_system": "The call has no system to cache. The fixed context is in the messages or the tools, and I won't change those blindly.",
