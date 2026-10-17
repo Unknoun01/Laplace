@@ -249,7 +249,8 @@ Del 16 al 17 de octubre, doce más, cada una en su sesión:
 
 El 17 de octubre, el bot de PR escribe TypeScript y JavaScript, con `tree-sitter` como
 extra opcional (D-220). Además propone arreglos de texto: los escribe un modelo, los
-prueba un replay y nunca abren un PR sin la aprobación de una persona (D-221).
+prueba un replay y nunca abren un PR sin la aprobación de una persona (D-221). Y las
+pantallas corren también en WebKit, sin nada que arreglar (D-228).
 
 Del 1 al 2 de octubre entró el resto de la lista «siguiente»:
 - la caché compartida entre pasos (D-178);

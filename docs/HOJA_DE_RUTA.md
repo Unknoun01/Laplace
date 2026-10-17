@@ -143,12 +143,10 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
   uno de verdad.
 
 ## 4. Deuda y detalles sueltos
-- **Los navegadores que no son Chromium**, que la auditoría del rediseño no revisó
-  (`docs/auditoria-rediseno.md`). Safari trata distinto `backdrop-filter` y `color-mix`,
-  y todo el color sale de `color-mix`; el claro Rose Gold depende del cristal y de
-  `saturate()`. En el contenedor sólo hay Chromium, así que hace falta un Mac o
-  WebKit de Playwright. Las pantallas con sesión y los flujos de escritura ya se
-  recorren en `test_pantallas_cuentas.py` (D-175).
+- **Los navegadores que no son Chromium:** las pantallas corren también en el WebKit de
+  Playwright (`LAPLACE_NAVEGADOR=webkit`, D-228), y no salió nada que arreglar:
+  `color-mix`, `backdrop-filter` y los dos temas se ven igual. Lo que WebKit no cubre
+  frente a un Safari de verdad (iOS, la barra de direcciones) espera a que haya un Mac.
 - **En español a propósito, y por decidir si sigue así** (D-148): la línea de órdenes
   (`laplace ui`, `laplace demo`) y los logs.
 - **Móvil: sin app, y la web adaptada se queda como está** (decisión del usuario, 17 de
