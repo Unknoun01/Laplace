@@ -1075,3 +1075,68 @@ def test_el_grafo_del_panel_lleva_de_un_paso_a_sus_trazas_y_fichas(servidor, nav
         assert errores == [], errores
     finally:
         pagina.close()
+
+
+def test_el_arreglo_de_texto_se_aprueba_con_el_diff_delante_y_probado(servidor, navegador):
+    """D-221: la ficha enseña el diff de la propuesta y lo que costó; sin replay dice que
+    no está probada y no deja aprobar; con replay, aprobar manda la huella de lo visto.
+    El modelo no está encendido en la demo: las respuestas del backend se simulan."""
+    with urllib.request.urlopen(f"{servidor}/api/overview?project_id=demo&days=30") as r:
+        fijo = next(h for h in json.load(r)["findings"] if h["kind"] == "contexto_fijo")
+    estado = {"probada": None}
+    aprobadas: list[dict] = []
+
+    def vista(ruta):
+        ruta.fulfill(json={
+            "disponible": True,
+            "objetivo": "acortar",
+            "propuesta": {
+                "sha": "abc123def456", "original": "Eres el asistente.\nNormas largas.",
+                "propuesto": "Asistente: normas.", "explicacion": "Quita lo repetido.",
+                "modelo": "claude-sonnet-4-5",
+                "donde": {"tipo": "codigo", "ruta": "agente/reservas.py", "linea": 10},
+            },
+            "diff": {"lines": [
+                {"op": "-", "text": "Eres el asistente.", "left": 1, "right": None},
+                {"op": "-", "text": "Normas largas.", "left": 2, "right": None},
+                {"op": "+", "text": "Asistente: normas.", "left": None, "right": 1},
+            ], "added": 1, "removed": 2, "unchanged": 0, "summary": ""},
+            "gasto": {"usd": 0.0123, "unknown": False, "calls": 2},
+            "probada": estado["probada"],
+            "conjunto": "responder",
+        })
+
+    def aprobar(ruta):
+        aprobadas.append(json.loads(ruta.request.post_data))
+        ruta.fulfill(json={"url": "https://github.com/acme/agentes/pull/7", "number": 7})
+
+    pagina = navegador.new_page(viewport={"width": 1440, "height": 900}, locale="es-ES")
+    errores: list[str] = []
+    pagina.on("pageerror", lambda exc: errores.append(f"excepción: {exc}"))
+    pagina.route(re.compile(r"/api/arreglos-texto\?"), vista)
+    pagina.route(re.compile(r"/api/arreglos-texto/aprobar"), aprobar)
+    url = f"{servidor}/problema/?project=demo&days=30&id={urllib.parse.quote(fijo['id'])}"
+    try:
+        pagina.goto(url, wait_until="networkidle")
+        caja = pagina.locator("[data-arreglo-texto]")
+        caja.wait_for(timeout=15_000)
+        texto = caja.inner_text()
+        assert "Asistente: normas." in texto and "Normas largas." in texto, texto
+        assert "0,012" in texto, texto
+        assert "No está probada" in texto, texto
+        assert "--propuesta" in texto, texto
+        boton = caja.get_by_role("button", name=re.compile("Aprobar"))
+        assert boton.is_disabled()
+
+        estado["probada"] = {"run_id": "r1", "original_run_id": "r0", "casos": 3,
+                             "fallidos": 0}
+        pagina.goto(url, wait_until="networkidle")
+        caja.wait_for(timeout=15_000)
+        assert "Probada con un replay" in caja.inner_text()
+        caja.get_by_role("button", name=re.compile("Aprobar")).click()
+        caja.get_by_role("link", name=re.compile("Pull request abierto")).wait_for()
+        assert aprobadas == [{"project_id": "demo", "finding_id": fijo["id"],
+                              "sha": "abc123def456"}]
+        assert errores == [], errores
+    finally:
+        pagina.close()

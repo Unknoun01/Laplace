@@ -14,6 +14,7 @@ import { useApi } from "@/lib/useApi";
 import { Head, Repetitions, SpanAttributes, Markup } from "./tecnico";
 import { EstadoHallazgo } from "./seguimiento";
 import { Ciclo, versionesDelPrompt } from "./ciclo";
+import { ArregloTexto } from "./arreglo-texto";
 import { PullRequest } from "./pull-request";
 import { tr } from "@/lib/i18n";
 import { t } from "@/lib/textos";
@@ -219,6 +220,9 @@ function Contenido() {
 
       {permisos.escribir && (
         <PullRequest project={project} finding={finding} days={days} query={query} />
+      )}
+      {permisos.escribir && (
+        <ArregloTexto project={project} finding={finding} days={days} query={query} />
       )}
 
       <VolverAVersion finding={finding} query={query} />

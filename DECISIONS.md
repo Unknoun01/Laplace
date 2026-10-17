@@ -6028,3 +6028,23 @@ sostenga y sin que una persona lo apruebe con el diff delante. Va en
 Queda fuera, y se dice: el webhook (D-191) no marca arreglado el hallazgo al fusionar un
 PR de texto, porque reconoce la rama del PR de código; se marca a mano. Sólo Python, como
 D-190. No se ha probado contra un proveedor de verdad: transportes falsos.
+
+Pruebas en `test_arreglos_texto.py` (21, con proveedor y GitHub falsos): la validación
+(recorte, crecer, variables), el cambio en lo grabado con variables de plantilla, que en
+el replay sólo cambian los mensajes de sistema, el literal en una constante y en un
+mensaje de OpenAI, el árbol igual salvo la constante, tres textos maliciosos que quedan
+como texto, la f-string que no se toca, el literal que cambió; el modelo con su coste y
+sus rechazos; y por la API, de la ficha al PR pasando por el replay (sin replay 409, con
+todo fallido 409, huella distinta 409, la rama principal intacta), la propuesta nueva
+que deja viejo el replay, el rechazo que apunta su coste y no pisa, el código que no dice
+lo que mandó la traza, el prompt versionado que acaba en v2 sin desplegar, apagado (503)
+y la clave de proyecto que no aprueba (403). En `test_replay_sdk.py`, `laplace replay`
+con `--propuesta` manda el texto nuevo y deja las dos tiradas con su huella. En
+`test_pantallas.py`, la ficha enseña el diff y lo que costó, no deja aprobar sin replay
+y aprueba mandando la huella. Se rompieron a propósito dieciséis sitios (variables, recorte,
+árbol igual, valor viejo, literal, coincide con la traza, casos fallidos, huella, sin
+probar, persona, coste del rechazo, sustituir en el replay, sólo el rol de sistema, rama
+propia, nombre de la tirada en el SDK, y el botón de aprobar en la pantalla) y en todos
+falla alguna; la de sólo el rol de sistema no mordía y tiene ahora su prueba. Un aviso
+del SDK para una propuesta que no existe tampoco mordía (el backend ya responde 404) y se
+quitó.

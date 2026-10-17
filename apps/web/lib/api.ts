@@ -935,6 +935,8 @@ export interface ReplayPeticion {
   dataset: string;
   model: string;
   max_usd: number;
+  /** El hallazgo cuyo arreglo de texto se prueba (D-221). */
+  propuesta?: string;
 }
 
 export function getReplayEstado(
@@ -949,4 +951,39 @@ export function planDeReplay(body: ReplayPeticion): Promise<ReplayPlan> {
 
 export function lanzarReplay(body: ReplayPeticion & { acepta_usd: number }): Promise<ReplayTirada> {
   return send("/api/replay", "POST", body);
+}
+
+/** El arreglo de texto de un hallazgo (D-221): la propuesta, su diff, lo que costó y su replay. */
+export interface ArregloTexto {
+  disponible: boolean;
+  objetivo: "acortar" | "json" | "";
+  propuesta: {
+    sha: string;
+    original: string;
+    propuesto: string;
+    explicacion: string;
+    modelo: string;
+    donde: { tipo: "codigo" | "prompt"; ruta?: string; linea?: number; nombre?: string; version?: number };
+  } | null;
+  diff: Diff | null;
+  gasto: { usd: number; unknown: boolean; calls: number };
+  probada: { run_id: string; original_run_id: string; casos: number; fallidos: number } | null;
+  conjunto: string;
+}
+
+export function getArregloTexto(projectId: string, findingId: string): Promise<ArregloTexto> {
+  return get("/api/arreglos-texto", { project_id: projectId, finding_id: findingId });
+}
+
+export function proponerArregloTexto(projectId: string, findingId: string, days: number): Promise<ArregloTexto> {
+  return send("/api/arreglos-texto/proponer", "POST", { project_id: projectId, finding_id: findingId, days });
+}
+
+/** Aprueba lo que se vio (`sha`): abre el PR o guarda la versión nueva del prompt. */
+export function aprobarArregloTexto(
+  projectId: string,
+  findingId: string,
+  sha: string,
+): Promise<{ url?: string; version?: number }> {
+  return send("/api/arreglos-texto/aprobar", "POST", { project_id: projectId, finding_id: findingId, sha });
 }

@@ -90,6 +90,23 @@ def test_el_texto_viejo_se_cambia_en_lo_grabado_tambien_con_variables():
     assert at.cambiar_en_texto("a. Sin variables. b", "Sin variables.", "Corto.") == "a. Corto. b"
 
 
+def test_en_el_replay_solo_cambian_las_instrucciones_de_sistema():
+    from laplace_backend.replay import Llamada, Reenviables
+
+    def llamada(sistema: str) -> Llamada:
+        return Llamada(case_id="c", trace_id="t", span_id="s", messages=[
+            {"role": "system", "content": sistema},
+            {"role": "user", "content": f"Repite esto: {SISTEMA}"},
+        ])
+
+    propuesta = {"original": SISTEMA, "propuesto": CORTO, "sha": "abc"}
+    r = at.en_reenviables(Reenviables(dataset_id="d", calls=[llamada(SISTEMA), llamada("otro")]),
+                          propuesta)
+    assert r.proposal == "abc" and r.excluded == {"sin_el_texto": 1}
+    assert r.calls[0].messages == [{"role": "system", "content": CORTO},
+                                   {"role": "user", "content": f"Repite esto: {SISTEMA}"}]
+
+
 # ---------------------------------------------------------------------------------
 # En el código: sólo el valor de un literal
 # ---------------------------------------------------------------------------------

@@ -704,8 +704,6 @@ def replay_dataset(
         + (f"&propuesta={quote(proposal)}" if proposal else "")
     )
     huella = str(datos.get("proposal") or "")
-    if proposal and not huella:
-        raise EvalError(f"Laplace no tiene la propuesta de texto de «{proposal}»")
     tarifa = datos.get("target")
     if not tarifa:
         raise EvalError(

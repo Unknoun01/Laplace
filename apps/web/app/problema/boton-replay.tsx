@@ -26,10 +26,13 @@ export function BotonReplay({
   project,
   conjunto,
   modelo,
+  propuesta,
 }: {
   project: string;
   conjunto: string;
   modelo: string;
+  /** Probar el arreglo de texto de este hallazgo, con el mismo modelo (D-221). */
+  propuesta?: string;
 }) {
   const { escribir } = usePermisos(project);
   const [disponible, setDisponible] = useState(false);
@@ -42,6 +45,7 @@ export function BotonReplay({
     dataset: conjunto,
     model: modelo,
     max_usd: TOPE_USD,
+    ...(propuesta ? { propuesta } : {}),
   };
 
   const mirar = useCallback(() => {
