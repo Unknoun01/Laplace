@@ -71,9 +71,21 @@ APUNTAR = r"""
     if (o < 0.05) continue;
     const rango = document.createRange();
     rango.selectNodeContents(n);
+    // El texto que se sale de una caja con `overflow` recortado no se ve: WebKit, a
+    // diferencia de Chromium, da en el rango también la parte recortada (D-228).
+    const recortes = [];
+    for (let a = el; a && a !== document.body; a = a.parentElement)
+      if (getComputedStyle(a).overflowX !== 'visible') recortes.push(a.getBoundingClientRect());
     const rects = [...rango.getClientRects()]
-      .filter(r => r.width >= 2 && r.height >= 6)
-      .map(r => [r.left + scrollX, r.top + scrollY, r.width, r.height]);
+      .map(r => {
+        let [l, t, d, b] = [r.left, r.top, r.right, r.bottom];
+        for (const c of recortes) {
+          l = Math.max(l, c.left); t = Math.max(t, c.top);
+          d = Math.min(d, c.right); b = Math.min(b, c.bottom);
+        }
+        return [l + scrollX, t + scrollY, d - l, b - t];
+      })
+      .filter(r => r[2] >= 2 && r[3] >= 6);
     if (!rects.length) continue;
     const [r, g, b, a] = aRgba(cs.color);
     const px = parseFloat(cs.fontSize), negrita = parseInt(cs.fontWeight) >= 700;

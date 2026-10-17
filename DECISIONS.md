@@ -5966,3 +5966,36 @@ el tope de preguntas, poner dinero en el total y `costs_money` verdadero.
 `test_regla_cache_parecida.py`, `test_carga.py` (espera `cache_parecida`; `scripts/carga.py`
 siembra el caso sin ejecutarse) y la prueba de paridad sobre empates en `test_paridad.py`.
 
+
+### D-228 — Las pantallas, también en WebKit (el motor de Safari)
+
+La auditoría del rediseño no miró más que Chromium, y Safari trata distinto
+`backdrop-filter`, `color-mix` y `saturate()`. Sin Mac, se usa el WebKit de Playwright
+(WebKit 26.6, el mismo motor).
+
+**Qué se hizo.** `LAPLACE_NAVEGADOR=webkit` (por defecto `chromium`) elige el motor en el
+fixture `navegador` de `test_pantallas.py`, que usan también el contraste y las cuentas.
+Ninguna prueba depende de algo propio de Chromium, así que no se salta ninguna. Nueva
+`test_navegadores.py`: en el tema oscuro y en el claro (Rose Gold), mira el estilo
+calculado: todo token de color se resuelve (ni vacío ni heredado), el cristal tiene
+`backdrop-filter` (en claro con `saturate`) y `-webkit-backdrop-filter`, el fondo del
+cristal es translúcido y los resplandores tienen color.
+
+**Qué se veía distinto: nada de la web.** Los tokens, el cristal y los resplandores
+calculan igual que en Chromium en los dos temas, con y sin alto contraste (sólo cambia el
+redondeo del sexto decimal). Las diferencias eran de las pruebas, y se arreglaron ahí:
+1. un fetch cortado por una navegación lanza en WebKit una excepción «due to access
+   control checks» (todo es del mismo origen: no es CORS); se ignora sólo en WebKit;
+2. Playwright da por visible el contenido de un `<details>` cerrado (WebKit le deja caja);
+   la prueba del héroe mira `open`;
+3. el rango de un texto recortado por `overflow` incluye en WebKit lo recortado, y el
+   contraste medía contra la barra de al lado; ahora se recorta el rectángulo a las cajas
+   con `overflow`.
+
+**Mutaciones (sobre el CSS construido, en WebKit):** quitar `backdrop-filter` falla en los
+dos temas; un `color-mix` con un `var()` inexistente deja el token vacío y falla.
+
+**Lo que no cubre.** El WebKit de Playwright no es Safari: no hay Safari de iOS, ni las
+versiones anteriores a la 18 (que necesitan el prefijo, que está), ni el escalado de
+pantalla de un Mac, ni la aceleración por GPU del desenfoque. Sigue haciendo falta una
+mirada a mano en un Mac o un iPhone antes de afirmar que Safari está comprobado.
