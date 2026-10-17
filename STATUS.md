@@ -247,6 +247,10 @@ Del 16 al 17 de octubre, doce más, cada una en su sesión:
 - y la escala, medida sin tocar código (D-212): con diez millones de spans al día, el
   Diagnóstico de 7 días tarda 59–181 s y el de un día 19–35 s.
 
+El 17 de octubre, el bot de PR escribe TypeScript y JavaScript, con `tree-sitter` como
+extra opcional (D-220). Además propone arreglos de texto: los escribe un modelo, los
+prueba un replay y nunca abren un PR sin la aprobación de una persona (D-221).
+
 Del 1 al 2 de octubre entró el resto de la lista «siguiente»:
 - la caché compartida entre pasos (D-178);
 - lo evitable de cada cliente, ingresos en otras monedas y la columna de cliente en las

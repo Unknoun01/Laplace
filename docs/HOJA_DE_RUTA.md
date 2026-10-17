@@ -92,11 +92,12 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
 - **Replay contrafactual, más allá** (hecho: lo básico, D-167; las herramientas, D-205; las imágenes, los bloques entre proveedores y la API Responses, D-213; el botón en la versión local, D-214). Queda pasarlo contra las API reales (espera una clave, sección 5).
 - **Bot de pull requests, más allá** (hecho: el cambio de modelo, D-185; `cache_control` y el tope de vueltas sobre el árbol de sintaxis, D-190; el webhook que marca el hallazgo arreglado al fusionar, D-191; sus pantallas, D-192; la
   frontera en el despliegue a producción por el aviso `deployment_status`, D-204). Lo que queda:
-  - arreglos que no se derivan del código (acortar un contexto, cambiar un prompt): harían falta un modelo que los escriba y una persona que los mire, y por eso no se hicieron (D-190);
-  - otros lenguajes: desde D-218 el bot encuentra la llamada con los atributos estándar
-    `code.*` de cualquier SDK, pero sólo escribe arreglos en Python. Para TypeScript y
-    JavaScript haría falta leer el árbol de sintaxis, y el camino sería `tree-sitter`
-    como extra opcional;
+  - arreglos de texto (acortar un contexto, cambiar un prompt): hechos en D-221. Los
+    propone un modelo, los prueba un replay y los aprueba una persona en la ficha, con el
+    diff delante. Falta pasarlos contra un modelo de verdad (espera una clave);
+  - otros lenguajes: el bot encuentra la llamada con los atributos `code.*` de cualquier
+    SDK (D-218) y escribe Python, TypeScript y JavaScript (D-220, con `tree-sitter` como
+    extra opcional). Para otros lenguajes, el mismo camino con su gramática;
   - la señal de despliegue: el aviso `deployment_status` (D-204) y, si no llega,
     `service.version` cuando se puede atar al commit de la fusión (D-216). Sin ninguna de
     las dos, la frontera sigue en la fusión, y la nota lo dice.
