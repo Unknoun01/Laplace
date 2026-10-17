@@ -19,7 +19,9 @@ proyecto grande, que es el caso que hay que aguantar: un cliente con mucho volum
 Y cada regla con algo que encontrar, porque una lectura que no encuentra nada mide menos
 de lo que costará: una de cada cincuenta trazas rehace «extraer» tras cortarse por el
 tope de salida, otra lo rehace tras un JSON roto, y una de cada veinte conversaciones (5
-trazas del mismo proyecto) crece 800 tokens por turno (D-197).
+trazas del mismo proyecto) crece 800 tokens por turno (D-197). Y una de cada cuatro
+trazas del proyecto grande no lleva usuario ni sesión, que es lo que pregunta la regla de
+los lotes (D-223).
 
 El objetivo, escrito para que haya algo contra lo que medir: **10 millones de spans al
 día en la instalación, y el Diagnóstico de un proyecto por debajo de 1,5 s**.
@@ -107,8 +109,12 @@ SELECT
     if(p IN (2, 4), name, '')                                         AS tool_name,
     if(p IN (2, 4), concat('{{"vuelo":"IB', toString(t %% 9000), '"}}'), '') AS tool_arguments,
     if(p IN (2, 4), '{{"ok":true}}', '')                              AS tool_output,
-    concat('sesion-', toString(t %% 2), '-', toString(intDiv(t, 10))) AS session_id,
-    concat('cliente-', toString(t %% 5000))                            AS user_id,
+    -- Una de cada cuatro trazas del proyecto grande, sin usuario ni sesión: el peor caso
+    -- de los lotes (D-223), que abre todas las ejecuciones así en un proyecto que sí los
+    -- pone en las demás. Las conversaciones del historial conservan la suya.
+    if(sin_persona, '',
+       concat('sesion-', toString(t %% 2), '-', toString(intDiv(t, 10)))) AS session_id,
+    if(sin_persona, '', concat('cliente-', toString(t %% 5000)))        AS user_id,
     -- Una de cada diez trazas repite la llamada a terra: mismo hash que la de luna.
     if(t %% 10 = 0 AND p IN (1, 3), concat('rep-', toString(t)), toString(n))
                                                                       AS dedup_hash,
@@ -134,6 +140,7 @@ FROM (
            -- La llamada que se rehace: en estas trazas, p = 1 también es «extraer».
            if(t %% 50 IN (22, 44) AND p = 1, 3, p) AS q,
            intDiv(t, 10) %% 20 = 1 AS historial,
+           t %% 8 = 6 AND NOT historial AS sin_persona,
            t %% 20 = 6 AND p = 5 AS parecida  -- par: del proyecto grande
     FROM numbers(%(inicio)s, %(cuantos)s)
 )

@@ -6182,3 +6182,41 @@ turnos en la tabla y dos en crudo (en el borde de la ventana, y en una fila que 
 porque una traza cruza). En `test_carga.py`, que el filtro deje fuera más del 80 % de las
 filas de la tabla (en rojo con `master`: pasaban todas). Se rompió a propósito tres veces:
 sin las tocadas, sin los tramos crudos y sin el filtro. Las tres fallan.
+
+### D-223 — Los lotes, en el peor caso: sin ventana por traza
+D-199 dejó sin medir el peor caso de la regla de lotes: muchas ejecuciones sin usuario en
+un proyecto que sí lo pone en otras, porque la carga no tenía ese tráfico. Ahora lo
+tiene: una de cada cuatro trazas del proyecto grande va sin usuario ni sesión (salvo las
+conversaciones del historial, que conservan la suya), y `test_carga.py` exige el hallazgo
+`lotes` (en rojo sin la siembra).
+
+**Medido, se dispara.** Con diez millones de spans al día y siete días (un millón de
+ejecuciones candidatas): 15–17 s y 2,5 GiB, frente a los 2,7–7,2 s de D-212 sin este
+tráfico. Por partes: elegir las candidatas, 3,1 s y 776 MiB, que es lo de siempre (agrupa
+por traza toda la ventana); el resto es la ventana `min(end_time) OVER (PARTITION BY
+trace_id)`, que ordenaba 3,1 millones de llamadas con todas sus columnas.
+
+**Ahora**, en ClickHouse: la misma agrupación que elige las candidatas saca también la
+marca (`max(has(tags, …))`) y el primer fin de sus llamadas (`minIf(end_time, span_type =
+'llm')`), y va a cada llamada con un `INNER JOIN` por traza. Sin ventanas y sin la
+subconsulta aparte de la marca, que leía la ventana otra vez. La agrupación es sin
+`FINAL`, como ya lo era: las copias de un span son reenvíos del mismo span, y no cambian
+ni la marca ni el mínimo. Las llamadas siguen con `FINAL`. SQLite no cambia: su ventana
+es la misma cuenta.
+
+| 7 días, 10 M/día | Antes | Ahora |
+|---|---|---|
+| lotes | 14,9–17,1 s | 9,1–9,3 s |
+| memoria | 2,47–2,52 GiB | 916–944 MiB |
+| 1 día | 1,9–2,7 s, 387 MiB | 1,6–1,8 s, 255 MiB |
+
+Sale igual que antes, salvo la duodécima cifra de las sumas de coste, que también cambia
+entre dos tandas de `master` (el orden de una suma en paralelo). Lo que queda es leer la
+ventana dos veces (las candidatas y las llamadas): es el coste de D-199 sin este tráfico.
+
+Pruebas: en `test_regla_lotes.py`, en los dos almacenes, que una herramienta que acaba
+antes que la llamada no la encadene (el mínimo es de las llamadas) y que un lote reenviado
+sin fusionar no cuente dos veces. En `test_carga.py`, que la consulta no tenga ventanas
+(en rojo con `master`). Se rompió a propósito dos veces: el primer fin de todos los spans
+y las llamadas sin `FINAL`. Las dos fallan. La paridad sobre empates de `test_paridad.py`
+sigue igual.

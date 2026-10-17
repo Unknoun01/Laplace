@@ -216,3 +216,28 @@ def test_la_ficha_cuenta_lo_mismo_que_la_tarjeta(store):
     codigo = " ".join(p.code or "" for p in ficha.fix_steps)
     assert "client.batches.create" in codigo, "ya está marcada: el arreglo es el lote"
     assert PUEDE_ESPERAR_TAG not in codigo
+
+
+def test_una_herramienta_que_acaba_antes_no_encadena_la_llamada(store):
+    """La llamada espera a otra llamada al modelo, no a lo que hizo antes la ejecución:
+    el primer fin que cuenta es el de las llamadas (D-223 lo saca de otra consulta)."""
+    spans = _ejecuciones("herramienta", 25)
+    for llamada in [s for s in spans if s.type == "llm"]:
+        spans.append(_span("herramienta", llamada.trace_id,
+                           llamada.start_time - timedelta(seconds=1), 500, name="buscar",
+                           type="tool"))
+    store.insert_spans(spans)
+    (h,) = _lotes(store, "herramienta")
+    assert h.window_waste_usd == pytest.approx(25 * COSTE * 0.5)
+
+
+def test_un_lote_reenviado_no_cuenta_dos_veces(store):
+    """Un lote reenviado y aún sin fusionar duplica las filas de cada span: cada
+    llamada contaría dos veces y la segunda copia la encadenaría."""
+    if hasattr(store, "_client"):
+        store._client.command("SYSTEM STOP MERGES spans")
+    spans = _ejecuciones("reenviado", 25, llamadas=2, a_la_vez=True)
+    store.insert_spans(spans)
+    store.insert_spans(spans)
+    (h,) = _lotes(store, "reenviado")
+    assert h.window_waste_usd == pytest.approx(50 * COSTE * 0.5)
