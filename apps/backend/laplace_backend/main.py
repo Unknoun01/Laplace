@@ -21,6 +21,7 @@ from .api_empresa import router as empresa_router
 from .api_evals import router as evals_router
 from .api_prompts import router as prompts_router
 from .api_replay import router as replay_router
+from .arreglos_texto import router as arreglos_texto_router
 from .auth import AuthMiddleware
 from .config import Settings, get_settings
 from .idioma import MiddlewareIdioma
@@ -384,6 +385,7 @@ app.include_router(router)
 app.include_router(evals_router)
 app.include_router(prompts_router)
 app.include_router(replay_router)
+app.include_router(arreglos_texto_router)
 app.include_router(ajustes_router)
 app.include_router(cuentas_router)
 app.include_router(empresa_router)

@@ -42,6 +42,7 @@ def ejecutar(
         endpoint=spec["endpoint"],
         confirm=permiso,
         client=client,
+        proposal=spec.get("propuesta") or None,
         on_call=on_call,
     )
     return dataclasses.asdict(resultado)

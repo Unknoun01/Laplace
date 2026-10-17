@@ -1113,6 +1113,22 @@ export const es = {
   "prob.pr.abierto": "Pull request abierto: ábrelo en GitHub",
   "prob.pr.abrir": "Abrir pull request en {repo}",
   "prob.pr.error": "No se ha podido abrir el pull request.",
+  "prob.texto.titulo": "Un texto nuevo, escrito por un modelo",
+  "prob.texto.lead": "Un modelo propone unas instrucciones más cortas que hacen lo mismo. Se prueban con un replay de las llamadas reales del paso y sólo pasan al código o a Prompts si las apruebas tú, con el cambio delante.",
+  "prob.texto.lead_json": "Un modelo propone unas instrucciones que piden sólo JSON válido. Se prueban con un replay de las llamadas reales del paso y sólo pasan al código o a Prompts si las apruebas tú, con el cambio delante.",
+  "prob.texto.donde_codigo": "En {ruta}, en la llamada de la línea {linea}.",
+  "prob.texto.donde_prompt": "En el prompt «{nombre}», sobre la v{version}.",
+  "prob.texto.gasto": "Proponer ha costado {minimo}{usd} en {n} llamadas al modelo, contando las rechazadas. No es tráfico del agente.",
+  "prob.texto.al_menos": "al menos ",
+  "prob.texto.probada": "Probada con un replay: {n} casos respondidos, {fallidos} fallidos.",
+  "prob.texto.comparar": "Compárala con la original en Probar →",
+  "prob.texto.sin_probar": "No está probada. Sin un replay de esta propuesta no se puede aprobar.",
+  "prob.texto.sin_conjunto": "Para probarla, guarda antes las llamadas de este paso como conjunto (arriba, en el ciclo).",
+  "prob.texto.aprobar_pr": "Aprobar y abrir el pull request",
+  "prob.texto.aprobar_version": "Aprobar y guardarla como versión nueva de «{nombre}» (sin desplegar)",
+  "prob.texto.version_creada": "Guardada como v{n}, sin desplegar: ábrela en Prompts",
+  "prob.texto.proponer": "Pedir una propuesta",
+  "prob.texto.otra": "Pedir otra",
 } as const;
 
 export type Clave = keyof typeof es;

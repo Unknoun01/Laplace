@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 220 decisiones.
+final. 221 decisiones.
 
 ## Coste, precios y caché
 
@@ -110,6 +110,7 @@ final. 220 decisiones.
 - [D-205](../DECISIONS.md#d-205--el-replay-con-herramientas-cada-resultado-el-que-grabó-la-traza-lo-que-no-se-grabó-corta-el-caso) — El replay con herramientas: cada resultado, el que grabó la traza; lo que no se grabó corta el caso
 - [D-214](../DECISIONS.md#d-214--lanzar-el-replay-desde-la-interfaz-local-con-un-botón) — Lanzar el replay desde la interfaz local, con un botón
 - [D-213](../DECISIONS.md#d-213--el-replay-con-imágenes-entre-proveedores-y-desde-la-api-responses-los-bloques-se-convierten-lo-que-no-tiene-equivalente-no-se-reenvía) — El replay con imágenes, entre proveedores y desde la API Responses: los bloques se convierten; lo que no tiene equivalente no se reenvía
+- [D-221](../DECISIONS.md#d-221--los-arreglos-de-texto-los-escribe-un-modelo-los-prueba-un-replay-y-los-aprueba-una-persona) — Los arreglos de texto: los escribe un modelo, los prueba un replay y los aprueba una persona
 
 ## Prompts
 
@@ -268,6 +269,7 @@ final. 220 decisiones.
 - [D-148](../DECISIONS.md#d-148--el-producto-entero-en-cinco-idiomas) — El producto entero en cinco idiomas
 - [D-149](../DECISIONS.md#d-149--los-errores-de-la-api-en-el-idioma-de-la-petición) — Los errores de la API, en el idioma de la petición
 - [D-151](../DECISIONS.md#d-151--menos-texto-lo-que-puedes-dejar-de-pagar-un-distintivo-de-confianza-y-el-porqué-plegado) — Menos texto: lo que puedes dejar de pagar, un distintivo de confianza y el porqué plegado
+- [D-221](../DECISIONS.md#d-221--los-arreglos-de-texto-los-escribe-un-modelo-los-prueba-un-replay-y-los-aprueba-una-persona) — Los arreglos de texto: los escribe un modelo, los prueba un replay y los aprueba una persona
 
 ## Demo y datos de ejemplo
 
@@ -342,6 +344,7 @@ final. 220 decisiones.
 - [D-140](../DECISIONS.md#d-140--la-prueba-inestable-era-un-servidor-falso-que-no-leía-el-cuerpo) — La prueba inestable era un servidor falso que no leía el cuerpo
 - [D-150](../DECISIONS.md#d-150--los-pendientes-de-la-auditoría-del-rediseño-a1-a2-b1-y-la-maquetación) — Los pendientes de la auditoría del rediseño (A1, A2, B1) y la maquetación
 - [D-171](../DECISIONS.md#d-171--ocho-detalles-de-la-lista-de-deuda-cerrados-con-su-prueba) — Ocho detalles de la lista de deuda, cerrados con su prueba
+- [D-221](../DECISIONS.md#d-221--los-arreglos-de-texto-los-escribe-un-modelo-los-prueba-un-replay-y-los-aprueba-una-persona) — Los arreglos de texto: los escribe un modelo, los prueba un replay y los aprueba una persona
 
 ## Proyecto y empaquetado
 
@@ -701,3 +704,4 @@ final. 220 decisiones.
 - [D-216](../DECISIONS.md#d-216--serviceversion-como-segunda-señal-de-despliegue-si-se-puede-atar-a-un-commit) — `service.version` como segunda señal de despliegue, si se puede atar a un commit
 - [D-219](../DECISIONS.md#d-219--caché-parecida-simhash-local-sin-dinero-en-el-total-y-lo-que-sí-se-puede-afirmar) — Caché parecida: simhash local, sin dinero en el total, y lo que sí se puede afirmar
 - [D-220](../DECISIONS.md#d-220--el-bot-de-pr-escribe-también-typescript-y-javascript-con-tree-sitter-opcional) — El bot de PR escribe también TypeScript y JavaScript, con `tree-sitter` opcional
+- [D-221](../DECISIONS.md#d-221--los-arreglos-de-texto-los-escribe-un-modelo-los-prueba-un-replay-y-los-aprueba-una-persona) — Los arreglos de texto: los escribe un modelo, los prueba un replay y los aprueba una persona
