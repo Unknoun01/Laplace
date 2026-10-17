@@ -680,13 +680,15 @@ def replay_dataset(
     confirm: Callable[[Plan], bool] | None = None,
     client: Any = None,
     on_call: Callable[[int, int], None] | None = None,
+    proposal: str | None = None,
 ) -> ReplayResult:
     """Reenvía las llamadas del paso de un conjunto a `model`, sin pasar de `max_usd`.
 
     `confirm` recibe el plan antes de gastar nada y decide; sin él, se sigue (desde la
     línea de órdenes siempre se pregunta, salvo con `--si`). `client` es para pasar un
     cliente de OpenAI o Anthropic ya configurado; sin él se crea uno con la clave del
-    entorno.
+    entorno. `proposal` es el hallazgo de un arreglo de texto (D-221): las llamadas van
+    con el texto propuesto, y la tirada se llama `propuesta <huella>`.
     """
     if max_usd <= 0:
         raise EvalError("el tope tiene que ser mayor que cero")
@@ -697,7 +699,13 @@ def replay_dataset(
     base = _endpoint(endpoint)
     dataset_id, _casos = fetch_dataset(dataset, project=project_id, endpoint=base)
 
-    datos = _request(f"{base}/api/datasets/{quote(dataset_id)}/replay?model={quote(model)}")
+    datos = _request(
+        f"{base}/api/datasets/{quote(dataset_id)}/replay?model={quote(model)}"
+        + (f"&propuesta={quote(proposal)}" if proposal else "")
+    )
+    huella = str(datos.get("proposal") or "")
+    if proposal and not huella:
+        raise EvalError(f"Laplace no tiene la propuesta de texto de «{proposal}»")
     tarifa = datos.get("target")
     if not tarifa:
         raise EvalError(
@@ -761,7 +769,7 @@ def replay_dataset(
         return resultado
 
     cliente = client if client is not None else _cliente(proveedor)
-    nombre = variant or f"replay {model}"
+    nombre = variant or (f"propuesta {huella}" if huella else f"replay {model}")
     por_caso: dict[str, list[dict[str, Any]]] = {}
     for llamada in llamadas:
         por_caso.setdefault(llamada["case_id"], []).append(llamada)
@@ -861,7 +869,8 @@ def replay_dataset(
         payload={
             "project_id": project_id,
             "dataset_id": dataset_id,
-            "variant": f"original ({modelo_original})" if modelo_original else "original",
+            "variant": f"original · propuesta {huella}" if huella
+            else f"original ({modelo_original})" if modelo_original else "original",
             "notes": notas + " Esta tirada no gastó nada: son las llamadas reales.",
             "items": originales,
         },

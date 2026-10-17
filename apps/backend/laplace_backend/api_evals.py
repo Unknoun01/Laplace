@@ -20,6 +20,7 @@ from laplace.schema import Annotation, Dataset, DatasetItem, EvalRun, EvalRunIte
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
+from . import arreglos_texto
 from .auth import identity_of
 from .evals import Comparison, RunSummary, compare, cost_key, coste_de_spans, summarize_run
 from .judge import JudgeConfig, JudgeUnavailable, build_prompt, judge_trace
@@ -412,6 +413,7 @@ async def replay_calls(
     request: Request,
     dataset_id: str,
     model: str = Query("", max_length=200, description="modelo al que se reenviará"),
+    propuesta: str = Query("", max_length=500, description="hallazgo con arreglo de texto"),
 ) -> Reenviables:
     """Las llamadas reales de un conjunto que se pueden reenviar a otro modelo (D-167).
 
@@ -433,6 +435,12 @@ async def replay_calls(
     ]
     paso = str(conjunto.source_filter.get("step_key") or "")
     resultado = reenviables(dataset_id, paso, casos)
+    if propuesta:
+        # Las mismas llamadas, con el texto que propuso el modelo (D-221).
+        guardada = arreglos_texto.leer(meta, conjunto.project_id, propuesta).get("propuesta")
+        if not guardada:
+            raise HTTPException(status_code=404, detail=t("texto.sin_propuesta"))
+        resultado = arreglos_texto.en_reenviables(resultado, guardada)
     if model:
         resultado.target = tarifa(model)
     return resultado

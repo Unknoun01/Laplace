@@ -35,6 +35,8 @@ class ReplayIn(BaseModel):
     max_usd: float = Field(gt=0, le=1000)
     #: Lo peor que se enseñó al pedir permiso. Sin él, no se lanza.
     acepta_usd: float = Field(default=0, ge=0)
+    #: El hallazgo cuyo arreglo de texto se prueba (D-221); vacío, el replay de siempre.
+    propuesta: str = Field(default="", max_length=500)
 
 
 def _exigir_local() -> None:

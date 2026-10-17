@@ -5966,3 +5966,65 @@ el tope de preguntas, poner dinero en el total y `costs_money` verdadero.
 `test_regla_cache_parecida.py`, `test_carga.py` (espera `cache_parecida`; `scripts/carga.py`
 siembra el caso sin ejecutarse) y la prueba de paridad sobre empates en `test_paridad.py`.
 
+
+### D-221 — Los arreglos de texto: los escribe un modelo, los prueba un replay y los aprueba una persona
+El bot de PR (D-185, D-190) sólo escribía lo que se deriva del código. Acortar un contexto
+fijo o pedir JSON de verdad en un prompt no se deriva: hay que escribir texto nuevo. Lo
+escribe un modelo; por eso nada llega al repositorio ni a Prompts sin un replay que lo
+sostenga y sin que una persona lo apruebe con el diff delante. Va en
+`arreglos_texto.py`; `github_bot.py` no cambia (se usan `abrir(cambiar=…)`, `ubicar`,
+`sitio` y `token_de`).
+
+* **Qué hallazgos.** Dos, con su objetivo: `contexto_fijo` → **acortar** (el texto nuevo
+  tiene que ser al menos un 10 % más corto) y `json_roto` → **json** (pedir sólo JSON
+  válido, sin crecer más del doble). Los demás no tienen un arreglo de texto claro
+  (`prompt_caro` se arregla volviendo a la versión anterior) y no se ofrece nada.
+* **Dónde está el texto, o no hay propuesta.** De las llamadas del paso en la traza de
+  ejemplo:
+  - con `prompt_name` y versión > 0, es **un prompt versionado de Laplace**: el texto es
+    el de esa versión;
+  - si no, el sitio anotado (`code.*`, `sitio`), el fichero leído de GitHub (`ubicar`) y,
+    en la llamada de esa línea, el `system=` o el mensaje `{"role": "system", …}`
+    escrito en la lista de `messages=`. Sólo **un literal de texto**, directo o en una
+    variable asignada una sola vez a un literal. Una f-string, un `.format()`, una
+    función: no se sabe qué texto acaba saliendo, y no se toca.
+  - Además, el texto encontrado **tiene que estar** en el `system` que grabó la traza (con
+    las variables `{{ x }}` de una plantilla, como patrón). Si no está, el sitio no es el
+    que mandó esa llamada y no se propone nada (`texto.no_coincide`).
+* **El modelo propone, con el proveedor del diagnóstico** (`LAPLACE_DIAGNOSIS_ENABLED` y
+  el del juez; apagado por defecto). El texto actual y el hallazgo van como dato
+  (`<dato>`, D-130). Lo que devuelve se comprueba antes de guardarlo: que no esté vacío,
+  el objetivo (más corto, o no más del doble), y **las mismas variables `{{ x }}`** que
+  el original: perder una rompería `render()`. Si no pasa, se rechaza (422) y la
+  propuesta anterior se queda.
+* **Lo que cuesta se apunta, y no es tráfico.** Cada llamada pagada —aceptada o
+  rechazada— queda en la propuesta (`gastos`, con su tarifa; sin tarifa, `cost_unknown`,
+  no cero), en el almacén de metadatos y nunca en `spans`. El replay gasta en trazas de
+  tirada (D-167): marcadas como evaluación, fuera de las reglas y de los preagregados.
+* **Probar antes de aprobar.** `laplace replay <conjunto del paso> --propuesta <hallazgo>`
+  (y el botón de la versión local, D-214): el backend entrega las mismas llamadas del
+  conjunto con el texto viejo cambiado por el propuesto en su `system` (o en el mensaje
+  de sistema), y las que no lo llevan se cuentan aparte (`sin_el_texto`). Mismo modelo,
+  mismo tope y mismas dos tiradas que siempre; la nueva se llama `propuesta <sha>`, la
+  huella del texto propuesto. **Sin una tirada de esa huella con algún caso que no haya
+  fallado no se aprueba** (409 `texto.sin_probar`): una propuesta nueva deja viejo el
+  replay de la anterior. La pantalla enseña el replay y lleva a su comparación (coste y
+  juez); si no hay, dice claro que no está probada.
+* **Aprobar es de una persona.** La ficha enseña el diff (el de Prompts,
+  `diff_versions`), y aprobar manda la huella de lo que se vio: si la propuesta cambió
+  entretanto, 409. Una clave de proyecto no aprueba (403): vive en el entorno del agente,
+  y aprobar tiene que hacerlo alguien.
+* **Lo que escribe el modelo no se ejecuta.** En el código, el literal se sustituye por
+  otro que escribe `repr()`, y se exige que el árbol de sintaxis nuevo sea **el mismo**
+  salvo el valor de esa constante: ni una llamada, ni un import, ni un carácter de código
+  más. Si al abrir el PR el literal ya no dice lo que decía, no hay PR
+  (`texto.cambio_el_fichero`). Rama propia (`rama_para("texto:" + hallazgo)`), así que
+  no choca con el PR de `cache_control` del mismo hallazgo.
+* **Prompt versionado → versión nueva, no PR.** El texto no vive en el repositorio, vive en
+  Laplace: aprobar crea la versión siguiente, **sin ponerla en producción**. Desplegar
+  sigue siendo el gesto aparte de Prompts, con su vuelta atrás de un clic; y la versión
+  nueva mide su coste y su acierto con el tráfico, como todas.
+
+Queda fuera, y se dice: el webhook (D-191) no marca arreglado el hallazgo al fusionar un
+PR de texto, porque reconoce la rama del PR de código; se marca a mano. Sólo Python, como
+D-190. No se ha probado contra un proveedor de verdad: transportes falsos.

@@ -161,6 +161,7 @@ def comando_replay(args: argparse.Namespace) -> int:
             provider=args.proveedor,
             judge=not args.sin_juez,
             confirm=permiso,
+            proposal=args.propuesta,
             on_call=lambda n, total: print(f"  {n}/{total}", end="\r", flush=True),
         )
     except EvalError as exc:
@@ -242,6 +243,9 @@ def main(argv: list[str] | None = None) -> int:
     replay.add_argument("--proveedor", choices=("openai", "anthropic"), default=None)
     replay.add_argument("--sin-juez", action="store_true", help="no juzgar las respuestas")
     replay.add_argument("--si", action="store_true", help="no preguntar antes de gastar")
+    replay.add_argument(
+        "--propuesta", default=None, help="probar el arreglo de texto de este hallazgo (D-221)"
+    )
     replay.set_defaults(func=comando_replay)
 
     args = parser.parse_args(argv)

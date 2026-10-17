@@ -996,3 +996,29 @@ _ARGUMENTOS_ROTOS = {"id": "a", "type": "function", "function": {"name": "f", "a
 def test_lo_que_no_tiene_equivalente_no_se_convierte(mensajes, desde, hacia, dice):
     with pytest.raises(sdk_replay._SinEquivalente, match=dice):
         sdk_replay._convertir(mensajes, desde, hacia)
+
+
+# ---------------------------------------------------------------------------------
+# Con un arreglo de texto (D-221)
+# ---------------------------------------------------------------------------------
+
+
+def test_con_una_propuesta_de_texto_se_reenvia_con_el_texto_nuevo(backend):
+    corto = "Clasifica: facturación, equipaje u otro."
+    propuesta = {"sha": "abc123def456", "original": SISTEMA, "propuesto": corto}
+    backend.app.state.metadata.set_setting(
+        "local", "arreglo_texto:contexto_fijo:x", {"propuesta": propuesta}
+    )
+    recibidas: list[dict] = []
+    resultado = _replay(backend, _openai(recibidas), model="gpt-5.6-terra",
+                        proposal="contexto_fijo:x")
+
+    assert resultado.calls_done == 3
+    assert recibidas[0]["messages"][0] == {"role": "system", "content": corto}
+    tiradas = {r.variant for r in backend.app.state.metadata.list_runs("local")}
+    assert {"propuesta abc123def456", "original · propuesta abc123def456"} <= tiradas
+
+
+def test_sin_la_propuesta_no_se_reenvia_nada(backend):
+    with pytest.raises(EvalError):
+        _replay(backend, _openai([]), model="gpt-5.6-terra", proposal="no:existe")

@@ -153,6 +153,8 @@ class Reenviables(BaseModel):
     #: Llamadas de modelo del conjunto que no se reenvían, por motivo.
     excluded: dict[str, int] = Field(default_factory=dict)
     target: Tarifa | None = None
+    #: La huella del arreglo de texto con el que van las llamadas, si lo hay (D-221).
+    proposal: str = ""
 
 
 def _imagenes(valor: Any) -> list[dict[str, Any]]:
