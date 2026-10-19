@@ -125,14 +125,15 @@ Trazas, Panel, Clientes, Prompts y Ajustes. Dos despliegues con paridad probada:
     `laplace-puede-esperar` hay dinero, sin ella una pregunta;
   - la memoria del historial, de 1,09 GiB a 188 MiB con un filtro previo que sí
     descarta (D-198), y el tiempo, de 1,77 s a 1,28 s en 7 días con la tabla
-    `pre_historial` (D-207). Lo que queda son las trazas que cruzan las horas y
-    componer las filas, unos 0,3 s cada una; en un día no gana nada;
+    `pre_historial` (D-207). Con diez millones de spans al día, el de 7 días baja de unos
+    10 s a 7,9 s componiendo sólo las conversaciones que pueden contar (D-222);
   - caché semántica hecha (D-200): la misma pregunta salvo los números y la misma
     respuesta exacta en ejecuciones distintas, «hasta X» sin dinero en el total. Lo
     parecido, con simhash, también está (`cache_parecida`, D-219), sin dinero en el total.
     Con embeddings no: pediría un modelo;
-  - lotes, el peor caso sin medir: muchas ejecuciones sin usuario en un proyecto que sí
-    lo pone en otras (la carga no tiene ese tráfico) (D-199);
+  - lotes, en el peor caso (muchas ejecuciones sin usuario en un proyecto que sí lo pone
+    en otras): sembrado en la carga y medido; de 15–17 s a 9,2 s en 7 días con diez
+    millones de spans al día (D-223);
   - el historial con dinero: un tope que se pueda defender, sacado de un replay con
     evaluación (D-195);
 - **Lo que dejaron D-178 a D-182**, hecho: los diagnósticos con modelo se borran con su

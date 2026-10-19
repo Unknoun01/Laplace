@@ -252,6 +252,9 @@ extra opcional (D-220). Además propone arreglos de texto: los escribe un modelo
 prueba un replay y nunca abren un PR sin la aprobación de una persona (D-221). Y las
 pantallas corren también en WebKit, sin nada que arreglar (D-228).
 
+Con diez millones de spans al día y 7 días, el historial baja de unos 10 s a 7,9 s
+(D-222). Lotes, medido por fin en su peor caso, de 15–17 s a 9,2 s (D-223).
+
 Del 1 al 2 de octubre entró el resto de la lista «siguiente»:
 - la caché compartida entre pasos (D-178);
 - lo evitable de cada cliente, ingresos en otras monedas y la columna de cliente en las
