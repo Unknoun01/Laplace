@@ -6124,3 +6124,99 @@ dos temas; un `color-mix` con un `var()` inexistente deja el token vacío y fall
 versiones anteriores a la 18 (que necesitan el prefijo, que está), ni el escalado de
 pantalla de un Mac, ni la aceleración por GPU del desenfoque. Sigue haciendo falta una
 mirada a mano en un Mac o un iPhone antes de afirmar que Safari está comprobado.
+### D-222 — El historial compone sólo las conversaciones que pueden contar
+D-212 midió que, con diez millones de spans al día, la consulta principal del historial
+de siete días pedía 3,8 GiB, y lo atribuyó a lo crudo de las trazas que cruzan. Medido por
+partes, no: lo crudo pide unos 130 MiB. Los GiB son de **componer** `pre_historial`: se
+agrupaban los 2,6 millones de filas de la ventana por conversación, con sus etiquetas, sus
+trazas y su array de horas, para tirar al final, en el HAVING, el 95 % de ellas.
+
+**Ahora** (`_PUEDEN` en `preagregados.py`): antes de componer, las filas de la tabla
+pasan por un filtro con la misma cuenta que el HAVING, pero con estados de números,
+agrupados por `sipHash64(conversación, paso)`: los turnos, las bajadas dentro de cada hora,
+la primera entrada y la mayor. Es exacto para una conversación que sale entera de la
+tabla, salvo las bajadas entre horas, que sólo podrían dejar fuera más; y el HAVING de
+siempre sigue después. Una conversación con algo en crudo pasa entera sin mirarla, porque
+sus turnos crudos no están en la tabla:
+
+* las de una fila que no se lee (`tocadas`);
+* las que tienen llamadas en los tramos crudos (bordes y horas sucias), buscadas en
+  `spans` sólo en esos tramos;
+* una ejecución sin sesión que cruza no necesita nada: todas sus filas llevan su traza y
+  no se leen.
+
+Un hash que choca sólo deja pasar de más. El resultado sale **idéntico campo a campo**
+con y sin el filtro, y con la lectura en crudo, en ventanas de uno y de siete días.
+
+**Medido** con `scripts/carga.py --spans 10000000 --dias 7` (70 millones de spans), con
+`master` y con esto sobre los mismos datos, uno detrás de otro, tres veces:
+
+| 7 días, 10 M/día | Antes | Ahora |
+|---|---|---|
+| historial | 9,97–10,5 s (28 s en frío) | 7,90–7,93 s |
+| consulta principal | 7,6–7,8 s, **3,96 GiB** | 5,5 s, **674–690 MiB** |
+| 1 día: historial | 3,9–6,8 s, 652 MiB | 3,1–3,3 s, 258 MiB |
+
+Con 500.000 spans al día: 268 → 105 MiB y 0,87 → 0,84 s la consulta principal; el
+historial de siete días, 1,2–1,8 s antes y 1,3–1,5 s ahora, dentro del ruido.
+
+**Lo que queda, medido y no hecho:**
+
+* **Lo crudo de las trazas pedidas**, 3,1 s: leer 2.879 trazas (23.000 spans) recorre
+  35 millones de filas. `spans` va por (proyecto, hora, traza), así que las trazas de cada
+  hora están repartidas por todos sus gránulos; ni el índice de saltos ni pedir por
+  (hora, traza) dejan fuera bastantes. Quitarlo es lo que D-207 dejó escrito: guardar por
+  traza las llamadas de las que tocan los bordes de la hora.
+* **Las trazas que cruzan** (`_CRUZAN`), 1,5 s y 877 MiB, que ahora es el pico de memoria
+  del historial. Agrupar por hash en dos pasos lo baja a 624 MiB y 1,1 s con el mismo
+  resultado; no compensa una consulta más.
+
+**Ruido de las medidas.** `--borrar` usa `DELETE` ligero, que sólo marca las filas: la
+tabla `spans` de este portátil tenía 75 millones de filas físicas para 3,5 millones
+vivas, restos de la carga de D-212, y lo crudo del historial leía 36 millones de filas en
+lugar de 1,7. Antes de medir se purgaron con `ALTER TABLE … APPLY DELETED MASK`, y se
+vaciaron `system.text_log` y `processors_profile_log`.
+
+Pruebas: en `test_regla_historial.py`, en los tres caminos, una conversación con dos
+turnos en la tabla y dos en crudo (en el borde de la ventana, y en una fila que no se lee
+porque una traza cruza). En `test_carga.py`, que el filtro deje fuera más del 80 % de las
+filas de la tabla (en rojo con `master`: pasaban todas). Se rompió a propósito tres veces:
+sin las tocadas, sin los tramos crudos y sin el filtro. Las tres fallan.
+
+### D-223 — Los lotes, en el peor caso: sin ventana por traza
+D-199 dejó sin medir el peor caso de la regla de lotes: muchas ejecuciones sin usuario en
+un proyecto que sí lo pone en otras, porque la carga no tenía ese tráfico. Ahora lo
+tiene: una de cada cuatro trazas del proyecto grande va sin usuario ni sesión (salvo las
+conversaciones del historial, que conservan la suya), y `test_carga.py` exige el hallazgo
+`lotes` (en rojo sin la siembra).
+
+**Medido, se dispara.** Con diez millones de spans al día y siete días (un millón de
+ejecuciones candidatas): 15–17 s y 2,5 GiB, frente a los 2,7–7,2 s de D-212 sin este
+tráfico. Por partes: elegir las candidatas, 3,1 s y 776 MiB, que es lo de siempre (agrupa
+por traza toda la ventana); el resto es la ventana `min(end_time) OVER (PARTITION BY
+trace_id)`, que ordenaba 3,1 millones de llamadas con todas sus columnas.
+
+**Ahora**, en ClickHouse: la misma agrupación que elige las candidatas saca también la
+marca (`max(has(tags, …))`) y el primer fin de sus llamadas (`minIf(end_time, span_type =
+'llm')`), y va a cada llamada con un `INNER JOIN` por traza. Sin ventanas y sin la
+subconsulta aparte de la marca, que leía la ventana otra vez. La agrupación es sin
+`FINAL`, como ya lo era: las copias de un span son reenvíos del mismo span, y no cambian
+ni la marca ni el mínimo. Las llamadas siguen con `FINAL`. SQLite no cambia: su ventana
+es la misma cuenta.
+
+| 7 días, 10 M/día | Antes | Ahora |
+|---|---|---|
+| lotes | 14,9–17,1 s | 9,1–9,3 s |
+| memoria | 2,47–2,52 GiB | 916–944 MiB |
+| 1 día | 1,9–2,7 s, 387 MiB | 1,6–1,8 s, 255 MiB |
+
+Sale igual que antes, salvo la duodécima cifra de las sumas de coste, que también cambia
+entre dos tandas de `master` (el orden de una suma en paralelo). Lo que queda es leer la
+ventana dos veces (las candidatas y las llamadas): es el coste de D-199 sin este tráfico.
+
+Pruebas: en `test_regla_lotes.py`, en los dos almacenes, que una herramienta que acaba
+antes que la llamada no la encadene (el mínimo es de las llamadas) y que un lote reenviado
+sin fusionar no cuente dos veces. En `test_carga.py`, que la consulta no tenga ventanas
+(en rojo con `master`). Se rompió a propósito dos veces: el primer fin de todos los spans
+y las llamadas sin `FINAL`. Las dos fallan. La paridad sobre empates de `test_paridad.py`
+sigue igual.

@@ -3,7 +3,7 @@
 Generado por `scripts/indice_decisiones.py` a partir de `DECISIONS.md`: no se edita a
 mano. Cada decisión cae en los temas cuyas palabras aparecen en su título, así que
 una puede salir en varios, y alguna en ninguno: la lista completa, en orden, está al
-final. 222 decisiones.
+final. 224 decisiones.
 
 ## Coste, precios y caché
 
@@ -327,6 +327,7 @@ final. 222 decisiones.
 - [D-217](../DECISIONS.md#d-217--el-grafo-del-proyecto-deja-de-ser-sólo-de-lectura-pulsar-un-paso-lleva-a-sus-trazas-y-a-sus-fichas) — El grafo del proyecto deja de ser sólo de lectura: pulsar un paso lleva a sus trazas y a sus fichas
 - [D-213](../DECISIONS.md#d-213--el-replay-con-imágenes-entre-proveedores-y-desde-la-api-responses-los-bloques-se-convierten-lo-que-no-tiene-equivalente-no-se-reenvía) — El replay con imágenes, entre proveedores y desde la API Responses: los bloques se convierten; lo que no tiene equivalente no se reenvía
 - [D-215](../DECISIONS.md#d-215--de-dónde-viene-cada-span-y-qué-parte-del-tráfico-se-queda-fuera-de-la-parada) — De dónde viene cada span, y qué parte del tráfico se queda fuera de la parada
+- [D-223](../DECISIONS.md#d-223--los-lotes-en-el-peor-caso-sin-ventana-por-traza) — Los lotes, en el peor caso: sin ventana por traza
 
 ## Pruebas y método
 
@@ -707,3 +708,5 @@ final. 222 decisiones.
 - [D-220](../DECISIONS.md#d-220--el-bot-de-pr-escribe-también-typescript-y-javascript-con-tree-sitter-opcional) — El bot de PR escribe también TypeScript y JavaScript, con `tree-sitter` opcional
 - [D-221](../DECISIONS.md#d-221--los-arreglos-de-texto-los-escribe-un-modelo-los-prueba-un-replay-y-los-aprueba-una-persona) — Los arreglos de texto: los escribe un modelo, los prueba un replay y los aprueba una persona
 - [D-228](../DECISIONS.md#d-228--las-pantallas-también-en-webkit-el-motor-de-safari) — Las pantallas, también en WebKit (el motor de Safari)
+- [D-222](../DECISIONS.md#d-222--el-historial-compone-sólo-las-conversaciones-que-pueden-contar) — El historial compone sólo las conversaciones que pueden contar
+- [D-223](../DECISIONS.md#d-223--los-lotes-en-el-peor-caso-sin-ventana-por-traza) — Los lotes, en el peor caso: sin ventana por traza

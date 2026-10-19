@@ -67,7 +67,9 @@ def test_la_carga_da_a_cada_regla_nueva_algo_que_encontrar_y_calcula_sus_horas(c
     almacen, carga = cargado
     ventana = _ventana()
     tipos = {f.kind for f in insights.detect(almacen, carga.GRANDE, ventana)}
-    assert {"salida_truncada", "json_roto", "historial", "cache_parecida"} <= tipos, tipos
+    assert {"salida_truncada", "json_roto", "historial", "cache_parecida", "lotes"} <= tipos, (
+        tipos
+    )
 
     horas = almacen._client.query(
         "SELECT uniqExact(hora) FROM pre_horas WHERE project_id = %(p)s",
@@ -108,3 +110,37 @@ def test_el_historial_solo_abre_las_conversaciones_que_pueden_contar(cargado):
     assert contadas > 0, "la carga tiene conversaciones que crecen"
     assert contadas <= candidatas, "el filtro no puede dejar fuera ninguna que cuente"
     assert candidatas < todas * 0.2, (candidatas, todas)
+
+
+def test_el_historial_solo_compone_las_conversaciones_que_pueden_contar(cargado, monkeypatch):
+    """Componer `pre_historial` guardaba los estados de todas sus conversaciones para
+    descartar casi todas al final: con diez millones de spans al día, 3,8 GiB (D-212). El
+    filtro previo (D-222) tiene que dejar fuera casi todas las filas de la tabla, y el
+    historial salir igual."""
+    from laplace_backend.storage import preagregados
+
+    almacen, carga = cargado
+    ventana = _ventana()
+    (filas,) = almacen._client.query(
+        "SELECT count() FROM pre_historial FINAL WHERE project_id = %(p)s",
+        parameters={"p": carga.GRANDE},
+    ).result_rows[0]
+    monkeypatch.setattr(
+        preagregados, "_CONVERSACIONES", "SELECT count() FROM ({partes})"
+    )
+    sql, params, externas = preagregados.historial(
+        almacen._client, carga.GRANDE, ventana.since, ventana.until,
+        dict(preagregados.UMBRALES_HISTORIAL),
+    )
+    (compuestas,) = almacen._client.query(
+        sql, parameters=params, external_data=externas
+    ).result_rows[0]
+    assert 0 < compuestas < filas * 0.2, (compuestas, filas)
+
+
+def test_los_lotes_no_ordenan_las_llamadas_de_cada_traza():
+    """Con muchas ejecuciones sin usuario en un proyecto que sí lo pone, la ventana por
+    traza ordenaba tres millones de llamadas enteras: 15 s y 2,5 GiB con diez millones de
+    spans al día (D-223). El primer fin de cada traza sale de la consulta que elige las
+    candidatas, sin ventanas."""
+    assert " OVER " not in clickhouse.DEFERRABLE_GROUPS_SQL

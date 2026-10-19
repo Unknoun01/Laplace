@@ -567,8 +567,11 @@ HISTORY_GROUPS_SQL = _HISTORIAL_FUERA.format(conversaciones=_CONVERSACIONES_CRUD
 
 #: Llamadas que podrían ir por la API de lotes: gemelo de `DEFERRABLE_GROUPS_SQL` de
 #: sqlite.py (D-199). Mismos alias. Las ejecuciones candidatas se eligen antes, sin
-#: FINAL y sin ventanas: en un proyecto que pone usuario en todas, no hay ninguna, y la
-#: ventana por traza de abajo sólo recorre las que hay.
+#: FINAL y sin ventanas: en un proyecto que pone usuario en todas, no hay ninguna. De la
+#: misma agrupación salen la marca y el primer fin de sus llamadas, y van a cada llamada
+#: con un JOIN (D-223): la ventana por traza de SQLite ordenaba las llamadas enteras, y
+#: con muchas ejecuciones sin usuario eran 15 s y 2,5 GiB. Las copias de un span son
+#: reenvíos del mismo span, así que contarlas sin FINAL no cambia el mínimo.
 _CON_PERSONA = f"""(
     SELECT count() FROM (
         SELECT DISTINCT trace_id FROM spans
@@ -607,24 +610,25 @@ FROM (
     SELECT
         if(step_key != '', step_key, name)                          AS paso_clave,
         if(step_label != '', step_label, name)                      AS etiqueta,
-        request_model, step_hint, step_site, trace_id, start_time, cost_total_usd,
-        cost_unknown, cost_rate_assumed,
-        trace_id IN (
-            SELECT trace_id FROM spans
-            WHERE {RULES_WHERE} AND has(tags, '{PUEDE_ESPERAR_TAG}')
-        )                                                           AS declarada,
+        request_model, step_hint, step_site, s.trace_id AS trace_id, start_time,
+        cost_total_usd, cost_unknown, cost_rate_assumed,
+        c.declarada                                                 AS declarada,
         billing_tier IN ('', 'standard')                            AS estandar,
-        start_time < min(end_time) OVER (PARTITION BY trace_id)     AS independiente
-    FROM spans FINAL
+        start_time < c.primer_fin                                   AS independiente
+    FROM spans AS s FINAL
+    INNER JOIN (
+        SELECT
+            trace_id,
+            max(has(tags, '{PUEDE_ESPERAR_TAG}'))                   AS declarada,
+            minIf(end_time, span_type = 'llm')                      AS primer_fin
+        FROM spans
+        WHERE {RULES_WHERE}
+        GROUP BY trace_id
+        HAVING declarada
+            OR (max(user_id != '' OR session_id != '') = 0
+                AND {_CON_PERSONA} >= %(min_persona)s)
+    ) AS c ON s.trace_id = c.trace_id
     WHERE {RULES_WHERE} AND span_type = 'llm'
-      AND trace_id IN (
-          SELECT trace_id FROM spans
-          WHERE {RULES_WHERE}
-          GROUP BY trace_id
-          HAVING max(has(tags, '{PUEDE_ESPERAR_TAG}'))
-              OR (max(user_id != '' OR session_id != '') = 0
-                  AND {_CON_PERSONA} >= %(min_persona)s)
-      )
 )
 GROUP BY paso_clave, request_model
 HAVING declaradas >= %(min_llamadas)s OR abiertas >= %(min_llamadas)s
